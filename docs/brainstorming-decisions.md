@@ -1,0 +1,147 @@
+# Brainstorming Decisions
+
+Running notes from the design brainstorm. Will fold into a formal spec when the windows/panes/cursor/host story is complete.
+
+## Concept
+
+iOS SSH/mosh client. **Reason to exist:** terminal work feels native on a touch device, especially around the iOS keyboard ergonomics that other clients fight against.
+
+Two complementary input mechanisms central to the differentiation:
+
+- **Context-aware key bar** — toolbar above keyboard morphs based on what's running (shell, vim, tmux, less). *Detection mechanism deferred.*
+- **Snippet / macro launcher** — flat list, smart sort, parameterized commands with placeholders, defaults, and per-host remembered values.
+
+---
+
+## Locked decisions
+
+### Product positioning
+
+| Topic | Decision |
+|---|---|
+| Name | **Glymr** — Old Norse for "echo, resonance, ringing sound." Names what the product does (the predictor echoes your vocabulary back; commands ring across distance to a remote shell), not the role of who uses it. Pronounced /ˈglɪmr/ — "GLIM-er." Lowercase `glymr` in path / code contexts; capitalized `Glymr` as the proper noun. |
+| Goal | Solve a personal annoyance (CLI / AI / security adjacent) |
+| Differentiator | Make the iOS keyboard pleasant for terminal work |
+| Security posture | Security-first: SE-default for new identities, per-host auth policy, no telemetry, local audit log, public-key always copyable |
+
+### Connections & sessions
+
+| Topic | Decision |
+|---|---|
+| Connection scope | SSH + mosh + jump hosts + port forwards + Tailscale-aware |
+| Session engine | **tmux control mode (`tmux -CC`)** — like iTerm2. Persistent remote sessions; native tabs/panes in the app UI |
+| tmux UX tiers | (1) Non-tmux user sees clean tabs/panes; tmux runs silently. (2) tmux user gets app-driven integration. (3) Purist can disable per-host. |
+| Concurrency | Multiple windows + multiple panes, with tmux-style splits |
+
+### Credentials & security
+
+| Topic | Decision |
+|---|---|
+| Credential storage | **Native only** — iOS Keychain + Secure Enclave. **No 3rd-party password-manager integration.** Matches Blink / Termius / Prompt 3. |
+
+### Snippets
+
+| Topic | Decision |
+|---|---|
+| Snippet model | Flat list + smart sort, toggle to disable smart sort |
+| Snippet power | Placeholders + defaults + remembered last-used values per host |
+
+### Window switching
+
+| Topic | Decision |
+|---|---|
+| Affordance | A single **pill** in the keyboard accessory bar (keybar). Stays in same spot when keyboard hidden. |
+| Pill content | Window title only (truncate at ~7 chars with ellipsis). No position indicator, no dots. |
+| Pill gestures | tap = next, swipe right = next, swipe left = previous, long-press = picker |
+| Secondary path | Single-finger horizontal swipe **anywhere in the terminal area** also switches windows (Safari-tabs-style). |
+| Safety valves | (1) Auto-suspend terminal swipe when focused pane has mouse mode active. (2) User setting to globally disable. |
+| Cycling | Wraps in both directions. Light haptic tick (`UIImpactFeedbackGenerator.light`) on wrap; no visual chrome. |
+| Picker | Vertical list expanding upward from the pill. Drag finger up to highlight; release on a row to switch; release back on pill or outside = cancel. Each row: title + `•` activity badge if new output since last viewed. |
+| Picker at scale | Past top of screen, hold finger near top edge → auto-scroll. At **≥15 windows**, filter bar auto-appears at top of list (type to filter). |
+
+### Pane management
+
+| Topic | Decision |
+|---|---|
+| Management surface | A **second pill** in the keybar next to the window pill. Terminal area kept clear so iOS-native text selection is preserved. |
+| Pill content | Adaptive: `+` when 1 pane, `▦` when 2+ panes, `▦` with amber dot when one pane is zoomed. |
+| Pill gestures | **Tap** = zoom toggle (or default-split when 1 pane). **Horizontal swipe** = horizontal split. **Vertical swipe** = vertical split. **Long-press** = menu. |
+| Default split (tap on `+`) | Horizontal split — new pane appears below the existing one. |
+| Long-press menu | Split horizontally · Split vertically · Swap with next · Close pane. *(Layout templates deferred to v1.5.)* |
+| Pane focus | **Tap inactive pane** in terminal area = focus moves. Tap is consumed by focus-switch; not sent to remote as click. Active pane has accent border + corner index badge. |
+| Zoom behavior | Tap pane pill = zoom focused pane fullscreen. Other panes hidden. Pill's amber dot persists as indicator. Tap pill again to unzoom. To switch panes while zoomed: unzoom first, or use menu's "Swap with next". |
+| Many panes on iPhone | **tmux-faithful** — show all panes proportionally, even when cramped. No auto-zoom. User manages by zooming or closing. |
+| Split terminology | UI uses vim convention: horizontal split = horizontal divider line (top/bottom). Vertical split = vertical divider line (left/right). Under the hood: `tmux split-window -v` for our "horizontal", `-h` for our "vertical". User never sees tmux flags. |
+
+### Predictive input
+
+| Topic | Decision |
+|---|---|
+| North star | **Input that learns the user's vocabulary, never silently rewrites it.** iOS silent autocorrect is off, always. Predictive suggestions are explicit (user must tap a chip to accept). |
+| Surface | **Thin auto-hiding row above the keybar** (~24pt). Hidden when no suggestion clears the confidence floor. Slides in/out on ~150ms spring. Visually distinct from keybar keys. Cannot reflow the keybar. |
+| Engine | Probabilistic data structures (Count-Min Sketch for unigrams + bigrams, Bloom filter for membership). On-device, encrypted at rest, no cloud. |
+| Storage layout | Hot `today.sketch` + pre-aggregated rolling sketches (7d/30d/90d) + sealed dailies + pinned seed. Queries are O(1): `today ⊕ rolling_<window> ⊕ seed_pinned`. |
+| Seeding | Bundled seed from carapace + tldr + curated dotfiles aggregates. **Pinned, not merged** into user's learned sketches — keeps the privacy story clean and lets seed update across app releases without contaminating user data. |
+| Deference | **Per-prefix gating** — when ≥`top_k` confident learned candidates exist for a prefix, seed entries hide for that prefix entirely. **Per-token weighting** — seed entries always rank below comparable learned entries (`seed_weight ≈ 0.5`). No global cliff; deference is continuous and automatic. |
+| Fallback | When predictor is master-off, iOS native autocorrect/suggestions take over. In normal operation, iOS suggestions never fire — our row is the only suggestion surface. |
+| Privacy | Layered: master off · read-only mode · per-host incognito · pattern-exclude list (with built-in defaults targeting secret-shaped strings). Transparency screen + wipe button + retention window setting (default 90 days). |
+
+**Full design**: see `docs/superpowers/specs/2026-06-13-predictor-design.md`.
+
+### Connection status
+
+| Topic | Decision |
+|---|---|
+| Surface | **Transient banner at the top of the screen** (Blink-style). Slides down on problem, slides back up on resolution. No persistent dot, no status bar real estate. |
+| Visibility rule | **Only visible when something is wrong.** Healthy connection = no banner at all. Inspired by Blink's behavior. |
+| States to show | Disconnected · reconnecting (mosh roaming) · high latency / degraded · auth failure · host unreachable. Healthy state explicitly does **not** show a banner. |
+| Reconnecting label | **Time since last successful frame / heartbeat**, counting up live (`last seen 4s ago` → `12s` → `1m 20s`). Anchors the user's expectation: how stale is the terminal they're looking at? |
+| Dismissal | Auto-dismisses when state returns to healthy. User can swipe to dismiss persistent issues (e.g., "I know it's still degraded, stop reminding me"); re-appears if state changes. |
+| Detailed status | Tap the banner → expanded view (latency, last roam, mosh frame counts, etc.). *Detailed design deferred.* |
+
+### Cursor placement
+
+| Topic | Decision |
+|---|---|
+| Gesture model | **Drag from a halo around the cursor.** ~60pt halo, faintly visible always (~15% opacity), brightens on touch. Outside the halo, existing gestures (focus / scroll / window-switch / selection) behave normally. |
+| Movement model | **Delta-based (mouse-like), never joystick.** Cursor moves by `finger_delta × gain(speed)`. Stops when finger stops; no momentum, no position-based continuous scrolling. |
+| Gain curve | Near 1:1 below ~600 pt/s finger speed (precision zone). Accelerated above, capped at ~3× (long-jump zone). |
+| Loupe | Magnifier rides **above the cursor** (not the finger) — user watches the cursor land while their finger can be anywhere on screen. |
+| Commit | Lift = commit. Tap inside halo without movement = no-op (no accidental commits). Synthesized arrow keystrokes are streamed to the remote as the cursor moves. |
+| Vertical dead-zone | Under **1.5 cells** of cumulative vertical travel, motion is clamped to horizontal-only. Prevents the shell-history footgun (a stray Up arrow swapping the readline buffer). Cross the threshold and vertical unlocks for the rest of the gesture. |
+| Cursor offscreen | While scrolled into scrollback, a `⌖` indicator parks at the bottom edge of the active pane. Touching it engages the drag; first movement auto-scrolls back to the live cursor. |
+| Mouse-mode passthrough | Halo still works when `set mouse=a` / less / htop is active — we synthesize arrow keys, not mouse events. No collision with taps elsewhere in the pane being passed through as mouse. |
+| iOS selection conflict | While iOS-native selection handles are visible, cursor-drag is suppressed. Dismiss selection to re-arm. |
+| Haptics | Light tick on engage and lift. No haptics during drag (would feel buzzy under acceleration). |
+| Multi-pane | Halo only on the focused pane. Drag clamped to that pane's geometry. |
+
+### Text selection / copy & paste
+
+| Topic | Decision |
+|---|---|
+| Selection gesture | **Long-press in a pane** = iOS-native text selection (magnifier loupe, drag handles, copy menu). Identical UX to Notes / Safari. |
+| Selection scope | Per-pane. Selection can't cross a pane divider — matches desktop tmux. |
+| Design constraint | All pane and window management lives on keybar pills so the terminal area stays available for selection / scrollback. |
+
+---
+
+## Deferred / for future conversation
+
+- **Keyboard / input UX (large topic — partially addressed)** — predictive-input subsystem is now locked (see Predictive input above + spec doc). Remaining sub-topics still need their own sessions:
+  - Accessory bar contents and layout (which keys are always present, which scroll, which appear contextually)
+  - Modifier behavior: sticky-tap (one-shot) vs hold-to-modify; visual feedback when a modifier is engaged
+  - Custom system keyboard extension vs in-app accessory bar only
+  - Symbols missing on iOS defaults: `` ` ~ | \ { } [ ] < > | ``, escape codes
+  - Function keys (F1–F12) — surfaced via long-press number row, dedicated row, or hidden?
+  - Arrow / navigation cluster (related to but distinct from the cursor-movement problem)
+  - Per-context layout swaps (vim shows `hjkl` + Esc prominent, tmux shows prefix-key, etc.) — overlaps with the deferred context-detection topic
+  - Customization (user-defined accessory rows, reorderable pills)
+  - "Raw" / passthrough mode for power users who want every keystroke sent verbatim
+- **Pill position customization** — left vs right in the keybar (handedness preference); a per-user setting. (Sub-item of the keyboard/input UX topic above.)
+- **Host switching** — the long-press host menu is referenced but not designed. Separate gesture/affordance still TBD.
+- **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
+- **Context detection** for the key bar — how does the app know if vim/tmux/less is running? Three fidelity tiers were discussed (heuristics / side-channel `ps` / opt-in shell helper); pick one.
+- **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
+- **iCloud sync scope** — hosts/snippets/identities — what syncs, what doesn't.
+- **External keyboard support** — shortcut design for the hardware-keyboard case.
+- **Monetization** — free / one-time / subscription / pro tier.
