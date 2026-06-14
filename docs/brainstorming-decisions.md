@@ -23,7 +23,7 @@ Two complementary input mechanisms central to the differentiation:
 | Goal | Solve a personal annoyance (CLI / AI / security adjacent) |
 | Differentiator | Make the iOS keyboard pleasant for terminal work |
 | Security posture | Security-first: SE-default for new identities, per-host auth policy, no telemetry, local audit log, public-key always copyable |
-| Brand palette | **"Bell bronze"** — bronze accent (`#D49A5C`) on cool-near-black (`#0E1116`), verdigris patina (`#5FA89C`) as success/tension color. Leverages the name's two readings (struck bell + glimmer-in-darkness). Avoids AI / terminal / Norse stereotypes. See `mockups/ux-directions.html` (#brand). |
+| Brand palette | **"Bell bronze"** — bronze accent (`#D49A5C`) on cool-near-black (`#0E1116`), verdigris patina (`#5FA89C`) as success/tension color. Leverages the name's two readings (struck bell + glimmer-in-darkness). Avoids AI / terminal / Norse stereotypes. See `mockups/design-system.html`. |
 
 ### Connections & sessions
 
@@ -57,7 +57,7 @@ Two complementary input mechanisms central to the differentiation:
 | Slot interaction | Three actions per slot: tap = primary, swipe-up = secondary, swipe-down = tertiary. Long-press = edit the slot (rebind, replace, pin a new macro). Each key shows the two swipe chars as small dim glyphs on the same key (top and bottom edges). |
 | Modifier behavior | **Ctrl, Alt, Shift = sticky-for-one-keystroke.** Tap → armed for the next key, auto-disarms. **Ctrl additionally double-tap-to-lock** (Emacs chord case); tap again unlocks. Alt/Shift stay sticky-only (their swipe-based gestures don't support double-arming cleanly; iOS already provides caps-lock for Shift). Esc and Tab fire on tap (no sticky/toggle). |
 | Arrow input | **Single Blink-style arrow-pad slot.** Touch and drag from center in any direction (↑↓←→) to fire that arrow. Replaces four discrete arrow keys. |
-| Default slots (v0) | 10 slots: **core** (Esc, Ctrl/Alt/Shift, Tab, arrow-pad) + **convenience** (`/`, `\|`, `~`, `-`, `(`, `)`). Convenience slots are removable. Core slots are locked. Full layout: `mockups/keybar-v1.html`. |
+| Default slots (v0) | 10 slots: **core** (Esc, Ctrl/Alt/Shift, Tab, arrow-pad) + **convenience** (`/`, `\|`, `~`, `-`, `(`, `)`). Convenience slots are removable. Core slots are locked. Full layout: `mockups/keybar.html`. |
 | Iteration plan | Defaults are a v0 best-guess. Public character-frequency data for shell typing on mobile doesn't exist. Plan: ship defensible defaults, make customization first-class, tune defaults in v1.5 from predictor's keystroke telemetry (with consent). |
 
 ### Window switching
