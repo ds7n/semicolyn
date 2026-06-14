@@ -167,12 +167,28 @@ Two complementary input mechanisms central to the differentiation:
 
 **Full design**: see `docs/superpowers/specs/2026-06-14-function-keys-design.md`.
 
+### Degraded mode & tmux requirements
+
+| Topic | Decision |
+|---|---|
+| Minimum tmux | **3.0** (2019). Below = degraded mode. No partial-version support. |
+| "Raw passthrough" as a feature | **Non-goal.** No user-facing toggle, no power-user mode. Degraded mode is a fallback, not a taste preference. |
+| Bootstrap / auto-install | **Never.** Glymr does not drop binaries, run package managers, or sudo on user hosts. |
+| Detection | Single `tmux -V` at connect; result decides `-CC` vs raw PTY. |
+| What works in degraded mode | Connection, single shell, predictor, snippets, keybar (modifiers/arrows/Esc/Tab/Fn manual), iOS copy/paste, cursor placement, status banner. |
+| What's off in degraded mode | Window pill, pane pill, context detection, function-key auto-engage. |
+| Keybar layout (degraded) | Locked-left collapses left after pills are removed; no badge, no accent shift — pill absence is the indicator. |
+| Connect-time banner | Reuses transient amber connection-status banner. Reoccurs every reconnect. No persistent chrome. |
+| Suppression | **Per-host only.** Auto-offered as a one-tap action after 2–3 dismissals; global toggle rejected as a footgun. Per-host "Don't attempt tmux on this host" lives in connection settings (deferred). |
+| Mid-session crash recovery | Drop to degraded immediately on same connection; show **persistent red banner** (the one documented exception to the transient-banner rule) with Reattach / Start new tmux / Dismiss. No auto-retry of `-CC`, no layout restoration, no false reassurance. |
+
+**Full design**: see `docs/superpowers/specs/2026-06-14-degraded-mode-design.md`.
+
 ---
 
 ## Deferred / for future conversation
 
-- **Keyboard / input UX (remaining sub-topics)** — predictor, keybar scope, keybar interaction model, default slots, modifier behavior, arrow cluster, customization, context detection, per-context layouts (now handled by context-aware promotions), and function keys are now locked. Still open:
-  - **"Raw" / passthrough mode** for power users who want every keystroke sent verbatim.
+- **Keyboard / input UX (remaining sub-topics)** — predictor, keybar scope, keybar interaction model, default slots, modifier behavior, arrow cluster, customization, context detection, per-context layouts, function keys, and degraded mode are now locked. Still open:
   - **v2 custom inputView** — if/when promoted from v1.5+ feedback, design the letter-to-alt-symbol mapping and the held-modifier interaction.
 - **Pill position customization** — left vs right in the keybar (handedness preference); a per-user setting. (Sub-item of the keyboard/input UX topic above.)
 - **Settings / preferences surface** — where do app-level options live (master predictor toggle, context-aware keybar toggle, retention windows, per-host policies, keybar customization, etc.)? In-app modal? Dedicated tab? iOS Settings.app integration? Discoverability and depth-of-nesting story TBD.

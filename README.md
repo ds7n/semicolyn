@@ -28,9 +28,10 @@ iOS SSH/mosh client. Differentiator: terminal work that feels native on a touch 
 - **Keybar structure (revised):** the bar is now **locked left** (window pill · pane pill · arrow-pad · Esc) plus **horizontally scrollable right** (Ctrl/Alt/Shift · Tab · context promotions · defaults · Fn). Scrolling preserves muscle memory while letting contextual content land in a stable position.
 - **Context detection:** per-pane foreground process detected via tmux `pane_current_command` (zero host cooperation needed). Drives **additive symbol promotions** in the scroll region — bronze-tint + top-edge accent, asymmetric anti-flap (250ms engage / 1500ms disengage). Bundled defaults for vim, less, python, psql, mysql, sqlite3, redis-cli, node. Full spec: `docs/superpowers/specs/2026-06-14-context-detection-design.md`.
 - **Function keys:** `Fn` slot in the keybar toggles F-key mode (the scroll region becomes F1–F12). Caps-lock state machine (tap = armed one-shot, double-tap = locked). Auto-engages in `htop`/`top`/`mc` via the context-detection state machine; respects user override per episode. Companion change: **Ctrl** also gets double-tap-to-lock (Alt/Shift stay sticky-only). Full spec: `docs/superpowers/specs/2026-06-14-function-keys-design.md`.
+- **Degraded mode & tmux requirements:** minimum tmux **3.0**. Missing/too-old/crashed tmux drops to raw-PTY mode (single shell, no pills, no context detection; predictor/snippets/keybar modifiers still work). Connect-time amber banner, reoccurs each reconnect, per-host suppression after a few dismissals. Mid-session crash gets the one persistent banner in the app (Reattach / Start new tmux / Dismiss). No auto-install, no power-user "raw" toggle. Full spec: `docs/superpowers/specs/2026-06-14-degraded-mode-design.md`.
 
 **Unresolved / needs more brainstorm:**
-- **Keyboard / input UX (remaining)** — raw passthrough mode, v2 custom inputView and its letter-to-alt mapping
+- **Keyboard / input UX (remaining)** — v2 custom inputView and its letter-to-alt mapping
 - Settings/preferences surface, connection management (host config CRUD), multiple connections + host switching, pill position customization, iPad navigation, layout templates, iCloud sync, external keyboard, monetization
 
 See `docs/brainstorming-decisions.md` for the full locked-decisions table and the deferred list.
@@ -38,7 +39,7 @@ See `docs/brainstorming-decisions.md` for the full locked-decisions table and th
 ## Layout
 
 - `docs/brainstorming-decisions.md` — every locked decision, organized by topic; deferred items at the bottom
-- `docs/superpowers/specs/` — detailed subsystem specs (`2026-06-13-predictor-design.md`, `2026-06-14-context-detection-design.md`, `2026-06-14-function-keys-design.md`)
+- `docs/superpowers/specs/` — detailed subsystem specs (`2026-06-13-predictor-design.md`, `2026-06-14-context-detection-design.md`, `2026-06-14-function-keys-design.md`, `2026-06-14-degraded-mode-design.md`)
 - `mockups/ux-directions.html` — locked UX directions: window switching, pane management, cursor placement, connection status banner, brand palette
 - `mockups/keybar-scope.html` — three options for the keyboard scope decision (accessory bar / custom inputView / hybrid)
 - `mockups/keybar-v1.html` — v0 draft of the keybar default slot layout, with rendered iPhone frame and rationale
@@ -49,4 +50,4 @@ See `docs/brainstorming-decisions.md` for the full locked-decisions table and th
 
 1. Open the mockup files in a browser for the visual record
 2. Skim `docs/brainstorming-decisions.md` "Locked decisions" to recall state
-3. Pick a topic from "Deferred / for future conversation"; raw passthrough mode, host switching, or iPad navigation are natural next
+3. Pick a topic from "Deferred / for future conversation"; connection management, multi-connection / host switching, or settings surface are natural next
