@@ -23,6 +23,7 @@ Two complementary input mechanisms central to the differentiation:
 | Goal | Solve a personal annoyance (CLI / AI / security adjacent) |
 | Differentiator | Make the iOS keyboard pleasant for terminal work |
 | Security posture | Security-first: SE-default for new identities, per-host auth policy, no telemetry, local audit log, public-key always copyable |
+| Brand palette | **"Bell bronze"** — bronze accent (`#D49A5C`) on cool-near-black (`#0E1116`), verdigris patina (`#5FA89C`) as success/tension color. Leverages the name's two readings (struck bell + glimmer-in-darkness). Avoids AI / terminal / Norse stereotypes. See `mockups/ux-directions.html` (#brand). |
 
 ### Connections & sessions
 
@@ -39,12 +40,25 @@ Two complementary input mechanisms central to the differentiation:
 |---|---|
 | Credential storage | **Native only** — iOS Keychain + Secure Enclave. **No 3rd-party password-manager integration.** Matches Blink / Termius / Prompt 3. |
 
-### Snippets
+### Snippets / macros (unified)
 
 | Topic | Decision |
 |---|---|
-| Snippet model | Flat list + smart sort, toggle to disable smart sort |
-| Snippet power | Placeholders + defaults + remembered last-used values per host |
+| Unified concept | **One concept: macro = a recorded sequence of input events.** Covers keystroke chords (`Ctrl+R`), literal strings (`kubectl `), mixed sequences (`Esc :wq Enter`), and tmux prefix combos. No separate "snippet" vs "macro" distinction. |
+| Two surfaces | **Launcher** = searchable full list (flat, smart sort, toggle to disable). **Keybar** = pinned subset for one-tap access. |
+| Optional placeholders | Placeholders + defaults + remembered last-used values per host are an optional per-macro property. Used by some launcher entries; usually unset on keybar items. |
+
+### Keybar (accessory bar above iOS keyboard)
+
+| Topic | Decision |
+|---|---|
+| v1 scope | **In-app accessory bar only.** iOS owns the letter keys; the 123 layer remains the fallback for any symbol not promoted to the keybar. Glymr owns the predictor strip + keybar pills + slots. |
+| v2 question (deferred) | Custom `inputView` (Glymr-owned keyboard inside the app) — enables long-press alts on letter keys, held modifier chords, custom repeat rates, context-swap layouts. Not a system-wide keyboard extension. |
+| Slot interaction | Three actions per slot: tap = primary, swipe-up = secondary, swipe-down = tertiary. Long-press = edit the slot (rebind, replace, pin a new macro). Each key shows the two swipe chars as small dim glyphs on the same key (top and bottom edges). |
+| Modifier behavior | **Ctrl, Alt, Shift = sticky-for-one-keystroke.** Tap → armed for the next key, auto-disarms. Esc and Tab fire on tap (no sticky/toggle). |
+| Arrow input | **Single Blink-style arrow-pad slot.** Touch and drag from center in any direction (↑↓←→) to fire that arrow. Replaces four discrete arrow keys. |
+| Default slots (v0) | 10 slots: **core** (Esc, Ctrl/Alt/Shift, Tab, arrow-pad) + **convenience** (`/`, `\|`, `~`, `-`, `(`, `)`). Convenience slots are removable. Core slots are locked. Full layout: `mockups/keybar-v1.html`. |
+| Iteration plan | Defaults are a v0 best-guess. Public character-frequency data for shell typing on mobile doesn't exist. Plan: ship defensible defaults, make customization first-class, tune defaults in v1.5 from predictor's keystroke telemetry (with consent). |
 
 ### Window switching
 
@@ -127,16 +141,11 @@ Two complementary input mechanisms central to the differentiation:
 
 ## Deferred / for future conversation
 
-- **Keyboard / input UX (large topic — partially addressed)** — predictive-input subsystem is now locked (see Predictive input above + spec doc). Remaining sub-topics still need their own sessions:
-  - Accessory bar contents and layout (which keys are always present, which scroll, which appear contextually)
-  - Modifier behavior: sticky-tap (one-shot) vs hold-to-modify; visual feedback when a modifier is engaged
-  - Custom system keyboard extension vs in-app accessory bar only
-  - Symbols missing on iOS defaults: `` ` ~ | \ { } [ ] < > | ``, escape codes
-  - Function keys (F1–F12) — surfaced via long-press number row, dedicated row, or hidden?
-  - Arrow / navigation cluster (related to but distinct from the cursor-movement problem)
-  - Per-context layout swaps (vim shows `hjkl` + Esc prominent, tmux shows prefix-key, etc.) — overlaps with the deferred context-detection topic
-  - Customization (user-defined accessory rows, reorderable pills)
-  - "Raw" / passthrough mode for power users who want every keystroke sent verbatim
+- **Keyboard / input UX (remaining sub-topics)** — predictor, keybar scope, keybar interaction model, default slots, modifier behavior, arrow cluster, and customization are now locked (see Predictive input and Keybar sections above). Still open:
+  - **Function keys (F1–F12)** — surfaced via long-press number row, dedicated row, pinned macro, or hidden?
+  - **Per-context layout swaps** — vim shows `hjkl` + Esc prominent, tmux shows prefix-key, etc. Overlaps with the deferred context-detection topic.
+  - **"Raw" / passthrough mode** for power users who want every keystroke sent verbatim.
+  - **v2 custom inputView** — if/when promoted from v1.5+ feedback, design the letter-to-alt-symbol mapping and the held-modifier interaction.
 - **Pill position customization** — left vs right in the keybar (handedness preference); a per-user setting. (Sub-item of the keyboard/input UX topic above.)
 - **Host switching** — the long-press host menu is referenced but not designed. Separate gesture/affordance still TBD.
 - **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
