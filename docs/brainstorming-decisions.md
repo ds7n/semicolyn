@@ -175,7 +175,9 @@ Two complementary input mechanisms central to the differentiation:
   - **"Raw" / passthrough mode** for power users who want every keystroke sent verbatim.
   - **v2 custom inputView** — if/when promoted from v1.5+ feedback, design the letter-to-alt-symbol mapping and the held-modifier interaction.
 - **Pill position customization** — left vs right in the keybar (handedness preference); a per-user setting. (Sub-item of the keyboard/input UX topic above.)
-- **Host switching** — the long-press host menu is referenced but not designed. Separate gesture/affordance still TBD.
+- **Settings / preferences surface** — where do app-level options live (master predictor toggle, context-aware keybar toggle, retention windows, per-host policies, keybar customization, etc.)? In-app modal? Dedicated tab? iOS Settings.app integration? Discoverability and depth-of-nesting story TBD.
+- **Connection management** — how the user creates / edits / deletes host configs (hostname, user, port, identity, jump-host chain, port forwards, mosh vs ssh, Tailscale routing). Where this UI lives, the form/list model, defaults inheritance, import/export. Separate from the *connecting to* a host gesture.
+- **Multiple connections + host switching** — do we support multiple simultaneous live connections, or is it one-at-a-time? If multiple: how do users see which are live, switch between them, and tell connections apart from tmux windows within one connection? Long-press host menu is referenced elsewhere but not designed. Includes the "specify which host to connect to" affordance (host picker on launch, recent list, search).
 - **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
 - **iCloud sync scope** — hosts/snippets/identities — what syncs, what doesn't.
