@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Glymr — Design system</title>
+<style>
+  :root {
+    /* Glymr "Bell bronze" palette */
+    --bg: #0E1116;          /* ground — near-black with a hint of cool */
+    --panel: #161A22;       /* surface */
+    --panel-2: #1F2530;     /* raised */
+    --line: #2A323F;        /* border / divider */
+    --text: #E8EBF0;        /* primary text — slightly warm white */
+    --muted: #8A93A3;       /* secondary text */
+    --accent: #D49A5C;      /* brand · bronze (lit metal) */
+    --accent-2: #F2C58A;    /* struck · hover/active bronze highlight */
+    --green: #5FA89C;       /* patina · success/settled (verdigris) */
+    --amber: #F5A524;       /* warning */
+    --red: #E06B6B;         /* error · muted brick */
+    --term-bg: #0A0C10;     /* terminal ground */
+    --term-fg: #CFD6E4;     /* terminal foreground */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  }
+  header {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; max-width: 800px; }
+  main { padding: 32px; max-width: 1400px; margin: 0 auto; }
+
+  section { margin-bottom: 56px; }
+  section > h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin: 0 0 4px;
+  }
+  section > p.lede { margin: 0 0 24px; color: var(--text); max-width: 800px; }
+
+  h3.sub {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin: 32px 0 10px;
+  }
+
+  /* ---- Palette ---- */
+  .brand-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px; margin-bottom: 16px;
+  }
+  .swatch { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+  .swatch .chip { height: 64px; display: flex; align-items: flex-end; padding: 8px; font: 600 11px/1 ui-monospace, "SF Mono", monospace; }
+  .swatch .meta { padding: 8px 10px; font-size: 11px; }
+  .swatch .meta .role { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
+  .swatch .meta .hex { color: var(--text); font: 600 12px/1.4 ui-monospace, "SF Mono", monospace; margin-top: 2px; }
+
+  /* ---- Applied demo ---- */
+  .brand-demo {
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 14px; padding: 24px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+  }
+  @media (max-width: 800px) { .brand-demo { grid-template-columns: 1fr; } }
+
+  .device { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .device-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+
+  .brand-term { background: var(--term-bg); border-radius: 10px; padding: 14px; font: 13px/1.55 ui-monospace, "SF Mono", monospace; color: var(--term-fg); }
+  .brand-term .prompt { color: var(--accent); }
+  .brand-term .host { color: var(--green); }
+  .brand-term .ok { color: var(--green); }
+  .brand-term .warn { color: var(--amber); }
+  .brand-term .err { color: var(--red); }
+  .brand-term .dim { color: var(--muted); }
+  .brand-term .cursor { display: inline-block; width: 8px; height: 15px; background: var(--accent-2); vertical-align: -2px; animation: brand-blink 1.1s steps(2) infinite; }
+  @keyframes brand-blink { 50% { opacity: 0; } }
+
+  .brand-keybar {
+    background: var(--panel); border-top: 1px solid var(--line);
+    margin-top: 12px; padding: 8px;
+    display: flex; gap: 6px; border-radius: 0 0 10px 10px; align-items: center;
+  }
+  .brand-keybar .pill {
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 999px; padding: 6px 12px; font: 600 12px/1 -apple-system, sans-serif;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .brand-keybar .pill.brand {
+    border-color: var(--accent); color: var(--accent-2);
+    box-shadow: 0 0 0 1px rgba(212, 154, 92, 0.25), 0 0 18px -4px rgba(242, 197, 138, 0.45);
+  }
+  .brand-keybar .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  .brand-keybar .k { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 6px 10px; font: 600 12px/1 ui-monospace, "SF Mono", monospace; }
+  .brand-keybar .spacer { flex: 1; }
+
+  .brand-suggest { background: var(--panel); border-top: 1px solid var(--line); padding: 6px 8px; display: flex; gap: 6px; }
+  .brand-suggest .chip {
+    background: transparent; border: 1px solid var(--line);
+    color: var(--text); border-radius: 6px; padding: 4px 10px;
+    font: 13px/1 ui-monospace, "SF Mono", monospace;
+  }
+  .brand-suggest .chip.top {
+    border-color: var(--accent); color: var(--accent-2);
+    background: rgba(212, 154, 92, 0.08);
+  }
+
+  .brand-btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .brand-btn { padding: 8px 14px; border-radius: 8px; font: 600 13px/1 -apple-system, sans-serif; border: 1px solid transparent; cursor: pointer; }
+  .brand-btn.primary { background: var(--accent); color: var(--bg); }
+  .brand-btn.primary:hover { background: var(--accent-2); }
+  .brand-btn.ghost { background: transparent; color: var(--accent-2); border-color: var(--accent); }
+  .brand-btn.subtle { background: var(--panel-2); color: var(--text); border-color: var(--line); }
+
+  .brand-banner {
+    margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+    font: 13px/1.4 -apple-system, sans-serif;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .brand-banner.warn { background: rgba(245, 165, 36, 0.08); border: 1px solid rgba(245, 165, 36, 0.35); color: var(--amber); }
+  .brand-banner.err  { background: rgba(224, 107, 107, 0.08); border: 1px solid rgba(224, 107, 107, 0.35); color: var(--red); }
+  .brand-banner.ok   { background: rgba(95, 168, 156, 0.08); border: 1px solid rgba(95, 168, 156, 0.35); color: var(--green); }
+
+  /* ---- Component vocabulary ---- */
+  .comp-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .comp {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px;
+  }
+  .comp h4 { margin: 0 0 4px; font-size: 13px; color: var(--accent-2); }
+  .comp .desc { color: var(--muted); font-size: 11px; margin-bottom: 12px; }
+  .comp .demo {
+    background: var(--term-bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 16px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    flex-wrap: wrap; min-height: 60px;
+  }
+
+  /* Demo primitives */
+  .slot {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 10px; font: 600 11px/1 -apple-system, sans-serif;
+    color: var(--text);
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .slot .hint {
+    position: relative; top: 1px; font-size: 8px;
+    color: rgba(212,154,92,0.6); font-weight: 700;
+  }
+  .pill {
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 999px; padding: 5px 11px;
+    font: 600 11px/1 -apple-system, sans-serif;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  .banner-demo {
+    width: 100%; padding: 7px 11px; border-radius: 8px;
+    font: 500 11px/1.3 -apple-system, sans-serif;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .banner-demo.warn { background: rgba(245, 165, 36, 0.12); border: 1px solid rgba(245, 165, 36, 0.4); color: var(--amber); }
+  .banner-demo.err  { background: rgba(224, 107, 107, 0.12); border: 1px solid rgba(224, 107, 107, 0.4); color: var(--red); }
+  .sheet-demo {
+    width: 100%;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .sheet-demo .row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 6px;
+    font: 500 11px/1 -apple-system, sans-serif;
+  }
+  .sheet-demo .row.active { background: rgba(212,154,92,0.14); }
+  .sheet-demo .row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  .sheet-demo .row .name { color: var(--text); flex: 1; }
+  .sheet-demo .row .meta { color: var(--muted); font-size: 10px; }
+  .row-set {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden; width: 100%;
+  }
+  .row-set .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--line);
+    font: 500 11px/1 -apple-system, sans-serif; color: var(--text);
+  }
+  .row-set .row:last-child { border-bottom: 0; }
+  .row-set .row .icon {
+    width: 20px; height: 20px; border-radius: 5px;
+    background: rgba(212,154,92,0.18); color: var(--accent-2);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; flex-shrink: 0;
+  }
+  .row-set .row .label { flex: 1; }
+  .row-set .row .meta { color: var(--muted); font-size: 10px; }
+  .row-set .row .chev { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Glymr — Design system</h1>
+  <p>Single source of truth for color, type, and the small component vocabulary used across every feature mockup. If you're starting a new mockup, copy the <code>:root</code> palette block and reuse the components below.</p>
+</header>
+
+<main>
+
+  <section id="palette">
+    <h2>Palette — "Bell bronze"</h2>
+    <p class="lede">
+      Name-driven: <b>Glymr</b> = Old Norse "ringing sound" (a struck bell → <b>bronze</b>); the English ear hears <b>"glimmer"</b> (faint light catching in darkness). Both meanings point at one material: <b>lit bronze on cool dark</b>, with <b>verdigris patina</b> as the tension color. Sidesteps salmon-clay (Anthropic), mono-green (ChatGPT), gradient-purple ("AI"), matrix-green and phosphor-amber (terminal stereotypes), and ice-blue (Norse stereotype).
+    </p>
+
+    <h3 class="sub">Surfaces & text</h3>
+    <div class="brand-grid">
+      <div class="swatch"><div class="chip" style="background:#0E1116; color:#E8EBF0;">Aa</div><div class="meta"><div class="role">Ground</div><div class="hex">#0E1116</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#161A22; color:#E8EBF0;">Aa</div><div class="meta"><div class="role">Surface</div><div class="hex">#161A22</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#1F2530; color:#E8EBF0;">Aa</div><div class="meta"><div class="role">Raised</div><div class="hex">#1F2530</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#2A323F; color:#E8EBF0;">Aa</div><div class="meta"><div class="role">Border</div><div class="hex">#2A323F</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#0E1116; color:#8A93A3;">Aa</div><div class="meta"><div class="role">Text muted</div><div class="hex">#8A93A3</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#0E1116; color:#E8EBF0;">Aa</div><div class="meta"><div class="role">Text primary</div><div class="hex">#E8EBF0</div></div></div>
+    </div>
+
+    <h3 class="sub">Brand & semantic</h3>
+    <div class="brand-grid">
+      <div class="swatch"><div class="chip" style="background:#D49A5C; color:#0E1116;">Aa</div><div class="meta"><div class="role">Bronze · brand</div><div class="hex">#D49A5C</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#F2C58A; color:#0E1116;">Aa</div><div class="meta"><div class="role">Struck · hover</div><div class="hex">#F2C58A</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#5FA89C; color:#0E1116;">Aa</div><div class="meta"><div class="role">Patina · success</div><div class="hex">#5FA89C</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#F5A524; color:#0E1116;">Aa</div><div class="meta"><div class="role">Warning</div><div class="hex">#F5A524</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#E06B6B; color:#0E1116;">Aa</div><div class="meta"><div class="role">Error</div><div class="hex">#E06B6B</div></div></div>
+    </div>
+
+    <h3 class="sub">Applied</h3>
+    <div class="brand-demo">
+      <div>
+        <div class="device-label">Terminal · keybar · suggestions</div>
+        <div class="device" style="padding:0; overflow:hidden;">
+          <div class="brand-term" style="border-radius:10px 10px 0 0;">
+            <div><span class="host">alex@bastion</span> <span class="dim">~/proj/glymr</span></div>
+            <div><span class="prompt">$</span> ssh forgejo</div>
+            <div><span class="dim">Last login: Tue Jun 13 22:14:08 2026</span></div>
+            <div><span class="prompt">$</span> tmux attach -t main</div>
+            <div><span class="ok">✓</span> session restored · <span class="dim">3 windows</span></div>
+            <div><span class="prompt">$</span> claude<span class="cursor"></span></div>
+          </div>
+          <div class="brand-suggest">
+            <span class="chip top">claude</span>
+            <span class="chip">clausewitz</span>
+            <span class="chip">claudio</span>
+          </div>
+          <div class="brand-keybar">
+            <span class="pill brand">main <span class="dot"></span></span>
+            <span class="pill">▦</span>
+            <span class="spacer"></span>
+            <span class="k">esc</span>
+            <span class="k">tab</span>
+            <span class="k">⌃</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="device-label">Controls · status</div>
+        <div class="device">
+          <div style="color:var(--text); font-size:13px; margin-bottom:8px;">Connect to host</div>
+          <div style="color:var(--muted); font-size:12px; margin-bottom:12px;">bastion · alex@example.net:22</div>
+          <div class="brand-btn-row">
+            <button class="brand-btn primary">Connect</button>
+            <button class="brand-btn ghost">Edit host</button>
+            <button class="brand-btn subtle">Cancel</button>
+          </div>
+          <div class="brand-banner ok">✓ Connected · mosh roaming · last seen 0s ago</div>
+          <div class="brand-banner warn">⚠ Reconnecting · last seen 4s ago</div>
+          <div class="brand-banner err">✕ Host unreachable · check network</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="components">
+    <h2>Component vocabulary</h2>
+    <p class="lede">Small set of reusable pieces every feature mockup pulls from. If you find yourself inventing a new pill or sheet shape, ask first whether one of these does the job — the goal is visual consistency, not novelty.</p>
+
+    <div class="comp-grid">
+
+      <div class="comp">
+        <h4>Keybar slot</h4>
+        <div class="desc">Rectangular tap target in the keybar. Bronze hint glyph below the label indicates a long-press action; absence of hint = tap only.</div>
+        <div class="demo">
+          <span class="slot">Esc</span>
+          <span class="slot" style="position: relative; padding-bottom: 14px;">Esc<span class="hint" style="position: absolute; bottom: 4px; left: 0; right: 0; text-align: center;">≡</span></span>
+          <span class="slot">Ctrl</span>
+          <span class="slot">←↕→</span>
+        </div>
+      </div>
+
+      <div class="comp">
+        <h4>Pill (window / pane)</h4>
+        <div class="desc">Rounded slot in the keybar's locked-left section. Shows a current-state label; gestures (tap/swipe/long-press) drive nav.</div>
+        <div class="demo">
+          <span class="pill">main <span class="dot"></span></span>
+          <span class="pill">▦</span>
+        </div>
+      </div>
+
+      <div class="comp">
+        <h4>Banner (top of screen)</h4>
+        <div class="desc">Transient by default (auto-dismiss); persistent only in documented exceptions (tmux-crash). Amber = degraded, red = broken.</div>
+        <div class="demo" style="flex-direction: column; gap: 8px;">
+          <span class="banner-demo warn">⚠ reconnecting… <span style="margin-left:auto; font-size:9px;">last seen 4s ago</span></span>
+          <span class="banner-demo err">● tmux session ended <span style="margin-left:auto; font-size:9px;">Reattach / New / Dismiss</span></span>
+        </div>
+      </div>
+
+      <div class="comp">
+        <h4>Picker sheet (above keybar)</h4>
+        <div class="desc">Anchored just above the keybar (not top of screen). Live → Recent → CTAs. Reached via long-press Esc.</div>
+        <div class="demo">
+          <div class="sheet-demo">
+            <div class="row active"><span class="dot"></span><span class="name">prod-web-3</span><span class="meta">current</span></div>
+            <div class="row"><span class="dot"></span><span class="name">db-replica-1</span><span class="meta">2m idle</span></div>
+            <div class="row" style="color: var(--accent);"><span style="width:14px; text-align:center;">+</span><span class="name" style="color: var(--accent);">Connect to host…</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="comp">
+        <h4>Settings row (grouped list)</h4>
+        <div class="desc">iOS-native grouped list for the full Settings screen. Icon + label + optional meta + chevron.</div>
+        <div class="demo">
+          <div class="row-set">
+            <div class="row"><span class="icon">🖥</span><span class="label">Hosts</span><span class="meta">12</span><span class="chev">›</span></div>
+            <div class="row"><span class="icon">🔑</span><span class="label">Identities & Keys</span><span class="meta">3</span><span class="chev">›</span></div>
+            <div class="row"><span class="icon">🛡</span><span class="label">Security</span><span class="chev">›</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="comp">
+        <h4>Buttons</h4>
+        <div class="desc">Primary = bronze fill, used once per surface for the main action. Ghost = bronze outline, secondary. Subtle = panel fill, tertiary/cancel.</div>
+        <div class="demo">
+          <button class="brand-btn primary">Connect</button>
+          <button class="brand-btn ghost">Edit</button>
+          <button class="brand-btn subtle">Cancel</button>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+</body>
+</html>
