@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Glymr — Context detection: promoted slot visuals</title>
+<style>
+  :root {
+    --bg: #0E1116;
+    --panel: #161A22;
+    --panel-2: #1F2530;
+    --line: #2A323F;
+    --text: #E8EBF0;
+    --muted: #8A93A3;
+    --accent: #D49A5C;
+    --accent-2: #F2C58A;
+    --green: #5FA89C;
+    --amber: #F5A524;
+    --red: #E06B6B;
+    --term-bg: #0A0C10;
+    --term-fg: #CFD6E4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  }
+  header {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; max-width: 820px; }
+  main { padding: 32px; max-width: 1400px; margin: 0 auto; }
+
+  section { margin-bottom: 56px; }
+  section > h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin: 0 0 12px;
+  }
+  section > p.lede { margin: 0 0 24px; color: var(--text); max-width: 820px; }
+
+  /* Slot styles (lifted from keybar-v1) */
+  .pill {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 4px 9px;
+    font: 600 10px/1 -apple-system, sans-serif;
+    display: inline-flex; align-items: center; gap: 4px;
+    flex-shrink: 0;
+  }
+  .slot {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--text);
+    width: 30px; height: 36px;
+    flex-shrink: 0;
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    font: 600 14px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .slot .up, .slot .down {
+    position: absolute; left: 0; right: 0;
+    text-align: center;
+    font: 600 8px/1 ui-monospace, monospace;
+    color: var(--muted);
+  }
+  .slot .up   { top: 2px; }
+  .slot .down { bottom: 2px; }
+  .slot.mod {
+    background: rgba(212, 154, 92, 0.10);
+    border-color: rgba(212, 154, 92, 0.40);
+    color: var(--accent-2);
+  }
+  .slot.dpad {
+    width: 42px;
+    background: rgba(212, 154, 92, 0.10);
+    border-color: rgba(212, 154, 92, 0.40);
+    color: var(--accent-2);
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    place-items: center;
+    font-size: 9px;
+    line-height: 1;
+  }
+  .slot.dpad .a-up    { grid-column: 2; grid-row: 1; }
+  .slot.dpad .a-left  { grid-column: 1; grid-row: 2; }
+  .slot.dpad .a-right { grid-column: 3; grid-row: 2; }
+  .slot.dpad .a-down  { grid-column: 2; grid-row: 3; }
+
+  /* Promoted slot treatments */
+  .slot.promo-tint {
+    background: rgba(212, 154, 92, 0.12);
+  }
+  .slot.promo-halo {
+    box-shadow: 0 0 8px rgba(212, 154, 92, 0.55);
+  }
+  .slot.promo-edge {
+    border-top: 2px solid var(--accent);
+    padding-top: 0;
+  }
+  .slot.promo-combo {
+    background: rgba(212, 154, 92, 0.12);
+    border-top: 2px solid var(--accent);
+  }
+
+  /* Bigger versions for the anatomy callout */
+  .slot.big { width: 70px; height: 88px; font-size: 28px; border-radius: 10px; }
+  .slot.big .up, .slot.big .down { font-size: 13px; }
+  .slot.big .up { top: 5px; }
+  .slot.big .down { bottom: 5px; }
+  .slot.big.promo-edge { border-top-width: 3px; }
+  .slot.big.promo-combo { border-top-width: 3px; }
+
+  /* Comparison row */
+  .compare {
+    display: flex; gap: 32px; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 24px;
+  }
+  .compare .item { text-align: center; }
+  .compare .item .label { color: var(--accent-2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 12px; }
+  .compare .item .sub { color: var(--muted); font-size: 11px; margin-top: 4px; max-width: 140px; }
+
+  /* Phone frame */
+  .phone {
+    width: 300px;
+    height: 580px;
+    background: #000;
+    border: 8px solid #1c2230;
+    border-radius: 36px;
+    padding: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+  .phone .notch {
+    position: absolute;
+    top: 6px; left: 50%; transform: translateX(-50%);
+    width: 90px; height: 22px;
+    background: #000;
+    border-radius: 0 0 14px 14px;
+    z-index: 10;
+  }
+  .screen {
+    width: 100%; height: 100%;
+    background: var(--term-bg);
+    border-radius: 24px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    font: 11px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .app-topbar {
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    padding: 30px 10px 6px;
+    color: var(--text);
+    font-size: 11px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .app-topbar .title { font-weight: 600; }
+  .app-topbar .sub { color: var(--muted); font-size: 10px; }
+
+  .term {
+    flex: 1;
+    background: var(--term-bg);
+    color: var(--term-fg);
+    padding: 8px 10px;
+    overflow: hidden;
+    white-space: pre-wrap;
+  }
+  .term .prompt { color: var(--accent); }
+  .term .dim { color: var(--muted); }
+  .term .cursor {
+    display: inline-block; width: 6px; height: 12px;
+    background: var(--accent-2);
+    vertical-align: -2px; animation: blink 1.1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* iOS keyboard mock (very rough) */
+  .ios-keys {
+    background: #2a2c33;
+    padding: 4px;
+    display: flex; flex-direction: column; gap: 3px;
+    flex-shrink: 0;
+  }
+  .ios-keys .row { display: flex; gap: 3px; justify-content: center; }
+  .ios-keys .k {
+    background: #44464d;
+    border-radius: 4px;
+    color: var(--text);
+    font: 600 11px/1 -apple-system, sans-serif;
+    padding: 6px 0;
+    flex: 1;
+    text-align: center;
+  }
+  .ios-keys .k.sp { flex: 4; }
+  .ios-keys .k.s { background: #2a2c33; color: var(--muted); font-size: 9px; }
+
+  /* Keybar */
+  .keybar {
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    padding: 5px 4px;
+    display: flex; gap: 5px;
+    align-items: center;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .keybar .sticky {
+    display: flex; gap: 4px; align-items: center;
+    flex-shrink: 0;
+    padding-right: 4px;
+    border-right: 1px solid var(--line);
+  }
+  .keybar .slots {
+    display: flex; gap: 3px;
+    overflow-x: hidden;
+    flex: 1;
+    position: relative;
+  }
+  .keybar .slots::after {
+    content: "";
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    width: 14px;
+    background: linear-gradient(90deg, transparent, var(--panel));
+    pointer-events: none;
+  }
+
+  /* Predictor strip */
+  .predict {
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    padding: 4px 6px;
+    display: flex; gap: 4px; flex-shrink: 0;
+  }
+  .predict .chip {
+    background: transparent; border: 1px solid var(--line);
+    color: var(--text); border-radius: 4px;
+    padding: 2px 7px;
+    font: 10px/1 ui-monospace, monospace;
+  }
+
+  /* Phone-row */
+  .phone-row {
+    display: grid;
+    grid-template-columns: repeat(3, 300px);
+    gap: 32px;
+    justify-content: start;
+  }
+  .phone-row .caption {
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--muted);
+    max-width: 300px;
+  }
+  .phone-row .caption b { color: var(--accent-2); }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Glymr — Context detection: promoted slot visuals</h1>
+  <p>The keybar now has a locked left section + a horizontally scrollable region. When detection identifies a context (vim, python, less, …), context-relevant <i>promoted</i> keys slide into the front of the scroll region. Defaults push right but remain reachable. Promoted keys need a visual identity that reads as "this is here because of context" — distinct from default convenience slots, without overloading the press/focus/modifier-armed states.</p>
+</header>
+
+<main>
+
+  <!-- =========================================================== -->
+  <section>
+    <h2>Treatment comparison — same key, four candidate visuals</h2>
+    <p class="lede">Bronze-tinted background, soft halo, top-edge accent, or combo. Glyph contrast stays high in all four — the difference is in the chrome around the glyph.</p>
+
+    <div class="compare">
+      <div class="item">
+        <div class="slot big">:<span class="up">;</span><span class="down">'</span></div>
+        <div class="label">Default</div>
+        <div class="sub">(reference — what a normal convenience slot looks like)</div>
+      </div>
+      <div class="item">
+        <div class="slot big promo-tint">:<span class="up">;</span><span class="down">'</span></div>
+        <div class="label">A. Bronze tint</div>
+        <div class="sub">Slot fill gets ~12% bronze wash. Ambient warm cast.</div>
+      </div>
+      <div class="item">
+        <div class="slot big promo-halo">:<span class="up">;</span><span class="down">'</span></div>
+        <div class="label">B. Bronze halo</div>
+        <div class="sub">Soft outer glow. Risk: collides with focus / pressed semantics.</div>
+      </div>
+      <div class="item">
+        <div class="slot big promo-edge">:<span class="up">;</span><span class="down">'</span></div>
+        <div class="label">C. Top-edge accent</div>
+        <div class="sub">1–2pt bronze line on top edge. Reads as "tab indicator."</div>
+      </div>
+      <div class="item">
+        <div class="slot big promo-combo">:<span class="up">;</span><span class="down">'</span></div>
+        <div class="label">A + C (recommended)</div>
+        <div class="sub">Warm wash + thin top accent. Distinctive but ambient. Brand-coherent "bronze ribbon."</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================== -->
+  <section>
+    <h2>Applied — shell vs vim vs python</h2>
+    <p class="lede">Same keybar across three contexts. Locked region (window pill · pane pill · arrows · Esc) never moves. Ctrl/Alt/Shift and Tab anchor the start of the scroll region. <b>Promoted keys (bronze-tint + top-edge) appear directly after Tab.</b> Defaults follow.</p>
+
+    <div class="phone-row">
+
+      <!-- Shell -->
+      <div>
+        <div class="phone">
+          <div class="notch"></div>
+          <div class="screen">
+            <div class="app-topbar">
+              <span class="title">prod-1 · main</span>
+              <span class="sub">●</span>
+            </div>
+            <div class="term"><span class="dim">~/proj $</span> ls
+README.md  src/  tests/
+<span class="prompt">~/proj $</span> <span class="cursor"></span></div>
+            <div class="predict">
+              <span class="chip">git status</span>
+              <span class="chip">cd src</span>
+            </div>
+            <div class="keybar">
+              <div class="sticky">
+                <span class="pill">prod-1 ▾</span>
+                <span class="pill">+</span>
+                <div class="slot dpad" title="arrow-pad">
+                  <div class="a-up">↑</div>
+                  <div class="a-left">←</div>
+                  <div class="a-right">→</div>
+                  <div class="a-down">↓</div>
+                </div>
+                <div class="slot mod" title="Esc">esc</div>
+              </div>
+              <div class="slots">
+                <div class="slot mod" title="modifier">⌃<span class="up">⌥</span><span class="down">⇧</span></div>
+                <div class="slot">tab</div>
+                <div class="slot">/<span class="up">?</span></div>
+                <div class="slot">|<span class="up">\</span></div>
+                <div class="slot">~<span class="up">`</span></div>
+                <div class="slot">-<span class="up">_</span></div>
+                <div class="slot">(<span class="up">{</span><span class="down">[</span></div>
+                <div class="slot">)<span class="up">}</span><span class="down">]</span></div>
+              </div>
+            </div>
+            <div class="ios-keys">
+              <div class="row"><div class="k">q</div><div class="k">w</div><div class="k">e</div><div class="k">r</div><div class="k">t</div><div class="k">y</div><div class="k">u</div><div class="k">i</div><div class="k">o</div><div class="k">p</div></div>
+              <div class="row"><div class="k">a</div><div class="k">s</div><div class="k">d</div><div class="k">f</div><div class="k">g</div><div class="k">h</div><div class="k">j</div><div class="k">k</div><div class="k">l</div></div>
+              <div class="row"><div class="k s">⇧</div><div class="k">z</div><div class="k">x</div><div class="k">c</div><div class="k">v</div><div class="k">b</div><div class="k">n</div><div class="k">m</div><div class="k s">⌫</div></div>
+              <div class="row"><div class="k s">123</div><div class="k sp">space</div><div class="k s">return</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="caption"><b>Shell.</b> Process = <code>zsh</code>. No promotions. Bar shows defaults: <code>/ | ~ - ( )</code>.</div>
+      </div>
+
+      <!-- Vim -->
+      <div>
+        <div class="phone">
+          <div class="notch"></div>
+          <div class="screen">
+            <div class="app-topbar">
+              <span class="title">prod-1 · main</span>
+              <span class="sub">vim</span>
+            </div>
+            <div class="term"><span class="dim">  1 </span>def fetch(url):
+<span class="dim">  2 </span>    return requests.get(url)<span class="cursor"></span>
+<span class="dim">  3 </span>
+<span class="dim">~                                  </span>
+<span class="dim">~                                  </span>
+<span class="dim">"server.py" 38L, 1.2K           </span></div>
+            <div class="predict">
+              <span class="chip">:w</span>
+              <span class="chip">:wq</span>
+            </div>
+            <div class="keybar">
+              <div class="sticky">
+                <span class="pill">prod-1 ▾</span>
+                <span class="pill">+</span>
+                <div class="slot dpad">
+                  <div class="a-up">↑</div>
+                  <div class="a-left">←</div>
+                  <div class="a-right">→</div>
+                  <div class="a-down">↓</div>
+                </div>
+                <div class="slot mod">esc</div>
+              </div>
+              <div class="slots">
+                <div class="slot mod">⌃<span class="up">⌥</span><span class="down">⇧</span></div>
+                <div class="slot">tab</div>
+                <div class="slot promo-combo">:<span class="up">;</span></div>
+                <div class="slot promo-combo">*<span class="up">#</span></div>
+                <div class="slot promo-combo">%<span class="up">^</span><span class="down">$</span></div>
+                <div class="slot">/<span class="up">?</span></div>
+                <div class="slot">|<span class="up">\</span></div>
+                <div class="slot">~<span class="up">`</span></div>
+                <div class="slot">-<span class="up">_</span></div>
+              </div>
+            </div>
+            <div class="ios-keys">
+              <div class="row"><div class="k">q</div><div class="k">w</div><div class="k">e</div><div class="k">r</div><div class="k">t</div><div class="k">y</div><div class="k">u</div><div class="k">i</div><div class="k">o</div><div class="k">p</div></div>
+              <div class="row"><div class="k">a</div><div class="k">s</div><div class="k">d</div><div class="k">f</div><div class="k">g</div><div class="k">h</div><div class="k">j</div><div class="k">k</div><div class="k">l</div></div>
+              <div class="row"><div class="k s">⇧</div><div class="k">z</div><div class="k">x</div><div class="k">c</div><div class="k">v</div><div class="k">b</div><div class="k">n</div><div class="k">m</div><div class="k s">⌫</div></div>
+              <div class="row"><div class="k s">123</div><div class="k sp">space</div><div class="k s">return</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="caption"><b>Vim.</b> Process = <code>vim</code>. Promotes <code>:</code>, <code>*</code>, <code>%</code>. Defaults <code>( )</code> push offscreen but reachable via pan.</div>
+      </div>
+
+      <!-- Python -->
+      <div>
+        <div class="phone">
+          <div class="notch"></div>
+          <div class="screen">
+            <div class="app-topbar">
+              <span class="title">prod-1 · main</span>
+              <span class="sub">python</span>
+            </div>
+            <div class="term"><span class="dim">Python 3.12.1</span>
+<span class="dim">&gt;&gt;&gt;</span> data = {
+<span class="dim">...</span>     "host": "prod-1",
+<span class="dim">...</span> }<span class="cursor"></span></div>
+            <div class="predict">
+              <span class="chip">print(</span>
+              <span class="chip">import</span>
+            </div>
+            <div class="keybar">
+              <div class="sticky">
+                <span class="pill">prod-1 ▾</span>
+                <span class="pill">+</span>
+                <div class="slot dpad">
+                  <div class="a-up">↑</div>
+                  <div class="a-left">←</div>
+                  <div class="a-right">→</div>
+                  <div class="a-down">↓</div>
+                </div>
+                <div class="slot mod">esc</div>
+              </div>
+              <div class="slots">
+                <div class="slot mod">⌃<span class="up">⌥</span><span class="down">⇧</span></div>
+                <div class="slot">tab</div>
+                <div class="slot promo-combo">:<span class="up">;</span></div>
+                <div class="slot promo-combo">[<span class="up">{</span></div>
+                <div class="slot promo-combo">]<span class="up">}</span></div>
+                <div class="slot promo-combo">=<span class="up">+</span></div>
+                <div class="slot">/<span class="up">?</span></div>
+                <div class="slot">|<span class="up">\</span></div>
+                <div class="slot">~<span class="up">`</span></div>
+              </div>
+            </div>
+            <div class="ios-keys">
+              <div class="row"><div class="k">q</div><div class="k">w</div><div class="k">e</div><div class="k">r</div><div class="k">t</div><div class="k">y</div><div class="k">u</div><div class="k">i</div><div class="k">o</div><div class="k">p</div></div>
+              <div class="row"><div class="k">a</div><div class="k">s</div><div class="k">d</div><div class="k">f</div><div class="k">g</div><div class="k">h</div><div class="k">j</div><div class="k">k</div><div class="k">l</div></div>
+              <div class="row"><div class="k s">⇧</div><div class="k">z</div><div class="k">x</div><div class="k">c</div><div class="k">v</div><div class="k">b</div><div class="k">n</div><div class="k">m</div><div class="k s">⌫</div></div>
+              <div class="row"><div class="k s">123</div><div class="k sp">space</div><div class="k s">return</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="caption"><b>Python REPL.</b> Process = <code>python</code>. Promotes <code>:</code>, <code>[</code>, <code>]</code>, <code>=</code>. Heavier promotion set; <code>( )</code> still default-reachable via the iOS 123 layer.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- =========================================================== -->
+  <section>
+    <h2>Notes</h2>
+    <ul style="max-width:820px; color:var(--text); font-size:13px;">
+      <li><b>Glyph readability:</b> bronze fill is low-opacity (~12%) so the glyph stays at full contrast against the panel background.</li>
+      <li><b>No state collision:</b> halo is reserved for cursor halo / focus, brighter fill is reserved for pressed, full-bronze fill is reserved for modifiers. Promoted = tint + top accent only.</li>
+      <li><b>Engage animation:</b> on context entry (after dwell), promoted slots slide in from left + brief one-cycle brighten of the top accent so the eye notices the change.</li>
+      <li><b>Disengage:</b> asymmetric 1500ms — promoted slots slide out, defaults reflow left. Protects against brief <code>:!</code> excursions from vim.</li>
+    </ul>
+  </section>
+
+</main>
+
+</body>
+</html>
