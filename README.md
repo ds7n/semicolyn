@@ -31,7 +31,7 @@ iOS SSH/mosh client. Differentiator: terminal work that feels native on a touch 
 
 **Unresolved / needs more brainstorm:**
 - **Keyboard / input UX (remaining)** — raw passthrough mode, v2 custom inputView and its letter-to-alt mapping
-- Pill position customization, host switching, iPad navigation, layout templates, iCloud sync, external keyboard, monetization
+- Settings/preferences surface, connection management (host config CRUD), multiple connections + host switching, pill position customization, iPad navigation, layout templates, iCloud sync, external keyboard, monetization
 
 See `docs/brainstorming-decisions.md` for the full locked-decisions table and the deferred list.
 
