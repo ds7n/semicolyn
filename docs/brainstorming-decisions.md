@@ -184,6 +184,29 @@ Two complementary input mechanisms central to the differentiation:
 
 **Full design**: see `docs/superpowers/specs/2026-06-14-degraded-mode-design.md`.
 
+### Host management & settings access (entry point only — config model still deferred)
+
+| Topic | Decision |
+|---|---|
+| Concurrency model | **Multiple simultaneous live connections.** Not single-foreground. |
+| Top-level entry point | **Long-press Esc slot in the keybar** (~400ms). Opens picker sheet. Esc was previously a tap-only core slot; long-press was undefined — no overload, no conflict. |
+| Visual hint | Small dim bronze **`≡`** glyph below the "Esc" label. Indicates "hold here for menu." |
+| Engage feedback | Esc slot highlights bronze + scales slightly + light haptic on long-press engage. |
+| Host chip / top bar | **None.** No persistent top-of-screen chrome for host status. Terminal extends right up to the DI safe-area edge. (Banner can still slide in from top when needed.) |
+| Picker anchor | **Above the keybar** (near where the gesture happened), not top of screen. Keeps the user's eyes near their thumb. |
+| Picker contents | **Live → Recent → + Connect to host… → ⚙ Settings.** Current host highlighted within Live group. |
+| Definition of "live" | A connection is "Live" if it can be resumed **without re-auth**. Mosh stays live across backgrounding (server-side session). SSH stays live while foreground / in iOS bg grace. **SSH/mosh are unified in the UI** — user sees Live vs Recent, not protocol. Drops from Live → Recent happen automatically when the underlying session is killed. |
+| Per-row swipe actions | **Live row:** `[Edit] [Disconnect]` (rightmost red; Disconnect closes session, keeps config, moves row to Recent). **Recent row:** `[Edit] [Delete]` (rightmost red; Delete removes the config entirely, with a confirmation prompt). |
+| Per-row long-press | Context menu with the swipe actions **plus** Copy hostname, Duplicate, Connection details. |
+| Banner placement | **Unchanged — banners stay at top of screen.** Independent of keyboard state. tmux-crash banner keeps action buttons in the banner itself (rare action, reach acceptable). |
+| Settings entry | **Inside the picker sheet** as the last row. No separate settings button, gear icon, hamburger, or tab anywhere in the app. The picker is the **only** top-level handle. |
+| Settings tree | Top level: **Hosts** (host config CRUD), **Identities & Keys** (SSH keypairs, biometric policy), **Security** (per-host auth policy, audit log, predictor pattern-exclude), **App preferences** (predictor, keybar, appearance), **About & Help**. |
+| Editing a host (two paths) | (1) **Mid-session quick edit:** swipe row in picker → Edit. (2) **Deep curation:** Settings → Hosts → tap host → edit screen. |
+| Dynamic Island handling rule | **A+C.** All top-edge chrome (chip-equivalents and banners alike) honors `safeAreaInsets.top` — placed flush below whatever the OS owns (DI / notch / status bar). Top-bar background tints around the DI so the cutout reads as part of our chrome rather than a hole. **No interactive UI in the flank** (Apple HIG, tap-collision). |
+| Live Activities (DI background presence) | **Out of scope for v1.** Worth revisiting post-v1; chip's data model designed so a Live Activity could feed off it later. |
+
+**Mockup**: see `mockups/host-management.html`. **Spec**: not yet written — the host config model itself (fields, identity refs, jump chains, port forwards, mosh/ssh, Tailscale routing, defaults inheritance), the CRUD flow, and the multi-connection switching semantics are still to brainstorm.
+
 ---
 
 ## Deferred / for future conversation
@@ -191,9 +214,10 @@ Two complementary input mechanisms central to the differentiation:
 - **Keyboard / input UX (remaining sub-topics)** — predictor, keybar scope, keybar interaction model, default slots, modifier behavior, arrow cluster, customization, context detection, per-context layouts, function keys, and degraded mode are now locked. Still open:
   - **v2 custom inputView** — if/when promoted from v1.5+ feedback, design the letter-to-alt-symbol mapping and the held-modifier interaction.
 - **Pill position customization** — left vs right in the keybar (handedness preference); a per-user setting. (Sub-item of the keyboard/input UX topic above.)
-- **Settings / preferences surface** — where do app-level options live (master predictor toggle, context-aware keybar toggle, retention windows, per-host policies, keybar customization, etc.)? In-app modal? Dedicated tab? iOS Settings.app integration? Discoverability and depth-of-nesting story TBD.
-- **Connection management** — how the user creates / edits / deletes host configs (hostname, user, port, identity, jump-host chain, port forwards, mosh vs ssh, Tailscale routing). Where this UI lives, the form/list model, defaults inheritance, import/export. Separate from the *connecting to* a host gesture.
-- **Multiple connections + host switching** — do we support multiple simultaneous live connections, or is it one-at-a-time? If multiple: how do users see which are live, switch between them, and tell connections apart from tmux windows within one connection? Long-press host menu is referenced elsewhere but not designed. Includes the "specify which host to connect to" affordance (host picker on launch, recent list, search).
+- **Settings / preferences surface (UI shape)** — entry point and top-level tree are locked (see Host management & settings access above); still open is the **detailed layout of each settings sub-screen** (App preferences, Security, etc.) — what controls live where, how nested, defaults, copy.
+- **Host config model** — fields, defaults inheritance, identity references, jump-host chain shape, port forward representation, mosh/ssh toggle semantics, Tailscale routing. The data model the rest of the connection-management work hangs off. *Entry point and switching UI are locked; the config schema itself is the remaining work.*
+- **Host CRUD flow** — create / edit / delete screens, validation, import/export (e.g., from `~/.ssh/config`), error states.
+- **Multi-connection switching semantics** — what happens to the foreground connection when you switch? Does its tmux stay attached? Does mosh keep heartbeating? iOS background-task budget implications. *UI is locked; behavior under the hood is the remaining work.*
 - **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
 - **iCloud sync scope** — hosts/snippets/identities — what syncs, what doesn't.
