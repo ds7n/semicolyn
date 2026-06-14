@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Glymr — Keybar v1 first try</title>
+<style>
+  :root {
+    --bg: #0E1116;
+    --panel: #161A22;
+    --panel-2: #1F2530;
+    --line: #2A323F;
+    --text: #E8EBF0;
+    --muted: #8A93A3;
+    --accent: #D49A5C;
+    --accent-2: #F2C58A;
+    --green: #5FA89C;
+    --amber: #F5A524;
+    --red: #E06B6B;
+    --term-bg: #0A0C10;
+    --term-fg: #CFD6E4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  }
+  header {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; max-width: 760px; }
+  main { padding: 32px; max-width: 1400px; margin: 0 auto; }
+
+  section { margin-bottom: 56px; }
+  section > h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin: 0 0 12px;
+  }
+  section > p.lede { margin: 0 0 24px; color: var(--text); max-width: 800px; }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: minmax(280px, 320px) 1fr;
+    gap: 40px;
+    align-items: start;
+  }
+  @media (max-width: 800px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* iPhone frame */
+  .phone {
+    width: 300px;
+    height: 620px;
+    background: #000;
+    border: 8px solid #1c2230;
+    border-radius: 36px;
+    padding: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+  .phone .notch {
+    position: absolute;
+    top: 6px; left: 50%; transform: translateX(-50%);
+    width: 90px; height: 22px;
+    background: #000;
+    border-radius: 0 0 14px 14px;
+    z-index: 10;
+  }
+  .screen {
+    width: 100%; height: 100%;
+    background: var(--term-bg);
+    border-radius: 24px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    font: 11px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .app-topbar {
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    padding: 30px 10px 6px;
+    color: var(--text);
+    font-size: 11px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .app-topbar .title { font-weight: 600; }
+  .app-topbar .sub { color: var(--muted); font-size: 10px; }
+
+  .term {
+    flex: 1;
+    background: var(--term-bg);
+    color: var(--term-fg);
+    padding: 8px 10px;
+    overflow: hidden;
+    white-space: pre-wrap;
+  }
+  .term .prompt { color: var(--accent); }
+  .term .ok { color: var(--green); }
+  .term .dim { color: var(--muted); }
+  .term .cursor {
+    display: inline-block; width: 6px; height: 12px;
+    background: var(--accent-2);
+    vertical-align: -2px; animation: blink 1.1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Predictor strip */
+  .predict {
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    padding: 4px 6px;
+    display: flex; gap: 4px; flex-shrink: 0;
+  }
+  .predict .chip {
+    background: transparent; border: 1px solid var(--line);
+    color: var(--text); border-radius: 4px;
+    padding: 2px 7px;
+    font: 10px/1 ui-monospace, monospace;
+  }
+  .predict .chip.top {
+    border-color: var(--accent); color: var(--accent-2);
+    background: rgba(212, 154, 92, 0.08);
+  }
+
+  /* Keybar — pills + scrollable key slots */
+  .keybar {
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    padding: 5px 4px;
+    display: flex; gap: 5px;
+    align-items: center;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .keybar .sticky {
+    display: flex; gap: 4px; align-items: center;
+    flex-shrink: 0;
+    padding-right: 4px;
+    border-right: 1px solid var(--line);
+  }
+  .keybar .slots {
+    display: flex; gap: 3px;
+    overflow-x: auto;
+    flex: 1;
+    scrollbar-width: none;
+  }
+  .keybar .slots::-webkit-scrollbar { display: none; }
+
+  .pill {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 4px 9px;
+    font: 600 10px/1 -apple-system, sans-serif;
+    display: inline-flex; align-items: center; gap: 4px;
+    flex-shrink: 0;
+  }
+  .pill.brand {
+    border-color: var(--accent); color: var(--accent-2);
+    box-shadow: 0 0 0 1px rgba(212,154,92,0.20), 0 0 12px -3px rgba(242,197,138,0.4);
+  }
+  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+
+  /* Multi-action slot — shows tap char + swipe-up hint + swipe-down hint */
+  .slot {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--text);
+    width: 30px; height: 36px;
+    flex-shrink: 0;
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    font: 600 14px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .slot .up, .slot .down {
+    position: absolute; left: 0; right: 0;
+    text-align: center;
+    font: 600 8px/1 ui-monospace, monospace;
+    color: var(--muted);
+  }
+  .slot .up   { top: 2px; }
+  .slot .down { bottom: 2px; }
+  .slot.mod {
+    background: rgba(212, 154, 92, 0.10);
+    border-color: rgba(212, 154, 92, 0.40);
+    color: var(--accent-2);
+  }
+  .slot.mod .up, .slot.mod .down { color: rgba(242, 197, 138, 0.55); }
+
+  /* Arrow-pad slot — Blink-style: touch and drag in direction to fire */
+  .slot.dpad {
+    width: 42px;
+    background: rgba(212, 154, 92, 0.10);
+    border-color: rgba(212, 154, 92, 0.40);
+    color: var(--accent-2);
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    place-items: center;
+    font-size: 9px;
+    line-height: 1;
+  }
+  .slot.dpad .a-up    { grid-column: 2; grid-row: 1; }
+  .slot.dpad .a-left  { grid-column: 1; grid-row: 2; }
+  .slot.dpad .a-right { grid-column: 3; grid-row: 2; }
+  .slot.dpad .a-down  { grid-column: 2; grid-row: 3; }
+
+  /* Larger version of the slot for the "anatomy" callout */
+  .slot.big { width: 70px; height: 88px; font-size: 28px; border-radius: 10px; }
+  .slot.big .up, .slot.big .down { font-size: 13px; }
+  .slot.big .up { top: 5px; }
+  .slot.big .down { bottom: 5px; }
+
+  /* Anatomy callout */
+  .anatomy {
+    display: flex; gap: 24px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px;
+    margin-bottom: 28px;
+  }
+  .anatomy .label-block {
+    flex: 1; font-size: 12px;
+  }
+  .anatomy .label-block dt { color: var(--accent-2); font-weight: 600; }
+  .anatomy .label-block dd { margin: 2px 0 10px; color: var(--muted); }
+
+  /* Layout table */
+  table.layout {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  table.layout th, table.layout td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+  }
+  table.layout th {
+    background: var(--panel-2);
+    color: var(--muted);
+    font: 600 11px/1 ui-monospace, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  table.layout tr:last-child td { border-bottom: none; }
+  table.layout td.key {
+    font: 600 13px/1 ui-monospace, "SF Mono", monospace;
+    color: var(--accent-2); white-space: nowrap;
+  }
+  table.layout td.mut { color: var(--muted); font-size: 11px; }
+  table.layout td.evi { color: var(--green); font-size: 11px; }
+  table.layout td.guess { color: var(--amber); font-size: 11px; }
+
+  /* Principles list */
+  .principles { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px 20px; }
+  .principles ol { margin: 0; padding-left: 20px; font-size: 13px; }
+  .principles ol li { margin-bottom: 6px; }
+  .principles ol li b { color: var(--accent-2); }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Glymr — Keybar v1 (first try)</h1>
+  <p>Evidence-grounded where the data allows it, marked as a guess where it doesn't. <b style="color:var(--amber)">This is a working draft — we expect to learn from real use and change it.</b> The whole point of first-class customization (long-press any slot to edit) is that defaults don't have to be perfect to ship. Iterate, don't over-engineer.</p>
+</header>
+
+<main>
+
+  <!-- ============================================================== -->
+  <section>
+    <h2>Design principles (lock first, debate second)</h2>
+    <div class="principles">
+      <ol>
+        <li><b>Keybar's purpose (narrow):</b> (a) window/pane pills, (b) keys iOS lacks entirely (Esc, Tab, Ctrl/Alt/Shift, arrows), (c) convenience defaults for symbols that <i>are</i> reachable via iOS's 123 layer but worth promoting (parens, pipes, tildes, etc.). The keybar is NOT a complete symbol surface — iOS's 123 layer still exists.</li>
+        <li><b>Core slots vs convenience slots.</b> Core slots (purpose a/b) ship locked. Convenience slots ship enabled but the user can remove or replace any of them.</li>
+        <li><b>Three actions per slot:</b> tap = primary, swipe-up = secondary, swipe-down = tertiary. Long-press = edit/customize. Exception: the arrow-pad slot uses drag-in-direction instead.</li>
+        <li><b>Tap = highest-frequency action in the slot.</b> Swipes are the rarer members of the same logical group.</li>
+        <li><b>Group by logic on each slot,</b> not by frequency across slots. Brackets live with brackets, even if a bracket would be hit more often than another slot's tap.</li>
+        <li><b>Every slot's swipe chars are visible</b> (small, muted, top/bottom edges) — discoverability is non-negotiable.</li>
+        <li><b>Ctrl, Alt, Shift are sticky-for-one-keystroke.</b> Tap → armed for the next keystroke only, auto-disarms after. Esc and Tab are normal keys — fire on tap.</li>
+        <li><b>v1 scope: in-app accessory bar above iOS's native keyboard.</b> iOS owns the letters; the 123 layer remains the fallback for any symbol not promoted to the keybar. Custom keyboard (with long-press alts on letters) deferred as a potential v2.</li>
+        <li><b>User customization is first-class:</b> long-press any slot to edit. The default set ships defensible; users own the bar.</li>
+        <li><b>Expect to change this.</b> The defaults are a v0 best-guess. Once Glymr has real users, the predictor's keystroke telemetry (with consent) tells us what's actually pressed. Plan for v1.5 default-set revisions; don't over-optimize now.</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ============================================================== -->
+  <section>
+    <h2>Slot anatomy</h2>
+    <div class="anatomy">
+      <div class="slot big">
+        <span class="up">\</span>
+        /
+        <span class="down">?</span>
+      </div>
+      <div class="label-block">
+        <dl>
+          <dt>Center (large):</dt>
+          <dd>Tap action. The most-used key in this slot's group.</dd>
+          <dt>Top edge (small, muted):</dt>
+          <dd>Swipe-up action. Second-most-used in the group.</dd>
+          <dt>Bottom edge (small, muted):</dt>
+          <dd>Swipe-down action. Third in the group, or empty.</dd>
+          <dt>Long-press:</dt>
+          <dd>Opens the slot editor — rebind any of the three, replace the slot, or pin a new macro.</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================== -->
+  <section>
+    <h2>The 12-slot default — rendered</h2>
+    <p class="lede">All 12 slots fit the keybar with horizontal scroll. Window and pane pills stay sticky on the left. On a standard iPhone width, ~7 slots are visible without scrolling; the rest are reachable with a small horizontal scroll. Slots with empty swipes (Tab, Esc) are intentional — those keys have no natural peer in their group; users can fill the swipes via the editor.</p>
+
+    <div class="two-col">
+
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="app-topbar">
+            <span class="title">main</span>
+            <span class="sub">alex@bastion</span>
+          </div>
+
+          <div class="term">
+            <div><span class="dim">~/proj/glymr</span></div>
+            <div><span class="prompt">$</span> ssh bastion</div>
+            <div><span class="ok">✓</span> session restored</div>
+            <div><span class="prompt">$</span> grep -rn "todo" . <span class="dim">|</span> head</div>
+            <div><span class="dim">README.md:14: TODO add tests</span></div>
+            <div><span class="dim">src/main.go:91: // TODO</span></div>
+            <div><span class="prompt">$</span> clau<span class="cursor"></span></div>
+          </div>
+
+          <div class="predict">
+            <span class="chip top">claude</span>
+            <span class="chip">clausewitz</span>
+            <span class="chip">claudio</span>
+          </div>
+
+          <div class="keybar">
+            <div class="sticky">
+              <span class="pill brand">main<span class="dot"></span></span>
+              <span class="pill">▦</span>
+            </div>
+            <div class="slots">
+              <div class="slot mod">⎋</div>
+              <div class="slot mod"><span class="up">⌥</span>⌃<span class="down">⇧</span></div>
+              <div class="slot mod">⇥</div>
+              <div class="slot dpad">
+                <span class="a-up">↑</span>
+                <span class="a-left">←</span>
+                <span class="a-right">→</span>
+                <span class="a-down">↓</span>
+              </div>
+              <div class="slot"><span class="up">\</span>/<span class="down">?</span></div>
+              <div class="slot"><span class="up">&amp;</span>|<span class="down">;</span></div>
+              <div class="slot"><span class="up">$</span>~<span class="down">*</span></div>
+              <div class="slot"><span class="up">&lt;</span>-<span class="down">&gt;</span></div>
+              <div class="slot"><span class="up">[</span>(<span class="down">{</span></div>
+              <div class="slot"><span class="up">]</span>)<span class="down">}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <table class="layout">
+          <thead>
+            <tr><th>#</th><th>Tap</th><th>Swipe ↑</th><th>Swipe ↓</th><th>Group</th><th>Evidence</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td class="key">Esc</td><td class="mut">—</td><td class="mut">—</td><td class="mut">Escape · <b style="color:var(--accent-2)">core</b></td><td class="evi">Fires on tap. Vim mode-exit; iOS lacks Esc</td></tr>
+            <tr><td>2</td><td class="key">Ctrl</td><td class="key">Alt</td><td class="key">Shift</td><td class="mut">Modifiers · <b style="color:var(--accent-2)">core</b></td><td class="evi">Sticky-for-one. Ctrl is iOS-absent; constant in shell (C-c, C-r, C-d, C-l)</td></tr>
+            <tr><td>3</td><td class="key">Tab</td><td class="mut">—</td><td class="mut">—</td><td class="mut">Tab · <b style="color:var(--accent-2)">core</b></td><td class="evi">Fires on tap. Completion universal; iOS lacks Tab</td></tr>
+            <tr><td>4</td><td class="key">Arrow pad</td><td colspan="2" class="key" style="text-align:center;">drag ↑ ↓ ← → from center</td><td class="mut">Arrows · <b style="color:var(--accent-2)">core</b></td><td class="evi">Single slot replaces 4 arrow keys (Blink-style D-pad). iOS lacks all arrows</td></tr>
+            <tr><td>5</td><td class="key">/</td><td class="key">\</td><td class="key">?</td><td class="mut">Slashes · convenience</td><td class="evi">/: paths and less-search universal · \: deeply buried on iOS</td></tr>
+            <tr><td>6</td><td class="key">|</td><td class="key">&amp;</td><td class="key">;</td><td class="mut">Separators · convenience</td><td class="evi">|: NL2Bash confirms heavy use; deeply buried on iOS</td></tr>
+            <tr><td>7</td><td class="key">~</td><td class="key">$</td><td class="key">*</td><td class="mut">Path / expansion · convenience</td><td class="evi">~: home dir paths · $: vars · *: globs. All buried on iOS</td></tr>
+            <tr><td>8</td><td class="key">-</td><td class="key">&lt;</td><td class="key">&gt;</td><td class="mut">Dash + redirects · convenience</td><td class="evi">-: every flag (ls -la, git -m) · &lt;/&gt;: redirects fold here</td></tr>
+            <tr><td>9</td><td class="key">(</td><td class="key">[</td><td class="key">{</td><td class="mut">Open paren · convenience</td><td class="evi">(: universal in code · iOS has it on 123 but worth promoting</td></tr>
+            <tr><td>10</td><td class="key">)</td><td class="key">]</td><td class="key">}</td><td class="mut">Close paren · convenience</td><td class="evi">Mirror of slot 9</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================== -->
+  <section>
+    <h2>What's "data-backed" vs "guessed" — colored honestly</h2>
+    <p class="lede">Green = backed by data I found. Amber = defensible guess; the public data was silent.</p>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+      <div class="principles" style="border-color: rgba(95, 168, 156, 0.4);">
+        <h3 style="margin: 0 0 8px; color: var(--green); font-size: 13px;">Data-backed</h3>
+        <ul style="margin:0; padding-left:18px; font-size:12px; line-height:1.6;">
+          <li><b>Ctrl, Tab, Esc, ↑</b> in default set, each as their own tap — iOS lacks them entirely, shell needs them</li>
+          <li><b>|, ~, /, \</b> in default set — universal shell use, deeply buried on iOS</li>
+          <li><b>( )</b> in tap position — Programmer Dvorak's "index finger" priority</li>
+          <li><b>{ } [ ]</b> in swipe positions of paren slots — paired-bracket logic</li>
+          <li>Tap = highest-frequency principle — universal layout-design wisdom</li>
+        </ul>
+      </div>
+      <div class="principles" style="border-color: rgba(245, 165, 36, 0.4);">
+        <h3 style="margin: 0 0 8px; color: var(--amber); font-size: 13px;">Defensible guesses</h3>
+        <ul style="margin:0; padding-left:18px; font-size:12px; line-height:1.6;">
+          <li><b>← → ↓</b> priority — readline conventions, no measured iOS data</li>
+          <li><b>&lt; &gt;</b> as their own slot — promoted from buried-swipe under brackets; relative frequency to other slots unmeasured</li>
+          <li><b>Word-jump on swipe-up of arrows</b> — readline Alt+arrow convention</li>
+          <li><b>$ * on slot 9</b> vs. somewhere else — vars/globs are common, but exact rank unknown</li>
+          <li><b>12 slots</b> as the right default count — not 10, not 14</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================== -->
+  <section>
+    <h2>Things explicitly deferred</h2>
+    <ul style="font-size:13px; line-height:1.7;">
+      <li><b>Function keys (F1–F12)</b> — none of the 10 default slots covers them. Candidates: long-press on the number row (when number row exists), or a "Fn" slot the user can pin. For v1 they live in the slot editor as buildable macros.</li>
+      <li><b>Context-swapping layouts</b> (vim shows hjkl prominent, tmux shows prefix) — deferred to its own conversation. v1 keybar is static.</li>
+      <li><b>Per-host pinning</b> — same as snippets, eventually a host can have its own pinned subset. v1 = one global keybar.</li>
+      <li><b>iPad layout</b> — keybar pill sizes and positions will change with iPad real estate. v1 = iPhone-first.</li>
+      <li><b>Symbol-pill overflow drawer</b> — what happens when user pins 30 slots? Long-scroll vs. category picker. v1 = horizontal scroll only.</li>
+    </ul>
+  </section>
+
+  <footer>
+    First try. Open `mockups/keybar-v1.html` to see it rendered.
+    The principles list is what to argue with first; the specific keys-per-slot are easier to swap once the principles hold.
+  </footer>
+
+</main>
+</body>
+</html>
