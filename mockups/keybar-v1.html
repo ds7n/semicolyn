@@ -296,7 +296,7 @@
         <li><b>Tap = highest-frequency action in the slot.</b> Swipes are the rarer members of the same logical group.</li>
         <li><b>Group by logic on each slot,</b> not by frequency across slots. Brackets live with brackets, even if a bracket would be hit more often than another slot's tap.</li>
         <li><b>Every slot's swipe chars are visible</b> (small, muted, top/bottom edges) — discoverability is non-negotiable.</li>
-        <li><b>Ctrl, Alt, Shift are sticky-for-one-keystroke.</b> Tap → armed for the next keystroke only, auto-disarms after. Esc and Tab are normal keys — fire on tap.</li>
+        <li><b>Ctrl, Alt, Shift are sticky-for-one-keystroke.</b> Tap → armed for the next keystroke only, auto-disarms after. <b>Ctrl additionally supports double-tap-to-lock</b> (Emacs-chord use case); tap again to unlock. Alt/Shift stay sticky-only — their gestures (swipe-up / swipe-down) don't support double-arming cleanly, and iOS already provides caps-lock for Shift. Esc and Tab are normal keys — fire on tap.</li>
         <li><b>v1 scope: in-app accessory bar above iOS's native keyboard.</b> iOS owns the letters; the 123 layer remains the fallback for any symbol not promoted to the keybar. Custom keyboard (with long-press alts on letters) deferred as a potential v2.</li>
         <li><b>User customization is first-class:</b> long-press any slot to edit. The default set ships defensible; users own the bar.</li>
         <li><b>Expect to change this.</b> The defaults are a v0 best-guess. Once Glymr has real users, the predictor's keystroke telemetry (with consent) tells us what's actually pressed. Plan for v1.5 default-set revisions; don't over-optimize now.</li>

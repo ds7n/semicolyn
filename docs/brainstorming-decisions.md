@@ -55,7 +55,7 @@ Two complementary input mechanisms central to the differentiation:
 | v1 scope | **In-app accessory bar only.** iOS owns the letter keys; the 123 layer remains the fallback for any symbol not promoted to the keybar. Glymr owns the predictor strip + keybar pills + slots. |
 | v2 question (deferred) | Custom `inputView` (Glymr-owned keyboard inside the app) — enables long-press alts on letter keys, held modifier chords, custom repeat rates, context-swap layouts. Not a system-wide keyboard extension. |
 | Slot interaction | Three actions per slot: tap = primary, swipe-up = secondary, swipe-down = tertiary. Long-press = edit the slot (rebind, replace, pin a new macro). Each key shows the two swipe chars as small dim glyphs on the same key (top and bottom edges). |
-| Modifier behavior | **Ctrl, Alt, Shift = sticky-for-one-keystroke.** Tap → armed for the next key, auto-disarms. Esc and Tab fire on tap (no sticky/toggle). |
+| Modifier behavior | **Ctrl, Alt, Shift = sticky-for-one-keystroke.** Tap → armed for the next key, auto-disarms. **Ctrl additionally double-tap-to-lock** (Emacs chord case); tap again unlocks. Alt/Shift stay sticky-only (their swipe-based gestures don't support double-arming cleanly; iOS already provides caps-lock for Shift). Esc and Tab fire on tap (no sticky/toggle). |
 | Arrow input | **Single Blink-style arrow-pad slot.** Touch and drag from center in any direction (↑↓←→) to fire that arrow. Replaces four discrete arrow keys. |
 | Default slots (v0) | 10 slots: **core** (Esc, Ctrl/Alt/Shift, Tab, arrow-pad) + **convenience** (`/`, `\|`, `~`, `-`, `(`, `)`). Convenience slots are removable. Core slots are locked. Full layout: `mockups/keybar-v1.html`. |
 | Iteration plan | Defaults are a v0 best-guess. Public character-frequency data for shell typing on mobile doesn't exist. Plan: ship defensible defaults, make customization first-class, tune defaults in v1.5 from predictor's keystroke telemetry (with consent). |
@@ -137,19 +137,46 @@ Two complementary input mechanisms central to the differentiation:
 | Selection scope | Per-pane. Selection can't cross a pane divider — matches desktop tmux. |
 | Design constraint | All pane and window management lives on keybar pills so the terminal area stays available for selection / scrollback. |
 
+### Context detection
+
+| Topic | Decision |
+|---|---|
+| Scope | **Foreground process per pane**, including REPLs (vim/nvim, less/more/man, python/node, psql/mysql, sqlite3, redis-cli, htop/top/mc, …). Modal sub-states (vim insert vs normal) and shell-command-line prediction deferred to v2. |
+| Signal source | **`pane_current_command` from tmux control mode.** Zero host cooperation required — works on any host the user can SSH to. |
+| Anti-flap | Asymmetric per-pane state machine: **engage at 250ms dwell, disengage at 1500ms dwell.** Brief excursions (`:!`, `:sh`) don't reflow the bar. |
+| Keybar structure | Bar splits into **locked left section** (window pill · pane pill · arrow-pad · Esc) + **horizontally scrollable right section** (Ctrl/Alt/Shift · Tab · promotions · defaults · Fn). |
+| Promotion model | Per context, a curated set of **symbols** is pushed to the front of the scroll region, directly after Tab. Defaults push right but remain reachable via pan. Letters are never promoted (iOS already provides them). |
+| Promoted slot visual | **Bronze tint fill (~12%) + 1pt bronze top-edge accent.** Glyph contrast preserved. Distinct from pressed / modifier-armed / focus-halo / connection states. |
+| Authoring | Bundled JSON defaults for ~8 apps. JSON-file customization in v1; in-app editor v1.5. User can register new processes. |
+| Override | Long-press pane pill → "Pin to defaults" / "Pin to *current context*." Global kill-switch in settings. Unknown processes silently fall back to defaults (no nag). |
+| Shared signal | Per-pane `currentContext` observable on the session model. Keybar is v1's only consumer; predictor / launcher / pill-badge can subscribe later without re-architecture. |
+
+**Full design**: see `docs/superpowers/specs/2026-06-14-context-detection-design.md`.
+
+### Function keys
+
+| Topic | Decision |
+|---|---|
+| Surface | **Fn slot in the keybar toggles "F-key mode" on the scrollable region** — F1–F12 appear in place of `[promotions, defaults]`. Locked region unchanged. Matches the layer-toggle pattern used by Blink, Termius, a-Shell. |
+| Fn slot location | **End of the scroll region by default, not always visible.** Heavy users live in auto-engaging contexts; everyone else gets it out of the way. Customizable. |
+| Fn state machine | **Caps-lock semantics.** Tap = Armed (one-shot, fires next F-key then reverts). Double-tap = Locked (until tapped again). Tap-while-locked = Off. |
+| Auto-engage | In `htop`, `top`, `mc` the context detection state machine auto-locks Fn on entry, returns to Off on exit. Same 250/1500 thresholds. |
+| User override per episode | If the user single-taps Fn off during an auto-engaged episode, `fnUserOverride = true` for that episode — auto-engage will not relock until the next visit to that context. |
+| Range | F1–F12. F13–F24 not surfaced. |
+| Mutual exclusion | Fn mode and symbol promotions both transform the scroll region; they're mutually exclusive on display. No conflict in the v1 bundled lists. |
+
+**Full design**: see `docs/superpowers/specs/2026-06-14-function-keys-design.md`.
+
 ---
 
 ## Deferred / for future conversation
 
-- **Keyboard / input UX (remaining sub-topics)** — predictor, keybar scope, keybar interaction model, default slots, modifier behavior, arrow cluster, and customization are now locked (see Predictive input and Keybar sections above). Still open:
-  - **Function keys (F1–F12)** — surfaced via long-press number row, dedicated row, pinned macro, or hidden?
-  - **Per-context layout swaps** — vim shows `hjkl` + Esc prominent, tmux shows prefix-key, etc. Overlaps with the deferred context-detection topic.
+- **Keyboard / input UX (remaining sub-topics)** — predictor, keybar scope, keybar interaction model, default slots, modifier behavior, arrow cluster, customization, context detection, per-context layouts (now handled by context-aware promotions), and function keys are now locked. Still open:
   - **"Raw" / passthrough mode** for power users who want every keystroke sent verbatim.
   - **v2 custom inputView** — if/when promoted from v1.5+ feedback, design the letter-to-alt-symbol mapping and the held-modifier interaction.
 - **Pill position customization** — left vs right in the keybar (handedness preference); a per-user setting. (Sub-item of the keyboard/input UX topic above.)
 - **Host switching** — the long-press host menu is referenced but not designed. Separate gesture/affordance still TBD.
 - **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
-- **Context detection** for the key bar — how does the app know if vim/tmux/less is running? Three fidelity tiers were discussed (heuristics / side-channel `ps` / opt-in shell helper); pick one.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
 - **iCloud sync scope** — hosts/snippets/identities — what syncs, what doesn't.
 - **External keyboard support** — shortcut design for the hardware-keyboard case.
