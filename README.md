@@ -40,6 +40,7 @@ See `docs/brainstorming-decisions.md` for the full locked-decisions table and th
 
 - `docs/brainstorming-decisions.md` — every locked decision, organized by topic; deferred items at the bottom
 - `docs/superpowers/specs/` — detailed subsystem specs (`2026-06-13-predictor-design.md`, `2026-06-14-context-detection-design.md`, `2026-06-14-function-keys-design.md`, `2026-06-14-degraded-mode-design.md`)
+- `docs/ideas/` — parked concepts not on the v1 roadmap (`system-keyboard-extension.md`)
 - `mockups/ux-directions.html` — locked UX directions: window switching, pane management, cursor placement, connection status banner, brand palette
 - `mockups/keybar-scope.html` — three options for the keyboard scope decision (accessory bar / custom inputView / hybrid)
 - `mockups/keybar-v1.html` — v0 draft of the keybar default slot layout, with rendered iPhone frame and rationale
