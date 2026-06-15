@@ -230,6 +230,26 @@ Two complementary input mechanisms central to the differentiation:
 
 **Full spec**: see `docs/superpowers/specs/2026-06-15-host-config-model-design.md`. CRUD flow + multi-connection switching semantics are separate deferred items.
 
+### Host CRUD flow
+
+| Topic | Decision |
+|---|---|
+| Form shape | **Single scrollable form, same for create and edit.** No wizard, no tabs. Nine sections: Basics · Auth · Connection · Jump chain · Port forwarding · Mosh · Tailscale · Glymr behavior · Delete host (edit-only). |
+| Default expansion | New host: Basics + Auth expanded; rest collapsed. Edit host: a section auto-expands iff it carries a non-default value. Save with errors: any flagged section auto-expands. Not persisted across opens. |
+| Conditional fields | **Show + explain, never hide.** `mosh.enabled = true` → `serverAlive*` rows grayed out with tooltip ("Mosh has its own keepalive"); port-forward, forwardAgent, and Tailscale sections show inline caveat banners under their headers. No field is ever fully hidden by conditional rules. |
+| Identity sub-flow | Half-sheet from bottom with **three tabs**: **Pick existing** (list of stored identities with flavor + biometric badges), **Mint new** (algorithm / storage flavor / biometric policy / display name), **Import existing** (paste PEM/OpenSSH blob + optional passphrase + flavor + policy). Post-mint/import shows public key with Copy/Share/AirDrop for manual install. |
+| ssh-copy-id auto-install | **Deferred to v1.5.** v1 = manual paste only. |
+| Password-manager integration | **Locked out (storage backend).** iOS has no SSH-agent IPC primitive; cross-vendor app key access doesn't exist. iCloud Keychain (Apple's PM backend) IS our default storage. **Import existing key** path covers the "I generated my key in 1Password" case. |
+| Validation timing | **Hybrid.** Required-field markers (bronze `•`) live; Save button disabled until `label` + `hostName` set. **Content validation** (cycle detection, label duplicates, no-user-anywhere, malformed forward, stale passwordRef) runs **on Save tap**. Flagged sections auto-expand. |
+| Soft- vs hard-block | Duplicate label = soft (allow override with "Save anyway"). No user anywhere = soft on save, hard on connect. Jump cycle = hard. Malformed forward = hard. Stale passwordRef = hard. |
+| Cancel | Action sheet if changes exist ("Discard changes? Keep editing / Discard"). Silent dismiss otherwise. **No auto-draft in v1** (v1.5 candidate). |
+| Quick-edit vs deep-edit | **Same form, different presentation.** Quick-edit (picker swipe) = half-sheet. Deep-edit (Settings → Hosts → tap) = full-screen push. Identical fields, validation, expansion rules. |
+| Delete | Two entry points: picker swipe and form-bottom row (edit mode). Confirmation sheet on both. |
+| Refused-if-referenced delete | If host is a `proxyJump` ref target, delete refused with a tappable list of dependents ("Used as jumphost by: prod-db, staging-api"). Tapping a dependent navigates into its editor with Jump chain pre-expanded. No cascade. Identity records are never deleted by host delete. |
+| Defaults editor | Same form shell; no `label`/`hostName`/Delete; all sections collapsed by default; each row shows **inherit unset** vs **set** state; **swipe-left to Clear override** (revert to system fallback). Entry: dedicated row at top of Settings → Hosts. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-15-host-crud-design.md`. **Mockup**: `mockups/host-crud.html`.
+
 ---
 
 ## Deferred / for future conversation
@@ -238,7 +258,9 @@ Two complementary input mechanisms central to the differentiation:
   - **v2 custom inputView** — if/when promoted from v1.5+ feedback, design the letter-to-alt-symbol mapping and the held-modifier interaction.
 - **Pill position customization** — left vs right in the keybar (handedness preference); a per-user setting. (Sub-item of the keyboard/input UX topic above.)
 - **Settings / preferences surface (UI shape)** — entry point and top-level tree are locked (see Host management & settings access above); still open is the **detailed layout of each settings sub-screen** (App preferences, Security, etc.) — what controls live where, how nested, defaults, copy.
-- **Host CRUD flow** — create / edit / delete screens, validation, import/export (e.g., from `~/.ssh/config`), error states (jumphost-in-use, duplicate-label, inline-mint-identity wizard).
+- **Importing from `~/.ssh/config`** — file picker / paste / share extension, mapping rules (which OpenSSH options map to what), what to do with `Match` blocks / `Include` / Tier-3 options, conflict resolution against existing hosts, post-import review screen. *Host CRUD form itself is locked above; import is a separable problem.*
+- **Exporting to `~/.ssh/config`** — slug generation, label-to-alias resolution, what to emit for Glymr extensions (mosh, Tailscale, glymr.*), fingerprint comments, identity export (public-key only).
+- **Identities & Keys management surface** — the standalone list, per-identity detail screen ("which hosts use this key"), rotation flows, deletion flows. *Inline pick/mint/import sub-flow is locked above; the standalone surface is a separate brainstorm.*
 - **Multi-connection switching semantics** — what happens to the foreground connection when you switch? Does its tmux stay attached? Does mosh keep heartbeating? iOS background-task budget implications. *UI is locked; behavior under the hood is the remaining work.*
 - **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
