@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Glymr — Host create / edit form</title>
+<style>
+  :root {
+    --bg: #0E1116;
+    --panel: #161A22;
+    --panel-2: #1F2530;
+    --line: #2A323F;
+    --text: #E8EBF0;
+    --muted: #8A93A3;
+    --accent: #D49A5C;
+    --accent-2: #F2C58A;
+    --green: #5FA89C;
+    --amber: #F5A524;
+    --red: #E06B6B;
+    --term-bg: #0A0C10;
+    --term-fg: #CFD6E4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  }
+  header {
+    padding: 24px 32px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; max-width: 820px; }
+  main { padding: 32px; max-width: 1500px; margin: 0 auto; }
+  section { margin-bottom: 56px; }
+  section > h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin: 0 0 12px;
+  }
+  section > p.lede { margin: 0 0 24px; color: var(--text); max-width: 820px; }
+
+  /* ---- Phone ---- */
+  .phone {
+    width: 320px; height: 680px; background: #000;
+    border: 8px solid #1c2230; border-radius: 40px;
+    padding: 6px; position: relative; overflow: hidden;
+    flex-shrink: 0;
+  }
+  .phone .di {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    width: 96px; height: 26px; background: #000;
+    border-radius: 999px; z-index: 12;
+    pointer-events: none;
+  }
+  .screen {
+    width: 100%; height: 100%; background: var(--bg);
+    border-radius: 30px; overflow: hidden;
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+
+  /* ---- Nav bar at top of form ---- */
+  .navbar {
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    padding: 46px 12px 8px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0; min-height: 76px;
+  }
+  .navbar .left, .navbar .right {
+    flex: 0 0 64px;
+    font: 600 12px/1 -apple-system, sans-serif;
+    color: var(--accent-2);
+  }
+  .navbar .right { text-align: right; }
+  .navbar .right.disabled { color: var(--muted); opacity: 0.5; }
+  .navbar .title {
+    flex: 1; text-align: center;
+    font: 600 14px/1 -apple-system, sans-serif;
+    color: var(--text);
+  }
+  .navbar .title .sub {
+    display: block; font: 400 10px/1 -apple-system, sans-serif;
+    color: var(--muted); margin-top: 2px;
+  }
+
+  /* ---- Form body (scrollable) ---- */
+  .form-body {
+    flex: 1; overflow-y: auto;
+    padding: 12px 0 24px;
+  }
+
+  /* iOS grouped form sections */
+  .sec-head {
+    font: 600 10px/1 -apple-system, sans-serif;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted);
+    padding: 18px 16px 6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .sec-head .chev {
+    margin-left: auto;
+    color: var(--muted); font-size: 11px;
+  }
+  .sec-head.collapsible { cursor: pointer; }
+  .sec-head .pad { color: var(--green); margin-left: 6px; font-size: 9px; }
+
+  .group {
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .row {
+    display: flex; align-items: center;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--line);
+    font: 13px/1.3 -apple-system, sans-serif;
+    color: var(--text);
+    min-height: 38px;
+  }
+  .row:last-child { border-bottom: 0; }
+  .row .label {
+    flex: 0 0 96px;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .row .label .req { color: var(--accent); margin-left: 2px; font-weight: 700; }
+  .row .value {
+    flex: 1;
+    color: var(--text);
+    font: 13px/1.3 ui-monospace, "SF Mono", monospace;
+    text-align: right;
+  }
+  .row .value.placeholder { color: var(--muted); font-style: normal; }
+  .row .value.muted-val { color: var(--muted); font: 13px/1.3 -apple-system, sans-serif; }
+  .row .chev { color: var(--muted); margin-left: 6px; }
+  .row.disabled .label,
+  .row.disabled .value { color: var(--muted); opacity: 0.55; }
+  .row.disabled .pad-note {
+    flex-basis: 100%;
+    margin-top: 2px;
+    color: var(--amber);
+    font: 400 10px/1.3 -apple-system, sans-serif;
+    text-align: right;
+    opacity: 0.85;
+  }
+  .row.warn-row .value { color: var(--amber); }
+  .row.full {
+    display: block;
+  }
+  .row.full .label { margin-bottom: 4px; }
+
+  /* Toggle */
+  .toggle {
+    display: inline-block;
+    width: 36px; height: 20px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 999px; position: relative;
+    vertical-align: middle;
+  }
+  .toggle::after {
+    content: ""; position: absolute;
+    top: 1px; left: 1px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: 0.15s;
+  }
+  .toggle.on { background: rgba(95,168,156,0.3); border-color: var(--green); }
+  .toggle.on::after { left: 17px; background: var(--green); }
+
+  /* Inline value pills (identity, jump hop) */
+  .vpill {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font: 600 11px/1 -apple-system, sans-serif;
+    color: var(--text);
+  }
+  .vpill .key-ico {
+    font-size: 10px; color: var(--accent-2);
+  }
+  .vpill.add {
+    color: var(--accent); border-color: rgba(212,154,92,0.5);
+    background: rgba(212,154,92,0.08);
+  }
+  .vpill.se {
+    border-color: rgba(95,168,156,0.5); color: var(--green);
+  }
+
+  /* Inline banners */
+  .inline-banner {
+    margin: 8px 14px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font: 11px/1.4 -apple-system, sans-serif;
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .inline-banner.warn { background: rgba(245,165,36,0.1); border: 1px solid rgba(245,165,36,0.35); color: var(--amber); }
+  .inline-banner.info { background: rgba(212,154,92,0.08); border: 1px solid rgba(212,154,92,0.3); color: var(--accent-2); }
+  .inline-banner.ok { background: rgba(95,168,156,0.08); border: 1px solid rgba(95,168,156,0.3); color: var(--green); }
+  .inline-banner .ico { flex-shrink: 0; font-weight: 700; }
+
+  /* Footer notes under section */
+  .note {
+    padding: 6px 16px 0;
+    color: var(--muted);
+    font: 11px/1.4 -apple-system, sans-serif;
+  }
+
+  /* Layout */
+  .phone-row {
+    display: flex; gap: 36px; flex-wrap: wrap; align-items: flex-start;
+    justify-content: center;
+  }
+  .phone-col { display: flex; flex-direction: column; align-items: center; max-width: 360px; }
+  .caption {
+    margin-top: 14px; color: var(--text); font-size: 12px;
+    line-height: 1.55; max-width: 320px;
+  }
+  .caption b { color: var(--accent-2); }
+  .caption ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+  .caption li { margin-bottom: 3px; font-size: 11px; }
+
+  /* Legends / tables */
+  .legend {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 20px; margin: 24px 0;
+    color: var(--text); font-size: 12px; line-height: 1.6;
+  }
+  .legend b { color: var(--accent-2); }
+  .legend ul { margin: 8px 0 0; padding-left: 18px; }
+  .legend code {
+    background: var(--panel-2); padding: 1px 5px; border-radius: 3px;
+    font: 11px/1.2 ui-monospace, "SF Mono", monospace; color: var(--accent-2);
+  }
+
+  /* Mint-identity inset */
+  .inset-wrap {
+    display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap;
+    justify-content: center;
+  }
+  .modal-card {
+    width: 320px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; overflow: hidden;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  }
+  .modal-card .head {
+    padding: 14px 16px 8px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-2);
+  }
+  .modal-card .head h4 {
+    margin: 0; font: 600 14px/1.2 -apple-system, sans-serif;
+    color: var(--text);
+  }
+  .modal-card .head p {
+    margin: 4px 0 0; font: 11px/1.4 -apple-system, sans-serif;
+    color: var(--muted);
+  }
+  .modal-card .body { padding: 12px 16px 16px; }
+  .modal-card .field {
+    margin-bottom: 12px;
+  }
+  .modal-card .field-label {
+    font: 600 10px/1 -apple-system, sans-serif;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin-bottom: 5px;
+  }
+  .modal-card .input {
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 10px;
+    font: 12px/1.3 ui-monospace, "SF Mono", monospace;
+    color: var(--text);
+  }
+  .modal-card .input.placeholder { color: var(--muted); }
+  .modal-card .seg {
+    display: flex; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden;
+  }
+  .modal-card .seg .opt {
+    flex: 1; padding: 10px 8px;
+    font: 600 11px/1.3 -apple-system, sans-serif;
+    text-align: center;
+    border-right: 1px solid var(--line);
+    color: var(--muted); cursor: pointer;
+  }
+  .modal-card .seg .opt:last-child { border-right: 0; }
+  .modal-card .seg .opt.sel {
+    background: rgba(212,154,92,0.16);
+    color: var(--accent-2);
+  }
+  .modal-card .seg .opt .meta {
+    display: block; font: 400 9px/1.3 -apple-system, sans-serif;
+    color: var(--muted); margin-top: 3px; text-transform: none; letter-spacing: 0;
+  }
+  .modal-card .seg .opt.sel .meta { color: var(--accent-2); opacity: 0.85; }
+  .modal-card .actions {
+    display: flex; gap: 8px; margin-top: 12px;
+  }
+  .modal-card .actions .btn {
+    flex: 1; padding: 9px 0;
+    border-radius: 8px; border: 1px solid transparent;
+    font: 600 12px/1 -apple-system, sans-serif;
+    text-align: center;
+  }
+  .modal-card .actions .btn.primary { background: var(--accent); color: var(--bg); }
+  .modal-card .actions .btn.ghost { background: transparent; border-color: var(--line); color: var(--text); }
+
+  /* Matrix table (for the page narrative) */
+  .matrix {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    font-size: 11.5px;
+  }
+  .matrix th, .matrix td {
+    text-align: left; padding: 7px 9px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  .matrix th {
+    color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    font-size: 10px;
+    background: var(--panel-2);
+  }
+  .matrix td.field { color: var(--accent-2); font: 600 11px/1.3 ui-monospace, "SF Mono", monospace; }
+  .matrix .ok { color: var(--green); }
+  .matrix .cond { color: var(--amber); }
+  .matrix .cav { color: var(--accent-2); }
+  .matrix .no { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Glymr — Host create / edit form</h1>
+  <p>The CRUD form reached two ways: (1) picker row → swipe → Edit (quick), (2) Settings → Hosts → tap host (deep). Same form, same layout — quick path simply opens with everything collapsed. Schema and naming come from <a style="color: var(--accent-2);" href="../docs/superpowers/specs/2026-06-15-host-config-model-design.md">host-config-model-design.md</a>. Colors and components from <a style="color: var(--accent-2);" href="design-system.html">design-system.html</a>.</p>
+</header>
+
+<main>
+
+  <!-- =============================================================
+       FRAME 1 — new host, default collapsed state, plus an
+       "advanced expanded" sibling to show what's hidden
+       ============================================================= -->
+  <section>
+    <h2>1 — New host · default collapsed state · advanced expanded for reference</h2>
+    <p class="lede">Out of the box, only <b>Basics</b> and <b>Auth</b> are expanded. Connection, Forwarding, Mosh, Tailscale, and Advanced are collapsed — most hosts never touch them. The schema's "tier 2" lives behind one disclosure (<b>Advanced</b>). Required fields carry a small bronze <code>•</code> on the label.</p>
+
+    <div class="phone-row">
+
+      <!-- Left phone: default collapsed -->
+      <div class="phone-col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="navbar">
+              <div class="left">Cancel</div>
+              <div class="title">New host<span class="sub">unsaved</span></div>
+              <div class="right disabled">Save</div>
+            </div>
+            <div class="form-body">
+
+              <!-- BASICS -->
+              <div class="sec-head">Basics</div>
+              <div class="group">
+                <div class="row">
+                  <div class="label">Label<span class="req">•</span></div>
+                  <div class="value placeholder">e.g. prod-web-3</div>
+                </div>
+                <div class="row">
+                  <div class="label">Host<span class="req">•</span></div>
+                  <div class="value placeholder">hostname or IP</div>
+                </div>
+                <div class="row">
+                  <div class="label">User</div>
+                  <div class="value muted-val">Defaults · alex</div>
+                </div>
+                <div class="row">
+                  <div class="label">Port</div>
+                  <div class="value muted-val">22</div>
+                </div>
+              </div>
+              <div class="note">User and Port inherit from Defaults when left blank.</div>
+
+              <!-- AUTH -->
+              <div class="sec-head">Auth</div>
+              <div class="group">
+                <div class="row">
+                  <div class="label">Identities</div>
+                  <div class="value">
+                    <span class="vpill add">+ Add identity</span>
+                  </div>
+                </div>
+                <div class="row">
+                  <div class="label">Password</div>
+                  <div class="value muted-val">none</div>
+                </div>
+              </div>
+              <div class="note">No identity? Tap "+ Add identity" to pick an existing key or mint a new one inline.</div>
+
+              <!-- COLLAPSED SECTIONS -->
+              <div class="sec-head collapsible">Connection<span class="chev">▸</span></div>
+              <div class="sec-head collapsible">Jump chain<span class="chev">▸</span></div>
+              <div class="sec-head collapsible">Port forwarding<span class="chev">▸</span></div>
+              <div class="sec-head collapsible">Mosh<span class="chev">▸</span></div>
+              <div class="sec-head collapsible">Tailscale<span class="chev">▸</span></div>
+              <div class="sec-head collapsible">Advanced<span class="chev">▸</span></div>
+              <div class="sec-head collapsible" style="color: var(--red); opacity: 0.7;">Delete host<span class="chev">▸</span></div>
+
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>Default state — new host.</b> Only Basics + Auth open. Save is disabled until both required fields (Label, Host) are filled. Everything else is one tap behind a disclosure.
+          <ul>
+            <li>Required-field markers: small bronze <code>•</code></li>
+            <li>Inherited values show as muted "Defaults · &lt;value&gt;"</li>
+            <li>Delete row pinned at the bottom in red (edit mode only — hidden for unsaved new hosts; shown here greyed for reference)</li>
+          </ul>
+        </p>
+      </div>
+
+      <!-- Right phone: advanced expanded -->
+      <div class="phone-col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="navbar">
+              <div class="left">‹ Back</div>
+              <div class="title">New host<span class="sub">disclosure expanded</span></div>
+              <div class="right disabled">Save</div>
+            </div>
+            <div class="form-body">
+
+              <div class="sec-head collapsible" style="opacity: 0.6;">Basics<span class="chev">▾</span></div>
+              <div class="sec-head collapsible" style="opacity: 0.6;">Auth<span class="chev">▾</span></div>
+
+              <!-- CONNECTION (Tier 2) -->
+              <div class="sec-head">Connection<span class="chev">▾</span></div>
+              <div class="group">
+                <div class="row">
+                  <div class="label">Keepalive</div>
+                  <div class="value muted-val">Defaults · 30s × 3</div>
+                </div>
+                <div class="row">
+                  <div class="label">Compression</div>
+                  <div class="value"><span class="toggle"></span></div>
+                </div>
+                <div class="row">
+                  <div class="label">Strict host key</div>
+                  <div class="value muted-val">accept-new</div>
+                </div>
+                <div class="row">
+                  <div class="label">Forward agent</div>
+                  <div class="value"><span class="toggle"></span></div>
+                </div>
+                <div class="row">
+                  <div class="label">Auth order</div>
+                  <div class="value muted-val">publickey › ki › password</div>
+                </div>
+              </div>
+
+              <!-- JUMP CHAIN -->
+              <div class="sec-head">Jump chain<span class="chev">▾</span></div>
+              <div class="group">
+                <div class="row">
+                  <div class="label">Hops</div>
+                  <div class="value"><span class="vpill add">+ Add jumphost</span></div>
+                </div>
+              </div>
+              <div class="note">Each hop can be an existing host (ref) or inline <code>user@host:port</code>. Cycles refused at save.</div>
+
+              <!-- PORT FORWARDING -->
+              <div class="sec-head">Port forwarding<span class="chev">▾</span></div>
+              <div class="group">
+                <div class="row">
+                  <div class="label">Local</div>
+                  <div class="value"><span class="vpill add">+ Add</span></div>
+                </div>
+                <div class="row">
+                  <div class="label">Remote</div>
+                  <div class="value"><span class="vpill add">+ Add</span></div>
+                </div>
+                <div class="row">
+                  <div class="label">Dynamic</div>
+                  <div class="value"><span class="vpill add">+ Add</span></div>
+                </div>
+              </div>
+
+              <!-- ADVANCED -->
+              <div class="sec-head">Glymr behavior<span class="chev">▾</span></div>
+              <div class="group">
+                <div class="row">
+                  <div class="label">Incognito predictor</div>
+                  <div class="value"><span class="toggle"></span></div>
+                </div>
+                <div class="row">
+                  <div class="label">Try tmux -CC</div>
+                  <div class="value"><span class="toggle on"></span></div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>Disclosure expanded — for reference.</b> The full set of Tier 2 surfaces that hide behind the collapsed headers on the left. Tier 3 (Ciphers/MACs/Kex/HostKey) is deliberately absent — no v1 escape hatch.
+          <ul>
+            <li>One toggle per binary field; no separate "use default" checkbox</li>
+            <li>"Defaults · &lt;value&gt;" reveals what would be inherited if cleared</li>
+            <li>Tapping an inherited row opens a small overlay: Override / Reset to default</li>
+          </ul>
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- =============================================================
+       FRAME 2 — editing an existing mosh-via-tailscale host
+       ============================================================= -->
+  <section>
+    <h2>2 — Edit existing host · mosh over Tailscale · conditional visibility in action</h2>
+    <p class="lede">When a section has any non-default value, the form opens with that section pre-expanded. Here: Mosh enabled, Tailscale required, two identities (one SE-bound). Note the disabled-with-tooltip rows for fields that mosh supersedes, and the warning banner for the conditional caveat.</p>
+
+    <div class="phone-row">
+
+      <!-- Phone showing edit mode -->
+      <div class="phone-col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="navbar">
+              <div class="left">‹ Hosts</div>
+              <div class="title">homelab-nas<span class="sub">edit · mosh + Tailscale</span></div>
+              <div class="right">Save</div>
+            </div>
+            <div class="form-body">
+
+              <!-- BASICS -->
+              <div class="sec-head">Basics<span class="chev">▾</span></div>
+              <div class="group">
+                <div class="row">
+                  <div class="label">Label<span class="req">•</span></div>
+                  <div class="value">homelab-nas</div>
+                </div>
+                <div class="row warn-row">
+                  <div class="label">Host<span class="req">•</span></div>
+                  <div class="value">nas.tail-scaled.ts.net</div>
+                </div>
+                <div class="row">
+                  <div class="label">User</div>
+                  <div class="value">alex</div>
+                </div>
+                <div class="row">
+                  <div class="label">Port</div>
+                  <div class="value muted-val">22</div>
+                </div>
+              </div>
+
+              <!-- AUTH -->
+              <div class="sec-head">Auth<span class="chev">▾</span></div>
+              <div class="group">
+                <div class="row">
+                  <div class="label">Identities</div>
+                  <div class="value" style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end;">
+                    <span class="vpill"><span class="key-ico">🔑</span>homelab-ed25519</span>
+                    <span class="vpill se"><span class="key-ico">⚡</span>iPhone-SE</span>
+                    <span class="vpill add">+</span>
+                  </div>
+                </div>
+                <div class="row">
+                  <div class="label">Password</div>
+                  <div class="value muted-val">none</div>
+                </div>
+              </div>
+
+              <!-- CONNECTION (auto-expanded because of disabled rows) -->
+              <div class="sec-head">Connection<span class="chev">▾</span></div>
+              <div class="group">
+                <div class="row disabled">
+                  <div class="label">Keepalive</div>
+                  <div class="value">30s × 3</div>
+                  <div class="pad-note">Mosh has its own keepalive — this is ignored</div>
+                </div>
+                <div class="row">
+                  <div class="label">Compression</div>
+                  <div class="value"><span class="toggle"></span></div>
+                </div>
+                <div class="row">
+                  <div class="label">Strict host key</div>
+                  <div class="value muted-val">accept-new</div>
+                </div>
+                <div class="row">
+                  <div class="label">Forward agent</div>
+                  <div class="value"><span class="toggle"></span></div>
+                </div>
+              </div>
+
+              <!-- MOSH (expanded, on) -->
+              <div class="sec-head">Mosh<span class="pad">enabled</span><span class="chev">▾</span></div>
+              <div class="group">
+                <div class="row">
+                  <div class="label">Use mosh</div>
+                  <div class="value"><span class="toggle on"></span></div>
+                </div>
+                <div class="row">
+                  <div class="label">Server path</div>
+                  <div class="value muted-val">mosh-server</div>
+                </div>
+                <div class="row">
+                  <div class="label">UDP ports</div>
+                  <div class="value">60000–61000</div>
+                </div>
+                <div class="row">
+                  <div class="label">Prediction</div>
+                  <div class="value muted-val">adaptive</div>
+                </div>
+              </div>
+
+              <!-- TAILSCALE (expanded, required) -->
+              <div class="sec-head">Tailscale<span class="pad">required</span><span class="chev">▾</span></div>
+              <div class="group">
+                <div class="row">
+                  <div class="label">Required</div>
+                  <div class="value"><span class="toggle on"></span></div>
+                </div>
+                <div class="row">
+                  <div class="label">Tailnet</div>
+                  <div class="value muted-val">default</div>
+                </div>
+              </div>
+              <div class="inline-banner info">
+                <span class="ico">i</span>
+                <div>When required, Glymr refuses to connect if Tailscale is down and shows a "Tailscale required" banner instead of a generic unreachable.</div>
+              </div>
+
+              <!-- PORT FORWARDING (caveat banner) -->
+              <div class="sec-head collapsible">Port forwarding<span class="chev">▸</span></div>
+              <div class="inline-banner warn">
+                <span class="ico">⚠</span>
+                <div>Port forwards bootstrap with the SSH leg only. After mosh takes over the UDP transport, forwards are not maintained across roaming events.</div>
+              </div>
+
+              <div class="sec-head collapsible">Jump chain<span class="chev">▸</span></div>
+              <div class="sec-head collapsible">Glymr behavior<span class="chev">▸</span></div>
+
+              <div class="sec-head" style="color: var(--red); padding-top: 28px;">Delete host<span class="chev">›</span></div>
+
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>Edit mode for a mosh-over-Tailscale host.</b> Any section with a non-default value auto-expands; pure-default sections stay collapsed even in edit mode.
+          <ul>
+            <li>Pill row for identities, including a verdigris-ringed pill for the SE-bound key (hardware icon ⚡)</li>
+            <li>Keepalive row greyed with inline explanation — not hidden, so the user understands <i>why</i></li>
+            <li>"enabled" / "required" pad badges next to section names give scannable section-state without expanding</li>
+            <li>Forwarding caveat surfaces as an inline banner under its (collapsed) header — visible without expansion</li>
+            <li>Delete pinned at the bottom (red) — confirm modal lives in a separate brainstorm</li>
+          </ul>
+        </p>
+      </div>
+
+      <!-- Inline mint-identity inset -->
+      <div class="phone-col">
+        <div style="font: 600 10px/1 -apple-system, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 10px;">Inline mint-identity sub-flow</div>
+        <div class="modal-card">
+          <div class="head">
+            <h4>New identity</h4>
+            <p>Lives in the central Identity store; this host references it by ID. You can reuse it for other hosts later.</p>
+          </div>
+          <div class="body">
+            <div class="field">
+              <div class="field-label">Display name</div>
+              <div class="input">homelab-ed25519</div>
+            </div>
+            <div class="field">
+              <div class="field-label">Algorithm</div>
+              <div class="seg">
+                <div class="opt sel">ed25519<span class="meta">recommended</span></div>
+                <div class="opt">ecdsa-p256</div>
+                <div class="opt">rsa-4096</div>
+              </div>
+            </div>
+            <div class="field">
+              <div class="field-label">Storage</div>
+              <div class="seg">
+                <div class="opt sel">iCloud Keychain<span class="meta">syncs across your devices · E2EE</span></div>
+                <div class="opt">Secure Enclave<span class="meta">hardware-bound · this device only</span></div>
+              </div>
+            </div>
+            <div class="field">
+              <div class="field-label">Use policy</div>
+              <div class="seg">
+                <div class="opt">no biometric</div>
+                <div class="opt sel">once per unlock</div>
+                <div class="opt">every use</div>
+              </div>
+            </div>
+            <div class="actions">
+              <div class="btn ghost">Cancel</div>
+              <div class="btn primary">Mint & attach</div>
+            </div>
+          </div>
+        </div>
+        <p class="caption" style="margin-top: 14px;"><b>Inline mint sub-flow.</b> Reached from the "+" pill in the Auth section. Presented as a half-sheet (not a full-screen push), so the host form remains visible underneath — context is preserved.
+          <ul>
+            <li>Storage default is iCloud Keychain. SE is the deliberate "I want hardware binding" choice with its tradeoff stated</li>
+            <li>"Mint & attach" both creates the Identity record and appends its UUID to <code>identities[]</code> on this host</li>
+            <li>"Picking" an existing identity uses the same surface with a list-of-keys at the top above the form — not shown here</li>
+          </ul>
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- =============================================================
+       Validation surfaces
+       ============================================================= -->
+  <section>
+    <h2>3 — Validation surfaces</h2>
+    <p class="lede">Validation is inline, never modal. Surfaced at the row level for field-scoped issues and at the section level (top of section) for cross-field issues. Save remains tappable except when a required field is empty.</p>
+
+    <div style="display: flex; gap: 24px; flex-wrap: wrap;">
+      <div style="flex: 1; min-width: 320px;">
+        <div class="inline-banner warn" style="margin: 0 0 8px;">
+          <span class="ico">⚠</span>
+          <div><b>Duplicate label.</b> "prod-web" is also used by another host. Save anyway? Labels are soft-unique — connections work either way, but the picker will show two rows with the same name.</div>
+        </div>
+        <div class="inline-banner warn" style="margin: 0 0 8px;">
+          <span class="ico">⚠</span>
+          <div><b>Jump-chain cycle.</b> This host appears in its own jump chain via <code>bastion → homelab-nas</code>. Save refused until the cycle is broken.</div>
+        </div>
+        <div class="inline-banner warn" style="margin: 0 0 8px;">
+          <span class="ico">⚠</span>
+          <div><b>No user set anywhere.</b> Neither this host nor Defaults specifies a user. Connect will fail. Open Defaults or set a user here.</div>
+        </div>
+        <div class="inline-banner ok" style="margin: 0 0 8px;">
+          <span class="ico">✓</span>
+          <div><b>Imported from <code>~/.ssh/config</code>.</b> 12 fields mapped; <code>ControlMaster</code> ignored (tier 3, not modeled in v1).</div>
+        </div>
+      </div>
+      <div style="flex: 1; min-width: 320px;">
+        <div class="legend" style="margin-top: 0;">
+          <b>Default-expansion rules</b>
+          <ul>
+            <li><b>New host:</b> Basics + Auth open; everything else collapsed.</li>
+            <li><b>Edit host:</b> a section opens iff it has at least one field set to a non-default value (or, for booleans, set to a non-fallback). Otherwise collapsed.</li>
+            <li><b>Validation triggers:</b> tapping Save runs validation and auto-expands any section containing an error or warning.</li>
+            <li><b>State pad badges:</b> mosh "enabled" / tailscale "required" badges appear on section headers regardless of expansion — visible at a glance.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =============================================================
+       Closing legend
+       ============================================================= -->
+  <section>
+    <h2>Notes on form scope</h2>
+    <div class="legend" style="margin-top: 0;">
+      <b>Out of scope for this mockup (separate brainstorms):</b>
+      <ul>
+        <li>Delete-confirm modal — referenced jumphost case carries its own message</li>
+        <li>Multi-connection switching (live vs recent transitions on save)</li>
+        <li>Import wizard UI for <code>~/.ssh/config</code> beyond the success-banner shown above</li>
+        <li>The Defaults editor surface — same schema minus required fields, identical visual treatment</li>
+      </ul>
+      <b style="display: block; margin-top: 10px;">Quick-edit vs deep-edit:</b>
+      <ul>
+        <li><b>Same form.</b> Quick (from picker swipe) presents as a half-sheet from the bottom; deep (from Settings) presents as a full-screen push from the right. Identical contents and layout. Reduces surface to maintain.</li>
+        <li>Quick-edit opens with the same default-expansion rules — typically the user lands on Basics + Auth, which is what they came for.</li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>
