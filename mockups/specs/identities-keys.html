@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Glymr — Identities & Keys management surface</title>
+<style>
+  :root {
+    --bg: #0E1116;
+    --panel: #161A22;
+    --panel-2: #1F2530;
+    --line: #2A323F;
+    --text: #E8EBF0;
+    --muted: #8A93A3;
+    --accent: #D49A5C;
+    --accent-2: #F2C58A;
+    --green: #5FA89C;
+    --amber: #F5A524;
+    --red: #E06B6B;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  }
+  header {
+    padding: 24px 32px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; max-width: 820px; }
+  main { padding: 32px; max-width: 1400px; margin: 0 auto; }
+  section { margin-bottom: 56px; }
+  section > h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin: 0 0 12px;
+  }
+  section > p.lede { margin: 0 0 24px; color: var(--text); max-width: 820px; }
+
+  .phone {
+    width: 300px; height: 600px; background: #000;
+    border: 8px solid #1c2230; border-radius: 36px;
+    padding: 6px; position: relative; overflow: hidden;
+  }
+  .phone .di {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    width: 96px; height: 26px; background: #000;
+    border-radius: 999px; z-index: 12;
+    pointer-events: none;
+  }
+  .screen {
+    width: 100%; height: 100%; background: var(--bg);
+    border-radius: 24px; overflow: hidden;
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+
+  /* iOS nav bar */
+  .nav {
+    padding: 46px 14px 8px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+  }
+  .nav .title { font: 600 13px/1 -apple-system, sans-serif; }
+  .nav .left, .nav .right {
+    font: 500 13px/1 -apple-system, sans-serif; color: var(--accent-2);
+    min-width: 40px; display: flex; align-items: center;
+  }
+  .nav .left { justify-content: flex-start; }
+  .nav .right { justify-content: flex-end; font-size: 18px; }
+  .nav .left.back::before { content: "‹ "; font-size: 16px; margin-right: 2px; }
+
+  /* List */
+  .list { flex: 1; overflow-y: auto; padding: 0; }
+  .row {
+    padding: 12px 14px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel);
+  }
+  .row .body { flex: 1; min-width: 0; }
+  .row .name {
+    font: 600 13px/1.2 -apple-system, sans-serif; color: var(--text);
+    margin-bottom: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .row .meta {
+    font: 11px/1.2 ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .row .aside {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+    flex-shrink: 0;
+  }
+  .row .chev { color: var(--muted); font-size: 16px; margin-left: 4px; }
+
+  .chip {
+    font: 700 9px/1 -apple-system, sans-serif;
+    padding: 3px 7px; border-radius: 999px;
+    letter-spacing: 0.04em;
+  }
+  .chip.icloud {
+    background: rgba(138,147,163,0.18); color: var(--muted);
+    border: 1px solid rgba(138,147,163,0.3);
+  }
+  .chip.se {
+    background: rgba(212,154,92,0.18); color: var(--accent-2);
+    border: 1px solid rgba(212,154,92,0.45);
+  }
+  .usage {
+    font: 500 10px/1 -apple-system, sans-serif; color: var(--muted);
+  }
+  .usage.unused { color: var(--muted); opacity: 0.65; font-style: italic; }
+
+  /* Detail screen */
+  .scroll { flex: 1; overflow-y: auto; }
+  .header-card {
+    padding: 18px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .header-card .chip { padding: 4px 10px; font-size: 10px; }
+  .header-card .meta-bits {
+    font: 11px/1.4 -apple-system, sans-serif; color: var(--muted);
+  }
+  .header-card .meta-bits .alg { color: var(--text); font-weight: 600; }
+
+  .sec-label {
+    font: 600 10px/1 -apple-system, sans-serif;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted);
+    padding: 18px 14px 6px;
+  }
+  .sec-row {
+    background: var(--panel);
+    padding: 11px 14px;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+    font: 13px/1.3 -apple-system, sans-serif;
+  }
+  .sec-row + .sec-row { border-top: none; }
+  .sec-row .label { color: var(--muted); font-size: 12px; }
+  .sec-row .value { color: var(--text); }
+  .sec-row .value.editable { color: var(--accent-2); }
+  .sec-row.tappable .chev { color: var(--muted); font-size: 16px; }
+
+  .pubkey-block {
+    background: var(--panel-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    padding: 10px 14px;
+    font: 11px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--text);
+    word-break: break-all;
+  }
+  .pubkey-block .copy {
+    float: right; color: var(--accent-2);
+    font: 600 11px/1 -apple-system, sans-serif;
+    margin-left: 8px;
+  }
+  .fingerprint {
+    font: 11px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--text);
+    word-break: break-all;
+  }
+
+  /* Segmented control */
+  .seg {
+    display: flex; background: var(--panel-2); border-radius: 8px;
+    padding: 2px; margin: 0;
+  }
+  .seg .opt {
+    flex: 1; padding: 6px 0; text-align: center;
+    font: 600 11px/1 -apple-system, sans-serif; color: var(--muted);
+    border-radius: 6px;
+  }
+  .seg .opt.on {
+    background: var(--accent); color: #1a1410;
+  }
+  .seg-explain {
+    padding: 8px 14px 14px;
+    color: var(--muted); font: 11px/1.4 -apple-system, sans-serif;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+
+  .delete-btn {
+    margin: 26px 14px 18px;
+    padding: 12px 0; text-align: center;
+    background: rgba(224,107,107,0.12);
+    color: var(--red);
+    border: 1px solid rgba(224,107,107,0.4);
+    border-radius: 10px;
+    font: 600 13px/1 -apple-system, sans-serif;
+  }
+
+  .se-note {
+    padding: 8px 14px;
+    color: var(--accent-2); font: 11px/1.4 -apple-system, sans-serif;
+    background: rgba(212,154,92,0.08);
+    border-bottom: 1px solid var(--line);
+    display: flex; gap: 8px; align-items: flex-start;
+  }
+  .se-note::before { content: "🔒"; font-size: 12px; }
+
+  /* Half-sheet (create/import) */
+  .sheet {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    background: var(--panel);
+    border-radius: 16px 16px 0 0;
+    padding: 8px 0 14px;
+    z-index: 20;
+    box-shadow: 0 -8px 24px rgba(0,0,0,0.5);
+    height: 78%;
+    display: flex; flex-direction: column;
+  }
+  .sheet .handle {
+    width: 36px; height: 4px; background: rgba(232,235,240,0.25);
+    border-radius: 2px; margin: 0 auto 8px;
+  }
+  .sheet .sheet-nav {
+    padding: 4px 14px 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+  }
+  .sheet .sheet-nav .ttl { font: 600 13px/1 -apple-system, sans-serif; }
+  .sheet .sheet-nav .cancel { color: var(--muted); font: 500 13px/1 -apple-system, sans-serif; }
+  .sheet .sheet-nav .save { color: var(--accent-2); font: 600 13px/1 -apple-system, sans-serif; }
+  .tabs {
+    display: flex; padding: 0 14px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .tab {
+    flex: 1; text-align: center; padding: 10px 0;
+    font: 600 11px/1 -apple-system, sans-serif; color: var(--muted);
+    border-bottom: 2px solid transparent;
+  }
+  .tab.on { color: var(--accent-2); border-bottom-color: var(--accent); }
+  .sheet .form {
+    padding: 4px 0; flex: 1; overflow-y: auto;
+  }
+
+  /* Form rows */
+  .form-row {
+    padding: 12px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  .form-row .label {
+    font: 600 10px/1 -apple-system, sans-serif;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .form-row .input {
+    font: 13px/1.3 -apple-system, sans-serif; color: var(--text);
+    padding: 4px 0;
+  }
+  .form-row .input.placeholder { color: var(--muted); }
+  .form-row .help {
+    font: 11px/1.4 -apple-system, sans-serif; color: var(--muted);
+    margin-top: 6px;
+  }
+
+  /* Radio (flavor picker) */
+  .radio {
+    display: flex; gap: 8px; align-items: flex-start;
+    padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 8px;
+    margin-bottom: 6px;
+  }
+  .radio.on { border-color: var(--accent); background: rgba(212,154,92,0.08); }
+  .radio .dot {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 1.5px solid var(--muted);
+    flex-shrink: 0; margin-top: 2px;
+  }
+  .radio.on .dot { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--panel); }
+  .radio .text .head { font: 600 12px/1.2 -apple-system, sans-serif; color: var(--text); }
+  .radio .text .sub { font: 11px/1.3 -apple-system, sans-serif; color: var(--muted); margin-top: 2px; }
+
+  /* Action sheet (delete confirm) */
+  .scrim {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 30;
+  }
+  .action-sheet {
+    position: absolute; left: 8px; right: 8px; bottom: 8px;
+    z-index: 40;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .action-sheet .group {
+    background: rgba(40,44,52,0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 12px; overflow: hidden;
+  }
+  .action-sheet .item {
+    padding: 14px 12px; text-align: center;
+    font: 500 14px/1.3 -apple-system, sans-serif;
+    color: var(--text);
+    border-bottom: 0.5px solid rgba(255,255,255,0.08);
+  }
+  .action-sheet .item:last-child { border-bottom: none; }
+  .action-sheet .item.title {
+    font-size: 11px; color: var(--muted); padding: 14px 16px 6px;
+    border-bottom: none;
+  }
+  .action-sheet .item.body {
+    font-size: 12px; color: var(--text); padding: 0 16px 14px;
+    border-bottom: 0.5px solid rgba(255,255,255,0.08);
+  }
+  .action-sheet .item.body b { color: var(--accent-2); }
+  .action-sheet .item.body em { color: var(--red); font-style: normal; font-weight: 700; }
+  .action-sheet .item.destructive { color: var(--red); font-weight: 600; }
+  .action-sheet .item.cancel { font-weight: 600; }
+
+  /* Layout */
+  .phone-row { display: flex; gap: 32px; flex-wrap: wrap; align-items: flex-start; }
+  .col { display: flex; flex-direction: column; align-items: center; }
+  .caption {
+    margin-top: 12px; color: var(--text); font-size: 12px; max-width: 300px;
+    line-height: 1.5;
+  }
+  .caption b { color: var(--accent-2); }
+
+  .legend {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 20px; margin: 24px 0;
+    color: var(--text); font-size: 12px; line-height: 1.55;
+  }
+  .legend b { color: var(--accent-2); }
+  .legend ul { margin: 6px 0 0; padding-left: 20px; }
+  .legend li { margin: 4px 0; }
+
+  /* Empty state */
+  .empty {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 0 20px; text-align: center; gap: 14px;
+  }
+  .empty .glyph {
+    width: 48px; height: 48px; border-radius: 50%;
+    background: rgba(212,154,92,0.1); border: 1px solid rgba(212,154,92,0.3);
+    color: var(--accent-2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+  .empty .head { font: 600 14px/1.3 -apple-system, sans-serif; color: var(--text); }
+  .empty .sub { font: 12px/1.5 -apple-system, sans-serif; color: var(--muted); }
+  .empty .cta {
+    margin-top: 6px; padding: 10px 18px;
+    background: var(--accent); color: #1a1410;
+    border-radius: 999px; font: 600 12px/1 -apple-system, sans-serif;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Glymr — Identities & Keys management surface</h1>
+  <p>The standalone management screen for SSH identities. Reached via <b>Settings → Identities & Keys</b> or by tapping an identity reference inside host CRUD. Colors and components come from <a href="design-system.html" style="color: var(--accent-2);">design-system.html</a>; sub-flow is shared with <a href="host-crud.html" style="color: var(--accent-2);">host-crud.html</a>.</p>
+</header>
+<main>
+
+  <section>
+    <h2>List screen</h2>
+    <p class="lede">Alphabetical by display name. Flavor chip (<b>iCloud</b> / <b>SE</b>) on the right; usage indicator below it. No swipe-actions: delete lives only on the detail screen, behind a confirmation sheet.</p>
+
+    <div class="phone-row">
+      <div class="col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="nav">
+              <span class="left">‹ Settings</span>
+              <span class="title">Identities & Keys</span>
+              <span class="right">+</span>
+            </div>
+            <div class="list">
+              <div class="row">
+                <div class="body">
+                  <div class="name">home-nas</div>
+                  <div class="meta">ed25519 · SHA256:Qx7p2nKv9MmJ…</div>
+                </div>
+                <div class="aside">
+                  <span class="chip icloud">iCloud</span>
+                  <span class="usage">Used by 2</span>
+                </div>
+                <span class="chev">›</span>
+              </div>
+              <div class="row">
+                <div class="body">
+                  <div class="name">old-laptop-2023</div>
+                  <div class="meta">rsa-4096 · SHA256:8FvL3kRzPp…</div>
+                </div>
+                <div class="aside">
+                  <span class="chip icloud">iCloud</span>
+                  <span class="usage unused">Unused</span>
+                </div>
+                <span class="chev">›</span>
+              </div>
+              <div class="row">
+                <div class="body">
+                  <div class="name">personal-github</div>
+                  <div class="meta">ed25519 · SHA256:R9mNxJpVqB…</div>
+                </div>
+                <div class="aside">
+                  <span class="chip icloud">iCloud</span>
+                  <span class="usage">Used by 1</span>
+                </div>
+                <span class="chev">›</span>
+              </div>
+              <div class="row">
+                <div class="body">
+                  <div class="name">work-laptop</div>
+                  <div class="meta">ecdsa-p256 · SHA256:7HmKpXz2Q…</div>
+                </div>
+                <div class="aside">
+                  <span class="chip se">SE</span>
+                  <span class="usage">Used by 4</span>
+                </div>
+                <span class="chev">›</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>Populated list.</b> Mixed flavors (SE chip in bronze, iCloud in muted gray). Unused keys are visibly muted but stay in alphabetical position — sort doesn't move them.</p>
+      </div>
+
+      <div class="col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="nav">
+              <span class="left">‹ Settings</span>
+              <span class="title">Identities & Keys</span>
+              <span class="right">+</span>
+            </div>
+            <div class="empty">
+              <div class="glyph">🔑</div>
+              <div class="head">No keys yet</div>
+              <div class="sub">SSH identities you create or import will appear here.</div>
+              <div class="cta">Create or import a key</div>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>Empty state.</b> Common on first install. Single CTA opens the same half-sheet as the <code>+</code> in the nav bar.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Detail screen</h2>
+    <p class="lede">Push from a list row tap, or from a host CRUD identity ref. Read-only metadata up top, inline-editable display name and auth policy, a tappable "Used by" row, and a destructive Delete button anchored at the bottom of the scrollable content.</p>
+
+    <div class="phone-row">
+      <div class="col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="nav">
+              <span class="left back">Identities</span>
+              <span class="title">personal-github</span>
+              <span class="right"></span>
+            </div>
+            <div class="scroll">
+              <div class="header-card">
+                <span class="chip icloud" style="padding: 4px 10px; font-size: 10px;">iCloud Keychain</span>
+                <div class="meta-bits">
+                  <div><span class="alg">ed25519</span></div>
+                  <div>Created Mar 4, 2026</div>
+                </div>
+              </div>
+
+              <div class="sec-label">Identity</div>
+              <div class="sec-row">
+                <span class="label">Display name</span>
+                <span class="value editable">personal-github ›</span>
+              </div>
+
+              <div class="sec-label">Public key</div>
+              <div class="pubkey-block">
+                <span class="copy">Copy</span>
+                ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA…
+              </div>
+
+              <div class="sec-label">Fingerprint</div>
+              <div class="pubkey-block">
+                <span class="copy">Copy</span>
+                <span class="fingerprint">SHA256:R9mNxJpVqB7kLcXfH2eY8mPqJzWvKnA3D4t5R6sQ7nM</span>
+              </div>
+
+              <div class="sec-label">Security</div>
+              <div style="padding: 10px 14px; background: var(--panel); border-top: 1px solid var(--line);">
+                <div class="seg">
+                  <span class="opt">Never</span>
+                  <span class="opt on">Per-unlock</span>
+                  <span class="opt">Per-use</span>
+                </div>
+              </div>
+              <div class="seg-explain">Biometric required once per device unlock; usable thereafter for the session.</div>
+
+              <div class="sec-label">Usage</div>
+              <div class="sec-row tappable">
+                <span class="value">Used by 1 host</span>
+                <span class="chev">›</span>
+              </div>
+
+              <div class="delete-btn">Delete identity</div>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>iCloud Keychain identity.</b> Fingerprint copyable. Auth policy as a 3-segment control with the live explainer underneath. Delete button bottom-anchored.</p>
+      </div>
+
+      <div class="col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="nav">
+              <span class="left back">Identities</span>
+              <span class="title">work-laptop</span>
+              <span class="right"></span>
+            </div>
+            <div class="scroll">
+              <div class="header-card">
+                <span class="chip se" style="padding: 4px 10px; font-size: 10px;">Secure Enclave</span>
+                <div class="meta-bits">
+                  <div><span class="alg">ecdsa-p256</span></div>
+                  <div>Created Jan 18, 2026</div>
+                </div>
+              </div>
+
+              <div class="se-note">This key is bound to this device. It will not appear on your other Apple devices.</div>
+
+              <div class="sec-label">Identity</div>
+              <div class="sec-row">
+                <span class="label">Display name</span>
+                <span class="value editable">work-laptop ›</span>
+              </div>
+
+              <div class="sec-label">Public key</div>
+              <div class="pubkey-block">
+                <span class="copy">Copy</span>
+                ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAy…
+              </div>
+
+              <div class="sec-label">Fingerprint</div>
+              <div class="pubkey-block">
+                <span class="copy">Copy</span>
+                <span class="fingerprint">SHA256:7HmKpXz2QnRcBvLfJ4eM8tWxVpKsAa9D3y5R7s1Q2nL</span>
+              </div>
+
+              <div class="sec-label">Security</div>
+              <div style="padding: 10px 14px; background: var(--panel); border-top: 1px solid var(--line);">
+                <div class="seg">
+                  <span class="opt">Never</span>
+                  <span class="opt">Per-unlock</span>
+                  <span class="opt on">Per-use</span>
+                </div>
+              </div>
+              <div class="seg-explain">Biometric (Face ID / Touch ID) required on every use of the key.</div>
+
+              <div class="sec-label">Usage</div>
+              <div class="sec-row tappable">
+                <span class="value">Used by 4 hosts</span>
+                <span class="chev">›</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>Secure Enclave identity.</b> Bronze chip and a constant low-contrast advisory row under the name. Auth policy defaulting to "Per-use" since SE users are typically opting in for stronger guarantees.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Delete confirmation — action sheet</h2>
+    <p class="lede">No biometric; instead, an iOS action sheet slides up from the bottom. Cancel sits at the bottom (closest to the thumb that just tapped Delete), destructive confirmation is one row up — far from where the original button was. Copy varies by flavor.</p>
+
+    <div class="phone-row">
+      <div class="col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="nav">
+              <span class="left back">Identities</span>
+              <span class="title">personal-github</span>
+              <span class="right"></span>
+            </div>
+            <div class="scroll" style="opacity: 0.35;">
+              <div class="header-card">
+                <span class="chip icloud" style="padding: 4px 10px; font-size: 10px;">iCloud Keychain</span>
+                <div class="meta-bits"><div><span class="alg">ed25519</span></div><div>Created Mar 4, 2026</div></div>
+              </div>
+              <div class="sec-label">Identity</div>
+              <div class="sec-row"><span class="label">Display name</span><span class="value editable">personal-github ›</span></div>
+            </div>
+            <div class="scrim"></div>
+            <div class="action-sheet">
+              <div class="group">
+                <div class="item title">Delete personal-github?</div>
+                <div class="item body">This will remove the key from <b>all your devices</b>. Hosts that use this key will lose access until you assign them another.</div>
+                <div class="item destructive">Delete key</div>
+              </div>
+              <div class="group">
+                <div class="item cancel">Cancel</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>iCloud Keychain delete.</b> Warning mentions cross-device removal. Destructive button is offset upward from where the original Delete tap landed.</p>
+      </div>
+
+      <div class="col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="nav">
+              <span class="left back">Identities</span>
+              <span class="title">work-laptop</span>
+              <span class="right"></span>
+            </div>
+            <div class="scroll" style="opacity: 0.35;">
+              <div class="header-card">
+                <span class="chip se" style="padding: 4px 10px; font-size: 10px;">Secure Enclave</span>
+                <div class="meta-bits"><div><span class="alg">ecdsa-p256</span></div><div>Created Jan 18, 2026</div></div>
+              </div>
+              <div class="se-note">This key is bound to this device.</div>
+            </div>
+            <div class="scrim"></div>
+            <div class="action-sheet">
+              <div class="group">
+                <div class="item title">Delete work-laptop?</div>
+                <div class="item body">This key was never backed up. <em>It cannot be recovered.</em></div>
+                <div class="item destructive">Delete key</div>
+              </div>
+              <div class="group">
+                <div class="item cancel">Cancel</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>Secure Enclave delete.</b> Irreversibility called out in red. Same geometry as the iCloud sheet — the user has learned where Cancel lives by row position.</p>
+      </div>
+
+      <div class="col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="nav">
+              <span class="left back">Identities</span>
+              <span class="title">home-nas</span>
+              <span class="right"></span>
+            </div>
+            <div class="scroll" style="opacity: 0.35;">
+              <div class="header-card">
+                <span class="chip icloud" style="padding: 4px 10px; font-size: 10px;">iCloud Keychain</span>
+                <div class="meta-bits"><div><span class="alg">ed25519</span></div></div>
+              </div>
+              <div class="sec-label">Usage</div>
+              <div class="sec-row tappable"><span class="value">Used by 2 hosts</span><span class="chev">›</span></div>
+              <div class="delete-btn">Delete identity</div>
+            </div>
+            <div class="scrim"></div>
+            <div class="action-sheet">
+              <div class="group">
+                <div class="item title">Can't delete home-nas</div>
+                <div class="item body">This identity is referenced by <b>2 hosts</b>. Remove or reassign them first.</div>
+                <div class="item" style="color: var(--accent-2); font-weight: 600;">Show hosts using this key</div>
+              </div>
+              <div class="group">
+                <div class="item cancel">Cancel</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>Refused delete (referenced).</b> Same refusal pattern as host CRUD jumphost deletes — surface the back-references, no destructive option offered, route the user to fix the reference instead.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Create / Import sub-flow</h2>
+    <p class="lede">Same half-sheet as the host CRUD inline create — three tabs. Entered standalone (from <code>+</code>), the <b>Pick existing</b> tab is hidden. Entered from host CRUD, all three are visible.</p>
+
+    <div class="phone-row">
+      <div class="col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="nav">
+              <span class="left back">Identities</span>
+              <span class="title">Identities & Keys</span>
+              <span class="right">+</span>
+            </div>
+            <div class="list" style="opacity: 0.3;">
+              <div class="row"><div class="body"><div class="name">home-nas</div><div class="meta">ed25519 · SHA256:Qx7p2nKv9MmJ…</div></div></div>
+              <div class="row"><div class="body"><div class="name">personal-github</div><div class="meta">ed25519 · SHA256:R9mNxJpVqB…</div></div></div>
+            </div>
+            <div class="sheet">
+              <div class="handle"></div>
+              <div class="sheet-nav">
+                <span class="cancel">Cancel</span>
+                <span class="ttl">New identity</span>
+                <span class="save">Create</span>
+              </div>
+              <div class="tabs">
+                <span class="tab on">Create new</span>
+                <span class="tab">Import existing</span>
+              </div>
+              <div class="form">
+                <div class="form-row">
+                  <div class="label">Display name</div>
+                  <div class="input placeholder">e.g. home-server</div>
+                </div>
+                <div class="form-row">
+                  <div class="label">Algorithm</div>
+                  <div class="input">ed25519 <span style="color: var(--muted); font-size: 11px;">(recommended)</span></div>
+                  <div class="help">Other algorithms (ecdsa-p256, ecdsa-p384, rsa-4096) available under "More algorithms".</div>
+                </div>
+                <div class="form-row">
+                  <div class="label">Storage</div>
+                  <div class="radio on">
+                    <div class="dot"></div>
+                    <div class="text">
+                      <div class="head">iCloud Keychain</div>
+                      <div class="sub">Default. Syncs end-to-end encrypted across your Apple devices.</div>
+                    </div>
+                  </div>
+                  <div class="radio">
+                    <div class="dot"></div>
+                    <div class="text">
+                      <div class="head">Secure Enclave <span style="color: var(--accent-2);">— Enhanced</span></div>
+                      <div class="sub">Hardware-bound. This device only. Cannot be backed up.</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="label">Auth policy</div>
+                  <div class="seg" style="margin-bottom: 6px;">
+                    <span class="opt">Never</span>
+                    <span class="opt on">Per-unlock</span>
+                    <span class="opt">Per-use</span>
+                  </div>
+                  <div class="help">Biometric required once per device unlock.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>Create new tab (standalone entry).</b> Two tabs because there's no host to pick into. Flavor radio expands the iCloud/SE trade-off at the moment of choice.</p>
+      </div>
+
+      <div class="col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="nav">
+              <span class="left back">Identities</span>
+              <span class="title">Identities & Keys</span>
+              <span class="right">+</span>
+            </div>
+            <div class="list" style="opacity: 0.3;">
+              <div class="row"><div class="body"><div class="name">home-nas</div></div></div>
+            </div>
+            <div class="sheet">
+              <div class="handle"></div>
+              <div class="sheet-nav">
+                <span class="cancel">Cancel</span>
+                <span class="ttl">New identity</span>
+                <span class="save" style="opacity: 0.4;">Save</span>
+              </div>
+              <div class="tabs">
+                <span class="tab">Create new</span>
+                <span class="tab on">Import existing</span>
+              </div>
+              <div class="form">
+                <div class="form-row">
+                  <div class="label">Source</div>
+                  <div style="display: flex; gap: 8px; margin-top: 4px;">
+                    <div style="flex: 1; padding: 10px; border: 1px solid var(--line); border-radius: 8px; text-align: center; font: 600 12px/1 -apple-system, sans-serif; color: var(--accent-2);">📋 Paste</div>
+                    <div style="flex: 1; padding: 10px; border: 1px solid var(--line); border-radius: 8px; text-align: center; font: 600 12px/1 -apple-system, sans-serif; color: var(--accent-2);">📁 Choose file…</div>
+                  </div>
+                  <div class="help">OpenSSH or legacy PEM format. Encrypted keys will prompt for a passphrase.</div>
+                </div>
+                <div class="form-row" style="opacity: 0.5;">
+                  <div class="label">Detected</div>
+                  <div class="input placeholder">Paste or pick a key file to continue.</div>
+                </div>
+                <div class="form-row" style="opacity: 0.5;">
+                  <div class="label">Display name</div>
+                  <div class="input placeholder">—</div>
+                </div>
+                <div class="form-row" style="opacity: 0.5;">
+                  <div class="label">Auth policy</div>
+                  <div class="seg">
+                    <span class="opt">Never</span>
+                    <span class="opt on">Per-unlock</span>
+                    <span class="opt">Per-use</span>
+                  </div>
+                  <div class="help" style="margin-top: 8px; color: var(--muted); font-style: italic;">Imported keys are always stored in iCloud Keychain. Secure Enclave cannot accept external key material.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>Import existing tab.</b> Paste + Files picker side-by-side. No Share Extension in v1. Flavor selector absent — imported keys can only land in iCloud Keychain.</p>
+      </div>
+
+      <div class="col">
+        <div class="phone">
+          <div class="di"></div>
+          <div class="screen">
+            <div class="nav">
+              <span class="left back">Edit host</span>
+              <span class="title">prod-web-3</span>
+              <span class="right" style="color: var(--accent-2); font: 600 13px/1 -apple-system, sans-serif;">Save</span>
+            </div>
+            <div class="scroll" style="opacity: 0.3; padding-top: 18px;">
+              <div class="sec-label">Auth</div>
+              <div class="sec-row"><span class="label">Identities</span><span class="value">…</span></div>
+            </div>
+            <div class="sheet">
+              <div class="handle"></div>
+              <div class="sheet-nav">
+                <span class="cancel">Cancel</span>
+                <span class="ttl">Identity for prod-web-3</span>
+                <span class="save">Attach</span>
+              </div>
+              <div class="tabs">
+                <span class="tab on">Pick existing</span>
+                <span class="tab">Create new</span>
+                <span class="tab">Import existing</span>
+              </div>
+              <div class="form">
+                <div class="row" style="background: rgba(212,154,92,0.1);">
+                  <div class="body"><div class="name">home-nas</div><div class="meta">ed25519 · SHA256:Qx7p2nKv9MmJ…</div></div>
+                  <div class="aside"><span class="chip icloud">iCloud</span></div>
+                </div>
+                <div class="row">
+                  <div class="body"><div class="name">personal-github</div><div class="meta">ed25519 · SHA256:R9mNxJpVqB…</div></div>
+                  <div class="aside"><span class="chip icloud">iCloud</span></div>
+                </div>
+                <div class="row">
+                  <div class="body"><div class="name">work-laptop</div><div class="meta">ecdsa-p256 · SHA256:7HmKpXz2Q…</div></div>
+                  <div class="aside"><span class="chip se">SE</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><b>Sub-flow from host CRUD (for reference).</b> All three tabs visible because the entry is attached to a host. Same component, parameterized.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Locked decisions</h2>
+    <div class="legend">
+      <ul>
+        <li><b>Scope:</b> inventory + standalone create. No rotation wizard in v1 (deferred until ssh-copy-id auto-install lands in v1.5).</li>
+        <li><b>List sort:</b> alphabetical by display name. No filter, no search, no sort toggle.</li>
+        <li><b>Row anatomy:</b> name + algorithm + fingerprint-prefix + flavor chip + usage count. Whole row taps to detail. No swipe actions.</li>
+        <li><b>Empty state:</b> centered icon, one-line copy, single CTA opening the create/import half-sheet.</li>
+        <li><b>Detail edits:</b> display name (inline), auth policy (3-segment control). Both commit immediately, no Save button.</li>
+        <li><b>Public key / fingerprint:</b> both have inline Copy actions. No QR, no share-sheet in v1.</li>
+        <li><b>"Used by" drill-down:</b> full-screen push to host list (same component as Settings → Hosts, filtered to this identity).</li>
+        <li><b>Delete (unreferenced):</b> bottom-anchored destructive button → action sheet from bottom. Confirm row positioned upward from original button; Cancel is closest to thumb. Copy varies by flavor.</li>
+        <li><b>Delete (referenced):</b> refusal pattern matches host CRUD jumphost delete. Surface back-references, no destructive option offered.</li>
+        <li><b>Auth policy change:</b> plain toggle, no biometric. App-level unlock is the security gate (matches Blink / Termius / 1Password / Secretive convention).</li>
+        <li><b>Import sources:</b> paste + Files app picker. No Share Extension in v1.</li>
+        <li><b>Import flavor:</b> always iCloud Keychain. SE cannot accept external key material.</li>
+        <li><b>Entry points:</b> Settings → Identities & Keys, plus tappable identity refs from host CRUD.</li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>

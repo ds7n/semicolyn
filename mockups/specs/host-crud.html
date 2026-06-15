@@ -235,7 +235,7 @@
     font: 11px/1.2 ui-monospace, "SF Mono", monospace; color: var(--accent-2);
   }
 
-  /* Mint-identity inset */
+  /* Create-identity inset */
   .inset-wrap {
     display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap;
     justify-content: center;
@@ -398,7 +398,7 @@
                   <div class="value muted-val">none</div>
                 </div>
               </div>
-              <div class="note">No identity? Tap "+ Add identity" to pick an existing key or mint a new one inline.</div>
+              <div class="note">No identity? Tap "+ Add identity" to pick an existing key or create a new one inline.</div>
 
               <!-- COLLAPSED SECTIONS -->
               <div class="sec-head collapsible">Connection<span class="chev">▸</span></div>
@@ -663,7 +663,7 @@
 
       <!-- Inline mint-identity inset -->
       <div class="phone-col">
-        <div style="font: 600 10px/1 -apple-system, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 10px;">Inline mint-identity sub-flow</div>
+        <div style="font: 600 10px/1 -apple-system, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 10px;">Inline create-identity sub-flow</div>
         <div class="modal-card">
           <div class="head">
             <h4>New identity</h4>
@@ -699,14 +699,14 @@
             </div>
             <div class="actions">
               <div class="btn ghost">Cancel</div>
-              <div class="btn primary">Mint & attach</div>
+              <div class="btn primary">Create & attach</div>
             </div>
           </div>
         </div>
-        <p class="caption" style="margin-top: 14px;"><b>Inline mint sub-flow.</b> Reached from the "+" pill in the Auth section. Presented as a half-sheet (not a full-screen push), so the host form remains visible underneath — context is preserved.
+        <p class="caption" style="margin-top: 14px;"><b>Inline create sub-flow.</b> Reached from the "+" pill in the Auth section. Presented as a half-sheet (not a full-screen push), so the host form remains visible underneath — context is preserved.
           <ul>
             <li>Storage default is iCloud Keychain. SE is the deliberate "I want hardware binding" choice with its tradeoff stated</li>
-            <li>"Mint & attach" both creates the Identity record and appends its UUID to <code>identities[]</code> on this host</li>
+            <li>"Create & attach" both creates the Identity record and appends its UUID to <code>identities[]</code> on this host</li>
             <li>"Picking" an existing identity uses the same surface with a list-of-keys at the top above the form — not shown here</li>
           </ul>
         </p>
