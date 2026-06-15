@@ -184,7 +184,7 @@ Two complementary input mechanisms central to the differentiation:
 
 **Full design**: see `docs/superpowers/specs/2026-06-14-degraded-mode-design.md`.
 
-### Host management & settings access (entry point only — config model still deferred)
+### Host management & settings access (entry point)
 
 | Topic | Decision |
 |---|---|
@@ -205,7 +205,30 @@ Two complementary input mechanisms central to the differentiation:
 | Dynamic Island handling rule | **A+C.** All top-edge chrome (chip-equivalents and banners alike) honors `safeAreaInsets.top` — placed flush below whatever the OS owns (DI / notch / status bar). Top-bar background tints around the DI so the cutout reads as part of our chrome rather than a hole. **No interactive UI in the flank** (Apple HIG, tap-collision). |
 | Live Activities (DI background presence) | **Out of scope for v1.** Worth revisiting post-v1; chip's data model designed so a Live Activity could feed off it later. |
 
-**Mockup**: see `mockups/host-management.html`. **Spec**: not yet written — the host config model itself (fields, identity refs, jump chains, port forwards, mosh/ssh, Tailscale routing, defaults inheritance), the CRUD flow, and the multi-connection switching semantics are still to brainstorm.
+**Mockup**: see `mockups/host-management.html`. CRUD flow + multi-connection switching semantics still deferred.
+
+### Host config model
+
+| Topic | Decision |
+|---|---|
+| Design posture | **`ssh_config(5)`-faithful in naming and semantics**, strict subset of OpenSSH's expressive power, lossless import/export with `~/.ssh/config` as a design goal. Glymr extensions namespaced (`mosh.*`, `tailscale.*`, `glymr.*`). |
+| Inheritance | **Single global Defaults record + per-host overrides.** Equivalent to OpenSSH's `Host *` block, no wildcards. `undefined = inherit`, `null/[]` = explicit override to "none" (distinction baked in so future groups/patterns are additive). |
+| Stable ID | **UUID v4** at create time; immutable; internal only. User-facing identifier is `label` (free-form, soft-unique — warn-on-duplicate, allow save). Export to `~/.ssh/config` sanitizes label → alias at write time. |
+| Required fields | `id` (UUID), `label`, `hostName`. Everything else optional → inherits from Defaults → built-in fallback. |
+| Auth refs | **Ordered `identities: IdentityRef[]`** (matches OpenSSH `IdentityFile` repeated-line model) + optional `passwordRef`. `preferredAuthentications` order controls attempt sequence. Auth policy is identity-level only in v1 (host-level confirmation deferred). |
+| Jump chain | **Mixed `proxyJump: JumpHop[]`** — each hop is `{kind: "ref", hostId}` or `{kind: "inline", hostName, port?, user?, identities?}`. Matches OpenSSH `ProxyJump alias,user@host:port,…`. Cycles refused at save. Deleting a referenced jumphost is refused with a "used by X, Y" message. |
+| Port forwards | All three OpenSSH types modeled with faithful shapes: `localForwards[]`, `remoteForwards[]`, `dynamicForwards[]`. |
+| OpenSSH option scope | **Tier 1** (always visible): connection basics, identities, jump chain, port forwards. **Tier 2** ("Advanced" disclosure): `serverAliveInterval/CountMax`, `compression`, `strictHostKeyChecking`, `forwardAgent` (default false), `preferredAuthentications`. **Tier 3** (Ciphers/MACs/Kex/HostKey/GSSAPI/etc.) deferred — no escape hatch in v1. |
+| Mosh | **`mosh: { enabled, serverPath?, udpPortRange?, predictionMode? }`** — modeled as an SSH-bootstrap option, not a separate transport, because mosh actually is one. Defaults: `enabled=false`, `udpPortRange=[60000, 61000]`, `predictionMode="adaptive"`. |
+| Tailscale | **`tailscale: { required, tailnet? }`** — awareness flag only; OS handles routing. When `required=true` and Tailscale is down, connection-status banner says "Tailscale required" instead of generic unreachable. Tailscale SSH (auth via tailnet identity) deferred to v1.5+. |
+| Glymr per-host extensions (v1) | **`glymr.predictor.incognito`** (don't learn from this host) and **`glymr.tmux.attemptControlMode`** (skip `-CC` probe per-host). Everything else stays global in v1. |
+| Identity model | **First-class entity, not embedded** (forced by iOS storage — SE keys can't be embedded, iCloud Keychain keys outlive any specific host). Two flavors at creation: **`iCloudKeychain`** (default — synced E2EE across devices, device-portable) or **`secureEnclave`** (opt-in "enhanced" — hardware-bound, single device). Host create flow can mint inline so users never have to visit "Identities & Keys" for the basic path. |
+| Auth policy enforcement | Identity-level only in v1, via iOS `SecAccessControl`: `never` / `anyUse` (biometric every use) / `afterUnlock` (biometric once per unlock). |
+| Storage backbone | **iCloud Keychain (E2EE)** = keys, passwords, passphrases, `known_hosts` entries, host-config encryption key. **Secure Enclave** = opt-in device-bound identities. **CloudKit Private DB + client-side AES-256-GCM** = host records, Defaults record, identity metadata (32-byte key in iCloud Keychain → effective E2EE regardless of user's ADP setting). **Local only** = audit log, recent connections, live session state. |
+| `known_hosts` | iCloud Keychain, synced. Trust-on-first-use on one device propagates to all. Per-host list (multiple entries supported for rotation windows). Mismatch UX: banner + modal with old/new fingerprints and *Trust new* / *Trust on this device only* / *Cancel*. |
+| Forward-compat | Schema designed so future additions are additive: groups/tags (Q1 deferred option), pattern matching (deferred), Tier 3 options, host-level confirmation policy, per-host snippets/keybar/context overrides. None of these require breaking v1 records. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-15-host-config-model-design.md`. CRUD flow + multi-connection switching semantics are separate deferred items.
 
 ---
 
@@ -215,11 +238,10 @@ Two complementary input mechanisms central to the differentiation:
   - **v2 custom inputView** — if/when promoted from v1.5+ feedback, design the letter-to-alt-symbol mapping and the held-modifier interaction.
 - **Pill position customization** — left vs right in the keybar (handedness preference); a per-user setting. (Sub-item of the keyboard/input UX topic above.)
 - **Settings / preferences surface (UI shape)** — entry point and top-level tree are locked (see Host management & settings access above); still open is the **detailed layout of each settings sub-screen** (App preferences, Security, etc.) — what controls live where, how nested, defaults, copy.
-- **Host config model** — fields, defaults inheritance, identity references, jump-host chain shape, port forward representation, mosh/ssh toggle semantics, Tailscale routing. The data model the rest of the connection-management work hangs off. *Entry point and switching UI are locked; the config schema itself is the remaining work.*
-- **Host CRUD flow** — create / edit / delete screens, validation, import/export (e.g., from `~/.ssh/config`), error states.
+- **Host CRUD flow** — create / edit / delete screens, validation, import/export (e.g., from `~/.ssh/config`), error states (jumphost-in-use, duplicate-label, inline-mint-identity wizard).
 - **Multi-connection switching semantics** — what happens to the foreground connection when you switch? Does its tmux stay attached? Does mosh keep heartbeating? iOS background-task budget implications. *UI is locked; behavior under the hood is the remaining work.*
 - **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
-- **iCloud sync scope** — hosts/snippets/identities — what syncs, what doesn't.
+- **iCloud sync scope (remaining)** — host records, identities, and `known_hosts` are locked in the host config spec. Still open: snippet library, keybar customizations, audit log retention/scope, per-device vs synced predictor sketches.
 - **External keyboard support** — shortcut design for the hardware-keyboard case.
 - **Monetization** — free / one-time / subscription / pro tier.
