@@ -31,10 +31,13 @@ iOS SSH/mosh client. Differentiator: terminal work that feels native on a touch 
 - **Degraded mode & tmux requirements:** minimum tmux **3.0**. Missing/too-old/crashed tmux drops to raw-PTY mode (single shell, no pills, no context detection; predictor/snippets/keybar modifiers still work). Connect-time amber banner, reoccurs each reconnect, per-host suppression after a few dismissals. Mid-session crash gets the one persistent banner in the app (Reattach / Start new tmux / Dismiss). No auto-install, no power-user "raw" toggle. Full spec: `docs/superpowers/specs/2026-06-14-degraded-mode-design.md`.
 - **Host management & settings access (entry point):** **multiple simultaneous live connections**. Entry point is **long-press Esc** (dim `≡` hint below the slot — no chip, no top bar, no menu slot). Picker sheet anchored above keybar; contents = Live → Recent → + Connect → ⚙ Settings. "Live" = resumable without re-auth (SSH/mosh unified). Per-row swipes: Edit + Disconnect (live) / Edit + Delete with confirm (recent). Banners still at top. Settings tree: Hosts / Identities & Keys / Security / App preferences / About. **Mockup:** `mockups/host-management.html`.
 - **Host config model:** `ssh_config(5)`-faithful naming, strict subset of OpenSSH options (Tier 1 + Tier 2 typed; no escape hatch in v1), UUID stable IDs + free-form labels, single-Defaults inheritance, ordered identity refs, mixed-mode `proxyJump` (ref or inline per hop), all three port-forward types. Mosh and Tailscale modeled as namespaced extensions. **Identities are first-class entities** with two flavors: **iCloud Keychain (default — synced E2EE, device-portable)** and **Secure Enclave (opt-in "Enhanced" — hardware-bound, single device)**. **Storage backbone:** iCloud Keychain for secrets and `known_hosts`; CloudKit Private DB + client-side AES-256-GCM for host records and metadata; local-only for audit log / recents / live state. Full spec: `docs/superpowers/specs/2026-06-15-host-config-model-design.md`.
+- **Host CRUD flow:** single scrollable form (same for create and edit), nine sections, aggressive default-collapse (only Basics + Auth open on new host; auto-expand on edit if non-default). Mosh / Tailscale as named sections with **show + explain** conditional behavior — fields are disabled with tooltips, never hidden. Identity sub-flow = half-sheet with three tabs (Pick existing · Mint new · Import existing); ssh-copy-id auto-install deferred to v1.5. Hybrid validation (required-field markers live, content checks on Save). Refused-if-referenced delete with tappable jumphost back-references. Quick-edit (picker swipe) = half-sheet; deep-edit (Settings → Hosts) = full-screen push; same form. Defaults editor reuses the shell with **inherit vs set** rows and swipe-to-clear-override. Full spec: `docs/superpowers/specs/2026-06-15-host-crud-design.md`. Mockup: `mockups/host-crud.html`.
 
 **Unresolved / needs more brainstorm:**
-- **Host CRUD flow** — create/edit/delete screens, validation, import from `~/.ssh/config`, error states (jumphost-in-use, duplicate-label warning, inline-mint-identity wizard)
 - **Multi-connection switching semantics** — foreground/background lifecycle, mosh heartbeat budget in iOS bg, SSH bg grace, when "Live" rows demote to "Recent"
+- **Importing from `~/.ssh/config`** — file picker / paste / share extension, mapping rules, `Match`/`Include` handling, conflict resolution
+- **Exporting to `~/.ssh/config`** — slug generation, what to emit for Glymr extensions, fingerprint comments
+- **Identities & Keys management surface** — standalone list, "which hosts use this key", rotation, deletion (the inline pick/mint/import sub-flow is locked above)
 - **Keyboard / input UX (remaining)** — v2 custom inputView and its letter-to-alt mapping
 - Settings sub-screen layouts, pill position customization, iPad navigation, layout templates, iCloud sync scope for non-host data, external keyboard, monetization
 
@@ -43,13 +46,14 @@ See `docs/brainstorming-decisions.md` for the full locked-decisions table and th
 ## Layout
 
 - `docs/brainstorming-decisions.md` — every locked decision, organized by topic; deferred items at the bottom
-- `docs/superpowers/specs/` — detailed subsystem specs (`2026-06-13-predictor-design.md`, `2026-06-14-context-detection-design.md`, `2026-06-14-function-keys-design.md`, `2026-06-14-degraded-mode-design.md`, `2026-06-15-host-config-model-design.md`)
+- `docs/superpowers/specs/` — detailed subsystem specs (`2026-06-13-predictor-design.md`, `2026-06-14-context-detection-design.md`, `2026-06-14-function-keys-design.md`, `2026-06-14-degraded-mode-design.md`, `2026-06-15-host-config-model-design.md`, `2026-06-15-host-crud-design.md`)
 - `docs/ideas/` — parked concepts not on the v1 roadmap (`system-keyboard-extension.md`)
 - `mockups/design-system.html` — color palette and reusable component vocabulary; reference for every other mockup
 - `mockups/features.html` — locked feature mockups: window switching, pane management, cursor placement, connection status banner
 - `mockups/keybar.html` — v0 keybar default slot layout, with rendered iPhone frame and rationale
 - `mockups/context-detection.html` — promoted-slot visual treatments + applied shell/vim/python comparison
 - `mockups/host-management.html` — host picker entry (long-press Esc), settings access path, multi-connection switching UI
+- `mockups/host-crud.html` — host create/edit form, conditional disabling, identity sub-flow, validation banners, defaults editor
 - `README.md` — this file
 
 ## Resuming next session
