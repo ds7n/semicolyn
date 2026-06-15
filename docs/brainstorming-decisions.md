@@ -23,7 +23,7 @@ Two complementary input mechanisms central to the differentiation:
 | Goal | Solve a personal annoyance (CLI / AI / security adjacent) |
 | Differentiator | Make the iOS keyboard pleasant for terminal work |
 | Security posture | Security-first: SE-default for new identities, per-host auth policy, no telemetry, local audit log, public-key always copyable |
-| Brand palette | **"Bell bronze"** — bronze accent (`#D49A5C`) on cool-near-black (`#0E1116`), verdigris patina (`#5FA89C`) as success/tension color. Leverages the name's two readings (struck bell + glimmer-in-darkness). Avoids AI / terminal / Norse stereotypes. See `mockups/design-system.html`. |
+| Brand palette | **"Bell bronze"** — bronze accent (`#D49A5C`) on cool-near-black (`#0E1116`), verdigris patina (`#5FA89C`) as success/tension color. Leverages the name's two readings (struck bell + glimmer-in-darkness). Avoids AI / terminal / Norse stereotypes. See `mockups/specs/design-system.html`. |
 
 ### Connections & sessions
 
@@ -57,7 +57,7 @@ Two complementary input mechanisms central to the differentiation:
 | Slot interaction | Three actions per slot: tap = primary, swipe-up = secondary, swipe-down = tertiary. Long-press = edit the slot (rebind, replace, pin a new macro). Each key shows the two swipe chars as small dim glyphs on the same key (top and bottom edges). |
 | Modifier behavior | **Ctrl, Alt, Shift = sticky-for-one-keystroke.** Tap → armed for the next key, auto-disarms. **Ctrl additionally double-tap-to-lock** (Emacs chord case); tap again unlocks. Alt/Shift stay sticky-only (their swipe-based gestures don't support double-arming cleanly; iOS already provides caps-lock for Shift). Esc and Tab fire on tap (no sticky/toggle). |
 | Arrow input | **Single Blink-style arrow-pad slot.** Touch and drag from center in any direction (↑↓←→) to fire that arrow. Replaces four discrete arrow keys. |
-| Default slots (v0) | 10 slots: **core** (Esc, Ctrl/Alt/Shift, Tab, arrow-pad) + **convenience** (`/`, `\|`, `~`, `-`, `(`, `)`). Convenience slots are removable. Core slots are locked. Full layout: `mockups/keybar.html`. |
+| Default slots (v0) | 10 slots: **core** (Esc, Ctrl/Alt/Shift, Tab, arrow-pad) + **convenience** (`/`, `\|`, `~`, `-`, `(`, `)`). Convenience slots are removable. Core slots are locked. Full layout: `mockups/specs/keybar.html`. |
 | Iteration plan | Defaults are a v0 best-guess. Public character-frequency data for shell typing on mobile doesn't exist. Plan: ship defensible defaults, make customization first-class, tune defaults in v1.5 from predictor's keystroke telemetry (with consent). |
 
 ### Window switching
@@ -205,7 +205,7 @@ Two complementary input mechanisms central to the differentiation:
 | Dynamic Island handling rule | **A+C.** All top-edge chrome (chip-equivalents and banners alike) honors `safeAreaInsets.top` — placed flush below whatever the OS owns (DI / notch / status bar). Top-bar background tints around the DI so the cutout reads as part of our chrome rather than a hole. **No interactive UI in the flank** (Apple HIG, tap-collision). |
 | Live Activities (DI background presence) | **Out of scope for v1.** Worth revisiting post-v1; chip's data model designed so a Live Activity could feed off it later. |
 
-**Mockup**: see `mockups/host-management.html`. CRUD flow + multi-connection switching semantics still deferred.
+**Mockup**: see `mockups/drafts/host-management.html`. CRUD flow + multi-connection switching semantics still deferred.
 
 ### Host config model
 
@@ -222,7 +222,7 @@ Two complementary input mechanisms central to the differentiation:
 | Mosh | **`mosh: { enabled, serverPath?, udpPortRange?, predictionMode? }`** — modeled as an SSH-bootstrap option, not a separate transport, because mosh actually is one. Defaults: `enabled=false`, `udpPortRange=[60000, 61000]`, `predictionMode="adaptive"`. |
 | Tailscale | **`tailscale: { required, tailnet? }`** — awareness flag only; OS handles routing. When `required=true` and Tailscale is down, connection-status banner says "Tailscale required" instead of generic unreachable. Tailscale SSH (auth via tailnet identity) deferred to v1.5+. |
 | Glymr per-host extensions (v1) | **`glymr.predictor.incognito`** (don't learn from this host) and **`glymr.tmux.attemptControlMode`** (skip `-CC` probe per-host). Everything else stays global in v1. |
-| Identity model | **First-class entity, not embedded** (forced by iOS storage — SE keys can't be embedded, iCloud Keychain keys outlive any specific host). Two flavors at creation: **`iCloudKeychain`** (default — synced E2EE across devices, device-portable) or **`secureEnclave`** (opt-in "enhanced" — hardware-bound, single device). Host create flow can mint inline so users never have to visit "Identities & Keys" for the basic path. |
+| Identity model | **First-class entity, not embedded** (forced by iOS storage — SE keys can't be embedded, iCloud Keychain keys outlive any specific host). Two flavors at creation: **`iCloudKeychain`** (default — synced E2EE across devices, device-portable) or **`secureEnclave`** (opt-in "enhanced" — hardware-bound, single device). Host create flow can create inline so users never have to visit "Identities & Keys" for the basic path. |
 | Auth policy enforcement | Identity-level only in v1, via iOS `SecAccessControl`: `never` / `anyUse` (biometric every use) / `afterUnlock` (biometric once per unlock). |
 | Storage backbone | **iCloud Keychain (E2EE)** = keys, passwords, passphrases, `known_hosts` entries, host-config encryption key. **Secure Enclave** = opt-in device-bound identities. **CloudKit Private DB + client-side AES-256-GCM** = host records, Defaults record, identity metadata (32-byte key in iCloud Keychain → effective E2EE regardless of user's ADP setting). **Local only** = audit log, recent connections, live session state. |
 | `known_hosts` | iCloud Keychain, synced. Trust-on-first-use on one device propagates to all. Per-host list (multiple entries supported for rotation windows). Mismatch UX: banner + modal with old/new fingerprints and *Trust new* / *Trust on this device only* / *Cancel*. |
@@ -237,7 +237,7 @@ Two complementary input mechanisms central to the differentiation:
 | Form shape | **Single scrollable form, same for create and edit.** No wizard, no tabs. Nine sections: Basics · Auth · Connection · Jump chain · Port forwarding · Mosh · Tailscale · Glymr behavior · Delete host (edit-only). |
 | Default expansion | New host: Basics + Auth expanded; rest collapsed. Edit host: a section auto-expands iff it carries a non-default value. Save with errors: any flagged section auto-expands. Not persisted across opens. |
 | Conditional fields | **Show + explain, never hide.** `mosh.enabled = true` → `serverAlive*` rows grayed out with tooltip ("Mosh has its own keepalive"); port-forward, forwardAgent, and Tailscale sections show inline caveat banners under their headers. No field is ever fully hidden by conditional rules. |
-| Identity sub-flow | Half-sheet from bottom with **three tabs**: **Pick existing** (list of stored identities with flavor + biometric badges), **Mint new** (algorithm / storage flavor / biometric policy / display name), **Import existing** (paste PEM/OpenSSH blob + optional passphrase + flavor + policy). Post-mint/import shows public key with Copy/Share/AirDrop for manual install. |
+| Identity sub-flow | Half-sheet from bottom with **three tabs**: **Pick existing** (list of stored identities with flavor + biometric badges), **Create new** (algorithm / storage flavor / biometric policy / display name), **Import existing** (paste PEM/OpenSSH blob + optional passphrase + flavor + policy). Post-create/import shows public key with Copy/Share/AirDrop for manual install. |
 | ssh-copy-id auto-install | **Deferred to v1.5.** v1 = manual paste only. |
 | Password-manager integration | **Locked out (storage backend).** iOS has no SSH-agent IPC primitive; cross-vendor app key access doesn't exist. iCloud Keychain (Apple's PM backend) IS our default storage. **Import existing key** path covers the "I generated my key in 1Password" case. |
 | Validation timing | **Hybrid.** Required-field markers (bronze `•`) live; Save button disabled until `label` + `hostName` set. **Content validation** (cycle detection, label duplicates, no-user-anywhere, malformed forward, stale passwordRef) runs **on Save tap**. Flagged sections auto-expand. |
@@ -248,7 +248,29 @@ Two complementary input mechanisms central to the differentiation:
 | Refused-if-referenced delete | If host is a `proxyJump` ref target, delete refused with a tappable list of dependents ("Used as jumphost by: prod-db, staging-api"). Tapping a dependent navigates into its editor with Jump chain pre-expanded. No cascade. Identity records are never deleted by host delete. |
 | Defaults editor | Same form shell; no `label`/`hostName`/Delete; all sections collapsed by default; each row shows **inherit unset** vs **set** state; **swipe-left to Clear override** (revert to system fallback). Entry: dedicated row at top of Settings → Hosts. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-15-host-crud-design.md`. **Mockup**: `mockups/host-crud.html`.
+**Full spec**: see `docs/superpowers/specs/2026-06-15-host-crud-design.md`. **Mockup**: `mockups/specs/host-crud.html`.
+
+### Identities & Keys management surface
+
+| Topic | Decision |
+|---|---|
+| Scope | **Inventory + standalone create.** No rotation wizard in v1 (deferred until `ssh-copy-id` auto-install lands in v1.5). Without auto-install, rotation is a checklist with a hand-wave in the middle. |
+| List sort | Alphabetical by `displayName`. No search, no filter, no sort toggle. Settings-screen stability matters more than recency. |
+| Row anatomy | Display name + algorithm + fingerprint-prefix on left; flavor chip (`iCloud` muted / `SE` bronze) + usage indicator on right; chevron to detail. `Used by N` or `Unused` (italic, further muted) for cleanup affordance. |
+| Swipe actions | **None.** Delete reachable only from the detail screen — destructive operations don't belong on swipe gestures. |
+| Empty state | Centered key glyph + "No keys yet" + single CTA opening the create/import half-sheet. |
+| Detail screen edits | Display name (inline, commit on blur, soft-unique). Auth policy (3-segment: `Never` / `Per-unlock` / `Per-use`) commits immediately. **No biometric on settings changes** — app-level unlock is the security gate (matches Blink / Termius / Secretive / 1Password / iOS Passwords). |
+| Public key / fingerprint | Both shown in monospace with inline Copy. Clipboard only in v1 — QR / Share / AirDrop deferred. |
+| "Used by" drill-down | Push to filtered host list (same component as `Settings → Hosts`). `Unused` row still pushes to an empty state — back-reference contract is symmetric. |
+| Delete (unreferenced) | Bottom-anchored destructive button → action sheet from bottom. Confirm row in top group, Cancel in bottom group — geometry guards against muscle-memory double-tap. No biometric. Body copy varies: iCloud mentions cross-device removal, SE bolds irreversibility (in red). |
+| Delete (referenced) | Refusal pattern mirrors host CRUD jumphost delete. Surface the back-references as a tappable "Show hosts using this key" navigation row; no destructive option offered. |
+| What gets deleted | Both the `Identity` metadata record AND the underlying private key material (Keychain item / SE handle). No orphaned key material. |
+| Create/Import sub-flow | Same half-sheet as host CRUD inline create. Standalone entry hides the `Pick existing` tab (no-op there); attached entry from host CRUD shows all three tabs. |
+| Import sources | Paste + Files app picker. **No Share Extension in v1.** Imported keys always land in iCloud Keychain (SE cannot accept external key material — flavor selector absent). Passphrase consumed on decrypt and discarded. |
+| Tab label | **"Create new"** (formerly "Mint new" — renamed throughout for plain language). |
+| Entry points | `Settings → Identities & Keys` (list), plus tappable identity refs from host CRUD (push directly to detail). |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-15-identities-keys-management-design.md`. **Mockup**: `mockups/specs/identities-keys.html`.
 
 ---
 
@@ -260,7 +282,6 @@ Two complementary input mechanisms central to the differentiation:
 - **Settings / preferences surface (UI shape)** — entry point and top-level tree are locked (see Host management & settings access above); still open is the **detailed layout of each settings sub-screen** (App preferences, Security, etc.) — what controls live where, how nested, defaults, copy.
 - **Importing from `~/.ssh/config`** — file picker / paste / share extension, mapping rules (which OpenSSH options map to what), what to do with `Match` blocks / `Include` / Tier-3 options, conflict resolution against existing hosts, post-import review screen. *Host CRUD form itself is locked above; import is a separable problem.*
 - **Exporting to `~/.ssh/config`** — slug generation, label-to-alias resolution, what to emit for Glymr extensions (mosh, Tailscale, glymr.*), fingerprint comments, identity export (public-key only).
-- **Identities & Keys management surface** — the standalone list, per-identity detail screen ("which hosts use this key"), rotation flows, deletion flows. *Inline pick/mint/import sub-flow is locked above; the standalone surface is a separate brainstorm.*
 - **Multi-connection switching semantics** — what happens to the foreground connection when you switch? Does its tmux stay attached? Does mosh keep heartbeating? iOS background-task budget implications. *UI is locked; behavior under the hood is the remaining work.*
 - **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
