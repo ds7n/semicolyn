@@ -39,7 +39,7 @@ Two complementary input mechanisms central to the differentiation:
 | Topic | Decision |
 |---|---|
 | Credential storage | **Native only** — iOS Keychain + Secure Enclave. **No 3rd-party password-manager integration.** Matches Blink / Termius / Prompt 3. |
-| Security posture framing | **Storage is the security story, not per-use friction.** Keys live in iCloud Keychain (E2EE-synced) or Secure Enclave (hardware-bound). The user-facing biometric gate is **app-level** (Face ID once per session). Per-use biometric (`anyUse`) is an opt-in escape hatch for users who deliberately want per-operation friction on specific high-value identities — not the recommended default. (Clarified in `2026-06-15-multi-connection-switching-design.md`.) |
+| Security posture framing | **Storage is the security story, not per-use friction.** Keys live in iCloud Keychain (E2EE-synced) or Secure Enclave (hardware-bound). The user-facing gate is the **device unlock**. App-level Face ID is an **opt-in extra layer**, off by default — revised in `2026-06-16-settings-sub-screens-design.md` (Notes / Mail / Messages don't gate themselves on an unlocked phone; Glymr doesn't either by default). Per-use biometric (`anyUse`) remains the opt-in escape hatch for per-operation friction on specific high-value identities. (Original locked-decision in `2026-06-15-multi-connection-switching-design.md` said app-level Face ID was the default gate; that's superseded.) |
 
 ### Snippets / macros (unified)
 
@@ -346,6 +346,24 @@ Two complementary input mechanisms central to the differentiation:
 
 **Full spec**: see `docs/superpowers/specs/2026-06-16-first-host-onboarding-design.md`. **Mockup**: `mockups/drafts/first-host-onboarding.html`.
 
+### Settings sub-screens (Security · App preferences · About & Help)
+
+| Topic | Decision |
+|---|---|
+| Scope | The three remaining sub-screens after Hosts and Identities & Keys. Each kept narrow; power-user knobs deferred. |
+| Security: App lock | **Opt-in, off by default** — revises the prior "Face ID once per session" framing. When enabled, sub-row exposes **Re-lock timeout** (Immediately / 1m / 5m / 15m; default 5m). Live sessions on re-lock are **hidden, not killed** (killing a mosh would defeat its purpose). Lock view = full-screen sheet with Glymr mark + Unlock button. Falls through to device passcode on Face ID cancel (standard `LAContext`). |
+| Security: Predictor | **Two controls only.** Master toggle (default ON; off = pause, not delete — sketches persist on disk and in iCloud sync) + **Wipe all learning** (destructive, action-sheet confirm). Wipe clears today + rolling + sealed dailies; **the bundled seed survives**. Pattern-exclude, retention window, incognito hosts review all deferred to v1.5+. |
+| Security: Host fingerprints | Drill-down titled **"Host fingerprints"** (avoids `known_hosts` jargon). Flat alphabetical list, hostname + algorithm or key count, swipe-to-forget per entry. No global forget-all, no search, no sort toggle. |
+| App preferences: Keybar | Single drill-down row, passes through to the editable list specced in `2026-06-15-keybar-customization-design.md`. No new UI. |
+| App preferences: iCloud sync | Three category toggles (**Macros · Keybar customizations · Predictor sketches**), all default ON per the iCloud sync scope spec. Toggling off stops bidirectional sync for that category; existing local data untouched. Footer caption telegraphs the on-device encryption story. Per-macro "don't sync" flag lives on the macro itself, not here. |
+| App preferences: Haptics | Single global toggle, default ON. Off disables cursor engage/lift tick, window-switch wrap tick, long-press feedback, modifier-engage feedback. No per-event tuning in v1. |
+| App preferences cuts | No **Appearance** section (one palette in v1 — no light mode, no theme picker). No **Connection defaults** entry (Defaults editor lives under `Settings → Hosts`). No **Predictor display tuning** (confidence floor / row position — defaults from predictor spec carry v1). |
+| About & Help | Five rows: **Tips & Gestures** (secondary path to the same screen the Esc-pill picker opens) · **Privacy statement** (plain-English drill-down; storage-is-the-security framing, sync scope, no telemetry) · **Open source** (alphabetical OSS list with licenses, generated at archive time) · **Send feedback** (`MFMailComposeViewController` with version/build pre-filled; fall-back to copyable email if no Mail set up) · **Glymr 1.0.0 (1234)** read-only row, tap to copy. |
+| About & Help cuts | No **Terms of Service** (no account, no service). No **Rate the app** (friction-y). No **Changelog** (defer until v1.5 has content). |
+| Cross-cutting | All destructive actions use the same action-sheet idiom as Identity delete (destructive row in top group, Cancel in bottom group). Footer captions used sparingly — only Predictor toggle, iCloud sync group, App lock when on. No badges, no "new" pips anywhere in Settings. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-16-settings-sub-screens-design.md`. **Mockup**: `mockups/drafts/settings-sub-screens.html`.
+
 ---
 
 ## Deferred / for future conversation
@@ -353,11 +371,9 @@ Two complementary input mechanisms central to the differentiation:
 - **Keyboard / input UX (remaining sub-topics)** — predictor, keybar scope, keybar interaction model, default slots, modifier behavior, arrow cluster, customization, context detection, per-context layouts, function keys, and degraded mode are now locked. Still open:
   - **v2 custom inputView** — if/when promoted from v1.5+ feedback, design the letter-to-alt-symbol mapping and the held-modifier interaction.
 - **Pill position customization** — left vs right in the keybar (handedness preference); a per-user setting. (Sub-item of the keyboard/input UX topic above.)
-- **Settings / preferences surface (UI shape)** — entry point and top-level tree are locked (see Host management & settings access above); still open is the **detailed layout of each settings sub-screen** (App preferences, Security, etc.) — what controls live where, how nested, defaults, copy.
 - **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
 - **External keyboard support** — shortcut design for the hardware-keyboard case.
-- **Settings sub-screen layouts** — App preferences, Security, About; tree is locked, contents still need design.
 - **Pro / paid version scope** — stance: no foundational functionality behind paid; Pro is for support + enterprise features (audit log being one candidate).
 - **Monetization** — free / one-time / subscription / pro tier (closely related to Pro scope above).
 - **Connection-status banner expanded view** — tap-to-expand latency / mosh frame counts / roam history. Deferred from locked spec.
