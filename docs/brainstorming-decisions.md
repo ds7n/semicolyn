@@ -39,6 +39,7 @@ Two complementary input mechanisms central to the differentiation:
 | Topic | Decision |
 |---|---|
 | Credential storage | **Native only** — iOS Keychain + Secure Enclave. **No 3rd-party password-manager integration.** Matches Blink / Termius / Prompt 3. |
+| Security posture framing | **Storage is the security story, not per-use friction.** Keys live in iCloud Keychain (E2EE-synced) or Secure Enclave (hardware-bound). The user-facing biometric gate is **app-level** (Face ID once per session). Per-use biometric (`anyUse`) is an opt-in escape hatch for users who deliberately want per-operation friction on specific high-value identities — not the recommended default. (Clarified in `2026-06-15-multi-connection-switching-design.md`.) |
 
 ### Snippets / macros (unified)
 
@@ -49,6 +50,8 @@ Two complementary input mechanisms central to the differentiation:
 | Optional placeholders | Placeholders + defaults + remembered last-used values per host are an optional per-macro property. Used by some launcher entries; usually unset on keybar items. |
 
 ### Keybar (accessory bar above iOS keyboard)
+
+> **Layout, customization, and gesture-ownership rules revised in `2026-06-15-keybar-customization-design.md`.** Default locked-left is now Esc pill · Pad · Modifier · Tab (fuses the previous Esc + Win pill, and arrow-pad + Pane pill, into two special widgets). Long-press = edit-slot shortcut removed; long-press is now a bindable gesture on custom slots. Almost every slot is reorderable / removable / movable across the locked-vs-scroll divider via Settings → Keybar. Reverse-bar (locked-right) toggle added.
 
 | Topic | Decision |
 |---|---|
@@ -62,6 +65,8 @@ Two complementary input mechanisms central to the differentiation:
 
 ### Window switching
 
+> **Superseded by `2026-06-15-keybar-customization-design.md`.** The standalone Window pill is gone — its role folds into the fused **Esc pill** (swipe-h = prev/next window, swipe-up = quick window picker, swipe-down = new window with confirm, long-press = unified picker including window list). Terminal-area horizontal swipe remains as a secondary path.
+
 | Topic | Decision |
 |---|---|
 | Affordance | A single **pill** in the keyboard accessory bar (keybar). Stays in same spot when keyboard hidden. |
@@ -74,6 +79,8 @@ Two complementary input mechanisms central to the differentiation:
 | Picker at scale | Past top of screen, hold finger near top edge → auto-scroll. At **≥15 windows**, filter bar auto-appears at top of list (type to filter). |
 
 ### Pane management
+
+> **Superseded by `2026-06-15-keybar-customization-design.md`.** The standalone Pane pill is gone — its role folds into the fused **Pad** (drag = arrow keystrokes, tap = zoom toggle, long-press = arm pane mode + bronze overlay, long-press + swipe-h/v = horiz/vert split, long-press + release = Swap/Close menu). Zoom indicator moves from the keybar to the focused pane's corner-index badge (gains a `⊕` glyph when zoomed). Pane-focus behavior (tap inactive pane = focus) unchanged.
 
 | Topic | Decision |
 |---|---|
@@ -93,7 +100,7 @@ Two complementary input mechanisms central to the differentiation:
 |---|---|
 | North star | **Input that learns the user's vocabulary, never silently rewrites it.** iOS silent autocorrect is off, always. Predictive suggestions are explicit (user must tap a chip to accept). |
 | Surface | **Thin auto-hiding row above the keybar** (~24pt). Hidden when no suggestion clears the confidence floor. Slides in/out on ~150ms spring. Visually distinct from keybar keys. Cannot reflow the keybar. |
-| Engine | Probabilistic data structures (Count-Min Sketch for unigrams + bigrams, Bloom filter for membership). On-device, encrypted at rest, no cloud. |
+| Engine | Probabilistic data structures (Count-Min Sketch for unigrams + bigrams, Bloom filter for membership). On-device, encrypted at rest. **Sketches sync via CloudKit + client-side AES, default ON, opt-out** — the synced data is a lossy frequency fingerprint (not recoverable text), encrypted E2EE. See `2026-06-16-icloud-sync-scope-design.md`. |
 | Storage layout | Hot `today.sketch` + pre-aggregated rolling sketches (7d/30d/90d) + sealed dailies + pinned seed. Queries are O(1): `today ⊕ rolling_<window> ⊕ seed_pinned`. |
 | Seeding | Bundled seed from carapace + tldr + curated dotfiles aggregates. **Pinned, not merged** into user's learned sketches — keeps the privacy story clean and lets seed update across app releases without contaminating user data. |
 | Deference | **Per-prefix gating** — when ≥`top_k` confident learned candidates exist for a prefix, seed entries hide for that prefix entirely. **Per-token weighting** — seed entries always rank below comparable learned entries (`seed_weight ≈ 0.5`). No global cliff; deference is continuous and automatic. |
@@ -272,6 +279,57 @@ Two complementary input mechanisms central to the differentiation:
 
 **Full spec**: see `docs/superpowers/specs/2026-06-15-identities-keys-management-design.md`. **Mockup**: `mockups/specs/identities-keys.html`.
 
+### Multi-connection switching semantics
+
+| Topic | Decision |
+|---|---|
+| State model | Four-state lifecycle: **Active · Live·Awake · Live·Sleeping · Recent**. Awake = client holds sockets / mosh frames; Sleeping = client released resources, trusts can resume; Recent = no live state at all. |
+| App backgrounding | Standard `beginBackgroundTask` only — no entitlement heroics. After iOS suspends: SSH connections demote to Sleeping (TCP gone); mosh stays conceptually Awake (server holds the session). |
+| Foreground return | Eagerly reattach the foreground connection only (mosh resume or SSH reconnect + `tmux attach`). Other connections sit as Sleeping until tapped. |
+| Cold launch | Mosh state persists across cold launch as Sleeping; SSH does not (rolls to Recent). Auto-resume the last-foregrounded mosh on cold launch. |
+| Soft cap | 8 simultaneously Awake. 9th connect silently LRU-demotes an existing Awake to Sleeping. Sleeping count is unbounded. |
+| Memory pressure | LRU sweep of Awake → Sleeping until iOS pressure clears. |
+| Mosh resume | Resume token first; transparent fallback to fresh `mosh-server` bootstrap if server expired. Drop to Recent only on full failure. |
+| Disconnect swipe | Client-only abandon — mosh server times out naturally, tmux session preserved on host. Reconnect within window resumes same session. |
+| `anyUse` policy on wake | Honored literally — Face ID prompt fires on waking a sleeping session whose identity is `anyUse`. |
+| Banner under multi-connection | Banner remains single-subject (foreground only). Background-connection health surfaces as a picker-row dot (amber/red) — no banner intrusion. |
+| Picker visual | Live group shows Awake (solid, green dot) and Sleeping (lower opacity + `zZ` glyph) under one header. Recent group capped at 10, sorted by last-disconnected. |
+| Activity indicators | **No** per-host new-output dot. Dots carry connection-health semantics only. "Notify on command done" deferred to v1.5+. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-15-multi-connection-switching-design.md`. **Mockup**: `mockups/drafts/multi-connection-banner.html`.
+
+### Keybar layout, customization, gesture-ownership (revisit)
+
+| Topic | Decision |
+|---|---|
+| Default locked-left | **Esc pill · Pad · Modifier · Tab** (4 items). Esc pill fuses the old Esc slot + Window pill; Pad fuses arrow-pad + Pane pill. Modifier and Tab are regular slots, movable to scroll by the user. |
+| Esc pill gestures | Tap = Esc · swipe-h = window prev/next · swipe-up = quick window picker · swipe-down = create new window (confirm) · long-press = unified picker (windows · hosts · Connect · Settings). |
+| Pad gestures | Drag = arrow keystrokes · tap = zoom toggle · long-press = arm pane mode (bronze overlay) · long-press + swipe-h = horiz split · long-press + swipe-v = vert split · long-press + release = Swap/Close menu. |
+| Zoom indicator | Lives on the focused pane (corner-index badge gains `⊕`), not in the keybar. |
+| Constraints | Esc pill and Pad cannot leave the locked region. All other slots are reorderable, removable, and movable across the locked-vs-scroll divider. |
+| Customization surface | Settings → Keybar — single editable list with a draggable divider between locked (above) and scroll (below). Per-row swipe-delete. "+ Add" for macros or new custom slots. |
+| Custom slot bindings | Each gesture (tap / swipe-up / swipe-down / long-press) binds to a macro. Horizontal swipes on user slots **deferred to v1.5+** to avoid pan-collision. Long-press-to-edit shortcut removed; edit moves to Settings. |
+| Reverse-bar option | Settings → Keybar → Layout direction: Locked-left / **Locked-right** (left-handed / preference toggle). Pure layout mirror; gesture semantics unchanged. |
+| Gesture ownership | **Touch-down location decides** which recognizer claims the gesture. Esc pill and Pad own their bounds (Blink-style); pan engages from anywhere else. |
+| Macro creation | Record mode (start recording, type the sequence, stop) or Template mode (literal string + inline modifier chord tokens). Created in Launcher or via "Record new" from a slot binding. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-15-keybar-customization-design.md`. **Mockup**: `mockups/drafts/esc-pill.html`.
+
+### iCloud sync scope
+
+| Topic | Decision |
+|---|---|
+| Organizing principle | **Configuration syncs. Behavior / history doesn't** — except predictor sketches, which sync because they're structurally lossy (CMS/Bloom) and the cross-device value is too high to bury. |
+| Macro library | Syncs via CloudKit + client-side AES-256-GCM, default ON. Per-macro "don't sync" flag for sensitive entries. |
+| Keybar customizations | Sync via CloudKit + AES — custom slots, slot order, divider position, reverse-bar toggle. |
+| Predictor sketches | **Sync via CloudKit + AES, default ON, opt-out per device.** Revises the predictor spec's "no cloud" promise. Sketch blobs are multi-MB so CloudKit (not Keychain). |
+| Audit log | **Dropped from v1 entirely.** No user-facing surface, no quiet collection. Code-level stub reserved for a future Pro compliance feature. |
+| New-device restore | Implicit via sync — no separate "restore from iCloud" button. Sign into iCloud → install Glymr → synced state populates. |
+| Snapshot time-travel | Deferred to v1.5+ (point-in-time rollback to a prior sealed daily). |
+| Sync status surface | None in v1 (CloudKit transparent). Add later if usage shows confusion. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-16-icloud-sync-scope-design.md`.
+
 ---
 
 ## Deferred / for future conversation
@@ -280,11 +338,16 @@ Two complementary input mechanisms central to the differentiation:
   - **v2 custom inputView** — if/when promoted from v1.5+ feedback, design the letter-to-alt-symbol mapping and the held-modifier interaction.
 - **Pill position customization** — left vs right in the keybar (handedness preference); a per-user setting. (Sub-item of the keyboard/input UX topic above.)
 - **Settings / preferences surface (UI shape)** — entry point and top-level tree are locked (see Host management & settings access above); still open is the **detailed layout of each settings sub-screen** (App preferences, Security, etc.) — what controls live where, how nested, defaults, copy.
-- **Importing from `~/.ssh/config`** — file picker / paste / share extension, mapping rules (which OpenSSH options map to what), what to do with `Match` blocks / `Include` / Tier-3 options, conflict resolution against existing hosts, post-import review screen. *Host CRUD form itself is locked above; import is a separable problem.*
-- **Exporting to `~/.ssh/config`** — slug generation, label-to-alias resolution, what to emit for Glymr extensions (mosh, Tailscale, glymr.*), fingerprint comments, identity export (public-key only).
-- **Multi-connection switching semantics** — what happens to the foreground connection when you switch? Does its tmux stay attached? Does mosh keep heartbeating? iOS background-task budget implications. *UI is locked; behavior under the hood is the remaining work.*
 - **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
-- **iCloud sync scope (remaining)** — host records, identities, and `known_hosts` are locked in the host config spec. Still open: snippet library, keybar customizations, audit log retention/scope, per-device vs synced predictor sketches.
 - **External keyboard support** — shortcut design for the hardware-keyboard case.
-- **Monetization** — free / one-time / subscription / pro tier.
+- **Settings sub-screen layouts** — App preferences, Security, About; tree is locked, contents still need design.
+- **First-host onboarding flow** — first-launch empty state, tooltips for Glymr-specific concepts. Surfaced after dropping ssh_config import.
+- **Pro / paid version scope** — stance: no foundational functionality behind paid; Pro is for support + enterprise features (audit log being one candidate).
+- **Monetization** — free / one-time / subscription / pro tier (closely related to Pro scope above).
+- **Connection-status banner expanded view** — tap-to-expand latency / mosh frame counts / roam history. Deferred from locked spec.
+
+### Rejected from v1 (v1.5+ candidates pending demand)
+
+- **Importing from `~/.ssh/config`** — debated and dropped. The friction of getting the file onto iOS roughly equals manual entry, and Glymr's host CRUD form is fast. Fallback plan if users grumble: a simple "paste comma/newline-separated hostnames" bulk-add tool. Full import (mapping rules, Match/Include, IdentityFile resolution, post-import review) revisitable if real demand surfaces.
+- **Exporting to `~/.ssh/config`** — dropped alongside import. Lossy roundtrip with Glymr extensions; low priority. Revisit only after import is reconsidered.
