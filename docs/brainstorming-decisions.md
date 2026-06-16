@@ -379,6 +379,23 @@ Two complementary input mechanisms central to the differentiation:
 
 **Full spec**: see `docs/superpowers/specs/2026-06-16-pro-paid-scope-design.md`. **Mockup**: `mockups/drafts/pro-paid.html`.
 
+### Connection-status banner expanded view
+
+| Topic | Decision |
+|---|---|
+| Trigger | Tap any transient banner state (reconnecting · high latency · auth failure · host unreachable · disconnected). **tmux-crashed banner is out of scope** — already has inline actions, never expands. |
+| Layout | **Expand in place** — the banner grows downward; terminal scrolls under. One mental model: the banner *is* the connection-status surface. Auto-collapses when the underlying state returns to healthy. Beats half-sheet (two concepts for one thing) and full-sheet (heavy interruption for a status check). |
+| Two templates | (1) **"Live in trouble"** (amber) — reconnecting / high latency. Stats grid + inline RTT graph (60s rolling, min/max overlay) + actions. mosh-specific rows (frames sent/acked, last roam, network) hide for SSH; SSH-specific keepalive row appears. (2) **"Connection failed"** (red) — auth failure / host unreachable / disconnected. Fault details (DNS / TCP / method / identity / attempts) + red-tinted error strip with the underlying error string verbatim + actions. No graph. |
+| Template 1 actions | **Retry now** (primary, amber) · Copy diagnostics · **Disconnect** (destructive). |
+| Template 2 actions | **Retry** (primary, red) · **Edit host** (pushes to host CRUD) · Copy diagnostics · **Disconnect** (destructive). |
+| Dismissal | Four ways out: tap header to collapse · swipe up on the bottom grab-handle (the handle shows a `↑` chevron — banner came from the top, so up = away) · auto-collapse when state returns to healthy · swipe up on the collapsed banner to dismiss (already-locked persistent-issue dismiss). Consistent rule: **up = away**, never down. |
+| Copy diagnostics | JSON snapshot of visible fields + `copiedAt` timestamp + app version/build + iOS version + device model + banner state + (Template 2) underlying error string. **No redaction** — user explicitly chose to copy. Light haptic + small auto-fading "Copied" toast at the bottom of the expanded panel. |
+| Live updating | Fields refresh once per second while open. Header stamp and `Last seen` row share an observable so they never disagree. RTT graph appends one sample per second, drops oldest past 60s, no inter-sample animation. |
+| Obscured terminal | Accepted — user tapped a "something is wrong" banner; covering the terminal underneath is fine. |
+| Out of scope (v1) | Per-state custom layouts beyond the two templates · editable thresholds · full roam-history log (deferred to v1.5+) · "Switch network" inline action (iOS doesn't allow it programmatically) · "Change identity" inline action (Edit host covers it) · ShareSheet for diagnostics (Copy is enough) · iPad adaptation · localisation. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-16-banner-expanded-design.md`. **Mockups**: `mockups/drafts/banner-expanded-layouts.html` (three layouts compared) · `mockups/drafts/banner-expanded-templates.html` (both templates rendered with example states).
+
 ---
 
 ## Deferred / for future conversation
@@ -389,7 +406,6 @@ Two complementary input mechanisms central to the differentiation:
 - **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
 - **External keyboard support** — shortcut design for the hardware-keyboard case.
-- **Connection-status banner expanded view** — tap-to-expand latency / mosh frame counts / roam history. Deferred from locked spec.
 
 ### Rejected from v1 (v1.5+ candidates pending demand)
 
