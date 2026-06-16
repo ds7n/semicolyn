@@ -364,6 +364,21 @@ Two complementary input mechanisms central to the differentiation:
 
 **Full spec**: see `docs/superpowers/specs/2026-06-16-settings-sub-screens-design.md`. **Mockup**: `mockups/drafts/settings-sub-screens.html`.
 
+### Pro / paid scope
+
+| Topic | Decision |
+|---|---|
+| Posture | Glymr ships into an established category (Blink, Termius, Prompt 3, …). Monetization is **secondary to product quality**. The product is for users; payment is for users who *want* to support development. **No feature that defines the product sits behind a paywall.** |
+| Qualification rule | **A feature qualifies as Pro only if it is cosmetic, optional, or a thank-you. The moment "I need Pro to do X" is a real sentence, the feature is wrong for Pro.** Test future feature ideas against this. |
+| Monetization model | **Free + one-time Pro purchase.** Single non-consumable in-app purchase via StoreKit, Family Sharing on. Price band $5–10 USD (exact decided pre-launch). **No subscription, no Pro+, no Ultimate tier, no trial mode, no time-limited free Pro.** Resolves the README's open `Monetization` thread. |
+| v1 Pro inventory | Three cosmetic / vanity perks: (1) **alternative app icons** via `setAlternateIconName`; (2) **alternative color themes** (light up the moment a second palette is actually designed — v1 ships bell-bronze only); (3) **Supporter badge** in About & Help, visible only to the user. That's the entire inventory. |
+| Entry point | **One row at the top of About & Help.** Reads "Glymr Pro" when free, "Glymr Pro — thanks!" when active. Tapping pushes to a plain settings-style upgrade screen (not a modal, not a full-screen takeover). |
+| Upgrade screen rules | Anchor sentence: *"Glymr is, and will stay, free to use in full."* Included list is **exact** — no vague "and more!" Restore purchase + Family Sharing notice visible without being buried. No countdown, no urgency, no "limited time." |
+| Visibility | **No upsell prompts anywhere else in the app.** Not in onboarding, not after the Nth connection, not on any preference change. No "Pro" lock icons on any feature (there are no features to lock). The About row is the only entry point. |
+| Enterprise (deferred) | **Explicitly out of v1.** Candidate features captured but not designed: **audit log** (compliance — stub already at data layer), **team-shared host configs** (most natural subscription candidate if there ever is one — needs backend), **MDM-friendly configuration**, **centralized policy enforcement**, **SSO into the app**, **sealed org-curated snippet packs**, **concurrent-device licensing / seat management**, **premium support**. None designed; revisit when a real customer asks. Even in an enterprise tier, the qualification rule still applies — enterprise features must be things that *only make sense in an org context*, not solo features pay-walled. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-16-pro-paid-scope-design.md`. **Mockup**: `mockups/drafts/pro-paid.html`.
+
 ---
 
 ## Deferred / for future conversation
@@ -374,8 +389,6 @@ Two complementary input mechanisms central to the differentiation:
 - **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
 - **External keyboard support** — shortcut design for the hardware-keyboard case.
-- **Pro / paid version scope** — stance: no foundational functionality behind paid; Pro is for support + enterprise features (audit log being one candidate).
-- **Monetization** — free / one-time / subscription / pro tier (closely related to Pro scope above).
 - **Connection-status banner expanded view** — tap-to-expand latency / mosh frame counts / roam history. Deferred from locked spec.
 
 ### Rejected from v1 (v1.5+ candidates pending demand)
