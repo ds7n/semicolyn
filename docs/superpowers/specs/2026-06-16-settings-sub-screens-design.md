@@ -178,18 +178,28 @@ Haptics                             [●─○]
 
 ## About & Help
 
-Five rows. Static-feeling reference content.
+Six rows. Static-feeling reference content.
 
 ```
-Tips & Gestures                         >
+✦  Glymr Pro                            >       ← amended; see Pro spec
+─────────────────────────────────────
+?  Tips & Gestures                      >
 ─────────────────────────────────────
 Privacy statement                       >
 Open source                             >
 ─────────────────────────────────────
 Send feedback                           ↗
 ─────────────────────────────────────
-Glymr 1.0.0 (1234)                          ← tap to copy
+Glymr 1.0.0 (1234)                              ← tap to copy
+                                  (Supporter ✦ when Pro is active)
 ```
+
+### Glymr Pro
+
+Top row. Added in
+`docs/superpowers/specs/2026-06-16-pro-paid-scope-design.md`. Reads
+**"Glymr Pro"** when the user is free, **"Glymr Pro — thanks!"** when
+Pro is active. Pushes to the upgrade screen specced there.
 
 ### Tips & Gestures
 
