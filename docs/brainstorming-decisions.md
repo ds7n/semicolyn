@@ -330,6 +330,22 @@ Two complementary input mechanisms central to the differentiation:
 
 **Full spec**: see `docs/superpowers/specs/2026-06-16-icloud-sync-scope-design.md`.
 
+### First-host onboarding & Tips & Gestures
+
+| Topic | Decision |
+|---|---|
+| Posture | **No forced walkthrough, no JIT tooltips.** Coach marks, spotlight overlays, animated callouts all rejected. Glymr-specific gesture vocabulary is documented in one voluntary reference screen, openable from two entry points. |
+| Empty state (no hosts) | Centered **"Add your first host"** CTA (bell-bronze, large tap target) + one-line micro-copy *("You'll need a hostname, username, and either a password or key.")* + dim secondary row: **Settings · Tips & Gestures**. Keybar hidden (nothing to act on). Empty state disappears once any host exists; does not return on later "all hosts deleted." |
+| Esc-pill picker (post-connection) | Existing rows (Live → Recent → + Connect → ⚙ Settings) gain **? Tips & Gestures** as a new bottom row. Same destination as the empty-state link. Always present — no badge, no "unread" indicator. |
+| Screen format | Single scrollable page. Top-anchored close button. Six sections: **The keybar · The Esc pill · The Pad · Context-aware promotions · Modifiers · Fn keys.** Each section = short prose + one small static SVG diagram. Identical content from both entry points; no first-time-vs-returning branching. |
+| Visual treatment | Static SVG inline per section. No animation, no autoplay, no looping clips. Bronze accent strokes on cool-dark fill. |
+| State tracking | **None.** No read state, no analytics, no CloudKit sync of "have you seen this." Entry points symmetric and permanent (or, for empty state, until first host). |
+| Label rationale | **"Tips & Gestures"** chosen over "Getting Started" (temporally wrong once user has started), "Help" (negative connotation), "Guide" (sounds like a full manual). Telegraphs content honestly; "Tips" leaves room to add non-gesture material later without relabeling. |
+| Cut from tooltips | Predictor row (self-explanatory by existing); keybar swipe-up/down secondaries (covered by keybar orientation paragraph; dim glyphs on each key already telegraph affordance). |
+| Out of scope (v1) | JIT tooltips, demo PTY / sample session, prefilled example host, multi-page swipe tour, unread badges, localisation. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-16-first-host-onboarding-design.md`. **Mockup**: `mockups/drafts/first-host-onboarding.html`.
+
 ---
 
 ## Deferred / for future conversation
@@ -342,7 +358,6 @@ Two complementary input mechanisms central to the differentiation:
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
 - **External keyboard support** — shortcut design for the hardware-keyboard case.
 - **Settings sub-screen layouts** — App preferences, Security, About; tree is locked, contents still need design.
-- **First-host onboarding flow** — first-launch empty state, tooltips for Glymr-specific concepts. Surfaced after dropping ssh_config import.
 - **Pro / paid version scope** — stance: no foundational functionality behind paid; Pro is for support + enterprise features (audit log being one candidate).
 - **Monetization** — free / one-time / subscription / pro tier (closely related to Pro scope above).
 - **Connection-status banner expanded view** — tap-to-expand latency / mosh frame counts / roam history. Deferred from locked spec.
