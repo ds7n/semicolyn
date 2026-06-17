@@ -15,7 +15,7 @@ These are protocol-layer or first-trust UX questions whose answers partly determ
 | # | Item | Severity | Status | Resolution |
 |---|---|---|---|---|
 | 1 | **Terminal emulator scope.** Escape-sequence level (xterm-256? truecolor?), terminal **bell** (silent / haptic / sound / flash), **OSC 52** clipboard policy, **OSC 0/2** title handling, **mouse-mode** (`set mouse=a`) passthrough. Cursor-placement spec quietly assumes mouse mode exists; nothing states whether real mouse reporting is supported. | critical | resolved | (a, c, d, e) `2026-06-17-terminal-emulator-scope-design.md`; (b) `2026-06-17-terminal-feedback-design.md`. |
-| 2 | **SSH host-key TOFU + mismatch UX.** Host-config schema flags a mismatch modal as "deferred to CRUD spec"; CRUD doesn't pick it up. First-trust prompt format on the very first connection isn't documented anywhere as a UI flow. | critical | open | — |
+| 2 | **SSH host-key TOFU + mismatch UX.** Host-config schema flags a mismatch modal as "deferred to CRUD spec"; CRUD doesn't pick it up. First-trust prompt format on the very first connection isn't documented anywhere as a UI flow. | critical | resolved | `2026-06-17-host-key-trust-design.md` |
 | 3 | **SSH algorithm allowlist.** No spec declares the v1 ciphers / MACs / KEX / HostKey allowlist. "Modern OpenSSH defaults" depends on the SSH stack (libssh2 vs SwiftSSH vs Network.framework). | critical | open | — |
 
 ## Should address before implementation
