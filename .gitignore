@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 True Positive LLC
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Rust / Cargo
+/target/
+# Cargo.lock IS committed — this crate ships into a shipped app binary.
+
+# SwiftPM
+/.build/
+.swiftpm/
+
+# CI build artifacts (not source)
+/GlymrSSHCore.xcframework/
+# Generated UniFFI Swift wrapper (produced by scripts/build-xcframework.sh)
+/Sources/GlymrSSHCoreFFI/
+
+# Secrets / data
+.env
+/data/
