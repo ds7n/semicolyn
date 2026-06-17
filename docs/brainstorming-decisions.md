@@ -400,12 +400,14 @@ Two complementary input mechanisms central to the differentiation:
 
 ## Deferred / for future conversation
 
-- **Keyboard / input UX (remaining sub-topics)** — predictor, keybar scope, keybar interaction model, default slots, modifier behavior, arrow cluster, customization, context detection, per-context layouts, function keys, and degraded mode are now locked. Still open:
+- **Keyboard / input UX (remaining sub-topics)** — predictor, keybar scope, keybar interaction model, default slots, modifier behavior, arrow cluster, customization, context detection, per-context layouts, function keys, degraded mode, **external keyboard**, and **iPad scope** are now locked. Still open:
   - **v2 custom inputView** — if/when promoted from v1.5+ feedback, design the letter-to-alt-symbol mapping and the held-modifier interaction.
-- **Pill position customization** — left vs right in the keybar (handedness preference); a per-user setting. (Sub-item of the keyboard/input UX topic above.)
-- **iPad navigation** — keybar pill model probably needs adaptation. iPad has more horizontal real estate; rethink whether pills should live elsewhere.
+- **iPad-native surfaces** — multi-window via `UISceneSession` (Stage Manager / Split View), landscape-specific layouts (wider keybar, side-by-side panes as a layout option), trackpad / pointer integration reconciling Magic Keyboard pointer with the touch-oriented cursor halo. v1 ships iPad-compatible (single window, size-class-aware) per `docs/superpowers/specs/2026-06-17-ipad-scope-design.md`.
+- **In-app hardware-Esc rebind** — deferred to v1.5; v1 uses iOS's system-wide Caps-as-Esc remap. Per `docs/superpowers/specs/2026-06-17-external-keyboard-design.md`.
+- **Custom Cmd-shortcut remapping** — deferred to v1.5+; v1 ships a fixed 15-action map.
+- **Font-size shortcuts (⌘+ / ⌘−)** — deferred; depends on a font-size feature, not specced yet.
+- **Scrollback navigation shortcuts (⌘Home / ⌘End)** — deferred; revisit when scrollback ergonomics get their own pass.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
-- **External keyboard support** — shortcut design for the hardware-keyboard case.
 
 ### Rejected from v1 (v1.5+ candidates pending demand)
 
