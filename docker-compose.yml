@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 True Positive LLC
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Linux fast-loop for Glymr's platform-agnostic tier.
+#   docker compose build dev
+#   docker compose run --rm dev cargo test -p glymr-ssh-core
+#   docker compose run --rm dev swift test
+# Heavy build artifacts live in named volumes so the host bind-mount stays
+# source-only; the container runs as the host UID so any lockfiles it writes
+# (Cargo.lock / Package.resolved) remain host-editable.
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: glymr-dev
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    working_dir: /work
+    environment:
+      CARGO_TARGET_DIR: /work/target
+    volumes:
+      - .:/work
+      - cargo-target:/work/target
+      - swift-build:/work/.build
+      - cargo-registry:/usr/local/cargo/registry
+
+volumes:
+  cargo-target:
+  swift-build:
+  cargo-registry:
