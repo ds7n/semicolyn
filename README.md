@@ -6,7 +6,7 @@ iOS SSH/mosh client. Differentiator: terminal work that feels native on a touch 
 
 ## Status
 
-**Phase:** Brainstorming. No code yet.
+**Phase:** Design complete, implementation not yet started. All v1 subsystems have locked specs; the implementation roadmap and Phase 0 plan are written in `docs/superpowers/plans/`. No code yet.
 
 **Locked so far:**
 - Concept, product positioning, security posture
@@ -55,6 +55,9 @@ iOS SSH/mosh client. Differentiator: terminal work that feels native on a touch 
 - **tmux session naming + multi-device:** sessions named `glymr-<accountHash>` (first 8 hex chars of SHA-256 over the iCloud-Keychain-backed CloudKit key already used by the storage backbone). Devices signed into the same Apple ID **share the session** by default — start vim on iPad, switch to iPhone, keep typing. Esc-pill picker swipe-action set expands with **Disconnect & end session** (kills server-side tmux, boots other attached devices with a "Session ended from another device" banner) and **Connect in new session** (one-off `glymr-<accountHash>-<uuid>`; produces a separate picker entry labeled `<host> · alt N`). Raw-PTY mode opts out of this entire spec. No automatic GC of stale alt sessions in v1. Full spec: `docs/superpowers/specs/2026-06-17-tmux-session-design.md`.
 - **Screen-capture protection:** calibrated for SSH-client norms, not banking-app paranoia. **App-switcher overlay** always on (swap to a Glymr-branded view on background so terminal content doesn't leak into the multitasking thumbnail). **Screen-recording blank** is a Settings → Security toggle, **default OFF** (terminal demos and screencasts are common, legitimate uses); when on, panes blank during `UIScreen.isCaptured` while chrome stays visible. **No screenshot toast** — iOS can't block, and a toast is theater. About & Help → Privacy is honest about what Glymr does and what iOS won't let any app do. Full spec: `docs/superpowers/specs/2026-06-17-screen-capture-protection-design.md`.
 - **Privacy statement (App Store + in-app content):** v1 draft for About & Help → Privacy statement. Headline: Glymr collects **nothing** — no analytics, telemetry, crash reporting, ads, third-party SDKs, accounts. Documents storage backbone (iCloud Keychain / SE for identities; CloudKit private DB + client-side AES for host configs, macros, keybar customizations; local-only for recents and live state); iCloud sync (per-category toggles, E2EE-equivalent for all synced categories); third parties (none); screen capture (matches that spec); identity survival on uninstall (iCloud survives reinstall, SE does not). 17+ rating; change-notice policy; `hello@glymr.app` contact. Same content mirrored to the App Store privacy section and `glymr.app/privacy`. Maintenance triggers baked in. Full spec: `docs/superpowers/specs/2026-06-17-privacy-statement-design.md`.
+
+- **Engineering stack:** Rust SSH core (`russh`) bridged to Swift via UniFFI; tmux `-CC` control mode; crypto backend `aws-lc-rs`; SwiftTerm terminal engine (recommended). Build/CI on GitHub Actions macOS runners + a local Swift-on-Linux fast loop. Full rationale + dependency-ordered phase sequence: `docs/superpowers/plans/2026-06-17-glymr-implementation-roadmap.md`.
+- **License:** GPL-3.0-only + `LICENSE.IOS` App Store covenant; copyright **True Positive LLC**. Open-source-plus-paid-Pro model (Blink precedent).
 
 **Unresolved / needs more brainstorm:**
 - *(nothing currently flagged — all major v1 subsystems have a locked spec)*
