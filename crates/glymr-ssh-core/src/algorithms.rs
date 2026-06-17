@@ -62,8 +62,16 @@ pub(crate) fn build_preferred(allow_legacy: bool, allow_deprecated: bool) -> Pre
         cipher_algs.push(cipher::AES_128_CBC);
     }
 
-    // Tier 3 append is added in Task 3.
-    let _ = allow_deprecated;
+    // Tier 3 — legacy & risky (per-host `glymr.allowDeprecatedAlgorithms`).
+    // Every connection that negotiates one of these shows a warning (Phase 1b
+    // uses `is_tier3` to detect it). hmac-sha1-96 is spec'd here but absent from
+    // russh 0.61 (omitted).
+    if allow_deprecated {
+        kex_algs.push(kex::DH_G14_SHA1);
+        kex_algs.push(kex::DH_GEX_SHA1);
+        mac_algs.push(mac::HMAC_SHA1);
+        host_keys.push(Algorithm::Rsa { hash: None }); // ssh-rsa (SHA-1)
+    }
 
     Preferred {
         kex: Cow::Owned(kex_algs),
@@ -72,6 +80,23 @@ pub(crate) fn build_preferred(allow_legacy: bool, allow_deprecated: bool) -> Pre
         mac: Cow::Owned(mac_algs),
         compression: Cow::Borrowed(&[compression::NONE]),
     }
+}
+
+/// Wire names of the Tier-3 algorithms Glymr can offer. After a handshake,
+/// Phase 1b matches each negotiated algorithm name against this set to decide
+/// whether to raise the outdated-cryptography warning (ssh-algorithms-design
+/// §"Tier 3 warning UX"). hmac-sha1-96 is spec'd Tier 3 but absent from russh
+/// 0.61, so it is not listed here.
+pub(crate) const TIER3_WIRE_NAMES: &[&str] = &[
+    "diffie-hellman-group14-sha1",
+    "diffie-hellman-group-exchange-sha1",
+    "ssh-rsa",
+    "hmac-sha1",
+];
+
+/// True if `name` (a negotiated algorithm's wire name) is a Tier-3 algorithm.
+pub(crate) fn is_tier3(name: &str) -> bool {
+    TIER3_WIRE_NAMES.contains(&name)
 }
 
 #[cfg(test)]
@@ -124,6 +149,27 @@ mod tests {
         // legacy must NOT pull in Tier 3
         assert!(!kex_wire(&p).contains(&"diffie-hellman-group14-sha1"));
         assert!(!key_wire(&p).contains(&"ssh-rsa"));
+    }
+
+    #[test]
+    fn deprecated_toggle_adds_tier3_only() {
+        let p = build_preferred(false, true);
+        assert!(kex_wire(&p).contains(&"diffie-hellman-group14-sha1"));
+        assert!(kex_wire(&p).contains(&"diffie-hellman-group-exchange-sha1"));
+        assert!(mac_wire(&p).contains(&"hmac-sha1"));
+        assert!(key_wire(&p).contains(&"ssh-rsa"));
+        // deprecated must NOT pull in Tier 2
+        assert!(!cipher_wire(&p).contains(&"aes256-cbc"));
+    }
+
+    #[test]
+    fn tier3_classifier_flags_negotiated_names() {
+        assert!(is_tier3("ssh-rsa"));
+        assert!(is_tier3("hmac-sha1"));
+        assert!(is_tier3("diffie-hellman-group14-sha1"));
+        assert!(is_tier3("diffie-hellman-group-exchange-sha1"));
+        assert!(!is_tier3("curve25519-sha256"));
+        assert!(!is_tier3("aes256-gcm@openssh.com"));
     }
 
     #[test]
