@@ -396,6 +396,186 @@ Two complementary input mechanisms central to the differentiation:
 
 **Full spec**: see `docs/superpowers/specs/2026-06-16-banner-expanded-design.md`. **Mockups**: `mockups/drafts/banner-expanded-layouts.html` (three layouts compared) · `mockups/specs/banner-expanded-templates.html` (both templates rendered with example states).
 
+### iPad scope (v1)
+
+| Topic | Decision |
+|---|---|
+| Posture | **Universal iPhone + iPad binary, iPad-compatible not iPad-native.** Same UX rendered in a single iPad window, size-class-aware so nothing looks wrong at iPad size. No iPad-specific affordances. |
+| In v1 | Software keyboard works the same way as iPhone (incl. floating mini and split keyboard). External keyboard supported regardless of device. Every v1 mockup must render reasonably at iPad size; layouts that break need a size-class branch in the same spec. |
+| Deferred to v1.5+ | `UISceneSession` multi-window (Stage Manager / Split View), landscape-specific layouts (wider keybar, side-by-side panes), trackpad / pointer integration. Apple Pencil not considered. |
+| Revisit trigger | Quantitative iPad share of v1 active users + qualitative feedback that iPad ergonomics block real work. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-ipad-scope-design.md`.
+
+### External keyboard support
+
+| Topic | Decision |
+|---|---|
+| Trigger | Bluetooth / USB-C keyboard on iPhone, Magic Keyboard / Smart Keyboard Folio on iPad. iOS suppresses the software keyboard; Glymr adapts. |
+| Keybar | Stays visible as **compact floating bar** (Esc pill · Pad · Modifier · Tab) above the home indicator. Predictor strip governed independently. App preferences toggle to hide keybar entirely. |
+| Passthrough | Letters / numbers / symbols / arrows / Tab / Esc raw-byte to the terminal. **Ctrl / Option / Shift become real held modifiers** — no sticky dance. The headline win of HW keyboard support. |
+| Esc handling | Magic Keyboards mostly lack Esc — documented in Tips & Gestures: use iOS Settings → General → Keyboard → Hardware Keyboard → Caps Lock → Escape. In-app Esc rebind deferred to v1.5. |
+| Cmd shortcuts | **18 actions / 20 shortcuts.** `⌘T` new window, `⌘W` close, `⌘1…9` switch, `⇧⌘[`/`⇧⌘]` prev/next window, `⌘[`/`⌘]` prev/next pane, `⌘D`/`⌘\|` vertical split, `⇧⌘D`/`⌘-` horizontal split, `⌘F` find, `⌘K` clear, `⌘C`/`⌘V` copy/paste, `⇧⌘N` new connection, `⇧⌘R` reconnect, `⇧⌘P` macro launcher, `⌘,` settings, `⌘?` Tips & Gestures, `⌘+`/`⌘-`/`⌘0` font size. iOS auto-renders the discoverability HUD via `UIKeyCommand`. |
+| "Only handle" rule | The on-screen Esc-pill picker remains the only on-screen handle to Settings. Hardware Cmd-shortcuts (`⌘,` and friends) are off-screen and don't violate that rule. |
+| Macro vs shortcut collision | **System shortcut wins.** Macros are touch-surface bindings; Cmd-shortcuts route through `UIKeyCommand` at a higher layer. No warning in v1. |
+| Deferred | In-app Esc rebind, custom Cmd-shortcut remap, scrollback nav shortcuts, hardware F-row passthrough. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-external-keyboard-design.md`.
+
+### Color theming plumbing
+
+| Topic | Decision |
+|---|---|
+| API shape | **Single-layer semantic-token public API.** UI code reads `Color.theme.surface.bg`, `Color.theme.bell.edge`, etc. — nested namespace via structs, idiomatic SwiftUI. Never hex literals in consumer code. |
+| Theme file shape | Each theme is one Swift file. Inside it: `private let` palette constants with human-readable names (`bronze500`, `coolDarkAnchor`, `patina500`), mapped into a `Theme(...)` value of semantic tokens. Palette constants are file-private; only the semantic `Theme` is exported. Two semantic tokens that share a color reference the same private constant — drift-proof. |
+| Active theme | Held in a SwiftUI environment value. Runtime switching, no rebuild. v1 ships only `bellBronze`. Pro picker plumbing exists but is gated by entitlement and hidden when only one theme is registered. |
+| Mockup HTML | Existing mockups stay at palette-level CSS variables (reference artifacts, not consumer code). New mockups going forward use semantic CSS var names mirroring the registry. No retrofit pass. |
+| Out of scope (v1) | ANSI 16-color terminal palette theming (separate axis, deferred — Solarized/Dracula/Gruvbox-style alt palettes are a future Pro perk). Light mode. User-authored themes. Per-host theme overrides. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-design-tokens-design.md`.
+
+### Terminal feedback (bell)
+
+| Topic | Decision |
+|---|---|
+| Visual bell | **Halo pulse** on the pane that rang. `bell.edge` token (Bell Bronze maps to `bronze500`), ~3–4pt blur radius outward from the pane border, single 700ms ease-in/out (250 / 200 / 250), 30–35% peak opacity. Outline only, no interior fill. No traveling sweep. |
+| Rapid-bell behavior | Halo doesn't re-trigger from zero; holds at peak until the bell stream goes quiet for ~400ms, then fades. A busy `tput bel` loop produces one held glow, not strobing. |
+| Multi-pane | Halo appears on **the pane that rang**, not always the focused pane. Lets background-task users see which pane finished. |
+| Haptic | `UIImpactFeedbackGenerator(style: .soft)` — Apple's gentlest impact. Rate-limited ~500ms. Respects the App preferences → Haptics master toggle. |
+| Defaults | Visual ON, haptic OFF. |
+| Audio | **Rejected with prejudice.** No sound option, ever. iOS users expect notifications from notifications; a remote `\x07` playing a ding is alien. |
+| Settings | App preferences → Terminal → Feedback. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-terminal-feedback-design.md`.
+
+### Terminal emulator scope
+
+| Topic | Decision |
+|---|---|
+| Advertised TERM | `TERM=xterm-256color` + `COLORTERM=truecolor`. 256-color baseline, opportunistic 24-bit rendering when apps emit `\x1b[38;2;R;G;Bm` / `\x1b[48;2;R;G;Bm`. Same as Blink / Termius / Prompt 3 / iTerm2 / Alacritty. |
+| OSC 52 (clipboard) | **Allowed by default, per-host toggle to disable.** `glymr.osc52.allow` in the schema, default `true`. Disabled means the write sequence is parsed and dropped silently. **Read sequences (`\x1b]52;c;?\x07`) never honored regardless of the toggle** — sending the user's clipboard to a remote is a separate boundary v1 doesn't cross. |
+| OSC 0/2 (title) | Captured per window, surfaced only in the **Esc-pill picker Live group as a dim suffix** (`build-01 — ~/src/glymr`). Title truncates first, window name never. Nowhere else. |
+| Mouse mode | **Hybrid.** Modes 1000 / 1002 / 1003 / 1006 / 1015 supported. In a mouse-active pane: taps forward as mouse events (SGR encoding), drag forwards as motion, two-finger scroll forwards as wheel events. **Cursor halo and iOS long-press selection auto-suspend in that pane only.** Bronze 4pt indicator at the pane's top-right interior corner. All other gestures (keybar, Esc pill, etc.) work. Mouse mode is per-pane. |
+| Closed-set policy | Glymr's negotiation list contains only classified algorithms / sequences. New ones wait for an app update. |
+| Out of scope (v1) | Bracketed paste (likely-add), Sixel / iTerm2-inline-image / Kitty graphics, OSC 8 hyperlinks. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-terminal-emulator-scope-design.md`.
+
+### Terminal UX additions
+
+| Topic | Decision |
+|---|---|
+| Font size | Pinch-to-zoom changes the active pane's font size (lifetime of window). App preferences → Terminal → Font size slider, 9–24pt in 1pt increments, default **13pt**. Hardware shortcuts `⌘+` / `⌘-` / `⌘0`. Predictor strip + keybar **do not** scale (fixed at system text sizes for tap-target reliability). |
+| URL tap-to-open | Auto-detect `http://`, `https://`, `ssh://`. Brief underline on touch-down confirms tappable; **lift within 250ms and ≤10pt drift opens**. `ssh://` opens host picker prefilled. Wrapped URLs join across the row break only when first part ends mid-token. Suppressed in mouse-mode panes. |
+| Cursor | Three styles: **Block** (default), Underline, Bar. **Blink off** by default. DECSCUSR (`\x1b[<n> q`) honored — vim's runtime cursor-shape sequences temporarily override per pane. Cursor color uses `terminal.fg` token. |
+| Scrollback | tmux mode: tmux owns `history-limit`. Raw-PTY mode: default **5000 lines per pane**, slider to 1000 / 2000 / 5000 / 10000 / unlimited (with memory caveat for unlimited). |
+| Resize policy | `SIGWINCH` on visible-grid change incl. rotation (portrait↔landscape↔upside-down). Debounced to ~10Hz. Scrollback reflows; selection translates; mouse coords translate. iPhone-landscape-with-keyboard-up is documented as cramped, not compensated for. |
+| Port-forward status | Static-config forwards surface in the Esc-pill picker Live row as expandable rows with green / red status dot + inline toggle to disable without disconnecting. No banner for failures (per-forward, not per-connection). Ad-hoc forwards (without editing the host record) deferred to v1.5+. |
+| Settings home | App preferences → Terminal: Font size · Cursor · Scrollback (raw-PTY mode) · Feedback. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-terminal-ux-additions-design.md`.
+
+### SSH host-key trust UX
+
+| Topic | Decision |
+|---|---|
+| Default policy | `strictHostKeyChecking = ask`. Explicit user confirm on first trust, explicit user confirm on key change. Tier 2 schema lets a power user set `accept-new` or `no` per host. |
+| First-trust modal | Host label + key type + SHA256 fingerprint + body line ("Verify this matches what your administrator gave you"). Actions: **Trust & Connect** (primary, bronze) / Cancel. No biometric — device unlock is the gate. |
+| Mismatch modal | Red header strip ("⚠ Host key changed"). Body shows Last seen vs Now offering fingerprints. Three actions: Cancel · Edit host (for "I aimed at the wrong server") · Replace key & connect (**requires secondary action-sheet confirm**, matches identity-delete pattern). |
+| Per-algorithm | Each (host, key type) trusted independently. Key change on ed25519 doesn't invalidate the rsa-sha2-512 entry. |
+| Storage | iCloud Keychain `known_hosts` per `host-config-model`. Multi-device sync means device B doesn't re-prompt for hosts device A already trusted. |
+| Forget-and-retry path | Settings → Security → Host fingerprints → swipe-to-forget. After forget, the next connection fires first-trust as if brand new. |
+| Out of scope (v1) | SSHFP DNSSEC, CA-signed host certs (separate concern from client cert auth), `known_hosts` bulk import. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-host-key-trust-design.md`.
+
+### SSH algorithm allowlist
+
+| Topic | Decision |
+|---|---|
+| Model | **Four-tier closed-set.** Glymr only negotiates classified algorithms; unclassified wait for an app update. |
+| Tier 1 — silent | Modern + post-quantum. KEX: `sntrup761x25519`, `mlkem768x25519`, `curve25519-sha256`, `ecdh-nistp{256,384,521}`, `dh-group{16,18}-sha512`. HostKey: `ed25519`, `rsa-sha2-{512,256}`, `ecdsa-nistp{256,384,521}` + their cert variants. Cipher: `chacha20-poly1305`, `aes-gcm`, `aes-ctr`. MAC: SHA-2 with ETM preferred. |
+| Tier 2 — per-host opt-in, no warning | `glymr.allowLegacyAlgorithms`. Adds: `dh-group14-sha256`, `dh-gex-sha256`, `aes-cbc`. |
+| Tier 3 — per-host opt-in, **warns every connect** | `glymr.allowDeprecatedAlgorithms`. Adds: `dh-group14-sha1`, `dh-gex-sha1`, `ssh-rsa` (SHA-1 + cert variant), `hmac-sha1`. First connect with Tier 3 = modal; subsequent = persistent amber banner reusing the expanded-template chrome. |
+| Tier 4 — never offered | `arcfour*`, `3des-cbc`, `blowfish-cbc`, `cast128-cbc`, `hmac-md5`, `ssh-dss`, `dh-group1-sha1`. No toggle, no override path in v1. |
+| Override granularity (v1) | Two per-host toggles. Fine-grained per-algorithm control (Tier 3 host-config schema option) stays deferred to v1.5+. |
+| Maintenance | Review triggers baked into the spec: every OpenSSH major release, every Glymr major release, on any published practical attack. No separate process doc. References: Mozilla SSH guidelines, OpenSSH release notes, NIST SP 800-52 / 800-57. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-ssh-algorithms-design.md`.
+
+### SSH certificate auth (client-side, v1)
+
+| Topic | Decision |
+|---|---|
+| Scope | Client-side cert presentation. Glymr does **not** issue, sign, or generate certs — that's the user's CA's job. |
+| Schema | Identity gains optional `cert.{blob, cachedMetadata}`. Additive; existing records without `cert` unchanged. `cachedMetadata` regenerated on import. |
+| Import | The existing "Import existing" tab of the identity half-sheet gains an optional **Certificate (optional)** row below the private-key field. Validates that the cert's underlying pubkey matches the imported key; Save disabled on mismatch. |
+| Identity detail | New collapsible **Certificate** section: keyId, principals, validity window, CA fingerprint, critical options, extensions. `cert` chip on the identity list + amber `expires Nd` / red `expired` chip when within 14 days. |
+| Auth flow | Cert present + not expired → `<cert> + <key>` to the SSH stack. Cert present + expired → connect refused; **no silent fallback** to bare key (would surprise the user — their CA-signed identity suddenly auths as a different user). No cert → existing bare-key behavior. |
+| Algorithm allowlist intersection | Cert variants of currently-allowed signature algos are in Tier 1 (`ed25519-cert-v01`, `rsa-sha2-{512,256}-cert-v01`, `ecdsa-nistp{256,384,521}-cert-v01`). `ssh-rsa-cert-v01` is behind the Tier 3 toggle. |
+| `forwardAgent` removal | **`forwardAgent` removed entirely from the schema.** Glymr does not support agent forwarding. Multi-hop via `ProxyJump` (already in Tier 1). Git-on-remote: deploy keys or session-scoped creds. In-app ephemeral agent deferred to v1.5+ if demand warrants. |
+| Out of scope (v1) | Rotation wizard (v1.5 alongside `ssh-copy-id`), auto-renewal from CA APIs, Glymr-side cert generation, per-host cert overrides, PEM/DER format conversion. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-ssh-cert-auth-design.md`.
+
+### Jump-host chain authentication
+
+| Topic | Decision |
+|---|---|
+| Hard constraint | SE `anyUse` policy requires a fresh biometric per signing op. Cannot be coalesced. A chain with two `anyUse` hops will, by necessity, prompt twice. UX is framing around an unavoidable fact. |
+| 0 or 1 `anyUse` in chain | **Silent.** No summary modal. Single-prompt case is expected behavior. |
+| ≥2 `anyUse` in chain | **Pre-flight summary modal** before any socket opens. Lists target + each `anyUse` hop with its identity label. Continue / Cancel. After Continue, Face ID prompts fire serially as each hop authenticates. |
+| Mid-chain cancellation | User cancels iOS-native biometric → Glymr closes the in-flight SSH socket and any earlier-hop sockets, marks the connection failed, fires the existing connect-failed banner with "Authentication cancelled at hop {n}." |
+| Partial-success state | None. A chain either fully establishes or fully fails. |
+| Caching | None. No "don't ask again" affordance. The whole point of `anyUse` is no caching. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-chain-auth-design.md`.
+
+### tmux session naming + multi-device
+
+| Topic | Decision |
+|---|---|
+| Naming | `glymr-<accountHash>` where `accountHash` = first 8 hex chars of SHA-256 over the iCloud-Keychain-backed CloudKit key already used by the storage backbone. Stable across reboots / reinstalls; identical across devices on the same Apple ID; different across different Apple IDs. |
+| Default behavior | **Shared session per Apple ID.** Devices signed into the same Apple ID share the session — start vim on iPad, switch to iPhone, keep typing. Both clients attached via `tmux -CC`; tmux mirrors. |
+| New picker swipe actions | **Disconnect & end session** kills server-side tmux (action-sheet confirm) and boots other attached devices with a "Session ended from another device" banner. **Connect in new session** opens a one-off `glymr-<accountHash>-<short-uuid>`; produces a separate picker entry labeled `<host> · alt N`. |
+| Per-host configurability | None. Naming convention is the same on every host. |
+| Raw-PTY mode | Opts out — no session abstraction; each device's connection is independent. |
+| Stale alt sessions | Persist on the host until manually ended (Disconnect & end session, or raw SSH + `tmux kill-session`). **No automatic GC in v1.** |
+| Apple ID change | Old session orphans on the host; new Apple ID gets a new `accountHash`. Documented in Tips & Gestures. |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-tmux-session-design.md`.
+
+### Screen-capture protection
+
+| Topic | Decision |
+|---|---|
+| Posture | Calibrated for SSH-client norms, **not banking-app paranoia**. Terminal recording / mirroring is a common legitimate use case (screencasts, demos, pair programming). |
+| App-switcher overlay | **Always on, no toggle.** On background, swap to a Glymr-branded view (bronze mark on `surface.bg`) before iOS captures the switcher thumbnail. Cheap, standard, no downside. Differentiator vs Blink / Prompt 3. |
+| Screen-recording blank | App preferences → Security toggle, **default OFF**. When on and `UIScreen.isCaptured` is true, terminal panes blank with a small caption; keybar / predictor strip / chrome stay visible. The user who *wants* to mirror to TV is the default; the user who *needs* the protection flips the toggle. |
+| Screenshot toast | **Skipped.** iOS provides detection but not blocking; a toast that says "you can't actually prevent screenshots" is performative. |
+| Privacy framing | About & Help → Privacy is honest about what Glymr does and what iOS will not let any app do. |
+| Out of scope (v1) | Secure-text-field screenshot hacks (fragile, defeats user expectations). Per-pane sensitive flag (v1.5+ candidate; explicitly **not** a Pro perk — Pro is cosmetic, not security). |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-screen-capture-protection-design.md`.
+
+### Privacy statement
+
+| Topic | Decision |
+|---|---|
+| Placement | About & Help → Privacy statement (full-screen push, scrollable plain prose). Same content mirrored to the App Store privacy section and `glymr.app/privacy`. In-app page is canonical. |
+| Headline | Glymr collects **nothing**: no analytics, no telemetry, no crash reporting, no usage tracking, no advertising identifiers, no third-party SDKs that collect any of the above. No Glymr account. |
+| Storage | Documents the backbone: iCloud Keychain / Secure Enclave for identities; CloudKit Private DB + client-side AES for host records / macros / keybar customizations / known-hosts metadata; local-only for recents and live state. |
+| iCloud sync | Per-category toggles (macros / keybar customizations / predictor sketches). E2EE-equivalent for all synced categories regardless of Advanced Data Protection setting. |
+| Third parties | None. Only network requests are SSH/mosh to user-configured hosts plus iOS-level iCloud sync. |
+| Screen capture | Matches the screen-capture-protection spec. Honest about iOS's lack of a screenshot-block API. |
+| Identity survival | iCloud Keychain identities survive reinstall via sync; SE identities are bound to this device and this install and are destroyed on uninstall. |
+| Rating | 17+ (App Store) because Glymr connects to arbitrary remote servers we cannot moderate. |
+| Change notice | Material data-handling changes ship with a one-time in-app notice at next launch. |
+| Contact | `hello@glymr.app`. |
+| Out of scope (v1) | Localized translations (English only in v1), region-specific phrasing (GDPR-/CCPA-specific carve-outs — substance covered by the no-collection posture), cookie policy (no website state). |
+
+**Full spec**: see `docs/superpowers/specs/2026-06-17-privacy-statement-design.md`.
+
 ---
 
 ## Deferred / for future conversation
@@ -404,10 +584,17 @@ Two complementary input mechanisms central to the differentiation:
   - **v2 custom inputView** — if/when promoted from v1.5+ feedback, design the letter-to-alt-symbol mapping and the held-modifier interaction.
 - **iPad-native surfaces** — multi-window via `UISceneSession` (Stage Manager / Split View), landscape-specific layouts (wider keybar, side-by-side panes as a layout option), trackpad / pointer integration reconciling Magic Keyboard pointer with the touch-oriented cursor halo. v1 ships iPad-compatible (single window, size-class-aware) per `docs/superpowers/specs/2026-06-17-ipad-scope-design.md`.
 - **In-app hardware-Esc rebind** — deferred to v1.5; v1 uses iOS's system-wide Caps-as-Esc remap. Per `docs/superpowers/specs/2026-06-17-external-keyboard-design.md`.
-- **Custom Cmd-shortcut remapping** — deferred to v1.5+; v1 ships a fixed 15-action map.
-- **Font-size shortcuts (⌘+ / ⌘−)** — deferred; depends on a font-size feature, not specced yet.
+- **Custom Cmd-shortcut remapping** — deferred to v1.5+; v1 ships a fixed 18-action map.
 - **Scrollback navigation shortcuts (⌘Home / ⌘End)** — deferred; revisit when scrollback ergonomics get their own pass.
 - **Layout templates for panes** (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`) — deferred to v1.5.
+- **SSH identity / cert rotation wizards** — depends on `ssh-copy-id` auto-install (also v1.5). Cert auth ships in v1, but rotation flow waits for the auto-install primitive per `2026-06-17-ssh-cert-auth-design.md`.
+- **In-app ephemeral SSH agent** — supports `forwardAgent`-style use cases. Removed from v1 schema; revisit in v1.5+ if demand warrants. Multi-hop bastions use `ProxyJump` (already in v1).
+- **Ad-hoc port forwards** — adding a temporary tunnel at runtime without editing the host record. v1 supports only host-config-declared forwards. v1.5+.
+- **ANSI 16-color terminal palette theming** — Solarized / Dracula / Gruvbox-style alt palettes. Likely a future Pro perk alongside alternative color themes. Separate axis from the UI chrome theming plumbed in `2026-06-17-design-tokens-design.md`.
+- **OSC 8 hyperlinks** (the "real" terminal hyperlink protocol). Useful for `ls --hyperlink` output but adds parser + rendering surface that v1 doesn't need. v1.5+.
+- **Bracketed paste mode** (`\x1b[?2004h`). Likely-add to a future minor release; relevant for shells distinguishing typed vs pasted input.
+- **Image protocols** (Sixel / iTerm2 inline / Kitty graphics). Out of v1; v1.5+ if demand surfaces.
+- **Per-pane sensitive flag** for screen-capture protection (blank only marked panes during capture). v1.5+ candidate; explicitly not a Pro perk.
 
 ### Rejected from v1 (v1.5+ candidates pending demand)
 
