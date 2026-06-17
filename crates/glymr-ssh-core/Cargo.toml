@@ -1,0 +1,15 @@
+[package]
+name = "glymr-ssh-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "glymr_ssh_core"
+crate-type = ["staticlib", "lib"]
+
+[dependencies]
+uniffi = { version = "0.31", features = ["cli"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
