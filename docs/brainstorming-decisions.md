@@ -344,7 +344,7 @@ Two complementary input mechanisms central to the differentiation:
 | Cut from tooltips | Predictor row (self-explanatory by existing); keybar swipe-up/down secondaries (covered by keybar orientation paragraph; dim glyphs on each key already telegraph affordance). |
 | Out of scope (v1) | JIT tooltips, demo PTY / sample session, prefilled example host, multi-page swipe tour, unread badges, localisation. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-16-first-host-onboarding-design.md`. **Mockup**: `mockups/drafts/first-host-onboarding.html`.
+**Full spec**: see `docs/superpowers/specs/2026-06-16-first-host-onboarding-design.md`. **Mockup**: `mockups/specs/first-host-onboarding.html`.
 
 ### Settings sub-screens (Security · App preferences · About & Help)
 
@@ -362,7 +362,7 @@ Two complementary input mechanisms central to the differentiation:
 | About & Help cuts | No **Terms of Service** (no account, no service). No **Rate the app** (friction-y). No **Changelog** (defer until v1.5 has content). |
 | Cross-cutting | All destructive actions use the same action-sheet idiom as Identity delete (destructive row in top group, Cancel in bottom group). Footer captions used sparingly — only Predictor toggle, iCloud sync group, App lock when on. No badges, no "new" pips anywhere in Settings. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-16-settings-sub-screens-design.md`. **Mockup**: `mockups/drafts/settings-sub-screens.html`.
+**Full spec**: see `docs/superpowers/specs/2026-06-16-settings-sub-screens-design.md`. **Mockup**: `mockups/specs/settings-sub-screens.html`.
 
 ### Pro / paid scope
 
@@ -377,7 +377,7 @@ Two complementary input mechanisms central to the differentiation:
 | Visibility | **No upsell prompts anywhere else in the app.** Not in onboarding, not after the Nth connection, not on any preference change. No "Pro" lock icons on any feature (there are no features to lock). The About row is the only entry point. |
 | Enterprise (deferred) | **Explicitly out of v1.** Candidate features captured but not designed: **audit log** (compliance — stub already at data layer), **team-shared host configs** (most natural subscription candidate if there ever is one — needs backend), **MDM-friendly configuration**, **centralized policy enforcement**, **SSO into the app**, **sealed org-curated snippet packs**, **concurrent-device licensing / seat management**, **premium support**. None designed; revisit when a real customer asks. Even in an enterprise tier, the qualification rule still applies — enterprise features must be things that *only make sense in an org context*, not solo features pay-walled. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-16-pro-paid-scope-design.md`. **Mockup**: `mockups/drafts/pro-paid.html`.
+**Full spec**: see `docs/superpowers/specs/2026-06-16-pro-paid-scope-design.md`. **Mockup**: `mockups/specs/pro-paid.html`.
 
 ### Connection-status banner expanded view
 
@@ -394,7 +394,7 @@ Two complementary input mechanisms central to the differentiation:
 | Obscured terminal | Accepted — user tapped a "something is wrong" banner; covering the terminal underneath is fine. |
 | Out of scope (v1) | Per-state custom layouts beyond the two templates · editable thresholds · full roam-history log (deferred to v1.5+) · "Switch network" inline action (iOS doesn't allow it programmatically) · "Change identity" inline action (Edit host covers it) · ShareSheet for diagnostics (Copy is enough) · iPad adaptation · localisation. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-16-banner-expanded-design.md`. **Mockups**: `mockups/drafts/banner-expanded-layouts.html` (three layouts compared) · `mockups/drafts/banner-expanded-templates.html` (both templates rendered with example states).
+**Full spec**: see `docs/superpowers/specs/2026-06-16-banner-expanded-design.md`. **Mockups**: `mockups/drafts/banner-expanded-layouts.html` (three layouts compared) · `mockups/specs/banner-expanded-templates.html` (both templates rendered with example states).
 
 ---
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Glymr — Keybar v1 first try</title>
+<title>Glymr — Keybar v1 (locked layout)</title>
 <style>
   :root {
     --bg: #0E1116;
@@ -22,18 +22,14 @@
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
+    margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   }
   header {
-    padding: 24px 32px;
-    border-bottom: 1px solid var(--line);
-    background: var(--panel);
+    padding: 24px 32px; border-bottom: 1px solid var(--line); background: var(--panel);
   }
   header h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
-  header p { margin: 0; color: var(--muted); font-size: 13px; max-width: 760px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; max-width: 820px; }
   main { padding: 32px; max-width: 1400px; margin: 0 auto; }
 
   section { margin-bottom: 56px; }
@@ -41,79 +37,60 @@
     font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--muted); margin: 0 0 12px;
   }
-  section > p.lede { margin: 0 0 24px; color: var(--text); max-width: 800px; }
+  section > p.lede { margin: 0 0 24px; color: var(--text); max-width: 820px; }
 
   .two-col {
-    display: grid;
-    grid-template-columns: minmax(280px, 320px) 1fr;
-    gap: 40px;
-    align-items: start;
+    display: grid; grid-template-columns: minmax(280px, 320px) 1fr;
+    gap: 40px; align-items: start;
   }
   @media (max-width: 800px) { .two-col { grid-template-columns: 1fr; } }
 
   /* iPhone frame */
   .phone {
-    width: 300px;
-    height: 620px;
-    background: #000;
-    border: 8px solid #1c2230;
-    border-radius: 36px;
-    padding: 6px;
-    position: relative;
-    overflow: hidden;
+    width: 300px; height: 620px;
+    background: #000; border: 8px solid #1c2230; border-radius: 36px;
+    padding: 6px; position: relative; overflow: hidden;
   }
   .phone .notch {
-    position: absolute;
-    top: 6px; left: 50%; transform: translateX(-50%);
-    width: 90px; height: 22px;
-    background: #000;
-    border-radius: 0 0 14px 14px;
-    z-index: 10;
+    position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+    width: 90px; height: 22px; background: #000;
+    border-radius: 0 0 14px 14px; z-index: 10;
   }
+  .phone.sm { width: 260px; height: 540px; }
   .screen {
     width: 100%; height: 100%;
-    background: var(--term-bg);
-    border-radius: 24px;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
+    background: var(--term-bg); border-radius: 24px;
+    overflow: hidden; display: flex; flex-direction: column;
     font: 11px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+    position: relative;
   }
   .app-topbar {
-    background: var(--panel);
-    border-bottom: 1px solid var(--line);
+    background: var(--panel); border-bottom: 1px solid var(--line);
     padding: 30px 10px 6px;
-    color: var(--text);
-    font-size: 11px;
+    color: var(--text); font-size: 11px;
     display: flex; align-items: center; justify-content: space-between;
   }
   .app-topbar .title { font-weight: 600; }
   .app-topbar .sub { color: var(--muted); font-size: 10px; }
 
   .term {
-    flex: 1;
-    background: var(--term-bg);
-    color: var(--term-fg);
-    padding: 8px 10px;
-    overflow: hidden;
-    white-space: pre-wrap;
+    flex: 1; background: var(--term-bg); color: var(--term-fg);
+    padding: 8px 10px; overflow: hidden; white-space: pre-wrap;
   }
   .term .prompt { color: var(--accent); }
-  .term .ok { color: var(--green); }
   .term .dim { color: var(--muted); }
+  .term .ok { color: var(--green); }
   .term .cursor {
     display: inline-block; width: 6px; height: 12px;
-    background: var(--accent-2);
-    vertical-align: -2px; animation: blink 1.1s steps(2) infinite;
+    background: var(--accent-2); vertical-align: -2px;
+    animation: blink 1.1s steps(2) infinite;
   }
   @keyframes blink { 50% { opacity: 0; } }
 
   /* Predictor strip */
   .predict {
-    background: var(--panel);
-    border-top: 1px solid var(--line);
-    padding: 4px 6px;
-    display: flex; gap: 4px; flex-shrink: 0;
+    background: var(--panel); border-top: 1px solid var(--line);
+    padding: 4px 6px; display: flex; gap: 4px; flex-shrink: 0;
   }
   .predict .chip {
     background: transparent; border: 1px solid var(--line);
@@ -123,215 +100,336 @@
   }
   .predict .chip.top {
     border-color: var(--accent); color: var(--accent-2);
-    background: rgba(212, 154, 92, 0.08);
+    background: rgba(212,154,92,0.08);
   }
 
-  /* Keybar — pills + scrollable key slots */
+  /* Keybar */
   .keybar {
-    background: var(--panel);
-    border-top: 1px solid var(--line);
-    padding: 5px 4px;
-    display: flex; gap: 5px;
-    align-items: center;
-    flex-shrink: 0;
-    overflow: hidden;
+    background: var(--panel); border-top: 1px solid var(--line);
+    padding: 5px 4px; display: flex; gap: 5px;
+    align-items: center; flex-shrink: 0; overflow: hidden;
   }
-  .keybar .sticky {
-    display: flex; gap: 4px; align-items: center;
-    flex-shrink: 0;
-    padding-right: 4px;
+  .keybar.reverse { flex-direction: row-reverse; }
+  .keybar .locked {
+    display: flex; gap: 4px; align-items: center; flex-shrink: 0;
+    padding-right: 5px;
     border-right: 1px solid var(--line);
   }
-  .keybar .slots {
-    display: flex; gap: 3px;
-    overflow-x: auto;
-    flex: 1;
+  .keybar.reverse .locked {
+    border-right: none; border-left: 1px solid var(--line);
+    padding-right: 0; padding-left: 5px;
+  }
+  .keybar .scroll {
+    display: flex; gap: 4px; overflow-x: auto; flex: 1;
     scrollbar-width: none;
   }
-  .keybar .slots::-webkit-scrollbar { display: none; }
+  .keybar .scroll::-webkit-scrollbar { display: none; }
+  .keybar .scroll-fade {
+    position: absolute; right: 0; top: 0; bottom: 0;
+    width: 14px; pointer-events: none;
+    background: linear-gradient(to right, transparent, var(--panel));
+  }
 
-  .pill {
-    background: var(--panel-2);
-    border: 1px solid var(--line);
+  /* Esc pill */
+  .esc-pill {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 999px; height: 30px;
+    padding: 0 12px 0 14px;
+    font: 700 12px/1 -apple-system, sans-serif;
     color: var(--text);
-    border-radius: 999px;
-    padding: 4px 9px;
-    font: 600 10px/1 -apple-system, sans-serif;
-    display: inline-flex; align-items: center; gap: 4px;
-    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 5px;
+    flex-shrink: 0; position: relative;
   }
-  .pill.brand {
-    border-color: var(--accent); color: var(--accent-2);
-    box-shadow: 0 0 0 1px rgba(212,154,92,0.20), 0 0 12px -3px rgba(242,197,138,0.4);
+  .esc-pill .hint {
+    color: rgba(212,154,92,0.55);
+    font: 700 10px/1 -apple-system, sans-serif;
   }
-  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
-
-  /* Multi-action slot — shows tap char + swipe-up hint + swipe-down hint */
-  .slot {
-    background: var(--panel-2);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    color: var(--text);
-    width: 30px; height: 36px;
-    flex-shrink: 0;
-    position: relative;
-    display: flex; align-items: center; justify-content: center;
-    font: 600 14px/1 ui-monospace, "SF Mono", Menlo, monospace;
-  }
-  .slot .up, .slot .down {
-    position: absolute; left: 0; right: 0;
-    text-align: center;
-    font: 600 8px/1 ui-monospace, monospace;
-    color: var(--muted);
-  }
-  .slot .up   { top: 2px; }
-  .slot .down { bottom: 2px; }
-  .slot.mod {
-    background: rgba(212, 154, 92, 0.10);
-    border-color: rgba(212, 154, 92, 0.40);
+  .esc-pill.armed {
+    background: rgba(212,154,92,0.20);
+    border-color: rgba(212,154,92,0.55);
     color: var(--accent-2);
   }
-  .slot.mod .up, .slot.mod .down { color: rgba(242, 197, 138, 0.55); }
+  .esc-pill.armed .hint { color: rgba(242,197,138,0.85); }
 
-  /* Arrow-pad slot — Blink-style: touch and drag in direction to fire */
-  .slot.dpad {
-    width: 42px;
-    background: rgba(212, 154, 92, 0.10);
-    border-color: rgba(212, 154, 92, 0.40);
-    color: var(--accent-2);
-    display: grid;
+  /* Pad slot */
+  .pad {
+    width: 44px; height: 30px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--accent-2);
+    display: grid; place-items: center; flex-shrink: 0;
     grid-template-columns: 1fr 1fr 1fr;
     grid-template-rows: 1fr 1fr 1fr;
-    place-items: center;
-    font-size: 9px;
-    line-height: 1;
+    font: 600 9px/1 ui-monospace, monospace;
+    position: relative;
   }
-  .slot.dpad .a-up    { grid-column: 2; grid-row: 1; }
-  .slot.dpad .a-left  { grid-column: 1; grid-row: 2; }
-  .slot.dpad .a-right { grid-column: 3; grid-row: 2; }
-  .slot.dpad .a-down  { grid-column: 2; grid-row: 3; }
+  .pad .u { grid-column: 2; grid-row: 1; }
+  .pad .l { grid-column: 1; grid-row: 2; }
+  .pad .r { grid-column: 3; grid-row: 2; }
+  .pad .d { grid-column: 2; grid-row: 3; }
+  .pad.armed {
+    background: rgba(212,154,92,0.20);
+    border-color: rgba(212,154,92,0.55);
+  }
 
-  /* Larger version of the slot for the "anatomy" callout */
-  .slot.big { width: 70px; height: 88px; font-size: 28px; border-radius: 10px; }
-  .slot.big .up, .slot.big .down { font-size: 13px; }
-  .slot.big .up { top: 5px; }
-  .slot.big .down { bottom: 5px; }
+  /* Regular slot */
+  .slot {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--text);
+    width: 30px; height: 30px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font: 600 12px/1 ui-monospace, monospace;
+    flex-shrink: 0; position: relative;
+  }
+  .slot .up, .slot .down {
+    position: absolute; left: 0; right: 0; text-align: center;
+    font: 600 7px/1 ui-monospace, monospace; color: var(--muted);
+  }
+  .slot .up { top: 2px; }
+  .slot .down { bottom: 2px; }
 
-  /* Anatomy callout */
-  .anatomy {
-    display: flex; gap: 24px; align-items: center;
+  .slot.mod-armed {
+    background: rgba(212,154,92,0.20);
+    border-color: rgba(212,154,92,0.55);
+    color: var(--accent-2);
+  }
+  .slot.mod-locked {
+    background: rgba(212,154,92,0.28);
+    border-color: var(--accent);
+    color: var(--accent-2);
+  }
+  .slot.mod-locked::after {
+    content: ""; position: absolute; top: 2px; right: 2px;
+    width: 4px; height: 4px; border-radius: 50%; background: var(--accent);
+  }
+  .slot.fn-armed {
+    background: rgba(212,154,92,0.20);
+    border-color: rgba(212,154,92,0.55);
+    color: var(--accent-2);
+  }
+  .slot.promoted {
+    background: rgba(212,154,92,0.12);
+    border-top: 1.5px solid var(--accent);
+  }
+
+  /* iOS keys */
+  .ios-keys {
+    background: #2a2c33; padding: 4px;
+    display: flex; flex-direction: column; gap: 3px; flex-shrink: 0;
+  }
+  .ios-keys .row { display: flex; gap: 3px; justify-content: center; }
+  .ios-keys .k {
+    background: #44464d; border-radius: 4px; color: var(--text);
+    font: 600 11px/1 -apple-system, sans-serif;
+    padding: 6px 0; flex: 1; text-align: center;
+  }
+  .ios-keys .k.sp { flex: 4; }
+
+  /* Annotation rows / panels */
+  .panel {
     background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; padding: 20px;
-    margin-bottom: 28px;
+    border-radius: 12px; padding: 18px 20px;
   }
-  .anatomy .label-block {
-    flex: 1; font-size: 12px;
-  }
-  .anatomy .label-block dt { color: var(--accent-2); font-weight: 600; }
-  .anatomy .label-block dd { margin: 2px 0 10px; color: var(--muted); }
+  .panel h3 { margin: 0 0 6px; font-size: 13px; color: var(--accent-2); }
+  .panel .meta { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
 
-  /* Layout table */
-  table.layout {
-    width: 100%;
-    border-collapse: collapse;
+  /* Annotation under hero phone */
+  .anno-list {
+    display: grid; grid-template-columns: auto 1fr; gap: 6px 14px;
     font-size: 12px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    overflow: hidden;
   }
-  table.layout th, table.layout td {
-    padding: 8px 10px;
+  .anno-list dt {
+    color: var(--accent-2); font: 600 11px/1.4 ui-monospace, monospace;
+    white-space: nowrap;
+  }
+  .anno-list dd { margin: 0; color: var(--muted); }
+
+  /* Gesture table */
+  table.g {
+    width: 100%; border-collapse: collapse;
+    font-size: 12px;
+    background: var(--panel-2); border-radius: 8px; overflow: hidden;
+  }
+  table.g th, table.g td {
+    padding: 8px 12px; text-align: left;
     border-bottom: 1px solid var(--line);
-    text-align: left;
+    vertical-align: top;
   }
-  table.layout th {
-    background: var(--panel-2);
-    color: var(--muted);
+  table.g th {
+    background: rgba(0,0,0,0.2); color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    font: 600 10px/1.2 ui-monospace, monospace;
+  }
+  table.g tr:last-child td { border-bottom: none; }
+  table.g td.k {
+    color: var(--accent-2); font: 600 12px/1.3 ui-monospace, monospace;
+    white-space: nowrap; width: 140px;
+  }
+  table.g td.d { color: var(--muted); font-size: 11px; }
+
+  /* Mini-bar (no terminal, just keybar) */
+  .minibar-wrap {
+    background: var(--term-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px;
+    margin-bottom: 10px;
+  }
+  .minibar-wrap .cap {
+    color: var(--muted); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .minibar {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 5px 4px;
+    display: flex; gap: 5px; align-items: center;
+    position: relative; overflow: hidden;
+  }
+  .minibar.reverse { flex-direction: row-reverse; }
+  .minibar .locked {
+    display: flex; gap: 4px; flex-shrink: 0; padding-right: 5px;
+    border-right: 1px solid var(--line);
+  }
+  .minibar.reverse .locked {
+    border-right: none; border-left: 1px solid var(--line);
+    padding-right: 0; padding-left: 5px;
+  }
+  .minibar .scroll { display: flex; gap: 4px; overflow: hidden; flex: 1; }
+
+  /* Modifier states stack */
+  .state-row {
+    display: grid; grid-template-columns: 90px 1fr;
+    gap: 16px; align-items: center;
+    padding: 12px 0; border-bottom: 1px solid var(--line);
+  }
+  .state-row:last-child { border-bottom: none; }
+  .state-row .label { color: var(--accent-2); font: 600 12px/1.3 ui-monospace, monospace; }
+  .state-row .desc { color: var(--muted); font-size: 12px; }
+  .state-row .demo { display: flex; gap: 8px; align-items: center; }
+
+  /* Settings editor */
+  .editor {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 12px;
+    width: 100%; max-width: 420px;
+    font: 12px/1.4 -apple-system, sans-serif;
+  }
+  .editor .head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 6px 10px; border-bottom: 1px solid var(--line);
+    margin-bottom: 8px;
+  }
+  .editor .head .title { font-weight: 600; color: var(--text); }
+  .editor .head .reset { color: var(--accent-2); font-size: 11px; }
+  .editor .group-label {
+    color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.06em; font-size: 10px;
+    padding: 8px 8px 4px;
+  }
+  .editor .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 8px; border-radius: 6px;
+    background: var(--panel-2); margin-bottom: 4px;
+    position: relative;
+  }
+  .editor .row .drag {
+    color: var(--muted); font-size: 14px; cursor: grab; width: 14px;
+  }
+  .editor .row.locked-icon .drag { color: var(--accent); }
+  .editor .row .icon {
+    width: 28px; height: 22px; border-radius: 4px;
+    background: var(--panel); border: 1px solid var(--line);
+    display: inline-flex; align-items: center; justify-content: center;
     font: 600 11px/1 ui-monospace, monospace;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    color: var(--accent-2); flex-shrink: 0;
   }
-  table.layout tr:last-child td { border-bottom: none; }
-  table.layout td.key {
-    font: 600 13px/1 ui-monospace, "SF Mono", monospace;
-    color: var(--accent-2); white-space: nowrap;
+  .editor .row .name { flex: 1; color: var(--text); }
+  .editor .row .name .sub { color: var(--muted); font-size: 10px; display: block; margin-top: 1px; }
+  .editor .row .lock { color: var(--accent); font-size: 11px; }
+  .editor .row .rm {
+    color: var(--red); font-size: 11px;
+    opacity: 0.7;
   }
-  table.layout td.mut { color: var(--muted); font-size: 11px; }
-  table.layout td.evi { color: var(--green); font-size: 11px; }
-  table.layout td.guess { color: var(--amber); font-size: 11px; }
+  .editor .row.dragging {
+    background: rgba(212,154,92,0.14);
+    border: 1px dashed var(--accent);
+    transform: translateY(2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .editor .divider {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 8px;
+    border-top: 2px dashed var(--accent);
+    border-bottom: 2px dashed var(--accent);
+    background: rgba(212,154,92,0.06);
+    color: var(--accent-2); font: 600 10px/1 ui-monospace, monospace;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin: 6px 0;
+  }
+  .editor .divider .grip { color: var(--accent); font-size: 14px; }
+  .editor .add {
+    text-align: center; padding: 10px;
+    color: var(--accent-2); font: 600 11px/1 -apple-system, sans-serif;
+    border: 1px dashed var(--line); border-radius: 6px; margin-top: 8px;
+  }
 
-  /* Principles list */
-  .principles { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px 20px; }
-  .principles ol { margin: 0; padding-left: 20px; font-size: 13px; }
-  .principles ol li { margin-bottom: 6px; }
-  .principles ol li b { color: var(--accent-2); }
+  /* Side-by-side grids */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    .grid-3 { grid-template-columns: 1fr; }
+  }
 
+  .col-label {
+    color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.06em; margin: 0 0 8px;
+  }
+  .col-note {
+    color: var(--muted); font-size: 11px; margin-top: 10px;
+    font-style: italic; max-width: 320px;
+  }
+
+  /* Pad mode overlay glyph */
+  .pad.mode {
+    color: var(--accent-2);
+  }
+  .pad.mode::before {
+    content: "↔"; position: absolute; top: 1px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px; color: var(--accent-2);
+  }
+  .pad.mode::after {
+    content: "↕"; position: absolute; bottom: 1px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px; color: var(--accent-2);
+  }
+
+  /* Annotation arrow / callouts on the hero phone */
+  .callout-list {
+    margin-top: 16px;
+  }
   footer {
-    margin-top: 48px;
-    padding-top: 24px;
+    margin-top: 48px; padding-top: 24px;
     border-top: 1px solid var(--line);
-    color: var(--muted);
-    font-size: 12px;
+    color: var(--muted); font-size: 12px;
   }
+  footer a { color: var(--accent-2); text-decoration: none; }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>Glymr — Keybar v1 (first try)</h1>
-  <p>Evidence-grounded where the data allows it, marked as a guess where it doesn't. <b style="color:var(--amber)">This is a working draft — we expect to learn from real use and change it.</b> The whole point of first-class customization (long-press any slot to edit) is that defaults don't have to be perfect to ship. Iterate, don't over-engineer.</p>
+  <h1>Glymr — Keybar v1 (locked layout)</h1>
+  <p>The v1 keybar: locked-left default of <b>Esc pill · Pad · Modifier · Tab</b>, a customizable scroll region, and a unified Settings editor. Supersedes the v0 mockup at <code>mockups/specs/keybar.html</code> (which the spec itself flags as out-of-date) and the keybar passages in the context-detection spec. Locked direction per <code>2026-06-15-keybar-customization-design.md</code>.</p>
 </header>
 
 <main>
 
-  <!-- ============================================================== -->
+  <!-- ============================================================ -->
   <section>
-    <h2>Design principles (lock first, debate second)</h2>
-    <div class="principles">
-      <ol>
-        <li><b>Keybar's purpose (narrow):</b> (a) window/pane pills, (b) keys iOS lacks entirely (Esc, Tab, Ctrl/Alt/Shift, arrows), (c) convenience defaults for symbols that <i>are</i> reachable via iOS's 123 layer but worth promoting (parens, pipes, tildes, etc.). The keybar is NOT a complete symbol surface — iOS's 123 layer still exists.</li>
-        <li><b>Core slots vs convenience slots.</b> Core slots (purpose a/b) ship locked. Convenience slots ship enabled but the user can remove or replace any of them.</li>
-        <li><b>Three actions per slot:</b> tap = primary, swipe-up = secondary, swipe-down = tertiary. Long-press = edit/customize. Exception: the arrow-pad slot uses drag-in-direction instead.</li>
-        <li><b>Tap = highest-frequency action in the slot.</b> Swipes are the rarer members of the same logical group.</li>
-        <li><b>Group by logic on each slot,</b> not by frequency across slots. Brackets live with brackets, even if a bracket would be hit more often than another slot's tap.</li>
-        <li><b>Every slot's swipe chars are visible</b> (small, muted, top/bottom edges) — discoverability is non-negotiable.</li>
-        <li><b>Ctrl, Alt, Shift are sticky-for-one-keystroke.</b> Tap → armed for the next keystroke only, auto-disarms after. <b>Ctrl additionally supports double-tap-to-lock</b> (Emacs-chord use case); tap again to unlock. Alt/Shift stay sticky-only — their gestures (swipe-up / swipe-down) don't support double-arming cleanly, and iOS already provides caps-lock for Shift. Esc and Tab are normal keys — fire on tap.</li>
-        <li><b>v1 scope: in-app accessory bar above iOS's native keyboard.</b> iOS owns the letters; the 123 layer remains the fallback for any symbol not promoted to the keybar. Custom keyboard (with long-press alts on letters) deferred as a potential v2.</li>
-        <li><b>User customization is first-class:</b> long-press any slot to edit. The default set ships defensible; users own the bar.</li>
-        <li><b>Expect to change this.</b> The defaults are a v0 best-guess. Once Glymr has real users, the predictor's keystroke telemetry (with consent) tells us what's actually pressed. Plan for v1.5 default-set revisions; don't over-optimize now.</li>
-      </ol>
-    </div>
-  </section>
-
-  <!-- ============================================================== -->
-  <section>
-    <h2>Slot anatomy</h2>
-    <div class="anatomy">
-      <div class="slot big">
-        <span class="up">\</span>
-        /
-        <span class="down">?</span>
-      </div>
-      <div class="label-block">
-        <dl>
-          <dt>Center (large):</dt>
-          <dd>Tap action. The most-used key in this slot's group.</dd>
-          <dt>Top edge (small, muted):</dt>
-          <dd>Swipe-up action. Second-most-used in the group.</dd>
-          <dt>Bottom edge (small, muted):</dt>
-          <dd>Swipe-down action. Third in the group, or empty.</dd>
-          <dt>Long-press:</dt>
-          <dd>Opens the slot editor — rebind any of the three, replace the slot, or pin a new macro.</dd>
-        </dl>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================================================== -->
-  <section>
-    <h2>The 12-slot default — rendered</h2>
-    <p class="lede">All 12 slots fit the keybar with horizontal scroll. Window and pane pills stay sticky on the left. On a standard iPhone width, ~7 slots are visible without scrolling; the rest are reachable with a small horizontal scroll. Slots with empty swipes (Tab, Esc) are intentional — those keys have no natural peer in their group; users can fill the swipes via the editor.</p>
+    <h2>Hero — locked default layout</h2>
+    <p class="lede">Locked region holds the four anchors; the scroll region carries promotions (none engaged here), defaults, and Fn. The predictor strip sits above the keybar, unchanged from previous specs.</p>
 
     <div class="two-col">
 
@@ -339,18 +437,18 @@
         <div class="notch"></div>
         <div class="screen">
           <div class="app-topbar">
-            <span class="title">main</span>
-            <span class="sub">alex@bastion</span>
+            <span class="title">logs</span>
+            <span class="sub">prod-web-3</span>
           </div>
 
           <div class="term">
-            <div><span class="dim">~/proj/glymr</span></div>
-            <div><span class="prompt">$</span> ssh bastion</div>
-            <div><span class="ok">✓</span> session restored</div>
-            <div><span class="prompt">$</span> grep -rn "todo" . <span class="dim">|</span> head</div>
-            <div><span class="dim">README.md:14: TODO add tests</span></div>
-            <div><span class="dim">src/main.go:91: // TODO</span></div>
-            <div><span class="prompt">$</span> clau<span class="cursor"></span></div>
+<div><span class="prompt">$</span> tail -f app.log</div>
+<div><span class="dim">[12:03:41] req=482 ok</span></div>
+<div><span class="dim">[12:03:42] req=483 ok</span></div>
+<div><span class="dim">[12:03:43] req=484 ok</span></div>
+<div><span class="prompt">$</span> grep -rn "todo" .</div>
+<div><span class="dim">README.md:14: TODO add tests</span></div>
+<div><span class="prompt">$</span> clau<span class="cursor"></span></div>
           </div>
 
           <div class="predict">
@@ -360,96 +458,390 @@
           </div>
 
           <div class="keybar">
-            <div class="sticky">
-              <span class="pill brand">main<span class="dot"></span></span>
-              <span class="pill">▦</span>
-            </div>
-            <div class="slots">
-              <div class="slot mod">⎋</div>
-              <div class="slot mod"><span class="up">⌥</span>⌃<span class="down">⇧</span></div>
-              <div class="slot mod">⇥</div>
-              <div class="slot dpad">
-                <span class="a-up">↑</span>
-                <span class="a-left">←</span>
-                <span class="a-right">→</span>
-                <span class="a-down">↓</span>
+            <div class="locked">
+              <span class="esc-pill"><span>Esc</span><span class="hint">≡</span></span>
+              <div class="pad">
+                <span class="u">↑</span><span class="l">←</span><span class="r">→</span><span class="d">↓</span>
               </div>
-              <div class="slot"><span class="up">\</span>/<span class="down">?</span></div>
-              <div class="slot"><span class="up">&amp;</span>|<span class="down">;</span></div>
-              <div class="slot"><span class="up">$</span>~<span class="down">*</span></div>
-              <div class="slot"><span class="up">&lt;</span>-<span class="down">&gt;</span></div>
-              <div class="slot"><span class="up">[</span>(<span class="down">{</span></div>
-              <div class="slot"><span class="up">]</span>)<span class="down">}</span></div>
+              <div class="slot">⌃</div>
+              <div class="slot">⇥</div>
             </div>
+            <div class="scroll">
+              <div class="slot">/</div>
+              <div class="slot">|</div>
+              <div class="slot">~</div>
+              <div class="slot">-</div>
+              <div class="slot">(</div>
+              <div class="slot">)</div>
+              <div class="slot">Fn</div>
+            </div>
+          </div>
+
+          <div class="ios-keys">
+            <div class="row"><span class="k">q</span><span class="k">w</span><span class="k">e</span><span class="k">r</span><span class="k">t</span><span class="k">y</span><span class="k">u</span><span class="k">i</span><span class="k">o</span><span class="k">p</span></div>
+            <div class="row"><span class="k">a</span><span class="k">s</span><span class="k">d</span><span class="k">f</span><span class="k">g</span><span class="k">h</span><span class="k">j</span><span class="k">k</span><span class="k">l</span></div>
+            <div class="row"><span class="k">123</span><span class="k sp">space</span><span class="k">⏎</span></div>
           </div>
         </div>
       </div>
 
       <div>
-        <table class="layout">
-          <thead>
-            <tr><th>#</th><th>Tap</th><th>Swipe ↑</th><th>Swipe ↓</th><th>Group</th><th>Evidence</th></tr>
-          </thead>
+        <div class="panel">
+          <h3>Slot inventory (left to right)</h3>
+          <p class="meta">Divider between Tab and <code>/</code> marks the locked / scroll boundary. The scroll region pans horizontally when more than ~7 slots are present.</p>
+          <dl class="anno-list">
+            <dt>Esc pill</dt><dd>Tap = Esc keystroke. Constrained to locked region. Carries window navigation + unified picker.</dd>
+            <dt>Pad</dt><dd>Drag = arrow keys. Constrained to locked region. Long-press arms pane mode.</dd>
+            <dt>⌃ (Modifier)</dt><dd>Combined Ctrl / Alt / Shift. Sticky-for-one; Ctrl double-tap locks.</dd>
+            <dt>⇥ Tab</dt><dd>Tap-only. Movable to scroll or removable.</dd>
+            <dt class="d">— divider —</dt><dd>Locked region ends, scroll region begins. Right of this point pans.</dd>
+            <dt>/ | ~ - ( )</dt><dd>Default convenience slots. User-customizable, reorderable, removable.</dd>
+            <dt>Fn</dt><dd>Function-key toggle. Default last slot in scroll — reachable by pan or via context auto-engage.</dd>
+          </dl>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2>Esc pill — gesture detail</h2>
+    <p class="lede">One pill, five distinct gestures. Tap is the Esc keystroke; horizontal swipes navigate windows; vertical swipes open the quick picker or create a window; long-press opens the unified picker (Live · Recent · Connect · Settings · Tips). See <code>mockups/drafts/esc-pill.html</code> for the full picker treatments.</p>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h3>Gesture vocabulary</h3>
+        <table class="g">
+          <thead><tr><th>Gesture</th><th>Action</th></tr></thead>
           <tbody>
-            <tr><td>1</td><td class="key">Esc</td><td class="mut">—</td><td class="mut">—</td><td class="mut">Escape · <b style="color:var(--accent-2)">core</b></td><td class="evi">Fires on tap. Vim mode-exit; iOS lacks Esc</td></tr>
-            <tr><td>2</td><td class="key">Ctrl</td><td class="key">Alt</td><td class="key">Shift</td><td class="mut">Modifiers · <b style="color:var(--accent-2)">core</b></td><td class="evi">Sticky-for-one. Ctrl is iOS-absent; constant in shell (C-c, C-r, C-d, C-l)</td></tr>
-            <tr><td>3</td><td class="key">Tab</td><td class="mut">—</td><td class="mut">—</td><td class="mut">Tab · <b style="color:var(--accent-2)">core</b></td><td class="evi">Fires on tap. Completion universal; iOS lacks Tab</td></tr>
-            <tr><td>4</td><td class="key">Arrow pad</td><td colspan="2" class="key" style="text-align:center;">drag ↑ ↓ ← → from center</td><td class="mut">Arrows · <b style="color:var(--accent-2)">core</b></td><td class="evi">Single slot replaces 4 arrow keys (Blink-style D-pad). iOS lacks all arrows</td></tr>
-            <tr><td>5</td><td class="key">/</td><td class="key">\</td><td class="key">?</td><td class="mut">Slashes · convenience</td><td class="evi">/: paths and less-search universal · \: deeply buried on iOS</td></tr>
-            <tr><td>6</td><td class="key">|</td><td class="key">&amp;</td><td class="key">;</td><td class="mut">Separators · convenience</td><td class="evi">|: NL2Bash confirms heavy use; deeply buried on iOS</td></tr>
-            <tr><td>7</td><td class="key">~</td><td class="key">$</td><td class="key">*</td><td class="mut">Path / expansion · convenience</td><td class="evi">~: home dir paths · $: vars · *: globs. All buried on iOS</td></tr>
-            <tr><td>8</td><td class="key">-</td><td class="key">&lt;</td><td class="key">&gt;</td><td class="mut">Dash + redirects · convenience</td><td class="evi">-: every flag (ls -la, git -m) · &lt;/&gt;: redirects fold here</td></tr>
-            <tr><td>9</td><td class="key">(</td><td class="key">[</td><td class="key">{</td><td class="mut">Open paren · convenience</td><td class="evi">(: universal in code · iOS has it on 123 but worth promoting</td></tr>
-            <tr><td>10</td><td class="key">)</td><td class="key">]</td><td class="key">}</td><td class="mut">Close paren · convenience</td><td class="evi">Mirror of slot 9</td></tr>
+            <tr><td class="k">Tap</td><td>Esc keystroke. <span class="d">High-frequency; muscle-memory.</span></td></tr>
+            <tr><td class="k">Swipe →</td><td>Next window (wraps; light haptic on wrap).</td></tr>
+            <tr><td class="k">Swipe ←</td><td>Previous window (wraps; light haptic on wrap).</td></tr>
+            <tr><td class="k">Swipe ↑</td><td>Quick window picker — current host only, anchored above pill.</td></tr>
+            <tr><td class="k">Swipe ↓</td><td>Create new window — inline confirm sheet.</td></tr>
+            <tr><td class="k">Long-press</td><td>Unified picker: Windows → Live hosts → Recent → + Connect → Settings → Tips &amp; Gestures.</td></tr>
           </tbody>
         </table>
       </div>
-    </div>
-  </section>
 
-  <!-- ============================================================== -->
-  <section>
-    <h2>What's "data-backed" vs "guessed" — colored honestly</h2>
-    <p class="lede">Green = backed by data I found. Amber = defensible guess; the public data was silent.</p>
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-      <div class="principles" style="border-color: rgba(95, 168, 156, 0.4);">
-        <h3 style="margin: 0 0 8px; color: var(--green); font-size: 13px;">Data-backed</h3>
-        <ul style="margin:0; padding-left:18px; font-size:12px; line-height:1.6;">
-          <li><b>Ctrl, Tab, Esc, ↑</b> in default set, each as their own tap — iOS lacks them entirely, shell needs them</li>
-          <li><b>|, ~, /, \</b> in default set — universal shell use, deeply buried on iOS</li>
-          <li><b>( )</b> in tap position — Programmer Dvorak's "index finger" priority</li>
-          <li><b>{ } [ ]</b> in swipe positions of paren slots — paired-bracket logic</li>
-          <li>Tap = highest-frequency principle — universal layout-design wisdom</li>
-        </ul>
-      </div>
-      <div class="principles" style="border-color: rgba(245, 165, 36, 0.4);">
-        <h3 style="margin: 0 0 8px; color: var(--amber); font-size: 13px;">Defensible guesses</h3>
-        <ul style="margin:0; padding-left:18px; font-size:12px; line-height:1.6;">
-          <li><b>← → ↓</b> priority — readline conventions, no measured iOS data</li>
-          <li><b>&lt; &gt;</b> as their own slot — promoted from buried-swipe under brackets; relative frequency to other slots unmeasured</li>
-          <li><b>Word-jump on swipe-up of arrows</b> — readline Alt+arrow convention</li>
-          <li><b>$ * on slot 9</b> vs. somewhere else — vars/globs are common, but exact rank unknown</li>
-          <li><b>12 slots</b> as the right default count — not 10, not 14</li>
-        </ul>
+      <div class="panel">
+        <h3>Pill appearance</h3>
+        <p class="meta">Label is the literal "Esc". The dim bronze "≡" is the Glymr-wide "more gestures here" hint glyph. Pressed / picker-open state uses the bronze-tint fill — same treatment as armed modifiers.</p>
+        <div style="display:flex; gap:24px; align-items:center; padding:10px 0;">
+          <span class="esc-pill" style="height:42px; padding:0 18px; font-size:16px;"><span>Esc</span><span class="hint" style="font-size:14px;">≡</span></span>
+          <span class="esc-pill armed" style="height:42px; padding:0 18px; font-size:16px;"><span>Esc</span><span class="hint" style="font-size:14px;">≡</span></span>
+        </div>
+        <p class="meta">Rest (left) and armed / pressed (right). Window title is <i>not</i> rendered on the pill — the user identifies the current window by terminal content or by opening a picker.</p>
       </div>
     </div>
   </section>
 
-  <!-- ============================================================== -->
+  <!-- ============================================================ -->
   <section>
-    <h2>Things explicitly deferred</h2>
-    <ul style="font-size:13px; line-height:1.7;">
-      <li><b>Function keys (F1–F12)</b> — none of the 10 default slots covers them. Candidates: long-press on the number row (when number row exists), or a "Fn" slot the user can pin. For v1 they live in the slot editor as buildable macros.</li>
-      <li><b>Context-swapping layouts</b> (vim shows hjkl prominent, tmux shows prefix) — deferred to its own conversation. v1 keybar is static.</li>
-      <li><b>Per-host pinning</b> — same as snippets, eventually a host can have its own pinned subset. v1 = one global keybar.</li>
-      <li><b>iPad layout</b> — keybar pill sizes and positions will change with iPad real estate. v1 = iPhone-first.</li>
-      <li><b>Symbol-pill overflow drawer</b> — what happens when user pins 30 slots? Long-scroll vs. category picker. v1 = horizontal scroll only.</li>
-    </ul>
+    <h2>Pad — gesture detail</h2>
+    <p class="lede">The Pad fuses arrows with pane management. Drag fires arrows; long-press arms pane-mode (bronze tint + ↕/↔ overlay); long-press + swipe commits a split. Tap toggles zoom on the active pane.</p>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h3>Gesture vocabulary</h3>
+        <table class="g">
+          <thead><tr><th>Gesture</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td class="k">Drag (any dir)</td><td>Arrow keystroke (↑ ↓ ← →). Immediate motion from touch-down.</td></tr>
+            <tr><td class="k">Tap</td><td>Zoom toggle on the active pane. Tap = touch + quick release without drag.</td></tr>
+            <tr><td class="k">Long-press (~400ms)</td><td>Arms pane mode — bronze tint + ↕/↔ overlay appears. Light haptic.</td></tr>
+            <tr><td class="k">Long-press + swipe ↔</td><td>Vertical split (<code>tmux split-window -h</code>).</td></tr>
+            <tr><td class="k">Long-press + swipe ↕</td><td>Horizontal split (<code>tmux split-window -v</code>).</td></tr>
+            <tr><td class="k">Long-press + release</td><td>Leftover-actions menu: <i>Swap with next · Close pane</i>.</td></tr>
+          </tbody>
+        </table>
+        <p class="meta" style="margin-top:12px;">Disambiguation: arrow drag requires <i>immediate</i> motion; pane mode requires <i>holding without movement</i> for ~400ms. Zoom state shows on the focused pane itself (bronze border + ⊕ in index badge), not on the Pad.</p>
+      </div>
+
+      <div class="panel">
+        <h3>Pad states</h3>
+        <div style="display:flex; gap:32px; align-items:center; justify-content:center; padding:20px 0;">
+          <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
+            <div class="pad" style="width:64px; height:48px; font-size:11px;">
+              <span class="u">↑</span><span class="l">←</span><span class="r">→</span><span class="d">↓</span>
+            </div>
+            <div style="color:var(--muted); font-size:11px;">Rest</div>
+          </div>
+          <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
+            <div class="pad armed mode" style="width:64px; height:48px; font-size:11px;">
+              <span class="u">↑</span><span class="l">←</span><span class="r">→</span><span class="d">↓</span>
+            </div>
+            <div style="color:var(--muted); font-size:11px;">Pane mode armed<br/>(long-press held)</div>
+          </div>
+        </div>
+        <p class="meta">Armed state: bronze fill at ~20% opacity, with small ↔/↕ glyphs at top/bottom hinting the split-direction. Release without swipe opens the leftover-actions menu anchored above the Pad.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2>Modifier slot states</h2>
+    <p class="lede">Combined Ctrl / Alt / Shift slot. Tap arms Ctrl (sticky-for-one); swipe-up arms Alt; swipe-down arms Shift. Ctrl double-tap locks (Emacs chord use case); a single tap unlocks. Shift caps-lock is delegated to iOS's own keyboard.</p>
+
+    <div class="panel">
+      <div class="state-row">
+        <div class="label">Idle</div>
+        <div class="demo">
+          <div class="slot">⌃</div>
+          <div class="slot">⌥</div>
+          <div class="slot">⇧</div>
+          <div class="desc">Rest state. Single glyph; gestures invisible but discoverable.</div>
+        </div>
+      </div>
+      <div class="state-row">
+        <div class="label">Armed</div>
+        <div class="demo">
+          <div class="slot mod-armed">⌃</div>
+          <div class="slot mod-armed">⌥</div>
+          <div class="slot mod-armed">⇧</div>
+          <div class="desc">Sticky-for-one. Bronze-tint fill, accent border. Auto-disarms after next keystroke fires.</div>
+        </div>
+      </div>
+      <div class="state-row">
+        <div class="label">Locked</div>
+        <div class="demo">
+          <div class="slot mod-locked">⌃</div>
+          <div class="desc">Ctrl double-tap (or Shift caps-lock from iOS). Brighter glyph + bronze indicator dot top-right. Persists across keystrokes; tap to unlock.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2>Reverse-bar — locked-left vs locked-right</h2>
+    <p class="lede">A single Settings toggle flips the entire bar. Useful for left-thumb users or anyone whose grip favors the right edge. Pure layout mirror — gesture semantics on the Esc pill (swipe-left = previous window) do <i>not</i> flip.</p>
+
+    <div class="grid-2">
+      <div class="minibar-wrap">
+        <div class="cap">Locked-left (default)</div>
+        <div class="minibar">
+          <div class="locked">
+            <span class="esc-pill"><span>Esc</span><span class="hint">≡</span></span>
+            <div class="pad"><span class="u">↑</span><span class="l">←</span><span class="r">→</span><span class="d">↓</span></div>
+            <div class="slot">⌃</div>
+            <div class="slot">⇥</div>
+          </div>
+          <div class="scroll">
+            <div class="slot">/</div><div class="slot">|</div><div class="slot">~</div>
+            <div class="slot">-</div><div class="slot">(</div><div class="slot">)</div>
+          </div>
+        </div>
+        <p class="col-note">Scroll fade indicator on the right edge.</p>
+      </div>
+
+      <div class="minibar-wrap">
+        <div class="cap">Locked-right (mirror)</div>
+        <div class="minibar reverse">
+          <div class="locked">
+            <span class="esc-pill"><span>Esc</span><span class="hint">≡</span></span>
+            <div class="pad"><span class="u">↑</span><span class="l">←</span><span class="r">→</span><span class="d">↓</span></div>
+            <div class="slot">⌃</div>
+            <div class="slot">⇥</div>
+          </div>
+          <div class="scroll" style="flex-direction:row-reverse;">
+            <div class="slot">/</div><div class="slot">|</div><div class="slot">~</div>
+            <div class="slot">-</div><div class="slot">(</div><div class="slot">)</div>
+          </div>
+        </div>
+        <p class="col-note">Esc pill anchors the far-right edge; scroll fade flips to the left edge.</p>
+      </div>
+    </div>
+    <p class="lede" style="margin-top:18px;">Left-handed users (or anyone who reaches the Esc pill with the right thumb more comfortably) flip the whole bar with one toggle. No per-gesture remapping — swipes still mean what they mean.</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2>Settings → Keybar editor</h2>
+    <p class="lede">Single editable list. Drag handles reorder within a region; dragging across the dashed locked/scroll divider moves a slot between regions. Esc pill and Pad refuse the divider — a lock icon marks them. Swipe-left on a removable row reveals delete. The "+ Add" at the bottom opens the macro / custom-slot sub-sheet.</p>
+
+    <div class="grid-2">
+      <div>
+        <p class="col-label">Editor view</p>
+        <div class="editor">
+          <div class="head">
+            <span class="title">Keybar</span>
+            <span class="reset">Reset to defaults</span>
+          </div>
+
+          <div class="group-label">Locked region</div>
+
+          <div class="row locked-icon">
+            <span class="drag">⋮⋮</span>
+            <span class="icon">Esc</span>
+            <span class="name">Esc pill<span class="sub">window nav · picker · Esc keystroke</span></span>
+            <span class="lock">🔒</span>
+          </div>
+          <div class="row locked-icon">
+            <span class="drag">⋮⋮</span>
+            <span class="icon">⊞</span>
+            <span class="name">Pad<span class="sub">arrows · pane mode · zoom</span></span>
+            <span class="lock">🔒</span>
+          </div>
+          <div class="row">
+            <span class="drag">⋮⋮</span>
+            <span class="icon">⌃</span>
+            <span class="name">Modifier<span class="sub">Ctrl / Alt / Shift</span></span>
+            <span class="rm">Remove</span>
+          </div>
+          <div class="row">
+            <span class="drag">⋮⋮</span>
+            <span class="icon">⇥</span>
+            <span class="name">Tab</span>
+            <span class="rm">Remove</span>
+          </div>
+
+          <div class="divider">
+            <span class="grip">═</span>
+            <span>Locked  /  Scroll</span>
+            <span class="grip" style="margin-left:auto;">═</span>
+          </div>
+
+          <!-- One slot mid-drag, crossing the divider -->
+          <div class="row dragging">
+            <span class="drag">⋮⋮</span>
+            <span class="icon">/</span>
+            <span class="name">Slash<span class="sub">crossing into locked…</span></span>
+          </div>
+          <div class="row">
+            <span class="drag">⋮⋮</span>
+            <span class="icon">|</span>
+            <span class="name">Pipe</span>
+            <span class="rm">Remove</span>
+          </div>
+          <div class="row">
+            <span class="drag">⋮⋮</span>
+            <span class="icon">~</span>
+            <span class="name">Tilde</span>
+            <span class="rm">Remove</span>
+          </div>
+          <div class="row">
+            <span class="drag">⋮⋮</span>
+            <span class="icon">-</span>
+            <span class="name">Dash</span>
+            <span class="rm">Remove</span>
+          </div>
+          <div class="row">
+            <span class="drag">⋮⋮</span>
+            <span class="icon">(</span>
+            <span class="name">Open paren</span>
+            <span class="rm">Remove</span>
+          </div>
+          <div class="row">
+            <span class="drag">⋮⋮</span>
+            <span class="icon">)</span>
+            <span class="name">Close paren</span>
+            <span class="rm">Remove</span>
+          </div>
+          <div class="row">
+            <span class="drag">⋮⋮</span>
+            <span class="icon">Fn</span>
+            <span class="name">Function keys<span class="sub">toggles F1–F12 mode</span></span>
+            <span class="rm">Remove</span>
+          </div>
+
+          <div class="add">+ Add — pin macro · create macro · create slot</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Mechanics</h3>
+        <table class="g">
+          <thead><tr><th>Affordance</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td class="k">Drag handle</td><td>Reorder within current region. Drag <i>across the divider</i> moves between locked ↔ scroll.</td></tr>
+            <tr><td class="k">🔒 lock icon</td><td>Esc pill and Pad refuse divider crossings. Reorderable within locked, never movable to scroll, never removable.</td></tr>
+            <tr><td class="k">Swipe-left</td><td>Reveals Remove. Modifier shows one-time first-time warning ("You'll lose Ctrl/Alt/Shift access."). No nag on repeat.</td></tr>
+            <tr><td class="k">+ Add</td><td>Sub-sheet: <i>Pin a macro</i> · <i>Create new macro</i> · <i>Create new slot</i>.</td></tr>
+            <tr><td class="k">Reset</td><td>Restores v1 default layout. Single tap, no confirm.</td></tr>
+          </tbody>
+        </table>
+        <p class="meta" style="margin-top:12px;">A user-created custom slot is a bundle of up to four bindings (tap, swipe-up, swipe-down, long-press), each pointing at a macro. Horizontal-swipe bindings are reserved for special widgets and deferred to v1.5+ for user slots.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2>Fn slot + F-key mode</h2>
+    <p class="lede">Tapping Fn toggles F-key mode: the scroll region's contents cross-fade (~180ms) from the default symbols to F1–F12. Locked region is unchanged. Fn lives at the end of the scroll region by default — heavy users live in <code>htop</code>/<code>top</code>/<code>mc</code> where context detection auto-locks Fn for them.</p>
+
+    <div class="grid-2">
+      <div class="minibar-wrap">
+        <div class="cap">Fn idle — scroll shows defaults</div>
+        <div class="minibar">
+          <div class="locked">
+            <span class="esc-pill"><span>Esc</span><span class="hint">≡</span></span>
+            <div class="pad"><span class="u">↑</span><span class="l">←</span><span class="r">→</span><span class="d">↓</span></div>
+            <div class="slot">⌃</div>
+            <div class="slot">⇥</div>
+          </div>
+          <div class="scroll">
+            <div class="slot">/</div><div class="slot">|</div><div class="slot">~</div>
+            <div class="slot">-</div><div class="slot">(</div><div class="slot">)</div>
+            <div class="slot">Fn</div>
+          </div>
+        </div>
+        <p class="col-note">Fn is the last regular slot. Reach by pan.</p>
+      </div>
+
+      <div class="minibar-wrap">
+        <div class="cap">Fn armed (locked) — F-keys replace scroll contents</div>
+        <div class="minibar">
+          <div class="locked">
+            <span class="esc-pill"><span>Esc</span><span class="hint">≡</span></span>
+            <div class="pad"><span class="u">↑</span><span class="l">←</span><span class="r">→</span><span class="d">↓</span></div>
+            <div class="slot">⌃</div>
+            <div class="slot">⇥</div>
+          </div>
+          <div class="scroll">
+            <div class="slot">F1</div><div class="slot">F2</div><div class="slot">F3</div>
+            <div class="slot">F4</div><div class="slot">F5</div><div class="slot">F6</div>
+            <div class="slot fn-armed">Fn</div>
+          </div>
+        </div>
+        <p class="col-note">F7–F12 reachable by pan. Fn slot itself shows the armed / locked treatment (bronze fill, indicator dot when locked).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2>Context-detection preview (compact)</h2>
+    <p class="lede">When a known foreground process engages, its promotion set slides into the scroll region between the locked divider and the defaults. Promoted slots get a bronze-tint fill plus a thin top-edge accent. Cross-reference <code>mockups/specs/context-detection.html</code> for the full vim / python / less / psql story and the engage/disengage animation timing.</p>
+
+    <div class="minibar-wrap">
+      <div class="cap">vim engaged — three promoted slots prepended</div>
+      <div class="minibar">
+        <div class="locked">
+          <span class="esc-pill"><span>Esc</span><span class="hint">≡</span></span>
+          <div class="pad"><span class="u">↑</span><span class="l">←</span><span class="r">→</span><span class="d">↓</span></div>
+          <div class="slot">⌃</div>
+          <div class="slot">⇥</div>
+        </div>
+        <div class="scroll">
+          <div class="slot promoted"><span class="up">;</span>:</div>
+          <div class="slot promoted"><span class="up">#</span>*</div>
+          <div class="slot promoted"><span class="up">^</span>%<span class="down">$</span></div>
+          <div class="slot">/</div>
+          <div class="slot">|</div>
+          <div class="slot">~</div>
+          <div class="slot">-</div>
+        </div>
+      </div>
+      <p class="col-note">Bronze 12%-opacity fill + 1.5pt top-edge accent. Glyph contrast unchanged. Engage = slide-in from left over 180ms with a single 120ms accent-line pulse; disengage = slide-out, defaults reflow left, no pulse, no haptic.</p>
+    </div>
   </section>
 
   <footer>
-    First try. Open `mockups/keybar-v1.html` to see it rendered.
-    The principles list is what to argue with first; the specific keys-per-slot are easier to swap once the principles hold.
+    Supersedes <a href="../../docs/superpowers/specs/2026-06-15-keybar-customization-design.md">2026-06-15-keybar-customization-design</a>'s sole remaining mockup gap. See also: <a href="esc-pill.html">esc-pill draft</a>, <a href="context-detection.html">context-detection mockup</a>, <a href="design-system.html">design-system</a>.
   </footer>
 
 </main>
