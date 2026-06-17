@@ -53,8 +53,17 @@ pub(crate) fn build_preferred(allow_legacy: bool, allow_deprecated: bool) -> Pre
         Algorithm::Ecdsa { curve: EcdsaCurve::NistP521 },
     ];
 
-    // Tier 2 / Tier 3 appends are added in Tasks 2 and 3.
-    let _ = (allow_legacy, allow_deprecated);
+    // Tier 2 — legacy but allowed (per-host `glymr.allowLegacyAlgorithms`).
+    if allow_legacy {
+        kex_algs.push(kex::DH_G14_SHA256);
+        kex_algs.push(kex::DH_GEX_SHA256);
+        cipher_algs.push(cipher::AES_256_CBC);
+        cipher_algs.push(cipher::AES_192_CBC);
+        cipher_algs.push(cipher::AES_128_CBC);
+    }
+
+    // Tier 3 append is added in Task 3.
+    let _ = allow_deprecated;
 
     Preferred {
         kex: Cow::Owned(kex_algs),
@@ -103,6 +112,18 @@ mod tests {
         assert!(!cipher_wire(&p).contains(&"aes256-cbc"));                 // Tier 2
         assert!(!mac_wire(&p).contains(&"hmac-sha1"));                     // Tier 3
         assert!(!key_wire(&p).contains(&"ssh-rsa"));                       // Tier 3
+    }
+
+    #[test]
+    fn legacy_toggle_adds_tier2_only() {
+        let p = build_preferred(true, false);
+        assert!(kex_wire(&p).contains(&"diffie-hellman-group14-sha256"));
+        assert!(kex_wire(&p).contains(&"diffie-hellman-group-exchange-sha256"));
+        assert!(cipher_wire(&p).contains(&"aes256-cbc"));
+        assert!(cipher_wire(&p).contains(&"aes128-cbc"));
+        // legacy must NOT pull in Tier 3
+        assert!(!kex_wire(&p).contains(&"diffie-hellman-group14-sha1"));
+        assert!(!key_wire(&p).contains(&"ssh-rsa"));
     }
 
     #[test]
