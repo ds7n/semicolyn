@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 True Positive LLC
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Glymr Linux fast-loop dev image: Swift 6 + Rust on one Ubuntu base.
+# Runs the platform-agnostic tier (cargo test + swift test via swift-crypto).
+# The Apple-only tier (XCFramework bridge, SwiftUI) is a macOS-CI gate, not here.
+FROM swift:6.1
+
+# Rust toolchain via rustup. curl/build-essential round out the C toolchain
+# that aws-lc-rs / cc-rs need in later phases.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl ca-certificates build-essential pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --no-modify-path --default-toolchain stable --profile minimal \
+    && rustup component add rustfmt clippy \
+    # Make the toolchain dirs writable so the container can run as the host UID.
+    && chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
+
+# Pre-create the named-volume mountpoints with open perms. Fresh Docker volumes
+# inherit the image dir's ownership; without this they'd be root-owned and the
+# host-UID container couldn't write build artifacts.
+RUN mkdir -p /work/target /work/.build /usr/local/cargo/registry \
+    && chmod -R 0777 /work/target /work/.build /usr/local/cargo/registry
+
+WORKDIR /work
