@@ -38,6 +38,7 @@ Items that surfaced while resolving the original list and were addressed alongsi
 | # | Item | Severity | Status | Resolution |
 |---|---|---|---|---|
 | W1 | **Color theming plumbing.** Semantic-token layer for color references so v1 can ship Bell Bronze while staying ready for alternative palettes (Pro perk, accessibility, future light mode) without consumer-code churn. Surfaced from #1(b) bell-halo color discussion. | medium | resolved | `2026-06-17-design-tokens-design.md` |
+| W2 | **Terminal UX additions** — font size (incl. pinch-zoom + ⌘+/⌘-/⌘0), URL tap-to-open (http/https/ssh), cursor style + blink + DECSCUSR, scrollback buffer policy (tmux mode is tmux's; raw-PTY default 5000, slider to 'unlimited'), explicit resize / rotation policy, port-forward runtime status in Esc-pill picker Live row. Surfaced as a bundle of basic-terminal-client gaps no spec had covered. | medium | resolved | `2026-06-17-terminal-ux-additions-design.md` |
 
 ## Nice-to-tighten
 
