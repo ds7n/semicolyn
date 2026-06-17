@@ -28,7 +28,7 @@ Not load-bearing for ship, but should be designed before code starts.
 | 5 | **Jump-host chained Face ID prompts.** Two hops with `anyUse` identities — does the user get prompts in series? One bundled prompt? Will surprise users; spell out the order. | medium | resolved | `2026-06-17-chain-auth-design.md` |
 | 6 | **tmux session naming + multi-device policy.** Session-ID generation isn't defined. Two iCloud-paired iOS devices connecting to the same host — share session or fork two? Server-side state could diverge while picker shows one row. | medium | resolved | `2026-06-17-tmux-session-design.md` |
 | 7 | **Screenshot / screen-record protection.** No mention anywhere. Security-first marketing vs leaving terminal contents screenshottable by other processes / ReplayKit. Recommend `UIScreen.isCaptured` observation + opt-in App-preferences toggle, or an explicit decision *not* to do this with rationale. | medium | resolved | `2026-06-17-screen-capture-protection-design.md` |
-| 8 | **App-uninstall + Secure Enclave key destruction.** One-liner confirming SE-flavor keys are destroyed on uninstall (iOS 10.3+ default) and that's expected behavior, not a surprise. | low | open | — |
+| 8 | **App-uninstall + Secure Enclave key destruction.** One-liner confirming SE-flavor keys are destroyed on uninstall (iOS 10.3+ default) and that's expected behavior, not a surprise. | low | resolved | `2026-06-15-identities-keys-management-design.md` §"App uninstall behavior" |
 | 9 | **Mosh + Tailscale roaming interaction.** Mosh roaming assumed to "just work" on IP change; under Tailscale the UDP endpoint can change semantics. Likely fine but a sentence is warranted. | low | open | — |
 
 ## Added during walk-through
