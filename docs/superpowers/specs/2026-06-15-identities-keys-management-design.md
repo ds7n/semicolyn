@@ -191,6 +191,20 @@ On confirm:
 
 No orphaned key material. The user expectation when they tap "delete a key" is that the key is gone.
 
+### App uninstall behavior
+
+Documented here for completeness, since it's a deletion path the user can take outside the app:
+
+- **iCloud Keychain identities** *survive* app uninstall + reinstall. iOS removes the local Keychain item on uninstall (iOS 10.3+ default), but the iCloud-Keychain-synced copy lives in iCloud and is restored when the user reinstalls Glymr and re-signs in. Effectively: uninstalling Glymr does not destroy iCloud-flavor identities; signing out of iCloud (or removing the device from the Apple ID) does.
+- **Secure Enclave identities** are *destroyed* on app uninstall. The Keychain reference to the SE-bound key is deleted, the SE key material is no longer accessible, and there is no recovery path. Same outcome as tapping Delete inside the app. This is expected iOS behavior, not a Glymr quirk.
+
+This contrast is surfaced in two places:
+
+1. The **SE delete-confirm action sheet** already bolds the irreversibility (per the locked copy below). The same phrasing applies to uninstall: "irreversible" means uninstall too.
+2. The **About & Help → Privacy** drill-down per [[2026-06-16-settings-sub-screens-design]] mentions the contrast in one sentence: *"iCloud Keychain identities survive reinstall via iCloud sync; Secure Enclave identities are tied to this device and this install."*
+
+No in-app warning at uninstall (iOS doesn't surface uninstall to apps — the app is already gone before there's a chance to warn).
+
 ## Create / Import sub-flow
 
 The same half-sheet locked in `host-crud-design.md`. This spec adds the standalone-entry parameterization.
