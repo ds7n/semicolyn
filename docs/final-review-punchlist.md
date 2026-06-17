@@ -14,7 +14,7 @@ These are protocol-layer or first-trust UX questions whose answers partly determ
 
 | # | Item | Severity | Status | Resolution |
 |---|---|---|---|---|
-| 1 | **Terminal emulator scope.** Escape-sequence level (xterm-256? truecolor?), terminal **bell** (silent / haptic / sound / flash), **OSC 52** clipboard policy, **OSC 0/2** title handling, **mouse-mode** (`set mouse=a`) passthrough. Cursor-placement spec quietly assumes mouse mode exists; nothing states whether real mouse reporting is supported. | critical | open | — |
+| 1 | **Terminal emulator scope.** Escape-sequence level (xterm-256? truecolor?), terminal **bell** (silent / haptic / sound / flash), **OSC 52** clipboard policy, **OSC 0/2** title handling, **mouse-mode** (`set mouse=a`) passthrough. Cursor-placement spec quietly assumes mouse mode exists; nothing states whether real mouse reporting is supported. | critical | in-progress | (a) `TERM=xterm-256color` with opportunistic truecolor — locked. (b) bell handling — locked in `2026-06-17-terminal-feedback-design.md`. (c) OSC 52, (d) OSC 0/2 title, (e) mouse-mode — open. |
 | 2 | **SSH host-key TOFU + mismatch UX.** Host-config schema flags a mismatch modal as "deferred to CRUD spec"; CRUD doesn't pick it up. First-trust prompt format on the very first connection isn't documented anywhere as a UI flow. | critical | open | — |
 | 3 | **SSH algorithm allowlist.** No spec declares the v1 ciphers / MACs / KEX / HostKey allowlist. "Modern OpenSSH defaults" depends on the SSH stack (libssh2 vs SwiftSSH vs Network.framework). | critical | open | — |
 
@@ -30,6 +30,14 @@ Not load-bearing for ship, but should be designed before code starts.
 | 7 | **Screenshot / screen-record protection.** No mention anywhere. Security-first marketing vs leaving terminal contents screenshottable by other processes / ReplayKit. Recommend `UIScreen.isCaptured` observation + opt-in App-preferences toggle, or an explicit decision *not* to do this with rationale. | medium | open | — |
 | 8 | **App-uninstall + Secure Enclave key destruction.** One-liner confirming SE-flavor keys are destroyed on uninstall (iOS 10.3+ default) and that's expected behavior, not a surprise. | low | open | — |
 | 9 | **Mosh + Tailscale roaming interaction.** Mosh roaming assumed to "just work" on IP change; under Tailscale the UDP endpoint can change semantics. Likely fine but a sentence is warranted. | low | open | — |
+
+## Added during walk-through
+
+Items that surfaced while resolving the original list and were addressed alongside.
+
+| # | Item | Severity | Status | Resolution |
+|---|---|---|---|---|
+| W1 | **Color theming plumbing.** Semantic-token layer for color references so v1 can ship Bell Bronze while staying ready for alternative palettes (Pro perk, accessibility, future light mode) without consumer-code churn. Surfaced from #1(b) bell-halo color discussion. | medium | resolved | `2026-06-17-design-tokens-design.md` |
 
 ## Nice-to-tighten
 
