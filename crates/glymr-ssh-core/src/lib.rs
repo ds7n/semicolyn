@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 uniffi::setup_scaffolding!();
 
+mod algorithms;
+
 /// Returns the version string of the Glymr SSH core crate.
 ///
 /// Phase 0 uses this purely to prove the Rust→UniFFI→Swift toolchain end to end.
