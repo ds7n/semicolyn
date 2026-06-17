@@ -1,0 +1,64 @@
+# Final review punch list
+
+**Created:** 2026-06-17
+**Source:** post-mockup-audit holistic design review (commit `99599bf` is the reviewed state)
+**Purpose:** track the remaining design work surfaced by the final review so brainstorming finishes cleanly before code starts.
+
+Status legend: `open` · `in-progress` · `resolved` · `deferred`. Resolution column links to the spec / commit that closed the item.
+
+---
+
+## Critical (must lock before code)
+
+These are protocol-layer or first-trust UX questions whose answers partly determine the SSH stack pick. Reversing later is expensive.
+
+| # | Item | Severity | Status | Resolution |
+|---|---|---|---|---|
+| 1 | **Terminal emulator scope.** Escape-sequence level (xterm-256? truecolor?), terminal **bell** (silent / haptic / sound / flash), **OSC 52** clipboard policy, **OSC 0/2** title handling, **mouse-mode** (`set mouse=a`) passthrough. Cursor-placement spec quietly assumes mouse mode exists; nothing states whether real mouse reporting is supported. | critical | open | — |
+| 2 | **SSH host-key TOFU + mismatch UX.** Host-config schema flags a mismatch modal as "deferred to CRUD spec"; CRUD doesn't pick it up. First-trust prompt format on the very first connection isn't documented anywhere as a UI flow. | critical | open | — |
+| 3 | **SSH algorithm allowlist.** No spec declares the v1 ciphers / MACs / KEX / HostKey allowlist. "Modern OpenSSH defaults" depends on the SSH stack (libssh2 vs SwiftSSH vs Network.framework). | critical | open | — |
+
+## Should address before implementation
+
+Not load-bearing for ship, but should be designed before code starts.
+
+| # | Item | Severity | Status | Resolution |
+|---|---|---|---|---|
+| 4 | **SSH cert auth + `ssh-agent` semantics.** Cert auth (CA-signed) is unmentioned. `forwardAgent` flag is in the schema but Glymr has no agent — flag is decorative in v1. Either remove it from Tier 2 or document semantics (recommend: hard-disable in v1, "v1.5 in-app ephemeral agent" deferred). | medium | open | — |
+| 5 | **Jump-host chained Face ID prompts.** Two hops with `anyUse` identities — does the user get prompts in series? One bundled prompt? Will surprise users; spell out the order. | medium | open | — |
+| 6 | **tmux session naming + multi-device policy.** Session-ID generation isn't defined. Two iCloud-paired iOS devices connecting to the same host — share session or fork two? Server-side state could diverge while picker shows one row. | medium | open | — |
+| 7 | **Screenshot / screen-record protection.** No mention anywhere. Security-first marketing vs leaving terminal contents screenshottable by other processes / ReplayKit. Recommend `UIScreen.isCaptured` observation + opt-in App-preferences toggle, or an explicit decision *not* to do this with rationale. | medium | open | — |
+| 8 | **App-uninstall + Secure Enclave key destruction.** One-liner confirming SE-flavor keys are destroyed on uninstall (iOS 10.3+ default) and that's expected behavior, not a surprise. | low | open | — |
+| 9 | **Mosh + Tailscale roaming interaction.** Mosh roaming assumed to "just work" on IP change; under Tailscale the UDP endpoint can change semantics. Likely fine but a sentence is warranted. | low | open | — |
+
+## Nice-to-tighten
+
+Take-or-leave polish.
+
+| # | Item | Severity | Status | Resolution |
+|---|---|---|---|---|
+| 10 | README "multiple simultaneous live connections" pitch doesn't mention the soft cap of 8 from `multi-connection-switching`. Power-user reader would expect unbounded. | trivial | open | — |
+| 11 | `mosh-server` binary missing surfaces as generic "unreachable" — mosh users have a specific mental model for that failure and a tailored message would help. | trivial | open | — |
+| 12 | **Privacy statement** content (drilled-down from About & Help) is load-bearing for Glymr's marketed posture but has no draft. Worth a content pass before code so App Store submission isn't blocked. | medium | open | — |
+| 13 | README's Layout section lists every spec date individually; at 16 specs it's already long. Cosmetic. | trivial | open | — |
+| 14 | **Encrypted-key passphrase lifetime** — covered for imports, worth a sentence confirming Glymr never retains or re-prompts; the iCloud Keychain copy is the canonical decrypted-equivalent under iOS data protection. | trivial | open | — |
+
+---
+
+## Out of scope for this punch list
+
+These are the deliberately-deferred-to-v1.5+ items that came up in earlier sweeps and are **not** open brainstorm work:
+
+- v2 custom inputView (letter-to-alt mapping)
+- iPad-native surfaces (`UISceneSession` multi-window, landscape layouts, trackpad pointer)
+- In-app hardware-Esc rebind
+- Custom Cmd-shortcut remapping
+- Font-size shortcuts (`⌘+` / `⌘−`)
+- Scrollback navigation shortcuts (`⌘Home` / `⌘End`)
+- Pane layout templates (`even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`)
+- Alternative color palettes (a Pro perk; needs a second palette designed)
+- Alternative app icons (a Pro perk; needs concepts)
+- Default app icon design
+- Crash reporting policy (out-of-app failure surface)
+- Local / push notifications policy beyond "notify on command done" (already deferred)
+- App Store screenshots, listing copy, ASO
