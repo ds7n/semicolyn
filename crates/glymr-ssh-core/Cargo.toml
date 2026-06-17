@@ -9,6 +9,7 @@ crate-type = ["staticlib", "lib"]
 
 [dependencies]
 uniffi = { version = "0.31", features = ["cli"] }
+russh = "0.61"
 
 [[bin]]
 name = "uniffi-bindgen"
