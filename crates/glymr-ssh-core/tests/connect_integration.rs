@@ -45,3 +45,31 @@ async fn connect_aborts_when_delegate_rejects() {
     let err = connect_core(addr, false, false, v).await.unwrap_err();
     assert!(matches!(err, ConnectError::HostKeyRejected), "got {err:?}");
 }
+
+#[tokio::test]
+async fn tier3_algorithms_are_detected_when_negotiated() {
+    let Some(addr) = std::env::var("GLYMR_TEST_SSHD_LEGACY").ok() else {
+        eprintln!("skipping: set GLYMR_TEST_SSHD_LEGACY");
+        return;
+    };
+    // allow_deprecated so build_preferred offers the Tier-3 algorithms the
+    // legacy server requires; without it, negotiation would fail outright.
+    let v = Arc::new(RecordingVerifier { trust: true, seen: Mutex::new(None) });
+    let conn = connect_core(addr, false, true, v).await.expect("legacy connect");
+
+    let flagged = conn.tier3_in_use();
+    assert!(flagged.contains(&"ssh-rsa".to_string()), "got {flagged:?}");
+    assert!(flagged.contains(&"diffie-hellman-group14-sha1".to_string()), "got {flagged:?}");
+    assert!(flagged.contains(&"hmac-sha1".to_string()), "got {flagged:?}");
+}
+
+#[tokio::test]
+async fn modern_session_flags_no_tier3() {
+    let Some(addr) = sshd_addr() else {
+        eprintln!("skipping: set GLYMR_TEST_SSHD");
+        return;
+    };
+    let v = Arc::new(RecordingVerifier { trust: true, seen: Mutex::new(None) });
+    let conn = connect_core(addr, false, false, v).await.expect("modern connect");
+    assert!(conn.tier3_in_use().is_empty());
+}
