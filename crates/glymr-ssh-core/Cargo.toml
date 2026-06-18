@@ -8,8 +8,15 @@ name = "glymr_ssh_core"
 crate-type = ["staticlib", "lib"]
 
 [dependencies]
-uniffi = { version = "0.31", features = ["cli"] }
+uniffi = { version = "0.31", features = ["cli", "tokio"] }
 russh = "0.61"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time"] }
+async-trait = "0.1"
+thiserror = "2"
+
+[dev-dependencies]
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [[bin]]
 name = "uniffi-bindgen"
