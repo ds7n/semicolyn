@@ -78,6 +78,30 @@ impl client::Handler for ClientHandler {
         }
         Ok(trusted)
     }
+
+    async fn kex_done(
+        &mut self,
+        _shared_secret: Option<&[u8]>,
+        names: &russh::Names,
+        _session: &mut russh::client::Session,
+    ) -> Result<(), Self::Error> {
+        // Collect every negotiated algorithm's wire name and keep the Tier-3
+        // ones for the outdated-cryptography warning.
+        let negotiated = [
+            names.kex.as_ref(),
+            names.key.as_str(),
+            names.cipher.as_ref(),
+            names.client_mac.as_ref(),
+            names.server_mac.as_ref(),
+        ];
+        let mut flagged = self.tier3_in_use.lock().unwrap();
+        for name in negotiated {
+            if crate::algorithms::is_tier3(name) && !flagged.iter().any(|n| n == name) {
+                flagged.push(name.to_string());
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A live SSH transport connection. Phase 1c+ adds auth and channels; Phase 1b
