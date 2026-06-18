@@ -3,6 +3,7 @@
 uniffi::setup_scaffolding!();
 
 mod algorithms;
+pub mod connection;
 
 /// Returns the version string of the Glymr SSH core crate.
 ///
