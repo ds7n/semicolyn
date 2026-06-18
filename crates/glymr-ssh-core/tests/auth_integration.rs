@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: 2026 True Positive LLC
+// SPDX-License-Identifier: GPL-3.0-only
+use std::sync::{Arc, Mutex};
+use glymr_ssh_core::connection::{connect_core, AuthOutcome, HostKeyInfo, HostKeyVerifier};
+
+struct TrustAll;
+#[async_trait::async_trait]
+impl HostKeyVerifier for TrustAll {
+    async fn verify(&self, _info: HostKeyInfo) -> bool { true }
+}
+
+fn sshd_addr() -> Option<String> { std::env::var("GLYMR_TEST_SSHD").ok() }
+
+#[tokio::test]
+async fn password_auth_succeeds_with_correct_credentials() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
+    let outcome = conn.authenticate_password("tester".into(), "testpass".into()).await.expect("auth call");
+    assert_eq!(outcome, AuthOutcome::Success);
+}
+
+#[tokio::test]
+async fn password_auth_fails_with_wrong_password() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
+    let outcome = conn.authenticate_password("tester".into(), "wrong".into()).await.expect("auth call");
+    assert_eq!(outcome, AuthOutcome::Failure);
+}
+
+// silence unused import warning until Task 2 uses Mutex
+#[allow(dead_code)]
+fn _uses_mutex() -> Mutex<()> { Mutex::new(()) }
