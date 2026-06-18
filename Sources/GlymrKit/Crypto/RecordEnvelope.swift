@@ -23,13 +23,16 @@ public enum RecordEnvelope {
         return combined
     }
 
-    /// Opens a blob produced by `seal` and decodes it as `T`. Throws if the key
-    /// is wrong or the ciphertext was tampered with (GCM tag mismatch).
+    /// Opens a blob produced by `seal` and decodes it as `T`. Throws
+    /// `decryptionFailed` if the key is wrong, the ciphertext was tampered with
+    /// (GCM tag mismatch), or the blob is malformed (not a valid sealed box).
     public static func open<T: Decodable>(_ blob: Data, as type: T.Type,
                                           key: SymmetricKey) throws -> T {
-        let box = try AES.GCM.SealedBox(combined: blob)
         let plaintext: Data
         do {
+            // SealedBox construction is inside the catch so a malformed blob
+            // yields the typed `decryptionFailed`, not a raw CryptoKit error.
+            let box = try AES.GCM.SealedBox(combined: blob)
             plaintext = try AES.GCM.open(box, using: key)
         } catch {
             throw RecordEnvelopeError.decryptionFailed

@@ -34,7 +34,9 @@ final class RecordEnvelopeTests: XCTestCase {
         XCTAssertThrowsError(
             try RecordEnvelope.open(sealed, as: GlymrKit.Host.self,
                                     key: SymmetricKey(size: .bits256))
-        )
+        ) { error in
+            XCTAssertEqual(error as? RecordEnvelopeError, .decryptionFailed)
+        }
     }
 
     func testTamperedCiphertextFailsToOpen() throws {
@@ -43,6 +45,19 @@ final class RecordEnvelopeTests: XCTestCase {
         sealed[sealed.count - 1] ^= 0xFF   // flip a bit in the GCM tag region
         XCTAssertThrowsError(
             try RecordEnvelope.open(sealed, as: GlymrKit.Host.self, key: key)
-        )
+        ) { error in
+            XCTAssertEqual(error as? RecordEnvelopeError, .decryptionFailed)
+        }
+    }
+
+    func testMalformedBlobFailsToOpenWithTypedError() throws {
+        // Adversarial: a blob too short to be a valid sealed box must produce
+        // the typed `decryptionFailed`, never a panic or a raw CryptoKit error.
+        let garbage = Data([0x00, 0x01, 0x02, 0x03])
+        XCTAssertThrowsError(
+            try RecordEnvelope.open(garbage, as: GlymrKit.Host.self, key: key)
+        ) { error in
+            XCTAssertEqual(error as? RecordEnvelopeError, .decryptionFailed)
+        }
     }
 }
