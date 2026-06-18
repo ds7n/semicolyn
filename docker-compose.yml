@@ -18,11 +18,27 @@ services:
     working_dir: /work
     environment:
       CARGO_TARGET_DIR: /work/target
+      GLYMR_TEST_SSHD: sshd:22
+      GLYMR_TEST_SSHD_LEGACY: sshd-legacy:22
     volumes:
       - .:/work
       - cargo-target:/work/target
       - swift-build:/work/.build
       - cargo-registry:/usr/local/cargo/registry
+
+  # Modern SSH server for host-key / handshake integration tests.
+  sshd:
+    build:
+      context: docker
+      dockerfile: Dockerfile.sshd
+    image: glymr-sshd
+
+  # Legacy SSH server that offers only Tier-3 algorithms (Task 3).
+  sshd-legacy:
+    image: glymr-sshd
+    command: ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_legacy.conf"]
+    volumes:
+      - ./docker/sshd-legacy.conf:/etc/ssh/sshd_legacy.conf:ro
 
 volumes:
   cargo-target:
