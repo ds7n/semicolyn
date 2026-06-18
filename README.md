@@ -6,7 +6,7 @@ iOS SSH/mosh client. Differentiator: terminal work that feels native on a touch 
 
 ## Status
 
-**Phase:** Design complete, implementation not yet started. All v1 subsystems have locked specs; the implementation roadmap and Phase 0 plan are written in `docs/superpowers/plans/`. No code yet.
+**Phase:** Design complete; implementation underway. The SSH core is being built bottom-up — **Phase 0 (foundations), 1a (algorithm allowlist), and 1b (connection + handshake + host-key trust) are done** and on `master`; Phase 1c (authentication) is planned. The Linux fast loop runs in a Docker dev container (Swift 6 + Rust, `russh`); SSH integration tests run against containerized `sshd` fixtures. Tests green: 8 Rust unit + 4 Rust integration + 20 Swift. macOS-gated work (the UniFFI XCFramework bridge, iOS UI) and CI are deferred. Roadmap and per-phase plans live in `docs/superpowers/plans/`.
 
 **Locked so far:**
 - Concept, product positioning, security posture
