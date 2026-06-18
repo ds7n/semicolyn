@@ -42,6 +42,28 @@ impl From<russh::Error> for ConnectError {
     }
 }
 
+/// The result of an authentication attempt. A failed auth is a normal outcome,
+/// not a `ConnectError` — the caller decides what to do (retry, try another
+/// method, surface the connect-failed banner).
+#[derive(uniffi::Enum, Debug, PartialEq, Eq)]
+pub enum AuthOutcome {
+    /// Authentication fully succeeded; the session is usable.
+    Success,
+    /// The method was accepted but the server requires another method too
+    /// (multi-factor). Caller should authenticate again with a further method.
+    PartialSuccess,
+    /// Authentication failed.
+    Failure,
+}
+
+fn outcome(result: russh::client::AuthResult) -> AuthOutcome {
+    match result {
+        russh::client::AuthResult::Success => AuthOutcome::Success,
+        russh::client::AuthResult::Failure { partial_success: true, .. } => AuthOutcome::PartialSuccess,
+        russh::client::AuthResult::Failure { .. } => AuthOutcome::Failure,
+    }
+}
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use russh::client;
@@ -128,6 +150,20 @@ impl Connection {
     /// warning per ssh-algorithms-design §"Tier 3 warning UX".
     pub fn tier3_in_use(&self) -> Vec<String> {
         self.tier3_in_use.lock().unwrap().clone()
+    }
+}
+
+#[uniffi::export(async_runtime = "tokio")]
+impl Connection {
+    /// Password authentication. Returns the typed outcome; a wrong password is
+    /// `Failure`, not an error.
+    pub async fn authenticate_password(
+        &self,
+        user: String,
+        password: String,
+    ) -> Result<AuthOutcome, ConnectError> {
+        let mut handle = self.handle.lock().await;
+        Ok(outcome(handle.authenticate_password(user, password).await?))
     }
 }
 
