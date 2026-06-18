@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 True Positive LLC
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Glymr is GPL-3.0-only. Every dependency must resolve to a GPL-3-compatible
+# license. aws-lc-rs is GPL-3-compatible since AWS-LC relicensed its
+# OpenSSL-derived sources to Apache-2.0 (PR #3091). This gate fails if an
+# OpenSSL-licensed crate (e.g. an old aws-lc-sys) sneaks back in.
+[licenses]
+allow = [
+    "GPL-3.0-only",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+    "OpenSSL",
+]
+confidence-threshold = 0.9
+
+# Fail if the GPL-incompatible `ring` backend is pulled in alongside aws-lc-rs.
+[bans]
+deny = [{ name = "ring" }]

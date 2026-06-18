@@ -179,6 +179,20 @@ pub async fn connect_core(
     })
 }
 
+/// UniFFI entry point: connect to `addr` ("host:port"), delegating host-key
+/// trust to the foreign `verifier`. Async over the tokio runtime.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn connect(
+    addr: String,
+    allow_legacy: bool,
+    allow_deprecated: bool,
+    verifier: Arc<dyn HostKeyVerifier>,
+) -> Result<Arc<Connection>, ConnectError> {
+    connect_core(addr, allow_legacy, allow_deprecated, verifier)
+        .await
+        .map(Arc::new)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
