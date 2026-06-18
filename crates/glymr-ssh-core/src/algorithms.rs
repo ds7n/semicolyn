@@ -115,51 +115,107 @@ mod tests {
     fn key_wire(p: &russh::Preferred) -> Vec<&str> {
         p.key.iter().map(|a| a.as_str()).collect::<Vec<&str>>()
     }
+    fn comp_wire(p: &russh::Preferred) -> Vec<&str> {
+        p.compression.iter().map(|n| n.as_ref()).collect::<Vec<&str>>()
+    }
+
+    // Expected Tier-1 lists, in exact preference order (strongest first). The
+    // exact-equality assertions below catch any drop, addition, reorder, or
+    // typo — far stronger than membership checks. Tier-4 dead algorithms are
+    // proven absent by exact equality (they appear in no expected list).
+    const T1_KEX: &[&str] = &[
+        "mlkem768x25519-sha256",
+        "curve25519-sha256",
+        "curve25519-sha256@libssh.org",
+        "ecdh-sha2-nistp256",
+        "ecdh-sha2-nistp384",
+        "ecdh-sha2-nistp521",
+        "diffie-hellman-group16-sha512",
+        "diffie-hellman-group18-sha512",
+    ];
+    const T1_CIPHER: &[&str] = &[
+        "chacha20-poly1305@openssh.com",
+        "aes256-gcm@openssh.com",
+        "aes128-gcm@openssh.com",
+        "aes256-ctr",
+        "aes192-ctr",
+        "aes128-ctr",
+    ];
+    const T1_MAC: &[&str] = &[
+        "hmac-sha2-256-etm@openssh.com",
+        "hmac-sha2-512-etm@openssh.com",
+        "hmac-sha2-256",
+        "hmac-sha2-512",
+    ];
+    const T1_KEY: &[&str] = &[
+        "ssh-ed25519",
+        "rsa-sha2-512",
+        "rsa-sha2-256",
+        "ecdsa-sha2-nistp256",
+        "ecdsa-sha2-nistp384",
+        "ecdsa-sha2-nistp521",
+    ];
+
+    // Tier-2 (legacy) appends, in append order.
+    const T2_KEX: &[&str] = &[
+        "diffie-hellman-group14-sha256",
+        "diffie-hellman-group-exchange-sha256",
+    ];
+    const T2_CIPHER: &[&str] = &["aes256-cbc", "aes192-cbc", "aes128-cbc"];
+
+    // Tier-3 (deprecated) appends, in append order.
+    const T3_KEX: &[&str] = &[
+        "diffie-hellman-group14-sha1",
+        "diffie-hellman-group-exchange-sha1",
+    ];
+    const T3_MAC: &[&str] = &["hmac-sha1"];
+    const T3_KEY: &[&str] = &["ssh-rsa"];
 
     #[test]
-    fn tier1_defaults_offer_modern_set() {
+    fn tier1_only_exact_ordered() {
         let p = build_preferred(false, false);
-        let kex = kex_wire(&p);
-        assert!(kex.contains(&"mlkem768x25519-sha256"), "PQC KEX must be present");
-        assert!(kex.contains(&"curve25519-sha256"));
-        assert!(cipher_wire(&p).contains(&"chacha20-poly1305@openssh.com"));
-        assert!(cipher_wire(&p).contains(&"aes256-gcm@openssh.com"));
-        assert!(mac_wire(&p).contains(&"hmac-sha2-256-etm@openssh.com"));
-        assert!(key_wire(&p).contains(&"ssh-ed25519"));
-        assert!(key_wire(&p).contains(&"rsa-sha2-512"));
+        assert_eq!(kex_wire(&p), T1_KEX);
+        assert_eq!(cipher_wire(&p), T1_CIPHER);
+        assert_eq!(mac_wire(&p), T1_MAC);
+        assert_eq!(key_wire(&p), T1_KEY);
+        assert_eq!(comp_wire(&p), ["none"]);
     }
 
     #[test]
-    fn tier1_excludes_legacy_and_deprecated() {
-        let p = build_preferred(false, false);
-        assert!(!kex_wire(&p).contains(&"diffie-hellman-group14-sha256")); // Tier 2
-        assert!(!kex_wire(&p).contains(&"diffie-hellman-group14-sha1"));   // Tier 3
-        assert!(!cipher_wire(&p).contains(&"aes256-cbc"));                 // Tier 2
-        assert!(!mac_wire(&p).contains(&"hmac-sha1"));                     // Tier 3
-        assert!(!key_wire(&p).contains(&"ssh-rsa"));                       // Tier 3
-    }
-
-    #[test]
-    fn legacy_toggle_adds_tier2_only() {
+    fn legacy_adds_tier2_exact_ordered() {
         let p = build_preferred(true, false);
-        assert!(kex_wire(&p).contains(&"diffie-hellman-group14-sha256"));
-        assert!(kex_wire(&p).contains(&"diffie-hellman-group-exchange-sha256"));
-        assert!(cipher_wire(&p).contains(&"aes256-cbc"));
-        assert!(cipher_wire(&p).contains(&"aes128-cbc"));
-        // legacy must NOT pull in Tier 3
-        assert!(!kex_wire(&p).contains(&"diffie-hellman-group14-sha1"));
-        assert!(!key_wire(&p).contains(&"ssh-rsa"));
+        assert_eq!(kex_wire(&p), [T1_KEX, T2_KEX].concat());
+        assert_eq!(cipher_wire(&p), [T1_CIPHER, T2_CIPHER].concat());
+        // legacy touches only KEX + cipher; MAC and host-key stay Tier-1.
+        assert_eq!(mac_wire(&p), T1_MAC);
+        assert_eq!(key_wire(&p), T1_KEY);
     }
 
     #[test]
-    fn deprecated_toggle_adds_tier3_only() {
+    fn deprecated_adds_tier3_exact_ordered() {
         let p = build_preferred(false, true);
-        assert!(kex_wire(&p).contains(&"diffie-hellman-group14-sha1"));
-        assert!(kex_wire(&p).contains(&"diffie-hellman-group-exchange-sha1"));
-        assert!(mac_wire(&p).contains(&"hmac-sha1"));
-        assert!(key_wire(&p).contains(&"ssh-rsa"));
-        // deprecated must NOT pull in Tier 2
-        assert!(!cipher_wire(&p).contains(&"aes256-cbc"));
+        assert_eq!(kex_wire(&p), [T1_KEX, T3_KEX].concat());
+        assert_eq!(mac_wire(&p), [T1_MAC, T3_MAC].concat());
+        assert_eq!(key_wire(&p), [T1_KEY, T3_KEY].concat());
+        // deprecated does not pull in Tier-2 ciphers.
+        assert_eq!(cipher_wire(&p), T1_CIPHER);
+    }
+
+    #[test]
+    fn both_toggles_exact_ordered_tier2_before_tier3() {
+        let p = build_preferred(true, true);
+        // Tier-2 appends precede Tier-3 appends (legacy block runs first).
+        assert_eq!(kex_wire(&p), [T1_KEX, T2_KEX, T3_KEX].concat());
+        assert_eq!(cipher_wire(&p), [T1_CIPHER, T2_CIPHER].concat());
+        assert_eq!(mac_wire(&p), [T1_MAC, T3_MAC].concat());
+        assert_eq!(key_wire(&p), [T1_KEY, T3_KEY].concat());
+        // Tier-4 floor: dead algorithms appear in no list even with both toggles.
+        for dead in ["3des-cbc", "ssh-dss", "hmac-md5", "arcfour", "diffie-hellman-group1-sha1"] {
+            assert!(!kex_wire(&p).contains(&dead));
+            assert!(!cipher_wire(&p).contains(&dead));
+            assert!(!mac_wire(&p).contains(&dead));
+            assert!(!key_wire(&p).contains(&dead));
+        }
     }
 
     #[test]
@@ -173,10 +229,18 @@ mod tests {
     }
 
     #[test]
-    fn tier4_never_offered_even_with_both_toggles() {
-        let p = build_preferred(true, true);
-        assert!(!cipher_wire(&p).contains(&"3des-cbc"));
-        assert!(!key_wire(&p).contains(&"ssh-dss"));
-        assert!(!mac_wire(&p).contains(&"hmac-md5"));
+    fn classifier_matches_what_the_deprecated_toggle_actually_adds() {
+        // Every Tier-3 algorithm the builder appends must be classified Tier-3,
+        // and nothing the Tier-1 builder offers may be — keeps the warning hook
+        // and the offered set from drifting apart.
+        let tier1 = build_preferred(false, false);
+        let offered: Vec<&str> =
+            [kex_wire(&tier1), cipher_wire(&tier1), mac_wire(&tier1), key_wire(&tier1)].concat();
+        for name in offered {
+            assert!(!is_tier3(name), "Tier-1 algorithm {name} must not be Tier-3");
+        }
+        for name in [T3_KEX, T3_MAC, T3_KEY].concat() {
+            assert!(is_tier3(name), "appended Tier-3 algorithm {name} must classify as Tier-3");
+        }
     }
 }
