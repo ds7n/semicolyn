@@ -27,6 +27,18 @@ async fn password_auth_fails_with_wrong_password() {
     assert_eq!(outcome, AuthOutcome::Failure);
 }
 
+#[tokio::test]
+async fn publickey_auth_succeeds_with_authorized_key() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let key = match std::fs::read_to_string("/testkeys/id_ed25519") {
+        Ok(k) => k,
+        Err(_) => { eprintln!("skipping: /testkeys/id_ed25519 not mounted"); return }
+    };
+    let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
+    let outcome = conn.authenticate_publickey("tester".into(), key).await.expect("auth call");
+    assert_eq!(outcome, AuthOutcome::Success);
+}
+
 // silence unused import warning until Task 2 uses Mutex
 #[allow(dead_code)]
 fn _uses_mutex() -> Mutex<()> { Mutex::new(()) }

@@ -165,6 +165,23 @@ impl Connection {
         let mut handle = self.handle.lock().await;
         Ok(outcome(handle.authenticate_password(user, password).await?))
     }
+
+    /// Public-key authentication from an in-memory OpenSSH private key. (The
+    /// Secure-Enclave / Keychain-backed signing path is Phase 2 + macOS.)
+    pub async fn authenticate_publickey(
+        &self,
+        user: String,
+        private_key_openssh: String,
+    ) -> Result<AuthOutcome, ConnectError> {
+        let key = russh::keys::PrivateKey::from_openssh(private_key_openssh.as_bytes())
+            .map_err(|e| ConnectError::Transport { message: format!("invalid private key: {e}") })?;
+        let mut handle = self.handle.lock().await;
+        // For RSA keys, advertise the strongest server-supported SHA-2 hash;
+        // ignored for ed25519/ecdsa.
+        let hash = handle.best_supported_rsa_hash().await?.flatten();
+        let key = russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), hash);
+        Ok(outcome(handle.authenticate_publickey(user, key).await?))
+    }
 }
 
 /// Opens a TCP+SSH transport connection to `addr` (host:port), negotiating with
