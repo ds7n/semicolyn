@@ -30,4 +30,27 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(c.blue,  Double(0x5C) / 255, accuracy: 0.0001)
         XCTAssertEqual(c.opacity, 0.5, accuracy: 0.0001)
     }
+
+    func testRgbaBoundaryHexValues() {
+        // Boundary-value analysis: the extremes of the channel range.
+        let black = ThemeColor("#000000").rgba()
+        XCTAssertEqual(black.red, 0, accuracy: 0.0001)
+        XCTAssertEqual(black.green, 0, accuracy: 0.0001)
+        XCTAssertEqual(black.blue, 0, accuracy: 0.0001)
+
+        let white = ThemeColor("#FFFFFF").rgba()
+        XCTAssertEqual(white.red, 1, accuracy: 0.0001)
+        XCTAssertEqual(white.green, 1, accuracy: 0.0001)
+        XCTAssertEqual(white.blue, 1, accuracy: 0.0001)
+    }
+
+    func testRgbaMalformedHexFallsBackToZero() {
+        // Invalid partition: a non-hex string yields the documented (0,0,0)
+        // fallback rather than crashing.
+        let c = ThemeColor("#ZZTOP!", opacity: 0.8).rgba()
+        XCTAssertEqual(c.red, 0, accuracy: 0.0001)
+        XCTAssertEqual(c.green, 0, accuracy: 0.0001)
+        XCTAssertEqual(c.blue, 0, accuracy: 0.0001)
+        XCTAssertEqual(c.opacity, 0.8, accuracy: 0.0001)
+    }
 }
