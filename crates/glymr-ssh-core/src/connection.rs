@@ -324,6 +324,9 @@ async fn pump(
     let mut exit = ShellExit::default();
     loop {
         tokio::select! {
+            // `wait()` is cancel-safe (it awaits an mpsc recv): if the cmd arm
+            // wins this select, dropping this future loses no buffered message —
+            // the next `wait()` re-reads it.
             msg = channel.wait() => match msg {
                 Some(M::Data { data }) | Some(M::ExtendedData { data, .. }) => {
                     output.on_output(data.to_vec());
