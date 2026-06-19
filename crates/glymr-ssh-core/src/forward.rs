@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::connection::ClientHandler;
+use crate::connection::{ClientHandler, ConnectError, ForwardMap};
 
 type Handle = russh::client::Handle<ClientHandler>;
 
@@ -56,8 +56,7 @@ pub(crate) async fn open_local(
     local_port: u16,
     remote_host: String,
     remote_port: u16,
-) -> Result<LocalForward, crate::connection::ConnectError> {
-    use crate::connection::ConnectError;
+) -> Result<LocalForward, ConnectError> {
     let listener = tokio::net::TcpListener::bind((local_host.as_str(), local_port))
         .await
         .map_err(|e| ConnectError::Transport {
@@ -99,8 +98,7 @@ pub(crate) async fn open_dynamic(
     handle: Arc<Mutex<Handle>>,
     local_host: String,
     local_port: u16,
-) -> Result<DynamicForward, crate::connection::ConnectError> {
-    use crate::connection::ConnectError;
+) -> Result<DynamicForward, ConnectError> {
     let listener = tokio::net::TcpListener::bind((local_host.as_str(), local_port))
         .await
         .map_err(|e| ConnectError::Transport {
@@ -227,6 +225,54 @@ async fn socks5_serve(
         }
     }
     Ok(())
+}
+
+/// A live remote (forwarded-tcpip) forward. The server listens on `bound_port`
+/// and routes inbound connections back to a device-local target; `close()`
+/// cancels the server-side listener and unregisters the route.
+#[derive(uniffi::Object)]
+pub struct RemoteForward {
+    bound_port: u16,
+    bind_host: String,
+    handle: Arc<Mutex<Handle>>,
+    forwards: ForwardMap,
+}
+
+#[uniffi::export(async_runtime = "tokio")]
+impl RemoteForward {
+    pub fn bound_port(&self) -> u16 {
+        self.bound_port
+    }
+
+    /// Cancel the server-side listener and stop routing.
+    pub async fn close(&self) -> Result<(), ConnectError> {
+        self.forwards.lock().unwrap().remove(&(self.bound_port as u32));
+        let h = self.handle.lock().await;
+        h.cancel_tcpip_forward(self.bind_host.clone(), self.bound_port as u32).await?;
+        Ok(())
+    }
+}
+
+pub(crate) async fn open_remote(
+    handle: Arc<Mutex<Handle>>,
+    forwards: ForwardMap,
+    remote_bind_host: String,
+    remote_bind_port: u16,
+    local_host: String,
+    local_port: u16,
+) -> Result<RemoteForward, ConnectError> {
+    let assigned = {
+        let h = handle.lock().await;
+        h.tcpip_forward(remote_bind_host.clone(), remote_bind_port as u32).await?
+    };
+    // For a fixed (non-zero) request the server listens on exactly that port and
+    // the reply carries no port; for port 0 the server returns the chosen port.
+    let bound_port: u16 = if remote_bind_port == 0 { assigned as u16 } else { remote_bind_port };
+    forwards
+        .lock()
+        .unwrap()
+        .insert(bound_port as u32, (local_host, local_port));
+    Ok(RemoteForward { bound_port, bind_host: remote_bind_host, handle, forwards })
 }
 
 async fn local_accept_loop(

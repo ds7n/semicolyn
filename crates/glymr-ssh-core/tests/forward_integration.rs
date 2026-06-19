@@ -5,7 +5,7 @@ use std::time::Duration;
 #[allow(unused_imports)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use glymr_ssh_core::connection::{
-    connect_core, AuthOutcome, Connection, ConnectError, HostKeyInfo, HostKeyVerifier,
+    connect_core, AuthOutcome, Connection, HostKeyInfo, HostKeyVerifier,
 };
 
 struct TrustAll;
@@ -15,7 +15,6 @@ impl HostKeyVerifier for TrustAll {
 }
 
 fn sshd_addr() -> Option<String> { std::env::var("GLYMR_TEST_SSHD").ok() }
-#[allow(dead_code)]
 fn sshd_host() -> Option<String> { sshd_addr().map(|a| a.split(':').next().unwrap_or("sshd").to_string()) }
 
 async fn connect_and_auth(addr: String) -> Connection {
@@ -153,6 +152,43 @@ async fn dynamic_forward_rejects_unsupported_command() {
     fwd.close().await;
 }
 
-// Silence unused imports until later tasks use them.
-#[allow(dead_code)]
-fn _uses(_: Option<ConnectError>, _: fn(&mut [u8])) {}
+// Remote forward: ask the server to listen on a fixed port and route inbound
+// connections back to a device-local target serving a known banner. Connect to
+// the server's port (reachable as <sshd-host>:PORT thanks to GatewayPorts yes)
+// and expect the banner.
+#[tokio::test]
+async fn remote_forward_routes_inbound_to_local_target() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(host) = sshd_host() else { return };
+    const REMOTE_PORT: u16 = 13389;
+    const BANNER: &[u8] = b"HELLO-GLYMR\n";
+
+    // Device-local target: accept one connection and write the banner.
+    let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind target");
+    let target_port = target.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        if let Ok((mut s, _)) = target.accept().await {
+            let _ = s.write_all(BANNER).await;
+            let _ = s.flush().await;
+        }
+    });
+
+    let conn = connect_and_auth(addr).await;
+    let fwd = conn
+        .open_remote_forward("0.0.0.0".into(), REMOTE_PORT, "127.0.0.1".into(), target_port)
+        .await
+        .expect("open remote forward");
+    assert_eq!(fwd.bound_port(), REMOTE_PORT);
+
+    // Connect to the server's forwarded port from the dev container.
+    let mut sock = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::net::TcpStream::connect((host.as_str(), REMOTE_PORT)),
+    ).await.expect("connect timeout").expect("connect to server forward port");
+    let mut buf = vec![0u8; BANNER.len()];
+    tokio::time::timeout(Duration::from_secs(5), sock.read_exact(&mut buf))
+        .await.expect("read timeout").expect("read banner");
+    assert_eq!(&buf, BANNER, "remote forward must deliver the local target's banner");
+
+    fwd.close().await.expect("close remote forward");
+}

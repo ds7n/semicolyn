@@ -113,6 +113,11 @@ use russh::keys::ssh_key::HashAlg;
 
 use crate::algorithms::build_preferred;
 
+/// Server-listen-port → device-local target (host, port) for active remote
+/// (forwarded-tcpip) forwards. Shared between `Connection` and `ClientHandler`.
+pub(crate) type ForwardMap =
+    std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u32, (String, u16)>>>;
+
 /// russh client event handler. Trust decisions go to the injected delegate;
 /// `kex_done` records negotiated algorithm names for Tier-3 detection (Task 3).
 pub(crate) struct ClientHandler {
@@ -122,6 +127,7 @@ pub(crate) struct ClientHandler {
     /// "delegate said no" from a generic transport failure.
     rejected: Arc<AtomicBool>,
     tier3_in_use: Arc<Mutex<Vec<String>>>,
+    forwards: ForwardMap,
 }
 
 impl client::Handler for ClientHandler {
@@ -141,6 +147,31 @@ impl client::Handler for ClientHandler {
             self.rejected.store(true, Ordering::SeqCst);
         }
         Ok(trusted)
+    }
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<russh::client::Msg>,
+        _connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        _session: &mut russh::client::Session,
+    ) -> Result<(), Self::Error> {
+        // Route an inbound (server-initiated) forwarded connection to the
+        // device-local target registered for this server listen port.
+        let target = self.forwards.lock().unwrap().get(&connected_port).cloned();
+        if let Some((host, port)) = target {
+            tokio::spawn(async move {
+                if let Ok(sock) = tokio::net::TcpStream::connect((host.as_str(), port)).await {
+                    let mut sock = sock;
+                    let mut stream = channel.into_stream();
+                    let _ = tokio::io::copy_bidirectional(&mut sock, &mut stream).await;
+                }
+            });
+        }
+        // No registered target → channel is dropped (closed).
+        Ok(())
     }
 
     async fn kex_done(
@@ -174,6 +205,7 @@ impl client::Handler for ClientHandler {
 pub struct Connection {
     handle: std::sync::Arc<tokio::sync::Mutex<client::Handle<ClientHandler>>>,
     tier3_in_use: Arc<Mutex<Vec<String>>>,
+    forwards: ForwardMap,
 }
 
 impl std::fmt::Debug for Connection {
@@ -328,6 +360,30 @@ impl Connection {
             local_port,
             remote_host,
             remote_port,
+        )
+        .await
+        .map(std::sync::Arc::new)
+    }
+
+    /// Open a remote (forwarded-tcpip) port forward: ask the server to listen on
+    /// `remote_bind_host:remote_bind_port` and route each inbound connection
+    /// back to the device-local `local_host:local_port` through the SSH session.
+    /// Pass `remote_bind_port` 0 for a server-assigned port (read via
+    /// `bound_port()`).
+    pub async fn open_remote_forward(
+        &self,
+        remote_bind_host: String,
+        remote_bind_port: u16,
+        local_host: String,
+        local_port: u16,
+    ) -> Result<std::sync::Arc<crate::forward::RemoteForward>, ConnectError> {
+        crate::forward::open_remote(
+            std::sync::Arc::clone(&self.handle),
+            self.forwards.clone(),
+            remote_bind_host,
+            remote_bind_port,
+            local_host,
+            local_port,
         )
         .await
         .map(std::sync::Arc::new)
@@ -495,6 +551,7 @@ pub async fn connect_core(
     let host_label = addr.clone();
     let tier3_in_use = Arc::new(Mutex::new(Vec::new()));
     let rejected = Arc::new(AtomicBool::new(false));
+    let forwards: ForwardMap = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
 
     // ext-info-c is a protocol marker, not a user-facing algorithm — appended
     // here, not in the 1a allowlist.
@@ -514,6 +571,7 @@ pub async fn connect_core(
         verifier,
         rejected: rejected.clone(),
         tier3_in_use: tier3_in_use.clone(),
+        forwards: forwards.clone(),
     };
 
     let handle = match client::connect(config, addr, handler).await {
@@ -529,6 +587,7 @@ pub async fn connect_core(
     Ok(Connection {
         handle: std::sync::Arc::new(tokio::sync::Mutex::new(handle)),
         tier3_in_use,
+        forwards,
     })
 }
 
