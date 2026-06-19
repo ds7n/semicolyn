@@ -39,6 +39,29 @@ async fn publickey_auth_succeeds_with_authorized_key() {
     assert_eq!(outcome, AuthOutcome::Success);
 }
 
+#[tokio::test]
+async fn keyboard_interactive_auth_succeeds_with_password_response() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
+    // PAM keyboard-interactive presents a single password prompt.
+    let outcome = conn
+        .authenticate_keyboard_interactive("tester".into(), vec!["testpass".into()])
+        .await
+        .expect("auth call");
+    assert_eq!(outcome, AuthOutcome::Success);
+}
+
+#[tokio::test]
+async fn keyboard_interactive_auth_fails_with_wrong_response() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
+    let outcome = conn
+        .authenticate_keyboard_interactive("tester".into(), vec!["wrong".into()])
+        .await
+        .expect("auth call");
+    assert_eq!(outcome, AuthOutcome::Failure);
+}
+
 // silence unused import warning until Task 2 uses Mutex
 #[allow(dead_code)]
 fn _uses_mutex() -> Mutex<()> { Mutex::new(()) }
