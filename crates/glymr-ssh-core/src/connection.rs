@@ -326,27 +326,25 @@ async fn pump(
                     exit.signal = Some(format!("{signal_name:?}"));
                 }
                 Some(M::Eof) | Some(M::Close) | None => {
-                    // Drain any messages that already arrived alongside or
-                    // just before the Eof/Close (e.g. ExitStatus). Use a
-                    // short timeout so we don't hang if the server is done.
-                    loop {
-                        match tokio::time::timeout(
-                            std::time::Duration::from_millis(200),
-                            channel.wait(),
-                        )
-                        .await
-                        {
-                            Ok(Some(M::ExitStatus { exit_status })) => {
+                    // Drain any messages already buffered alongside or just
+                    // before the terminator (e.g. ExitStatus). Safe to loop
+                    // without a timeout: we already observed a terminating
+                    // message, so russh will yield any remaining buffered
+                    // messages and then another Eof/Close/None, guaranteeing
+                    // termination.
+                    while let Some(msg) = channel.wait().await {
+                        match msg {
+                            M::ExitStatus { exit_status } => {
                                 exit.exit_status = Some(exit_status);
                             }
-                            Ok(Some(M::ExitSignal { signal_name, .. })) => {
+                            M::ExitSignal { signal_name, .. } => {
                                 exit.signal = Some(format!("{signal_name:?}"));
                             }
-                            Ok(Some(M::Data { data }))
-                            | Ok(Some(M::ExtendedData { data, .. })) => {
+                            M::Data { data } | M::ExtendedData { data, .. } => {
                                 output.on_output(data.to_vec());
                             }
-                            _ => break, // Eof, Close, None, or timeout
+                            M::Eof | M::Close => break,
+                            _ => {}
                         }
                     }
                     break;
