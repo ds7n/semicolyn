@@ -89,6 +89,23 @@ async fn shell_clean_exit_reports_status_zero() {
     assert_eq!(exit.error, None);
 }
 
+#[tokio::test]
+async fn shell_resize_changes_window_size() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let conn = connect_and_auth(addr).await;
+    let col = Collector::new();
+    let session = conn
+        .open_shell("xterm".into(), 80, 24, Arc::new(col.clone()))
+        .await
+        .expect("open shell");
+    session.resize(120, 40).await.expect("resize");
+    session.write(b"stty size\n".to_vec()).await.expect("write");
+    // `stty size` prints "<rows> <cols>" — the resized terminal is 40x120.
+    let saw = wait_until(|| col.text().contains("40 120")).await;
+    assert!(saw, "expected resized size 40 120 in output, got: {:?}", col.text());
+    let _ = session.close().await;
+}
+
 // Silence the unused import until Task 3 uses it.
 #[allow(dead_code)]
 fn _uses_connect_error() -> Option<ConnectError> { None }
