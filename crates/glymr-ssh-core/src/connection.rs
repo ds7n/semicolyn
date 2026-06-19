@@ -115,7 +115,7 @@ use crate::algorithms::build_preferred;
 
 /// russh client event handler. Trust decisions go to the injected delegate;
 /// `kex_done` records negotiated algorithm names for Tier-3 detection (Task 3).
-struct ClientHandler {
+pub(crate) struct ClientHandler {
     host_label: String,
     verifier: Arc<dyn HostKeyVerifier>,
     /// Set when the delegate rejects the key, so `connect_core` can distinguish
@@ -172,7 +172,7 @@ impl client::Handler for ClientHandler {
 /// exposes only the Tier-3 warning list.
 #[derive(uniffi::Object)]
 pub struct Connection {
-    handle: tokio::sync::Mutex<client::Handle<ClientHandler>>,
+    handle: std::sync::Arc<tokio::sync::Mutex<client::Handle<ClientHandler>>>,
     tier3_in_use: Arc<Mutex<Vec<String>>>,
 }
 
@@ -309,6 +309,28 @@ impl Connection {
             }
         }
         Ok(AuthOutcome::Failure)
+    }
+
+    /// Open a local (direct-tcpip) port forward: bind `local_host:local_port`
+    /// on the device and tunnel each accepted connection to
+    /// `remote_host:remote_port` through the SSH session. Pass `local_port` 0
+    /// for an OS-assigned port (read it back via `bound_port()`).
+    pub async fn open_local_forward(
+        &self,
+        local_host: String,
+        local_port: u16,
+        remote_host: String,
+        remote_port: u16,
+    ) -> Result<std::sync::Arc<crate::forward::LocalForward>, ConnectError> {
+        crate::forward::open_local(
+            std::sync::Arc::clone(&self.handle),
+            local_host,
+            local_port,
+            remote_host,
+            remote_port,
+        )
+        .await
+        .map(std::sync::Arc::new)
     }
 
     /// Open a PTY-backed login shell. Requests a PTY (`term`/`cols`/`rows`,
@@ -492,7 +514,7 @@ pub async fn connect_core(
     };
 
     Ok(Connection {
-        handle: tokio::sync::Mutex::new(handle),
+        handle: std::sync::Arc::new(tokio::sync::Mutex::new(handle)),
         tier3_in_use,
     })
 }
