@@ -79,6 +79,80 @@ async fn local_forward_close_frees_the_port() {
     assert!(res.is_err(), "port {port} should be refused after close");
 }
 
+// Perform a SOCKS5 no-auth CONNECT handshake over `sock` to `host:port`.
+// Returns the server's reply byte (0x00 = success) after the greeting.
+async fn socks5_connect(sock: &mut tokio::net::TcpStream, host: &str, port: u16) -> u8 {
+    // greeting: VER=5, 1 method, method=0 (no auth)
+    sock.write_all(&[0x05, 0x01, 0x00]).await.expect("greeting");
+    let mut g = [0u8; 2];
+    sock.read_exact(&mut g).await.expect("greeting reply");
+    assert_eq!(g, [0x05, 0x00], "server must select no-auth");
+    // request: VER=5, CMD=CONNECT(1), RSV=0, ATYP=domain(3), len, host, port
+    let mut req = vec![0x05, 0x01, 0x00, 0x03, host.len() as u8];
+    req.extend_from_slice(host.as_bytes());
+    req.extend_from_slice(&port.to_be_bytes());
+    sock.write_all(&req).await.expect("request");
+    // reply: VER, REP, RSV, ATYP, BND.ADDR(4 for v4), BND.PORT(2)
+    let mut rep = [0u8; 10];
+    sock.read_exact(&mut rep).await.expect("reply");
+    assert_eq!(rep[0], 0x05);
+    rep[1]
+}
+
+#[tokio::test]
+async fn dynamic_forward_socks5_connect_reaches_target() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let conn = connect_and_auth(addr).await;
+    let fwd = conn.open_dynamic_forward("127.0.0.1".into(), 0).await.expect("open dynamic forward");
+    let mut sock = tokio::net::TcpStream::connect(("127.0.0.1", fwd.bound_port())).await.expect("connect proxy");
+    let rep = socks5_connect(&mut sock, "127.0.0.1", 22).await;
+    assert_eq!(rep, 0x00, "SOCKS5 CONNECT to 127.0.0.1:22 must succeed");
+    let mut buf = [0u8; 8];
+    let n = tokio::time::timeout(Duration::from_secs(5), sock.read(&mut buf)).await.expect("timeout").expect("read");
+    assert!(n >= 4 && &buf[..4] == b"SSH-", "expected SSH banner through SOCKS tunnel, got {:?}", &buf[..n]);
+    fwd.close().await;
+}
+
+#[tokio::test]
+async fn dynamic_forward_rejects_non_socks5_greeting() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let conn = connect_and_auth(addr).await;
+    let fwd = conn.open_dynamic_forward("127.0.0.1".into(), 0).await.expect("open dynamic forward");
+    let mut sock = tokio::net::TcpStream::connect(("127.0.0.1", fwd.bound_port())).await.expect("connect proxy");
+    // SOCKS4 greeting (VER=4) — unsupported; server must close without a v5 reply.
+    sock.write_all(&[0x04, 0x01, 0x00, 0x16]).await.expect("write");
+    let mut buf = [0u8; 2];
+    let r = tokio::time::timeout(Duration::from_secs(2), sock.read(&mut buf)).await.expect("timeout");
+    // Either EOF (0 bytes) or a non-0x05 first byte — never a SOCKS5 success.
+    match r {
+        Ok(0) => {}                               // connection closed: acceptable
+        Ok(_) => assert_ne!(buf[0], 0x05, "must not speak SOCKS5 to a v4 client"),
+        Err(e) => panic!("unexpected read error: {e}"),
+    }
+    fwd.close().await;
+}
+
+#[tokio::test]
+async fn dynamic_forward_rejects_unsupported_command() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let conn = connect_and_auth(addr).await;
+    let fwd = conn.open_dynamic_forward("127.0.0.1".into(), 0).await.expect("open dynamic forward");
+    let mut sock = tokio::net::TcpStream::connect(("127.0.0.1", fwd.bound_port())).await.expect("connect proxy");
+    sock.write_all(&[0x05, 0x01, 0x00]).await.expect("greeting");
+    let mut g = [0u8; 2];
+    sock.read_exact(&mut g).await.expect("greeting reply");
+    assert_eq!(g, [0x05, 0x00]);
+    // CMD=BIND(2) is unsupported → reply code 0x07 (command not supported).
+    let mut req = vec![0x05, 0x02, 0x00, 0x03, 0x09];
+    req.extend_from_slice(b"127.0.0.1");
+    req.extend_from_slice(&22u16.to_be_bytes());
+    sock.write_all(&req).await.expect("request");
+    let mut rep = [0u8; 10];
+    sock.read_exact(&mut rep).await.expect("reply");
+    assert_eq!(rep[1], 0x07, "BIND must be rejected with 0x07 command-not-supported");
+    fwd.close().await;
+}
+
 // Silence unused imports until later tasks use them.
 #[allow(dead_code)]
 fn _uses(_: Option<ConnectError>, _: fn(&mut [u8])) {}
