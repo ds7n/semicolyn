@@ -106,6 +106,39 @@ async fn shell_resize_changes_window_size() {
     let _ = session.close().await;
 }
 
-// Silence the unused import until Task 3 uses it.
-#[allow(dead_code)]
-fn _uses_connect_error() -> Option<ConnectError> { None }
+#[tokio::test]
+async fn shell_nonzero_exit_reports_real_code() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let conn = connect_and_auth(addr).await;
+    let col = Collector::new();
+    let session = conn
+        .open_shell("xterm".into(), 80, 24, Arc::new(col.clone()))
+        .await
+        .expect("open shell");
+    session.write(b"exit 3\n".to_vec()).await.expect("write");
+    let closed = wait_until(|| col.exit().is_some()).await;
+    assert!(closed, "shell did not report closure");
+    // Proves we surface the server's real exit code, not a hardcoded constant.
+    assert_eq!(col.exit().unwrap().exit_status, Some(3));
+}
+
+#[tokio::test]
+async fn write_after_close_returns_typed_error() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let conn = connect_and_auth(addr).await;
+    let col = Collector::new();
+    let session = conn
+        .open_shell("xterm".into(), 80, 24, Arc::new(col.clone()))
+        .await
+        .expect("open shell");
+    session.close().await.expect("close");
+    // Wait for the pump task to actually finish (drops the receiver) — only then
+    // is a further send guaranteed to fail rather than being buffered.
+    let closed = wait_until(|| col.exit().is_some()).await;
+    assert!(closed, "session did not close");
+    let err = session.write(b"x".to_vec()).await.expect_err("write after close must fail");
+    match err {
+        ConnectError::Transport { message } => assert_eq!(message, "shell session closed"),
+        other => panic!("expected Transport(\"shell session closed\"), got {other:?}"),
+    }
+}
