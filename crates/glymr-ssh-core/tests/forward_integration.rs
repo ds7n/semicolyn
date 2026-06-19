@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use std::sync::Arc;
 use std::time::Duration;
+#[allow(unused_imports)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use glymr_ssh_core::connection::{
     connect_core, AuthOutcome, Connection, ConnectError, HostKeyInfo, HostKeyVerifier,
@@ -14,6 +15,7 @@ impl HostKeyVerifier for TrustAll {
 }
 
 fn sshd_addr() -> Option<String> { std::env::var("GLYMR_TEST_SSHD").ok() }
+#[allow(dead_code)]
 fn sshd_host() -> Option<String> { sshd_addr().map(|a| a.split(':').next().unwrap_or("sshd").to_string()) }
 
 async fn connect_and_auth(addr: String) -> Connection {

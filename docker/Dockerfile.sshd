@@ -8,7 +8,7 @@ RUN apk add --no-cache openssh-server openssh-server-pam linux-pam \
     && sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
     && sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
     && sed -i 's/^AllowTcpForwarding no/AllowTcpForwarding yes/' /etc/ssh/sshd_config \
-    && printf 'UsePAM yes\nKbdInteractiveAuthentication yes\nAllowTcpForwarding yes\n' >> /etc/ssh/sshd_config
+    && printf 'UsePAM yes\nKbdInteractiveAuthentication yes\n' >> /etc/ssh/sshd_config
 COPY sshd-entrypoint.sh /sshd-entrypoint.sh
 RUN chmod +x /sshd-entrypoint.sh
 EXPOSE 22
