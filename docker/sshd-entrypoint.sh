@@ -20,7 +20,6 @@ chmod 600 /home/tester/.ssh/authorized_keys
 if [ ! -f /testkeys/ca ]; then
   ssh-keygen -t ed25519 -N '' -C 'glymr-test-ca' -f /testkeys/ca
 fi
-chmod 600 /testkeys/ca
 chmod 644 /testkeys/ca.pub
 # Sign id_ed25519 into three certs for principal 'tester': valid-now, expired,
 # and not-yet-valid. ssh-keygen names the output "<input-basename>-cert.pub",
@@ -29,9 +28,14 @@ chmod 644 /testkeys/ca.pub
 cp /testkeys/id_ed25519.pub /testkeys/valid.pub
 cp /testkeys/id_ed25519.pub /testkeys/expired.pub
 cp /testkeys/id_ed25519.pub /testkeys/notyet.pub
+# Must be 600 for ssh-keygen -s to accept it (even on reboot when a prior boot
+# left it 644). Set immediately before signing, then relax after so the
+# non-root dev container can read it on the mounted volume.
+chmod 600 /testkeys/ca
 ssh-keygen -s /testkeys/ca -I glymr-valid   -n tester -V -5m:+52w   /testkeys/valid.pub
 ssh-keygen -s /testkeys/ca -I glymr-expired -n tester -V 20000101000000:20000102000000 /testkeys/expired.pub
 ssh-keygen -s /testkeys/ca -I glymr-notyet  -n tester -V +52w:+104w /testkeys/notyet.pub
+chmod 644 /testkeys/ca
 chmod 644 /testkeys/valid-cert.pub /testkeys/expired-cert.pub /testkeys/notyet-cert.pub
 # Trust the CA for user authentication (idempotent across reboots).
 grep -q '^TrustedUserCAKeys' /etc/ssh/sshd_config \
