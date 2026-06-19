@@ -32,6 +32,51 @@ async fn cert_auth_succeeds_with_valid_cert() {
     assert_eq!(outcome, AuthOutcome::Success);
 }
 
-// Silence the unused import until Task 2 uses it.
-#[allow(dead_code)]
-fn _uses_connect_error() -> Option<ConnectError> { None }
+#[tokio::test]
+async fn cert_auth_rejects_expired_cert() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let (Some(key), Some(cert)) = (read_testkey("id_ed25519"), read_testkey("expired-cert.pub")) else { return };
+    let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
+    let err = conn
+        .authenticate_openssh_cert("tester".into(), key, cert)
+        .await
+        .expect_err("expired cert must be refused");
+    match err {
+        ConnectError::CertificateInvalid { message } => assert_eq!(message, "certificate has expired"),
+        other => panic!("expected CertificateInvalid(expired), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn cert_auth_rejects_not_yet_valid_cert() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let (Some(key), Some(cert)) = (read_testkey("id_ed25519"), read_testkey("notyet-cert.pub")) else { return };
+    let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
+    let err = conn
+        .authenticate_openssh_cert("tester".into(), key, cert)
+        .await
+        .expect_err("not-yet-valid cert must be refused");
+    match err {
+        ConnectError::CertificateInvalid { message } => assert_eq!(message, "certificate is not yet valid"),
+        other => panic!("expected CertificateInvalid(not yet valid), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn cert_auth_rejects_cert_for_a_different_key() {
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    // The CA private key is a valid ed25519 key unrelated to id_ed25519, so the
+    // valid cert (which certifies id_ed25519) does not match it → pair failure.
+    let (Some(wrong_key), Some(cert)) = (read_testkey("ca"), read_testkey("valid-cert.pub")) else { return };
+    let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
+    let err = conn
+        .authenticate_openssh_cert("tester".into(), wrong_key, cert)
+        .await
+        .expect_err("cert not matching the key must be refused");
+    match err {
+        ConnectError::CertificateInvalid { message } => {
+            assert_eq!(message, "certificate does not match the private key")
+        }
+        other => panic!("expected CertificateInvalid(mismatch), got {other:?}"),
+    }
+}
