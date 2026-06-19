@@ -34,6 +34,11 @@ pub enum ConnectError {
     HostKeyRejected,
     #[error("transport error: {message}")]
     Transport { message: String },
+    /// The supplied certificate is unusable on the client side: malformed,
+    /// not matching the private key, or outside its validity window. Never a
+    /// silent fallback to bare-key auth.
+    #[error("certificate invalid: {message}")]
+    CertificateInvalid { message: String },
 }
 
 impl From<russh::Error> for ConnectError {
@@ -217,6 +222,51 @@ impl Connection {
         let hash = handle.best_supported_rsa_hash().await?.flatten();
         let key = russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), hash);
         Ok(outcome(handle.authenticate_publickey(user, key).await?))
+    }
+
+    /// OpenSSH certificate authentication: present `<cert> + <private key>`.
+    /// Performs the three client-side checks from the cert-auth design (parse,
+    /// key↔cert pair match, validity window) then lets the server decide CA
+    /// trust. An unusable cert is `CertificateInvalid` — never a fallback to
+    /// the bare key.
+    pub async fn authenticate_openssh_cert(
+        &self,
+        user: String,
+        private_key_openssh: String,
+        cert_openssh: String,
+    ) -> Result<AuthOutcome, ConnectError> {
+        let key = russh::keys::PrivateKey::from_openssh(private_key_openssh.as_bytes())
+            .map_err(|e| ConnectError::Transport { message: format!("invalid private key: {e}") })?;
+        let cert = cert_openssh
+            .parse::<russh::keys::ssh_key::Certificate>()
+            .map_err(|e| ConnectError::CertificateInvalid { message: format!("malformed certificate: {e}") })?;
+        // Pair sanity: the cert must certify this private key.
+        if key.public_key().key_data() != cert.public_key() {
+            return Err(ConnectError::CertificateInvalid {
+                message: "certificate does not match the private key".into(),
+            });
+        }
+        // Validity window: validAfter <= now <= validBefore (unix seconds).
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if now < cert.valid_after() {
+            return Err(ConnectError::CertificateInvalid {
+                message: "certificate is not yet valid".into(),
+            });
+        }
+        if now > cert.valid_before() {
+            return Err(ConnectError::CertificateInvalid {
+                message: "certificate has expired".into(),
+            });
+        }
+        let mut handle = self.handle.lock().await;
+        Ok(outcome(
+            handle
+                .authenticate_openssh_cert(user, std::sync::Arc::new(key), cert)
+                .await?,
+        ))
     }
 
     /// Keyboard-interactive authentication. `responses` answers each server
