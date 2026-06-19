@@ -182,6 +182,48 @@ impl Connection {
         let key = russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), hash);
         Ok(outcome(handle.authenticate_publickey(user, key).await?))
     }
+
+    /// Keyboard-interactive authentication. `responses` answers each server
+    /// prompt in order (typically a single password). Each `InfoRequest` round
+    /// is answered with exactly `prompts.len()` replies taken from `responses`
+    /// in order — a zero-prompt round (e.g. PAM's final confirmation) gets an
+    /// empty reply, never a stray password. SSH requires the reply count to
+    /// match the prompt count; mismatched counts make the server drop the
+    /// connection. The loop is bounded to avoid a misbehaving server spinning
+    /// forever.
+    pub async fn authenticate_keyboard_interactive(
+        &self,
+        user: String,
+        responses: Vec<String>,
+    ) -> Result<AuthOutcome, ConnectError> {
+        use russh::client::KeyboardInteractiveAuthResponse as Kir;
+        let mut handle = self.handle.lock().await;
+        let mut reply = handle
+            .authenticate_keyboard_interactive_start(user, None)
+            .await?;
+        let mut sent = 0usize;
+        for _ in 0..10 {
+            match reply {
+                Kir::Success => return Ok(AuthOutcome::Success),
+                Kir::Failure { partial_success, .. } => {
+                    return Ok(if partial_success {
+                        AuthOutcome::PartialSuccess
+                    } else {
+                        AuthOutcome::Failure
+                    });
+                }
+                Kir::InfoRequest { prompts, .. } => {
+                    let batch: Vec<String> =
+                        responses.iter().skip(sent).take(prompts.len()).cloned().collect();
+                    sent += prompts.len();
+                    reply = handle
+                        .authenticate_keyboard_interactive_respond(batch)
+                        .await?;
+                }
+            }
+        }
+        Ok(AuthOutcome::Failure)
+    }
 }
 
 /// Opens a TCP+SSH transport connection to `addr` (host:port), negotiating with
