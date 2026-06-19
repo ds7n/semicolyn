@@ -333,6 +333,19 @@ impl Connection {
         .map(std::sync::Arc::new)
     }
 
+    /// Open a dynamic (SOCKS5) forward: run a device-local SOCKS5 proxy on
+    /// `local_host:local_port`; each CONNECT opens a direct-tcpip channel to the
+    /// requested target. Pass `local_port` 0 for an OS-assigned port.
+    pub async fn open_dynamic_forward(
+        &self,
+        local_host: String,
+        local_port: u16,
+    ) -> Result<std::sync::Arc<crate::forward::DynamicForward>, ConnectError> {
+        crate::forward::open_dynamic(std::sync::Arc::clone(&self.handle), local_host, local_port)
+            .await
+            .map(std::sync::Arc::new)
+    }
+
     /// Open a PTY-backed login shell. Requests a PTY (`term`/`cols`/`rows`,
     /// pixel dims 0, no extra modes) then a shell, and starts pumping output to
     /// `output`. Returns once the shell starts; output and the close event
