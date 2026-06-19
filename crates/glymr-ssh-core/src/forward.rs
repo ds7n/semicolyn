@@ -246,10 +246,27 @@ impl RemoteForward {
 
     /// Cancel the server-side listener and stop routing.
     pub async fn close(&self) -> Result<(), ConnectError> {
+        {
+            let h = self.handle.lock().await;
+            h.cancel_tcpip_forward(self.bind_host.clone(), self.bound_port as u32).await?;
+        }
         self.forwards.lock().unwrap().remove(&(self.bound_port as u32));
-        let h = self.handle.lock().await;
-        h.cancel_tcpip_forward(self.bind_host.clone(), self.bound_port as u32).await?;
         Ok(())
+    }
+}
+
+impl Drop for RemoteForward {
+    fn drop(&mut self) {
+        self.forwards.lock().unwrap().remove(&(self.bound_port as u32));
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            let handle = Arc::clone(&self.handle);
+            let bind_host = self.bind_host.clone();
+            let port = self.bound_port as u32;
+            rt.spawn(async move {
+                let h = handle.lock().await;
+                let _ = h.cancel_tcpip_forward(bind_host, port).await;
+            });
+        }
     }
 }
 
