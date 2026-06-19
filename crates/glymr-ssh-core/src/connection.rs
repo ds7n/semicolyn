@@ -206,6 +206,13 @@ pub struct Connection {
     handle: std::sync::Arc<tokio::sync::Mutex<client::Handle<ClientHandler>>>,
     tier3_in_use: Arc<Mutex<Vec<String>>>,
     forwards: ForwardMap,
+    /// Handles of every hop closer to the device, for a connection reached
+    /// through one or more jump hosts (`proxyJump`). Their transports carry
+    /// ours, so they must stay alive as long as this connection does. Dropping
+    /// this connection releases its references; once nothing in the chain
+    /// references a hop, that hop's transport closes. Empty for a direct
+    /// connection.
+    parents: Vec<std::sync::Arc<tokio::sync::Mutex<client::Handle<ClientHandler>>>>,
 }
 
 impl std::fmt::Debug for Connection {
@@ -423,6 +430,51 @@ impl Connection {
         tokio::spawn(pump(channel, cmd_rx, output));
         Ok(Arc::new(ShellSession { cmd_tx }))
     }
+
+    /// Open a jump-host hop: tunnel a `direct-tcpip` channel from this connection
+    /// to `target_host:target_port` and run a fresh SSH handshake over it,
+    /// returning the target as a new `Connection`. The caller authenticates the
+    /// returned connection with the usual `authenticate_*` methods, exactly as
+    /// for a direct connection — a `proxyJump` chain is built one hop at a time
+    /// by calling `connect_jump` then authenticating, repeatedly. `allow_legacy`,
+    /// `allow_deprecated`, and `verifier` apply to the *target* hop only; each
+    /// hop verifies its own host key independently. The returned connection keeps
+    /// this one (and any hops before it) alive for its whole lifetime; dropping
+    /// it tears the chain down.
+    pub async fn connect_jump(
+        &self,
+        target_host: String,
+        target_port: u16,
+        allow_legacy: bool,
+        allow_deprecated: bool,
+        verifier: Arc<dyn HostKeyVerifier>,
+    ) -> Result<Arc<Connection>, ConnectError> {
+        let host_label = format!("{target_host}:{target_port}");
+        let (config, handler, tier3_in_use, rejected, forwards) =
+            prepare(host_label, allow_legacy, allow_deprecated, verifier);
+
+        // Open a direct-tcpip channel to the next hop on the current transport,
+        // then run the target's SSH handshake over that channel's byte stream.
+        // The handle lock is released at the block's end, before connect_stream.
+        let stream = {
+            let h = self.handle.lock().await;
+            h.channel_open_direct_tcpip(target_host, target_port as u32, "127.0.0.1", 0).await?
+        }
+        .into_stream();
+
+        let handle = map_handshake(client::connect_stream(config, stream, handler).await, &rejected)?;
+
+        // Keep every hop closer to the device alive: their transports carry ours.
+        let mut parents = self.parents.clone();
+        parents.push(std::sync::Arc::clone(&self.handle));
+
+        Ok(Arc::new(Connection {
+            handle: std::sync::Arc::new(tokio::sync::Mutex::new(handle)),
+            tier3_in_use,
+            forwards,
+            parents,
+        }))
+    }
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -540,15 +592,19 @@ async fn pump(
     output.on_closed(exit);
 }
 
-/// Opens a TCP+SSH transport connection to `addr` (host:port), negotiating with
-/// the Phase-1a allowlist and routing the host-key decision to `verifier`.
-pub async fn connect_core(
-    addr: String,
+/// The pieces `prepare` hands back: the client config and event handler, plus
+/// the shared state the caller needs to assemble a `Connection` and to tell a
+/// host-key rejection apart from a transport error.
+type Prepared = (Arc<client::Config>, ClientHandler, Arc<Mutex<Vec<String>>>, Arc<AtomicBool>, ForwardMap);
+
+/// Builds the russh client config and event handler shared by direct
+/// (`connect_core`) and jumped (`connect_jump`) connections.
+fn prepare(
+    host_label: String,
     allow_legacy: bool,
     allow_deprecated: bool,
     verifier: Arc<dyn HostKeyVerifier>,
-) -> Result<Connection, ConnectError> {
-    let host_label = addr.clone();
+) -> Prepared {
     let tier3_in_use = Arc::new(Mutex::new(Vec::new()));
     let rejected = Arc::new(AtomicBool::new(false));
     let forwards: ForwardMap = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -574,20 +630,45 @@ pub async fn connect_core(
         forwards: forwards.clone(),
     };
 
-    let handle = match client::connect(config, addr, handler).await {
-        Ok(h) => h,
-        Err(e) => {
-            if rejected.load(Ordering::SeqCst) {
-                return Err(ConnectError::HostKeyRejected);
-            }
-            return Err(e.into());
+    (config, handler, tier3_in_use, rejected, forwards)
+}
+
+/// Maps a russh connect result to our error model: when the handshake failed
+/// because the trust delegate rejected the host key (recorded in `rejected`),
+/// report the specific `HostKeyRejected`; any other failure is the underlying
+/// transport error. Shared by the direct and jumped connect paths so the
+/// rejection-vs-transport policy lives in one place.
+fn map_handshake(
+    result: Result<client::Handle<ClientHandler>, ConnectError>,
+    rejected: &AtomicBool,
+) -> Result<client::Handle<ClientHandler>, ConnectError> {
+    result.map_err(|e| {
+        if rejected.load(Ordering::SeqCst) {
+            ConnectError::HostKeyRejected
+        } else {
+            e
         }
-    };
+    })
+}
+
+/// Opens a TCP+SSH transport connection to `addr` (host:port), negotiating with
+/// the Phase-1a allowlist and routing the host-key decision to `verifier`.
+pub async fn connect_core(
+    addr: String,
+    allow_legacy: bool,
+    allow_deprecated: bool,
+    verifier: Arc<dyn HostKeyVerifier>,
+) -> Result<Connection, ConnectError> {
+    let (config, handler, tier3_in_use, rejected, forwards) =
+        prepare(addr.clone(), allow_legacy, allow_deprecated, verifier);
+
+    let handle = map_handshake(client::connect(config, addr, handler).await, &rejected)?;
 
     Ok(Connection {
         handle: std::sync::Arc::new(tokio::sync::Mutex::new(handle)),
         tier3_in_use,
         forwards,
+        parents: Vec::new(),
     })
 }
 
