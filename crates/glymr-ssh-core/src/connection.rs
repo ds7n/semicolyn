@@ -42,6 +42,28 @@ impl From<russh::Error> for ConnectError {
     }
 }
 
+/// The result of an authentication attempt. A failed auth is a normal outcome,
+/// not a `ConnectError` — the caller decides what to do (retry, try another
+/// method, surface the connect-failed banner).
+#[derive(uniffi::Enum, Debug, PartialEq, Eq)]
+pub enum AuthOutcome {
+    /// Authentication fully succeeded; the session is usable.
+    Success,
+    /// The method was accepted but the server requires another method too
+    /// (multi-factor). Caller should authenticate again with a further method.
+    PartialSuccess,
+    /// Authentication failed.
+    Failure,
+}
+
+fn outcome(result: russh::client::AuthResult) -> AuthOutcome {
+    match result {
+        russh::client::AuthResult::Success => AuthOutcome::Success,
+        russh::client::AuthResult::Failure { partial_success: true, .. } => AuthOutcome::PartialSuccess,
+        russh::client::AuthResult::Failure { .. } => AuthOutcome::Failure,
+    }
+}
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use russh::client;
@@ -128,6 +150,79 @@ impl Connection {
     /// warning per ssh-algorithms-design §"Tier 3 warning UX".
     pub fn tier3_in_use(&self) -> Vec<String> {
         self.tier3_in_use.lock().unwrap().clone()
+    }
+}
+
+#[uniffi::export(async_runtime = "tokio")]
+impl Connection {
+    /// Password authentication. Returns the typed outcome; a wrong password is
+    /// `Failure`, not an error.
+    pub async fn authenticate_password(
+        &self,
+        user: String,
+        password: String,
+    ) -> Result<AuthOutcome, ConnectError> {
+        let mut handle = self.handle.lock().await;
+        Ok(outcome(handle.authenticate_password(user, password).await?))
+    }
+
+    /// Public-key authentication from an in-memory OpenSSH private key. (The
+    /// Secure-Enclave / Keychain-backed signing path is Phase 2 + macOS.)
+    pub async fn authenticate_publickey(
+        &self,
+        user: String,
+        private_key_openssh: String,
+    ) -> Result<AuthOutcome, ConnectError> {
+        let key = russh::keys::PrivateKey::from_openssh(private_key_openssh.as_bytes())
+            .map_err(|e| ConnectError::Transport { message: format!("invalid private key: {e}") })?;
+        let mut handle = self.handle.lock().await;
+        // For RSA keys, advertise the strongest server-supported SHA-2 hash;
+        // ignored for ed25519/ecdsa.
+        let hash = handle.best_supported_rsa_hash().await?.flatten();
+        let key = russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), hash);
+        Ok(outcome(handle.authenticate_publickey(user, key).await?))
+    }
+
+    /// Keyboard-interactive authentication. `responses` answers each server
+    /// prompt in order (typically a single password). Each `InfoRequest` round
+    /// is answered with exactly `prompts.len()` replies taken from `responses`
+    /// in order — a zero-prompt round (e.g. PAM's final confirmation) gets an
+    /// empty reply, never a stray password. SSH requires the reply count to
+    /// match the prompt count; mismatched counts make the server drop the
+    /// connection. The loop is bounded to avoid a misbehaving server spinning
+    /// forever.
+    pub async fn authenticate_keyboard_interactive(
+        &self,
+        user: String,
+        responses: Vec<String>,
+    ) -> Result<AuthOutcome, ConnectError> {
+        use russh::client::KeyboardInteractiveAuthResponse as Kir;
+        let mut handle = self.handle.lock().await;
+        let mut reply = handle
+            .authenticate_keyboard_interactive_start(user, None)
+            .await?;
+        let mut sent = 0usize;
+        for _ in 0..10 {
+            match reply {
+                Kir::Success => return Ok(AuthOutcome::Success),
+                Kir::Failure { partial_success, .. } => {
+                    return Ok(if partial_success {
+                        AuthOutcome::PartialSuccess
+                    } else {
+                        AuthOutcome::Failure
+                    });
+                }
+                Kir::InfoRequest { prompts, .. } => {
+                    let batch: Vec<String> =
+                        responses.iter().skip(sent).take(prompts.len()).cloned().collect();
+                    sent += prompts.len();
+                    reply = handle
+                        .authenticate_keyboard_interactive_respond(batch)
+                        .await?;
+                }
+            }
+        }
+        Ok(AuthOutcome::Failure)
     }
 }
 

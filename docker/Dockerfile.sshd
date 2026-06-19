@@ -1,10 +1,19 @@
 # SPDX-FileCopyrightText: 2026 True Positive LLC
 # SPDX-License-Identifier: GPL-3.0-only
 FROM alpine:3.20
-RUN apk add --no-cache openssh-server \
-    && ssh-keygen -A \
+RUN apk add --no-cache openssh-server openssh-server-pam linux-pam \
     && adduser -D -s /bin/sh tester \
     && echo 'tester:testpass' | chpasswd \
-    && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+    && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config \
+    && sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
+    && sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
+    && printf 'UsePAM yes\nKbdInteractiveAuthentication yes\n' >> /etc/ssh/sshd_config
+COPY sshd-entrypoint.sh /sshd-entrypoint.sh
+RUN chmod +x /sshd-entrypoint.sh
 EXPOSE 22
-CMD ["/usr/sbin/sshd", "-D", "-e"]
+ENTRYPOINT ["/sshd-entrypoint.sh"]
+# Alpine ships the PAM-enabled daemon as a separate binary; the plain
+# /usr/sbin/sshd is built without PAM and silently ignores `UsePAM yes`, which
+# breaks keyboard-interactive auth. The legacy fixture overrides `command:` and
+# does not need PAM, so it keeps the plain sshd.
+CMD ["/usr/sbin/sshd.pam", "-D", "-e"]
