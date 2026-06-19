@@ -25,6 +25,7 @@ services:
       - cargo-target:/work/target
       - swift-build:/work/.build
       - cargo-registry:/usr/local/cargo/registry
+      - testkeys:/testkeys:ro
 
   # Modern SSH server for host-key / handshake integration tests.
   sshd:
@@ -32,6 +33,8 @@ services:
       context: docker
       dockerfile: Dockerfile.sshd
     image: glymr-sshd
+    volumes:
+      - testkeys:/testkeys
 
   # Legacy SSH server that offers only Tier-3 algorithms (Task 3).
   sshd-legacy:
@@ -39,8 +42,10 @@ services:
     command: ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_legacy.conf"]
     volumes:
       - ./docker/sshd-legacy.conf:/etc/ssh/sshd_legacy.conf:ro
+      - testkeys:/testkeys
 
 volumes:
   cargo-target:
   swift-build:
   cargo-registry:
+  testkeys:
