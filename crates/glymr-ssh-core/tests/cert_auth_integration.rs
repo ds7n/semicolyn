@@ -16,7 +16,7 @@ fn sshd_addr() -> Option<String> { std::env::var("GLYMR_TEST_SSHD").ok() }
 fn read_testkey(name: &str) -> Option<String> {
     match std::fs::read_to_string(format!("/testkeys/{name}")) {
         Ok(s) => Some(s),
-        Err(_) => { eprintln!("skipping: /testkeys/{name} not mounted"); None }
+        Err(e) => { eprintln!("skipping: /testkeys/{name}: {e}"); None }
     }
 }
 
