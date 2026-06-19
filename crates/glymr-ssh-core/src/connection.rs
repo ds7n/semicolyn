@@ -64,6 +64,44 @@ fn outcome(result: russh::client::AuthResult) -> AuthOutcome {
     }
 }
 
+/// Sink for shell output and lifecycle. Swift implements it (forwarding into an
+/// AsyncStream); Linux tests use a Rust double. Methods are synchronous and MUST
+/// be fast/non-blocking — they run on the pump task.
+#[uniffi::export(with_foreign)]
+pub trait ShellOutput: Send + Sync {
+    /// A chunk of merged stdout+stderr from the PTY. May be called many times.
+    fn on_output(&self, data: Vec<u8>);
+    /// The session ended. Fired exactly once; no callbacks follow.
+    fn on_closed(&self, exit: ShellExit);
+}
+
+/// How a shell session ended. On a clean teardown at most one of
+/// `exit_status` / `signal` is set; `error` is set instead on transport failure.
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default)]
+pub struct ShellExit {
+    /// Clean exit code, from the server's `exit-status`.
+    pub exit_status: Option<u32>,
+    /// Signal name, when the remote process was killed by a signal.
+    pub signal: Option<String>,
+    /// Transport/protocol error message, when the channel failed.
+    pub error: Option<String>,
+}
+
+/// Commands the `ShellSession` sends to its owning pump task.
+enum ShellCommand {
+    Write(Vec<u8>),
+    #[allow(dead_code)] // used by Task 2 (window resize)
+    Resize(u32, u32),
+    Close,
+}
+
+/// A live PTY shell channel. Drives one background pump task that owns the russh
+/// channel; this handle only sends it commands.
+#[derive(uniffi::Object)]
+pub struct ShellSession {
+    cmd_tx: tokio::sync::mpsc::Sender<ShellCommand>,
+}
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use russh::client;
@@ -130,7 +168,6 @@ impl client::Handler for ClientHandler {
 /// exposes only the Tier-3 warning list.
 #[derive(uniffi::Object)]
 pub struct Connection {
-    #[allow(dead_code)] // consumed by Phase 1c (auth) and 1d (channels)
     handle: tokio::sync::Mutex<client::Handle<ClientHandler>>,
     tier3_in_use: Arc<Mutex<Vec<String>>>,
 }
@@ -224,6 +261,134 @@ impl Connection {
         }
         Ok(AuthOutcome::Failure)
     }
+
+    /// Open a PTY-backed login shell. Requests a PTY (`term`/`cols`/`rows`,
+    /// pixel dims 0, no extra modes) then a shell, and starts pumping output to
+    /// `output`. Returns once the shell starts; output and the close event
+    /// arrive asynchronously via the delegate.
+    pub async fn open_shell(
+        &self,
+        term: String,
+        cols: u32,
+        rows: u32,
+        output: Arc<dyn ShellOutput>,
+    ) -> Result<Arc<ShellSession>, ConnectError> {
+        let channel = {
+            let handle = self.handle.lock().await;
+            handle.channel_open_session().await?
+        };
+        channel.request_pty(true, &term, cols, rows, 0, 0, &[]).await?;
+        channel.request_shell(true).await?;
+        let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(32);
+        tokio::spawn(pump(channel, cmd_rx, output));
+        Ok(Arc::new(ShellSession { cmd_tx }))
+    }
+}
+
+#[uniffi::export(async_runtime = "tokio")]
+impl ShellSession {
+    /// Write bytes to the shell's stdin.
+    pub async fn write(&self, data: Vec<u8>) -> Result<(), ConnectError> {
+        self.cmd_tx
+            .send(ShellCommand::Write(data))
+            .await
+            .map_err(|_| ConnectError::Transport { message: "shell session closed".into() })
+    }
+
+    /// End the session: EOF + close. After the shell has already exited this
+    /// returns the "shell session closed" error.
+    pub async fn close(&self) -> Result<(), ConnectError> {
+        self.cmd_tx
+            .send(ShellCommand::Close)
+            .await
+            .map_err(|_| ConnectError::Transport { message: "shell session closed".into() })
+    }
+}
+
+/// Sole owner of the russh channel for a shell session. Multiplexes channel
+/// reads and `ShellSession` commands; pushes output to `output` and fires
+/// `on_closed` exactly once on exit.
+async fn pump(
+    mut channel: russh::Channel<russh::client::Msg>,
+    mut cmd_rx: tokio::sync::mpsc::Receiver<ShellCommand>,
+    output: Arc<dyn ShellOutput>,
+) {
+    use russh::ChannelMsg as M;
+    let mut exit = ShellExit::default();
+    loop {
+        tokio::select! {
+            msg = channel.wait() => match msg {
+                Some(M::Data { data }) | Some(M::ExtendedData { data, .. }) => {
+                    output.on_output(data.to_vec());
+                }
+                Some(M::ExitStatus { exit_status }) => exit.exit_status = Some(exit_status),
+                Some(M::ExitSignal { signal_name, .. }) => {
+                    exit.signal = Some(format!("{signal_name:?}"));
+                }
+                Some(M::Eof) | Some(M::Close) | None => {
+                    // Drain any messages that already arrived alongside or
+                    // just before the Eof/Close (e.g. ExitStatus). Use a
+                    // short timeout so we don't hang if the server is done.
+                    loop {
+                        match tokio::time::timeout(
+                            std::time::Duration::from_millis(200),
+                            channel.wait(),
+                        )
+                        .await
+                        {
+                            Ok(Some(M::ExitStatus { exit_status })) => {
+                                exit.exit_status = Some(exit_status);
+                            }
+                            Ok(Some(M::ExitSignal { signal_name, .. })) => {
+                                exit.signal = Some(format!("{signal_name:?}"));
+                            }
+                            Ok(Some(M::Data { data }))
+                            | Ok(Some(M::ExtendedData { data, .. })) => {
+                                output.on_output(data.to_vec());
+                            }
+                            _ => break, // Eof, Close, None, or timeout
+                        }
+                    }
+                    break;
+                }
+                Some(_) => {} // WindowAdjusted / Success / Failure / etc.
+            },
+            cmd = cmd_rx.recv() => match cmd {
+                Some(ShellCommand::Write(bytes)) => {
+                    if let Err(e) = channel.data_bytes(bytes).await {
+                        exit.error = Some(e.to_string());
+                        break;
+                    }
+                }
+                Some(ShellCommand::Resize(cols, rows)) => {
+                    if let Err(e) = channel.window_change(cols, rows, 0, 0).await {
+                        exit.error = Some(e.to_string());
+                        break;
+                    }
+                }
+                // Explicit close, or all senders dropped: tear down and drain.
+                Some(ShellCommand::Close) | None => {
+                    let _ = channel.eof().await;
+                    let _ = channel.close().await;
+                    while let Some(msg) = channel.wait().await {
+                        match msg {
+                            M::Data { data } | M::ExtendedData { data, .. } => {
+                                output.on_output(data.to_vec());
+                            }
+                            M::ExitStatus { exit_status } => exit.exit_status = Some(exit_status),
+                            M::ExitSignal { signal_name, .. } => {
+                                exit.signal = Some(format!("{signal_name:?}"));
+                            }
+                            M::Eof | M::Close => break,
+                            _ => {}
+                        }
+                    }
+                    break;
+                }
+            },
+        }
+    }
+    output.on_closed(exit);
 }
 
 /// Opens a TCP+SSH transport connection to `addr` (host:port), negotiating with
