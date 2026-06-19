@@ -90,7 +90,6 @@ pub struct ShellExit {
 /// Commands the `ShellSession` sends to its owning pump task.
 enum ShellCommand {
     Write(Vec<u8>),
-    #[allow(dead_code)] // used by Task 2 (window resize)
     Resize(u32, u32),
     Close,
 }
@@ -291,6 +290,14 @@ impl ShellSession {
     pub async fn write(&self, data: Vec<u8>) -> Result<(), ConnectError> {
         self.cmd_tx
             .send(ShellCommand::Write(data))
+            .await
+            .map_err(|_| ConnectError::Transport { message: "shell session closed".into() })
+    }
+
+    /// Tell the remote of a new terminal size (pixel dims 0).
+    pub async fn resize(&self, cols: u32, rows: u32) -> Result<(), ConnectError> {
+        self.cmd_tx
+            .send(ShellCommand::Resize(cols, rows))
             .await
             .map_err(|_| ConnectError::Transport { message: "shell session closed".into() })
     }
