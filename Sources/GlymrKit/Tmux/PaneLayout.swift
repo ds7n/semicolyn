@@ -16,6 +16,18 @@ public indirect enum PaneLayout: Equatable, Sendable {
 }
 
 extension PaneLayout {
+    /// Depth-first flatten to leaf panes with their geometry, for the renderer.
+    public var panes: [(pane: PaneID, geometry: Geometry)] {
+        switch self {
+        case let .leaf(id, geo):
+            return [(id, geo)]
+        case let .columns(children, _), let .rows(children, _):
+            return children.flatMap { $0.panes }
+        }
+    }
+}
+
+extension PaneLayout {
     /// Parse a tmux layout string (`checksum,WxH,X,Y{…}`). The leading 4-hex
     /// checksum is parsed and ignored. Returns nil on any grammar violation.
     /// Accepts any string type (`String`, `Substring`, literal).
