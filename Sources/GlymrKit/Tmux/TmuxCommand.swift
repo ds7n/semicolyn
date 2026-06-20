@@ -77,17 +77,8 @@ public enum TmuxCommand {
     /// anything else — names outside that set can't occur in practice, so they
     /// signal a bug rather than a value to quote around.
     public static func killSession(name: String) -> String? {
-        guard isSafeSessionName(name) else { return nil }
+        guard isValidTmuxSessionName(name) else { return nil }
         return "kill-session -t \(name)"
-    }
-}
-
-/// True iff `name` is a non-empty string of lowercase ASCII letters, digits, and
-/// hyphens — the only characters a Glymr-minted session name ever contains.
-private func isSafeSessionName(_ name: String) -> Bool {
-    guard !name.isEmpty else { return false }
-    return name.utf8.allSatisfy { b in
-        (b >= 0x61 && b <= 0x7A) || (b >= 0x30 && b <= 0x39) || b == 0x2D // a-z, 0-9, '-'
     }
 }
 
