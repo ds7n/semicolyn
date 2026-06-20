@@ -93,6 +93,8 @@ See `docs/brainstorming-decisions.md` for the full locked-decisions table and th
 
 ## Resuming next session
 
-1. Open the mockup files in a browser for the visual record
-2. Skim `docs/brainstorming-decisions.md` "Locked decisions" to recall state
-3. Pick a topic from "Deferred / for future conversation"; connection management, multi-connection / host switching, or settings surface are natural next
+Implementation is underway (see **Phase** above). To continue:
+
+1. Skim the **Phase** status line above and `docs/superpowers/plans/` for the per-phase plans (most recent first).
+2. Fast loop: `docker compose run --rm dev cargo test -p glymr-ssh-core` (Rust core) and `docker compose run --rm dev swift test` (GlymrKit).
+3. Natural next Linux-testable work: the tmux **command encoder** (`new-window`/`split-window`/`resize-pane`/`send-keys`/`kill-session` with escaping) then the **session controller** (the `-CC` handshake, seeding the model from `list-windows`, routing `%output` to SwiftTerm). macOS-gated work (XCFramework bridge, SwiftUI, Keychain/Secure-Enclave/CloudKit storage) waits for macOS CI.
