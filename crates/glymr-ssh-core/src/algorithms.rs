@@ -9,6 +9,16 @@
 //!   - sntrup761x25519-sha512@openssh.com (Tier 1 KEX) — ML-KEM remains the PQC KEX.
 //!   - umac-128-etm@openssh.com (Tier 1 MAC).
 //!   - hmac-sha1-96 (Tier 3 MAC).
+//!
+//! The spec also lists `ssh-ed25519-cert-v01@openssh.com` as a Tier-1 host-key
+//! algorithm, but russh 0.61.2's *client* cannot verify a server host
+//! *certificate*: the client kex (`client/kex.rs`) decodes the server host key
+//! as a plain `PublicKey` (`parse_public_key`) and the trust delegate only ever
+//! sees a `PublicKey` — there is no CA-signature / principal / validity path.
+//! Advertising the cert variant would therefore promise a capability we cannot
+//! honor, so the host-key list stays bare-key only and the
+//! `host_key_list_excludes_unverifiable_cert_variants` test guards against
+//! re-adding it. This lifts when russh gains client-side host-cert verification.
 
 use std::borrow::Cow;
 use russh::keys::ssh_key::{Algorithm, EcdsaCurve, HashAlg};
@@ -215,6 +225,27 @@ mod tests {
             assert!(!cipher_wire(&p).contains(&dead));
             assert!(!mac_wire(&p).contains(&dead));
             assert!(!key_wire(&p).contains(&dead));
+        }
+    }
+
+    #[test]
+    fn host_key_list_excludes_unverifiable_cert_variants() {
+        // russh 0.61's client cannot verify a server host *certificate* (kex
+        // parses the host key as a plain PublicKey; the trust delegate sees no
+        // CA / principals / validity). Offering a `*-cert-v01@openssh.com`
+        // host-key algorithm would advertise a capability we cannot honor, so no
+        // tier — not even with both toggles on — may include one. Asserting this
+        // across all four toggle combinations fails the moment a cert variant is
+        // added before russh can back it.
+        for (legacy, deprecated) in [(false, false), (true, false), (false, true), (true, true)] {
+            let p = build_preferred(legacy, deprecated);
+            for name in key_wire(&p) {
+                assert!(
+                    !name.ends_with("-cert-v01@openssh.com"),
+                    "host-key list must not offer unverifiable cert variant {name} \
+                     (legacy={legacy}, deprecated={deprecated})"
+                );
+            }
         }
     }
 
