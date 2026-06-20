@@ -28,6 +28,13 @@ public final class ControlModeParser {
             let line = String(decoding: lineBytes, as: UTF8.self)
             events.append(contentsOf: parseLine(line))
         }
+        // The DCS terminator (`ESC \`) trails the final newline-terminated line
+        // and never forms a complete line of its own — drop it so the stream
+        // ends on an empty buffer rather than two inert bytes. Re-checked each
+        // feed, so a terminator split across feeds (`ESC` then `\`) still clears.
+        if buffer == Self.dcsTerminatorBytes {
+            buffer.removeAll()
+        }
         return events
     }
 
@@ -37,6 +44,13 @@ public final class ControlModeParser {
         if openBlock != nil {
             return handleInsideBlock(line)
         }
+        // Outside a block (where the DCS envelope lives), strip tmux's control-
+        // mode framing. An empty line — whether it was nothing but framing, or a
+        // genuinely blank line — is a benign no-op, not protocol corruption, so
+        // it yields no event (rather than a `.malformed`, which is reserved for
+        // lines that look like a notification but don't parse).
+        let line = stripControlModeFraming(line)
+        if line.isEmpty { return [] }
         if line.hasPrefix("%begin ") {
             let parts = line.split(separator: " ")
             guard parts.count >= 3, let number = Int(parts[2]) else {
@@ -64,6 +78,25 @@ public final class ControlModeParser {
         block.body.append(line)
         openBlock = block
         return []
+    }
+
+    /// tmux wraps the entire `-CC` control stream in a DCS envelope: it opens
+    /// with `ESC P 1 0 0 0 p` (glued to the first `%begin`) and closes with
+    /// `ESC \` (ST). Glymr's channel is dedicated to control mode, so the
+    /// envelope conveys nothing and must be removed before parsing. Stripping it
+    /// is safe because a raw `ESC` never appears inside control content — tmux
+    /// octal-escapes such bytes in `%output` — so these sequences only ever occur
+    /// as the stream's outer framing.
+    private static let dcsIntro = "\u{1b}P1000p"
+    private static let dcsTerminator = "\u{1b}\\"
+    private static let dcsTerminatorBytes: [UInt8] = Array("\u{1b}\\".utf8)
+
+    /// Remove a leading DCS intro and/or trailing ST from an out-of-block line.
+    private func stripControlModeFraming(_ line: String) -> String {
+        var s = Substring(line)
+        if s.hasPrefix(Self.dcsIntro) { s = s.dropFirst(Self.dcsIntro.count) }
+        if s.hasSuffix(Self.dcsTerminator) { s = s.dropLast(Self.dcsTerminator.count) }
+        return String(s)
     }
 
     /// Recognise a `%end`/`%error` terminator line and pull its block number.
