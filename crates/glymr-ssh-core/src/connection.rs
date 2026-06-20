@@ -431,6 +431,37 @@ impl Connection {
         Ok(Arc::new(ShellSession { cmd_tx }))
     }
 
+    /// Exec `command` on a PTY-backed session channel and pump its stdio to
+    /// `output`. This is the transport for tmux control mode: the caller passes
+    /// `TmuxSessionController.start()`'s `tmux -CC new-session -A -s <name>`
+    /// string and drives the resulting control-mode stream (and it serves any
+    /// other run-a-remote-command need, e.g. the future mosh bootstrap).
+    ///
+    /// A PTY **is** requested: `tmux -CC` calls `tcgetattr` on startup and exits
+    /// without a controlling terminal, then disables echo itself (the second
+    /// `C`), so the control-mode protocol rides a PTY cleanly. `cols`/`rows` set
+    /// the initial control-client size; `ShellSession::resize` (a `window_change`)
+    /// works as for a shell. Returns once the channel is open; output and the
+    /// close event arrive asynchronously via the delegate.
+    pub async fn open_exec(
+        &self,
+        command: String,
+        term: String,
+        cols: u32,
+        rows: u32,
+        output: Arc<dyn ShellOutput>,
+    ) -> Result<Arc<ShellSession>, ConnectError> {
+        let channel = {
+            let handle = self.handle.lock().await;
+            handle.channel_open_session().await?
+        };
+        channel.request_pty(true, &term, cols, rows, 0, 0, &[]).await?;
+        channel.exec(true, command.into_bytes()).await?;
+        let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(32);
+        tokio::spawn(pump(channel, cmd_rx, output));
+        Ok(Arc::new(ShellSession { cmd_tx }))
+    }
+
     /// Open a jump-host hop: tunnel a `direct-tcpip` channel from this connection
     /// to `target_host:target_port` and run a fresh SSH handshake over it,
     /// returning the target as a new `Connection`. The caller authenticates the
