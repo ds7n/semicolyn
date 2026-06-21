@@ -10,6 +10,8 @@ import Foundation
 public struct PredictorEngine {
     private var learned: LearnedState
     private let seed: PredictorSeed?
+    /// Ephemeral output-token context (not persisted); leads suggestions.
+    private var output: OutputHarvest
     /// Write-time exclusion rules — consulted only by `record`, never by reads.
     public var filter: TokenFilter
     /// Ranking knobs (top-K, confidence floor, seed weight).
@@ -22,6 +24,7 @@ public struct PredictorEngine {
                 window: RollingWindow = .days30) {
         self.learned = learned
         self.seed = seed
+        self.output = OutputHarvest()
         self.filter = filter
         self.config = config
         self.window = window
@@ -43,11 +46,30 @@ public struct PredictorEngine {
         }
     }
 
-    /// Up to `config.topK` suggestions for `prefix`: next-token (bigram) candidates
-    /// after `previous` when given, otherwise single-word (unigram) candidates.
-    /// Each axis defers to the seed per-prefix via the same ``SeededSuggester``;
-    /// a missing seed yields learned-only results.
+    /// Harvest tokens from command `output` so they surface as completions. Each
+    /// whitespace-delimited token is privacy-filtered (an excluded token is
+    /// harvested nowhere) before entering the ephemeral store.
+    public mutating func harvest(output: String) {
+        let tokens = output
+            .split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r" })
+            .map(String.init)
+            .filter { !filter.excludes($0) }
+        self.output.harvest(tokens)
+    }
+
+    /// Drop harvested output tokens — for a context change (host switch, incognito).
+    public mutating func clearHarvest() {
+        output.clear()
+    }
+
+    /// Up to `config.topK` suggestions for `prefix`. Just-harvested output tokens
+    /// lead (recency order, axis-independent), then next-token (bigram) candidates
+    /// after `previous` when given, otherwise single-word (unigram) candidates,
+    /// each deferring to the seed per-prefix via the same ``SeededSuggester``.
+    /// Duplicates collapse to their first (harvested) position; a missing seed
+    /// yields learned-only results.
     public func suggestions(forPrefix prefix: String, after previous: String? = nil) -> [String] {
+        guard config.topK > 0 else { return [] }   // harvest path isn't otherwise capped
         let learnedSource: any CandidateSource
         let seedSource: any CandidateSource
         // An empty `previous` means "no preceding token" (start of line) — fall back
@@ -60,8 +82,19 @@ public struct PredictorEngine {
             learnedSource = learned.unigram.learnedSource(window: window)
             seedSource = seed?.unigram ?? Self.emptySource()
         }
-        return SeededSuggester(learned: learnedSource, seed: seedSource, config: config)
+        let base = SeededSuggester(learned: learnedSource, seed: seedSource, config: config)
             .suggestions(forPrefix: prefix)
+
+        // Harvested output leads (already newest-first); learned/seed fill the rest.
+        let harvested = output.candidates(forPrefix: prefix).map { $0.token }
+        var seen = Set<String>()
+        var merged: [String] = []
+        for token in harvested + base {
+            guard seen.insert(token).inserted else { continue }
+            merged.append(token)
+            if merged.count == config.topK { break }
+        }
+        return merged
     }
 
     /// Seal the day for both learned axes — the app calls this at user-local
