@@ -107,4 +107,59 @@ final class BigramVocabularyTests: XCTestCase {
                                 seed: seed.nextSource(after: "git"))
         XCTAssertEqual(s.suggestions(forPrefix: ""), ["push"])
     }
+
+    // MARK: serialization (Critical tier — this is the seed-blob format)
+
+    func testSerializationRoundTrip() {
+        var b = bigram()
+        b.record(previous: "git", next: "status", count: 5)
+        b.record(previous: "git", next: "commit", count: 2)
+        b.record(previous: "kubectl", next: "get", count: 3)
+        let restored = BigramVocabulary(deserializing: b.serialize())
+        XCTAssertNotNil(restored)
+        // Behavioral: the restored seed answers next-token queries identically.
+        XCTAssertEqual(restored?.candidates(after: "git"),
+                       [TokenCount(token: "commit", count: 2),
+                        TokenCount(token: "status", count: 5)])
+        XCTAssertEqual(restored?.candidates(after: "kubectl").map { $0.token }, ["get"])
+    }
+
+    func testRoundTripPreservesNoBleedGuarantee() {
+        // The composite-key encoding (and thus no-bleed across "git"/"github")
+        // must survive a serialize→deserialize cycle.
+        var b = bigram()
+        b.record(previous: "git", next: "status", count: 4)
+        b.record(previous: "github", next: "pulls", count: 9)
+        let restored = BigramVocabulary(deserializing: b.serialize())
+        XCTAssertEqual(restored?.candidates(after: "git").map { $0.token }, ["status"])
+    }
+
+    func testDeserializeRejectsWrongMagic() {
+        var b = bigram()
+        b.record(previous: "git", next: "status")
+        var blob = b.serialize()
+        blob[0] = 0x00
+        XCTAssertNil(BigramVocabulary(deserializing: blob))
+    }
+
+    func testDeserializeRejectsUnigramBlobAsBigram() {
+        // A GVOC (unigram) blob must not load as a GBGM (bigram) store — the
+        // distinct magic is the type-safety guard.
+        var v = Vocabulary(depth: 4, width: 1 << 16)
+        v.record("git", count: 3)
+        XCTAssertNil(BigramVocabulary(deserializing: v.serialize()),
+                     "a unigram vocabulary blob must not deserialize as a bigram store")
+    }
+
+    func testDeserializeRejectsTruncatedBlob() {
+        var b = bigram()
+        b.record(previous: "git", next: "status")
+        var blob = b.serialize()
+        blob.removeLast()
+        XCTAssertNil(BigramVocabulary(deserializing: blob))
+    }
+
+    func testDeserializeRejectsEmpty() {
+        XCTAssertNil(BigramVocabulary(deserializing: []))
+    }
 }
