@@ -20,3 +20,6 @@
 # Secrets / data
 .env
 /data/
+
+# Build-time seed artifacts (produced by scripts/build-seed.sh; bundled later)
+/seeds/

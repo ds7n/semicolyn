@@ -11,6 +11,10 @@ var targets: [Target] = [
         ]
     ),
     .testTarget(name: "GlymrKitTests", dependencies: ["GlymrKit"]),
+    // Build-time seed-ingestion tooling — never part of the shipped app product.
+    .target(name: "SeedKit", dependencies: ["GlymrKit"]),
+    .executableTarget(name: "glymr-seedbuild", dependencies: ["SeedKit"]),
+    .testTarget(name: "SeedKitTests", dependencies: ["SeedKit"]),
 ]
 
 // The UniFFI XCFramework exists only on Apple platforms; never reference it on Linux.
