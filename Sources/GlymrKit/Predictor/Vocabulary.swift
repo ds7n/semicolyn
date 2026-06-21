@@ -2,6 +2,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
+/// A token paired with its estimated frequency — the scored candidate the
+/// seed-deference layer ranks over.
+public struct TokenCount: Equatable, Sendable {
+    public let token: String
+    public let count: UInt32
+    public init(token: String, count: UInt32) {
+        self.token = token
+        self.count = count
+    }
+}
+
 /// A single learned vocabulary: a ``PrefixIndex`` of seen tokens paired with a
 /// ``CountMinSketch`` of their frequencies. `record` learns; `suggestions` turns
 /// a typed prefix into frequency-ranked candidates (`clau` → `claude`). The
@@ -26,6 +37,13 @@ public struct Vocabulary: Equatable, Sendable {
         guard !token.isEmpty, count > 0 else { return }
         index.insert(token)
         counts.add(token, count: count)
+    }
+
+    /// Every token having `prefix` paired with its estimated count, unranked.
+    /// Exposes the per-candidate scores the seed-deference layer needs (the
+    /// string-only `suggestions` hides them).
+    public func candidates(forPrefix prefix: String) -> [TokenCount] {
+        index.matching(prefix: prefix).map { TokenCount(token: $0, count: counts.estimate($0)) }
     }
 
     /// Up to `limit` tokens having `prefix`, ranked by estimated frequency
