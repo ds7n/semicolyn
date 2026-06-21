@@ -24,21 +24,31 @@ public struct BigramVocabulary {
         vocab = Vocabulary(depth: depth, width: width)
     }
 
-    /// Learn `count` occurrences of `next` following `previous`. Ignored when
-    /// either side is empty, `count` is zero, or either side contains the
-    /// separator byte (which would corrupt the encoding) — fail-closed.
+    /// The composite key for a `(previous, next)` pair, or `nil` when the pair is
+    /// unrecordable: either side empty, or either side carrying the separator byte
+    /// (which would corrupt the encoding). The single home of the bigram
+    /// encode-and-guard invariant — both the windowless and windowed
+    /// (``RollingBigramVocabulary``) stores call it, so the rule can't drift.
+    static func compositeKey(previous: String, next: String) -> String? {
+        guard !previous.isEmpty, !next.isEmpty,
+              !previous.utf8.contains(separatorByte),
+              !next.utf8.contains(separatorByte) else { return nil }
+        return previous + String(separator) + next
+    }
+
+    /// Learn `count` occurrences of `next` following `previous`. Ignored when the
+    /// pair is unrecordable (see ``compositeKey(previous:next:)``) or `count` is
+    /// zero — fail-closed.
     public mutating func record(previous: String, next: String, count: UInt32 = 1) {
-        guard !previous.isEmpty, !next.isEmpty, count > 0,
-              !previous.utf8.contains(Self.separatorByte),
-              !next.utf8.contains(Self.separatorByte) else { return }
-        vocab.record(previous + String(Self.separator) + next, count: count)
+        guard count > 0, let key = Self.compositeKey(previous: previous, next: next) else { return }
+        vocab.record(key, count: count)
     }
 
     /// A ``CandidateSource`` scoped to the successors of `previous`:
     /// `candidates(forPrefix:)` ranks the next tokens (decoded to bare strings),
     /// so it plugs straight into ``SeededSuggester`` and ``AggregateCandidateSource``.
     public func nextSource(after previous: String) -> any CandidateSource {
-        NextTokenSource(vocab: vocab, previous: previous)
+        NextTokenSource(base: vocab, previous: previous)
     }
 
     /// Successors of `previous` having `prefix`, byte-sorted with estimated
@@ -49,11 +59,14 @@ public struct BigramVocabulary {
     }
 }
 
-/// Adapts one previous token's slice of a composite-key ``Vocabulary`` into a
-/// next-token ``CandidateSource``: queries `previous + US + prefix`, then strips
-/// the `previous + US` lead off each composite key to recover the bare `next`.
+/// Adapts one previous token's slice of any composite-key ``CandidateSource``
+/// into a next-token source: queries `previous + US + prefix`, then strips the
+/// `previous + US` lead off each composite key to recover the bare `next`. Works
+/// over a single ``Vocabulary`` (``BigramVocabulary``) or a windowed
+/// ``AggregateCandidateSource`` (``RollingBigramVocabulary``) alike — it touches
+/// only `candidates(forPrefix:)`.
 struct NextTokenSource: CandidateSource {
-    let vocab: Vocabulary
+    let base: any CandidateSource
     let previous: String
 
     func candidates(forPrefix prefix: String) -> [TokenCount] {
@@ -62,7 +75,7 @@ struct NextTokenSource: CandidateSource {
         // with the module and immune to a leading combining mark a Character-wise
         // drop could mishandle.
         let dropBytes = lead.utf8.count
-        return vocab.candidates(forPrefix: lead + prefix).map { candidate in
+        return base.candidates(forPrefix: lead + prefix).map { candidate in
             let next = String(decoding: candidate.token.utf8.dropFirst(dropBytes), as: UTF8.self)
             return TokenCount(token: next, count: candidate.count)
         }
