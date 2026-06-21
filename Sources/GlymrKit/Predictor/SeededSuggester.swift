@@ -20,25 +20,23 @@ public struct SuggestionConfig: Equatable, Sendable {
     }
 }
 
-/// Combines a mutable **learned** ``Vocabulary`` with a pinned read-only **seed**
-/// to produce suggestions that are useful on day one and that let the seed step
-/// aside, per-prefix and invisibly, as the user builds vocabulary. Implements the
-/// two-layer deference of `2026-06-21-predictor-seed-deference-design`.
+/// A pure ranking combiner over a **learned** candidate source and a pinned
+/// read-only **seed** source: produces suggestions useful on day one that let the
+/// seed step aside, per-prefix and invisibly, as the user builds vocabulary.
+/// Implements the two-layer deference of
+/// `2026-06-21-predictor-seed-deference-design`. Learning is the store's job, not
+/// the ranker's — `learned` may be a single ``Vocabulary`` or a windowed
+/// ``AggregateCandidateSource`` (`today ⊕ rolling`).
 public struct SeededSuggester {
-    public var learned: Vocabulary
-    public let seed: Vocabulary
+    public let learned: any CandidateSource
+    public let seed: any CandidateSource
     public var config: SuggestionConfig
 
-    public init(learned: Vocabulary, seed: Vocabulary, config: SuggestionConfig = .init()) {
+    public init(learned: any CandidateSource, seed: any CandidateSource,
+                config: SuggestionConfig = .init()) {
         self.learned = learned
         self.seed = seed
         self.config = config
-    }
-
-    /// Learn `count` occurrences of `token` into the learned vocabulary. The seed
-    /// is pinned and never mutated.
-    public mutating func record(_ token: String, count: UInt32 = 1) {
-        learned.record(token, count: count)
     }
 
     /// Up to `topK` suggestions for `prefix`, applying per-prefix gating
