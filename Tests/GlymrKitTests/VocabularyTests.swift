@@ -79,4 +79,65 @@ final class VocabularyTests: XCTestCase {
         XCTAssertEqual(v.suggestions(forPrefix: "", limit: 3), ["git"],
                        "empty token must never be recorded or suggested")
     }
+
+    // MARK: serialization (Critical tier — blob is a synced/seed format)
+
+    func testSerializationRoundTrip() {
+        var v = vocab()
+        v.record("claude", count: 10)
+        v.record("crayon", count: 2)
+        let restored = Vocabulary(deserializing: v.serialize())
+        XCTAssertEqual(restored, v)
+        // Behavioral: restored store ranks identically.
+        XCTAssertEqual(restored?.suggestions(forPrefix: "c", limit: 3), ["claude", "crayon"])
+        XCTAssertEqual(restored?.candidates(forPrefix: "claude"),
+                       [TokenCount(token: "claude", count: 10)])
+    }
+
+    func testEmptyVocabularyRoundTrip() {
+        let v = vocab()
+        let restored = Vocabulary(deserializing: v.serialize())
+        XCTAssertEqual(restored, v)
+        XCTAssertEqual(restored?.suggestions(forPrefix: "", limit: 3), [])
+    }
+
+    func testDeserializeRejectsTruncatedBlob() {
+        var v = vocab()
+        v.record("git", count: 3)
+        var blob = v.serialize()
+        blob.removeLast()
+        XCTAssertNil(Vocabulary(deserializing: blob))
+    }
+
+    func testDeserializeRejectsWrongMagic() {
+        var v = vocab()
+        v.record("git")
+        var blob = v.serialize()
+        blob[0] = 0x00
+        XCTAssertNil(Vocabulary(deserializing: blob))
+    }
+
+    func testDeserializeRejectsWrongVersion() {
+        var v = vocab()
+        v.record("git")
+        var blob = v.serialize()
+        blob[4] = 0x02
+        XCTAssertNil(Vocabulary(deserializing: blob))
+    }
+
+    func testDeserializeRejectsCorruptEmbeddedSubBlob() {
+        // The embedded PrefixIndex sub-blob starts right after the GVOC header
+        // (magic 4 + version 1 + idxLen 4 = offset 9) with its own "GPIX" magic.
+        // Flipping that magic must make the sub-deserializer fail and propagate to
+        // nil — never a half-built vocabulary.
+        var v = vocab()
+        v.record("git", count: 3)
+        var blob = v.serialize()
+        blob[9] = 0x00   // corrupt the embedded PrefixIndex magic
+        XCTAssertNil(Vocabulary(deserializing: blob))
+    }
+
+    func testDeserializeRejectsEmpty() {
+        XCTAssertNil(Vocabulary(deserializing: []))
+    }
 }

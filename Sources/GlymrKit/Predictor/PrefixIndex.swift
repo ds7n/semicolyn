@@ -57,4 +57,54 @@ public struct PrefixIndex: Equatable, Sendable {
         }
         return lo
     }
+
+    // MARK: - Serialization
+
+    private static let magic: [UInt8] = [0x47, 0x50, 0x49, 0x58]  // "GPIX"
+    private static let formatVersion: UInt8 = 1
+    private static let headerSize = 9  // magic(4) + version(1) + count(4)
+
+    /// Serialize to the self-describing little-endian blob format:
+    /// `magic | version | count | [len | UTF-8 bytes]×count`. Tokens are emitted
+    /// in their stored ascending-byte order.
+    public func serialize() -> [UInt8] {
+        var out: [UInt8] = []
+        out.append(contentsOf: Self.magic)
+        out.append(Self.formatVersion)
+        appendLE32(&out, UInt32(tokens.count))
+        for token in tokens {
+            let bytes = Array(token.utf8)
+            appendLE32(&out, UInt32(bytes.count))
+            out.append(contentsOf: bytes)
+        }
+        return out
+    }
+
+    /// Reconstruct from a blob. Fails closed (`nil`) on wrong magic, unknown
+    /// version, a length field that overruns the buffer, trailing slack, or tokens
+    /// that are not strictly ascending by UTF-8 bytes — the latter would silently
+    /// break the binary search, so a corrupt/hostile blob is rejected rather than
+    /// trusted. Never pre-allocates from the untrusted count.
+    public init?(deserializing bytes: [UInt8]) {
+        guard bytes.count >= Self.headerSize,
+              Array(bytes[0..<4]) == Self.magic,
+              bytes[4] == Self.formatVersion,
+              let count = readLE32(bytes, 5) else { return nil }
+
+        var result: [String] = []
+        var p = Self.headerSize
+        var previousBytes: [UInt8]? = nil
+        for _ in 0..<count {
+            guard let tokenBytes = readLengthPrefixed(bytes, &p) else { return nil }
+            // Reject invalid UTF-8 outright — lossy decoding would desync the
+            // stored string's bytes from the order validated here.
+            guard let token = String(validating: tokenBytes, as: UTF8.self) else { return nil }
+            // Enforce the strictly-ascending, unique invariant on read.
+            if let prev = previousBytes, !prev.lexicographicallyPrecedes(tokenBytes) { return nil }
+            result.append(token)
+            previousBytes = tokenBytes
+        }
+        guard p == bytes.count else { return nil }  // no trailing slack
+        tokens = result
+    }
 }

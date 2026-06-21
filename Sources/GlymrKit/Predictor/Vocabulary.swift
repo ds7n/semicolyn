@@ -60,4 +60,44 @@ public struct Vocabulary: Equatable, Sendable {
         }
         return Array(ranked.prefix(limit))
     }
+
+    // MARK: - Serialization
+
+    private static let magic: [UInt8] = [0x47, 0x56, 0x4f, 0x43]  // "GVOC"
+    private static let formatVersion: UInt8 = 1
+    private static let headerSize = 5  // magic(4) + version(1)
+
+    /// Serialize to the self-describing blob format: `magic | version | idxLen |
+    /// idxBlob | cmsLen | cmsBlob`. The two sub-blobs are length-prefixed because
+    /// each sub-deserializer requires its exact byte slice.
+    public func serialize() -> [UInt8] {
+        var out: [UInt8] = []
+        out.append(contentsOf: Self.magic)
+        out.append(Self.formatVersion)
+        let idxBlob = index.serialize()
+        appendLE32(&out, UInt32(idxBlob.count))
+        out.append(contentsOf: idxBlob)
+        let cmsBlob = counts.serialize()
+        appendLE32(&out, UInt32(cmsBlob.count))
+        out.append(contentsOf: cmsBlob)
+        return out
+    }
+
+    /// Reconstruct from a blob. Fails closed (`nil`) on wrong magic/version, a
+    /// sub-blob length that overruns the buffer, trailing slack, or a sub-blob
+    /// that its own deserializer rejects — never a half-built vocabulary.
+    public init?(deserializing bytes: [UInt8]) {
+        guard bytes.count >= Self.headerSize,
+              Array(bytes[0..<4]) == Self.magic,
+              bytes[4] == Self.formatVersion else { return nil }
+
+        var p = Self.headerSize
+        guard let idxBlob = readLengthPrefixed(bytes, &p),
+              let cmsBlob = readLengthPrefixed(bytes, &p),
+              p == bytes.count,                                   // no trailing slack
+              let index = PrefixIndex(deserializing: idxBlob),
+              let counts = CountMinSketch(deserializing: cmsBlob) else { return nil }
+        self.index = index
+        self.counts = counts
+    }
 }
