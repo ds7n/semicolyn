@@ -33,7 +33,7 @@ struct IndexedSketch: CandidateSource {
 /// rolling sums and evicts aged-out days; `learnedSource` exposes
 /// `today ⊕ rolling_<window>` for ranking. See
 /// `2026-06-21-predictor-daily-rollover-design`.
-public struct RollingVocabulary {
+public struct RollingVocabulary: Equatable, Sendable {
     private var index: PrefixIndex
     private var today: CountMinSketch
     private var rolling7: CountMinSketch
@@ -105,4 +105,87 @@ public struct RollingVocabulary {
             IndexedSketch(index: index, counts: rolling),
         ])
     }
+
+    // MARK: - Serialization
+
+    private static let magic: [UInt8] = [0x47, 0x52, 0x4c, 0x56]  // "GRLV"
+    private static let formatVersion: UInt8 = 1
+    private static let headerSize = 5  // magic(4) + version(1)
+
+    /// Serialize the whole windowed state: `magic | version | index | today |
+    /// rolling7 | rolling30 | rolling90 | dailyCount | dailies…`, each sub-blob
+    /// length-prefixed.
+    public func serialize() -> [UInt8] {
+        var out: [UInt8] = []
+        out.append(contentsOf: Self.magic)
+        out.append(Self.formatVersion)
+        appendSubBlob(&out, index.serialize())
+        appendSubBlob(&out, today.serialize())
+        appendSubBlob(&out, rolling7.serialize())
+        appendSubBlob(&out, rolling30.serialize())
+        appendSubBlob(&out, rolling90.serialize())
+        appendLE32(&out, UInt32(dailies.count))
+        for daily in dailies { appendSubBlob(&out, daily.serialize()) }
+        return out
+    }
+
+    /// Reconstruct the whole state. Fails closed (`nil`) on wrong magic/version, a
+    /// rejected sub-blob, trailing slack, or any sketch whose dimensions differ
+    /// from `today`'s — mixed dimensions would make the rollover merge/subtract a
+    /// silent no-op, so such a blob is rejected outright. `depth`/`width` are taken
+    /// from `today` (a CMS carries its own dimensions).
+    public init?(deserializing bytes: [UInt8]) {
+        guard bytes.count >= Self.headerSize,
+              Array(bytes[0..<4]) == Self.magic,
+              bytes[4] == Self.formatVersion else { return nil }
+
+        var p = Self.headerSize
+        guard let indexBlob = readLengthPrefixed(bytes, &p),
+              let index = PrefixIndex(deserializing: indexBlob),
+              let today = readSketch(bytes, &p),
+              let rolling7 = readSketch(bytes, &p),
+              let rolling30 = readSketch(bytes, &p),
+              let rolling90 = readSketch(bytes, &p),
+              let rawDailyCount = readLE32(bytes, p) else { return nil }
+        p += 4
+
+        var dailies: [CountMinSketch] = []
+        for _ in 0..<Int(rawDailyCount) {
+            guard let daily = readSketch(bytes, &p) else { return nil }
+            dailies.append(daily)
+        }
+        guard p == bytes.count else { return nil }   // no trailing slack
+        // A real serialized state is pruned to the retention horizon; more dailies
+        // than that is a malformed/hostile blob (and an unbounded resource).
+        guard dailies.count <= Self.retentionDays else { return nil }
+
+        // All sketches must share today's dimensions or rollover arithmetic breaks.
+        let depth = today.depth, width = today.width
+        let sameDimensions = { (s: CountMinSketch) in s.depth == depth && s.width == width }
+        guard sameDimensions(rolling7), sameDimensions(rolling30), sameDimensions(rolling90),
+              dailies.allSatisfy(sameDimensions) else { return nil }
+
+        self.index = index
+        self.today = today
+        self.rolling7 = rolling7
+        self.rolling30 = rolling30
+        self.rolling90 = rolling90
+        self.dailies = dailies
+        self.depth = depth
+        self.width = width
+    }
+}
+
+/// Append a length-prefixed sub-blob (`LE32 length | bytes`) — the write-side
+/// counterpart to `readLengthPrefixed`, shared by the composite serializers.
+func appendSubBlob(_ out: inout [UInt8], _ blob: [UInt8]) {
+    appendLE32(&out, UInt32(blob.count))
+    out.append(contentsOf: blob)
+}
+
+/// Read a length-prefixed ``CountMinSketch`` sub-blob at `p`, advancing it; `nil`
+/// if the length overruns the buffer or the sketch blob is rejected.
+private func readSketch(_ bytes: [UInt8], _ p: inout Int) -> CountMinSketch? {
+    guard let blob = readLengthPrefixed(bytes, &p) else { return nil }
+    return CountMinSketch(deserializing: blob)
 }

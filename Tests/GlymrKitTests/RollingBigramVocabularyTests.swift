@@ -95,4 +95,46 @@ final class RollingBigramVocabularyTests: XCTestCase {
                        "empty/zero/separator-bearing pairs must not be recorded")
         XCTAssertNil(count(s, .days7, previous: "", next: "status"))
     }
+
+    // MARK: serialization (Critical tier — persisted learned state)
+
+    func testSerializationRoundTripPreservesWindowsAndAdjacency() {
+        var s = RollingBigramVocabulary()
+        s.record(previous: "git", next: "status", count: 2)
+        s.rollover()
+        s.record(previous: "git", next: "commit", count: 3)
+        let restored = RollingBigramVocabulary(deserializing: s.serialize())
+        XCTAssertEqual(restored, s)
+        XCTAssertEqual(restored?.candidates(after: "git", window: .days7),
+                       [TokenCount(token: "commit", count: 3),
+                        TokenCount(token: "status", count: 2)])
+    }
+
+    func testRolloverStillWorksAfterRoundTrip() {
+        var s = RollingBigramVocabulary()
+        s.record(previous: "git", next: "status", count: 5)
+        for _ in 0..<7 { s.rollover() }
+        var restored = RollingBigramVocabulary(deserializing: s.serialize())!
+        XCTAssertEqual(count(restored, .days7, previous: "git", next: "status"), 5)
+        restored.rollover()
+        XCTAssertEqual(count(restored, .days7, previous: "git", next: "status"), 0,
+                       "restored dailies must drive correct eviction")
+    }
+
+    func testDeserializeRejectsUnigramRollingBlob() {
+        // A GRLV (unigram) rolling state must not load as a GRBG bigram store.
+        var u = RollingVocabulary()
+        u.record("git", count: 3)
+        XCTAssertNil(RollingBigramVocabulary(deserializing: u.serialize()),
+                     "a unigram rolling blob must not deserialize as a bigram store")
+    }
+
+    func testDeserializeRejectsWrongMagicAndEmpty() {
+        var s = RollingBigramVocabulary()
+        s.record(previous: "git", next: "status")
+        var blob = s.serialize()
+        blob[0] = 0x00
+        XCTAssertNil(RollingBigramVocabulary(deserializing: blob))
+        XCTAssertNil(RollingBigramVocabulary(deserializing: []))
+    }
 }
