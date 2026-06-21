@@ -10,7 +10,7 @@ import Foundation
 /// the composite key `previous + US + next`, so this wraps ``RollingVocabulary``
 /// exactly as ``BigramVocabulary`` wraps ``Vocabulary``. See
 /// `2026-06-21-predictor-bigram-rollover-design`.
-public struct RollingBigramVocabulary {
+public struct RollingBigramVocabulary: Equatable, Sendable {
     private var rolling: RollingVocabulary
 
     /// A new windowed bigram store whose composite-key sketches have the given
@@ -49,5 +49,33 @@ public struct RollingBigramVocabulary {
     public func candidates(after previous: String, window: RollingWindow,
                            prefix: String = "") -> [TokenCount] {
         nextSource(after: previous, window: window).candidates(forPrefix: prefix)
+    }
+
+    // MARK: - Serialization
+
+    private static let magic: [UInt8] = [0x47, 0x52, 0x42, 0x47]  // "GRBG"
+    private static let formatVersion: UInt8 = 1
+    private static let headerSize = 5  // magic(4) + version(1)
+
+    /// Serialize the windowed bigram state: `magic | version | inner
+    /// RollingVocabulary blob`. The distinct magic guards against loading a unigram
+    /// `GRLV` state as a bigram store.
+    public func serialize() -> [UInt8] {
+        var out: [UInt8] = []
+        out.append(contentsOf: Self.magic)
+        out.append(Self.formatVersion)
+        out.append(contentsOf: rolling.serialize())
+        return out
+    }
+
+    /// Reconstruct from a blob. Fails closed (`nil`) on wrong magic/version or if
+    /// the inner rolling state is rejected (which already forbids trailing slack,
+    /// so the rest-of-bytes payload needs no length prefix).
+    public init?(deserializing bytes: [UInt8]) {
+        guard bytes.count >= Self.headerSize,
+              Array(bytes[0..<4]) == Self.magic,
+              bytes[4] == Self.formatVersion,
+              let rolling = RollingVocabulary(deserializing: Array(bytes[Self.headerSize...])) else { return nil }
+        self.rolling = rolling
     }
 }

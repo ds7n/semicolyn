@@ -90,4 +90,73 @@ final class RollingVocabularyTests: XCTestCase {
         XCTAssertNil(count(s, .days7, "ghost"), "zero-count token must not be recorded")
         XCTAssertNil(count(s, .days7, ""), "empty token must not be recorded")
     }
+
+    // MARK: serialization (Critical tier — persisted learned state)
+
+    func testSerializationRoundTripPreservesWindows() {
+        var s = RollingVocabulary()
+        s.record("deploy", count: 2)
+        s.rollover()                       // deploy → rolling7/30/90, sealed daily
+        s.record("git", count: 3)          // today
+        let restored = RollingVocabulary(deserializing: s.serialize())
+        XCTAssertEqual(restored, s)
+        XCTAssertEqual(count(restored!, .days7, "deploy"), 2)
+        XCTAssertEqual(count(restored!, .days7, "git"), 3)
+    }
+
+    func testRolloverStillWorksAfterRoundTrip() {
+        // Restored state must keep the dailies so window eviction stays correct.
+        var s = RollingVocabulary()
+        s.record("old", count: 5)
+        for _ in 0..<7 { s.rollover() }    // "old" still within 7d
+        var restored = RollingVocabulary(deserializing: s.serialize())!
+        XCTAssertEqual(count(restored, .days7, "old"), 5)
+        restored.rollover()                // 8th rollover post-load → evicts day 1
+        XCTAssertEqual(count(restored, .days7, "old"), 0,
+                       "the restored dailies must drive correct eviction")
+    }
+
+    func testEmptyStateRoundTrip() {
+        let s = RollingVocabulary()
+        XCTAssertEqual(RollingVocabulary(deserializing: s.serialize()), s)
+    }
+
+    func testDeserializeRejectsTruncated() {
+        var s = RollingVocabulary()
+        s.record("git")
+        var blob = s.serialize()
+        blob.removeLast()
+        XCTAssertNil(RollingVocabulary(deserializing: blob))
+    }
+
+    func testDeserializeRejectsWrongMagic() {
+        var s = RollingVocabulary()
+        s.record("git")
+        var blob = s.serialize()
+        blob[0] = 0x00
+        XCTAssertNil(RollingVocabulary(deserializing: blob))
+    }
+
+    func testDeserializeRejectsEmpty() {
+        XCTAssertNil(RollingVocabulary(deserializing: []))
+    }
+
+    func testDailyCountRetentionBoundary() {
+        // BVA on the retention horizon (90): a hand-assembled blob with 90 dailies
+        // is valid; 91 — more than any real pruned state holds — is rejected.
+        func blob(dailies: Int) -> [UInt8] {
+            var b: [UInt8] = Array("GRLV".utf8)
+            b.append(0x01)
+            appendSubBlob(&b, PrefixIndex().serialize())
+            let cms = CountMinSketch(depth: 4, width: 16).serialize()
+            for _ in 0..<4 { appendSubBlob(&b, cms) }   // today, rolling7/30/90
+            appendLE32(&b, UInt32(dailies))
+            for _ in 0..<dailies { appendSubBlob(&b, cms) }
+            return b
+        }
+        XCTAssertNotNil(RollingVocabulary(deserializing: blob(dailies: 90)),
+                        "the retention max (90 dailies) must be accepted")
+        XCTAssertNil(RollingVocabulary(deserializing: blob(dailies: 91)),
+                     "more than the retention horizon must be rejected")
+    }
 }
