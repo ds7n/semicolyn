@@ -55,6 +55,15 @@ final class VocabularyTests: XCTestCase {
         XCTAssertEqual(v.suggestions(forPrefix: "k", limit: 3), [])
     }
 
+    func testCandidatesReturnTokensWithCounts() {
+        var v = vocab()
+        v.record("git", count: 5)
+        v.record("go", count: 2)
+        // matching is byte-sorted: "git" < "go".
+        XCTAssertEqual(v.candidates(forPrefix: "g"),
+                       [TokenCount(token: "git", count: 5), TokenCount(token: "go", count: 2)])
+    }
+
     func testZeroCountNotRecorded() {
         var v = vocab()
         v.record("ghost", count: 0)
