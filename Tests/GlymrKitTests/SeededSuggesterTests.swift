@@ -96,13 +96,30 @@ final class SeededSuggesterTests: XCTestCase {
         XCTAssertEqual(s.suggestions(forPrefix: "a"), ["aa", "ab"])
     }
 
-    func testRecordLearningFlipsRanking() {
+    func testLearningFlipsRanking() {
         // Before learning, the seed ranks clang(0.5·100=50) over claude(0.5·1=0.5).
-        var s = suggester(learned: [], seed: [("claude", 1), ("clang", 100)])
-        XCTAssertEqual(s.suggestions(forPrefix: "cl"), ["clang", "claude"])
-        // Recording "claude" enough flips the order — proving record() actually
-        // mutates the learned vocabulary (a no-op record would leave clang first).
-        for _ in 0..<200 { s.record("claude") }
-        XCTAssertEqual(s.suggestions(forPrefix: "cl"), ["claude", "clang"])
+        let seed = vocab([("claude", 1), ("clang", 100)])
+        var learned = Vocabulary(depth: 4, width: 1 << 14)
+        let before = SeededSuggester(learned: learned, seed: seed)
+        XCTAssertEqual(before.suggestions(forPrefix: "cl"), ["clang", "claude"])
+        // Learning "claude" enough flips the order — proving the learned counts
+        // actually drive ranking (with no learning, clang stays first).
+        for _ in 0..<200 { learned.record("claude") }
+        let after = SeededSuggester(learned: learned, seed: seed)
+        XCTAssertEqual(after.suggestions(forPrefix: "cl"), ["claude", "clang"])
+    }
+
+    func testRanksOverWindowedAggregateRequiringSum() {
+        // "deploy" appears once in each of today and rolling — below the
+        // confidence floor of 2 in either alone, but today ⊕ rolling sums to 2,
+        // exactly clearing the floor. If the aggregate failed to SUM (read a
+        // single source), "deploy" would stay sub-floor and not surface. So this
+        // distinctly proves summing drives the outcome, end to end through the
+        // suggester — not just union.
+        let today = vocab([("deploy", 1)])
+        let rolling = vocab([("deploy", 1)])
+        let learned = AggregateCandidateSource([today, rolling])
+        let s = SeededSuggester(learned: learned, seed: vocab([]))  // default floor 2
+        XCTAssertEqual(s.suggestions(forPrefix: "de"), ["deploy"])
     }
 }
