@@ -9,7 +9,7 @@ import Foundation
 /// `nextSource(after:)` exposes one previous token's successors as a plain
 /// ``CandidateSource``, which the seed-deference and windowing composers consume
 /// unchanged. See `2026-06-21-predictor-bigram-next-token-design`.
-public struct BigramVocabulary {
+public struct BigramVocabulary: Sendable {
     private var vocab: Vocabulary
 
     /// ASCII unit separator (0x1F) — a control byte no shell token contains, so
