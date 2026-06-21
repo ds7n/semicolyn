@@ -67,3 +67,19 @@ func readLE32(_ bytes: [UInt8], _ offset: Int) -> UInt32? {
         | (UInt32(bytes[offset + 2]) << 16)
         | (UInt32(bytes[offset + 3]) << 24)
 }
+
+/// Read a length-prefixed chunk (`LE32 length | that many bytes`) starting at
+/// `offset`, advancing `offset` past the chunk on success. Returns `nil` — and
+/// leaves `offset` unspecified — when the length field is missing or runs past
+/// the buffer. The single bounds-checked "read a sized sub-blob" primitive the
+/// fail-closed deserializers share, so the overrun guard lives in one place.
+/// `Int(len)` is safe on the 64-bit-only targets: `len ≤ UInt32.max` and
+/// `offset ≤ bytes.count`, so `start + Int(len)` cannot overflow `Int`.
+func readLengthPrefixed(_ bytes: [UInt8], _ offset: inout Int) -> [UInt8]? {
+    guard let len = readLE32(bytes, offset) else { return nil }
+    let start = offset + 4
+    let end = start + Int(len)
+    guard end <= bytes.count else { return nil }
+    offset = end
+    return Array(bytes[start..<end])
+}
