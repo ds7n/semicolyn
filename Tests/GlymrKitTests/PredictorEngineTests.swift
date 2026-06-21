@@ -120,4 +120,53 @@ final class PredictorEngineTests: XCTestCase {
         e.record("xa", count: 5); e.record("xb", count: 4); e.record("xc", count: 3)
         XCTAssertEqual(e.suggestions(forPrefix: "x"), ["xa", "xb"])
     }
+
+    // MARK: output-token harvesting
+
+    func testHarvestedOutputLeadsSuggestions() {
+        var e = engine()
+        for _ in 0..<5 { e.record("status", after: "git") }   // strong learned
+        e.harvest(output: "deploy.log status.txt")            // just-seen output
+        // The harvested "status.txt" leads even over a frequent learned token.
+        XCTAssertEqual(e.suggestions(forPrefix: "st").first, "status.txt")
+    }
+
+    func testHarvestedAndLearnedMergeDeduped() {
+        var e = engine(config: SuggestionConfig(topK: 3))
+        for _ in 0..<2 { e.record("stage") }
+        e.harvest(output: "stash-pop")
+        let s = e.suggestions(forPrefix: "st")
+        XCTAssertEqual(s, ["stash-pop", "stage"], "harvested leads, learned fills, no dup")
+    }
+
+    func testHarvestRespectsPrivacyFilter() {
+        var e = engine()
+        e.harvest(output: "build.log secret-aikey")   // "secret" excluded by default
+        XCTAssertEqual(e.suggestions(forPrefix: "secret"), [],
+                       "an excluded output token must never be harvested or surfaced")
+        XCTAssertEqual(e.suggestions(forPrefix: "build"), ["build.log"])
+    }
+
+    func testHarvestedLeadsNextTokenAxisToo() {
+        var e = engine()
+        e.harvest(output: "config.yaml")
+        // `cat <harvested-file>`: after "cat", the harvested filename leads.
+        XCTAssertEqual(e.suggestions(forPrefix: "config", after: "cat").first, "config.yaml")
+    }
+
+    func testNonPositiveTopKReturnsEmptyEvenWithHarvest() {
+        // The harvest path is not otherwise capped; topK <= 0 must still yield [].
+        var e = engine(config: SuggestionConfig(topK: 0))
+        e.harvest(output: "a1 a2 a3")
+        XCTAssertEqual(e.suggestions(forPrefix: "a"), [],
+                       "topK <= 0 must return nothing, not the whole harvest")
+    }
+
+    func testClearHarvestDropsOutputTokens() {
+        var e = engine()
+        e.harvest(output: "ephemeral.tmp")
+        XCTAssertEqual(e.suggestions(forPrefix: "eph"), ["ephemeral.tmp"])
+        e.clearHarvest()
+        XCTAssertEqual(e.suggestions(forPrefix: "eph"), [])
+    }
 }
