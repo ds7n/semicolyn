@@ -57,6 +57,35 @@ public struct BigramVocabulary {
     public func candidates(after previous: String, prefix: String = "") -> [TokenCount] {
         nextSource(after: previous).candidates(forPrefix: prefix)
     }
+
+    // MARK: - Serialization
+
+    private static let magic: [UInt8] = [0x47, 0x42, 0x47, 0x4d]  // "GBGM"
+    private static let formatVersion: UInt8 = 1
+    private static let headerSize = 5  // magic(4) + version(1)
+
+    /// Serialize the seed/store blob: `magic | version | inner-vocabulary blob`.
+    /// The distinct magic is the type guard — a bigram store and a unigram
+    /// ``Vocabulary`` blob can't be loaded as each other.
+    public func serialize() -> [UInt8] {
+        var out: [UInt8] = []
+        out.append(contentsOf: Self.magic)
+        out.append(Self.formatVersion)
+        out.append(contentsOf: vocab.serialize())
+        return out
+    }
+
+    /// Reconstruct from a blob. Fails closed (`nil`) on wrong magic/version or if
+    /// the inner-vocabulary blob is rejected (the ``Vocabulary`` deserializer
+    /// already rejects any trailing slack, so the rest-of-bytes payload needs no
+    /// length prefix).
+    public init?(deserializing bytes: [UInt8]) {
+        guard bytes.count >= Self.headerSize,
+              Array(bytes[0..<4]) == Self.magic,
+              bytes[4] == Self.formatVersion,
+              let vocab = Vocabulary(deserializing: Array(bytes[Self.headerSize...])) else { return nil }
+        self.vocab = vocab
+    }
 }
 
 /// Adapts one previous token's slice of any composite-key ``CandidateSource``
