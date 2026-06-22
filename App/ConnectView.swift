@@ -59,5 +59,22 @@ struct ConnectView: View {
             }
             .navigationTitle("Glymr")
         }
+        // The prompt sheet rides the connect form; `state` only becomes
+        // `.shell` after `verify` has resolved, so the sheet is never orphaned.
+        // `onDismiss` fails closed: if the sheet is dismissed without an explicit
+        // button tap, treat it as rejection so the continuation is never leaked.
+        .sheet(item: $vm.pendingPrompt, onDismiss: { vm.resolvePrompt(false) }) { prompt in
+            Group {
+                switch prompt {
+                case let .firstTrust(hostLabel, keyType, offered):
+                    FirstTrustModal(hostLabel: hostLabel, keyType: keyType, offered: offered,
+                                    onDecision: { vm.resolvePrompt($0) })
+                case let .mismatch(hostLabel, keyType, stored, offered):
+                    MismatchModal(hostLabel: hostLabel, keyType: keyType, stored: stored,
+                                  offered: offered, onDecision: { vm.resolvePrompt($0) })
+                }
+            }
+            .interactiveDismissDisabled()
+        }
     }
 }
