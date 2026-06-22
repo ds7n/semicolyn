@@ -9,7 +9,9 @@ import GlymrKit
 struct HostListView: View {
     @StateObject private var vm = HostListViewModel()
     @Environment(\.theme) private var theme
-    @State private var showingEditor = false
+    /// `nil` means the editor is closed; `.creating` opens it for a new host;
+    /// `.editing(host)` opens it for an existing host.
+    @State private var editorMode: HostEditorMode?
 
     var body: some View {
         NavigationStack {
@@ -24,7 +26,7 @@ struct HostListView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
-                        showingEditor = true
+                        editorMode = .creating
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -33,9 +35,14 @@ struct HostListView: View {
             .onAppear {
                 vm.reload()
             }
-            // Editor sheet — placeholder until Task 3 ships HostEditorView.
-            .sheet(isPresented: $showingEditor, onDismiss: { vm.reload() }) {
-                HostEditorPlaceholder()
+            // Host editor sheet — Task 3.
+            .sheet(item: $editorMode, onDismiss: { vm.reload() }) { mode in
+                switch mode {
+                case .creating:
+                    HostEditorView(creating: true)
+                case .editing(let host):
+                    HostEditorView(editing: host)
+                }
             }
             // Delete-refusal alert.
             .alert(
@@ -57,7 +64,7 @@ struct HostListView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Button {
-                showingEditor = true
+                editorMode = .creating
             } label: {
                 Text("Add your first host")
                     .font(.headline)
@@ -94,9 +101,8 @@ struct HostListView: View {
                     }
 
                     // Edit action
-                    // TODO(Task 3): replace with navigation/sheet to HostEditorView(host: host)
                     Button {
-                        showingEditor = true
+                        editorMode = .editing(host)
                     } label: {
                         Label("Edit", systemImage: "pencil")
                     }
@@ -127,24 +133,17 @@ private struct HostRow: View {
     }
 }
 
-// MARK: - Editor placeholder
+// MARK: - Editor mode
 
-/// Minimal stub shown until Task 3 delivers `HostEditorView`.
-/// TODO(Task 3): replace with HostEditorView
-private struct HostEditorPlaceholder: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.theme) private var theme
+/// Discriminates between the two entry points for the host editor sheet.
+private enum HostEditorMode: Identifiable {
+    case creating
+    case editing(Host)
 
-    var body: some View {
-        NavigationStack {
-            Text("Host editor coming in Task 3.")
-                .foregroundStyle(Color(theme.text.secondary))
-                .navigationTitle("New Host")
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Done") { dismiss() }
-                    }
-                }
+    var id: String {
+        switch self {
+        case .creating: return "creating"
+        case .editing(let host): return host.id.uuidString
         }
     }
 }
