@@ -93,9 +93,11 @@ jobs:
       - name: Add iOS Rust targets
         run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 
+      - name: Build UniFFI XCFramework (compiles Rust core for all iOS triples — D4)
+        # Must precede any swift build: the macOS package manifest references this
+        # xcframework (binaryTarget), so resolution fails until it exists.
+        run: bash scripts/build-xcframework.sh
+
       - name: Build GlymrKit under CryptoKit
         # On macOS GlymrKit uses system CryptoKit (no swift-crypto); confirm it compiles.
         run: swift build --target GlymrKit
-
-      - name: Build UniFFI XCFramework (compiles Rust core for all iOS triples — D4)
-        run: bash scripts/build-xcframework.sh
