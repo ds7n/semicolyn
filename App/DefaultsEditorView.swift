@@ -14,8 +14,7 @@ import GlymrKit
 /// Save is always enabled — no required fields.
 ///
 /// NOTE: This is a completely standalone view, NOT an extension of `HostEditorView`.
-/// It reuses the pure mapper functions from `InheritedBinding.swift` and the
-/// `IssueBanner` struct (declared `internal` in `HostEditorView.swift`).
+/// It reuses the pure mapper functions from `InheritedBinding.swift` (only).
 struct DefaultsEditorView: View {
     @StateObject private var vm = DefaultsEditorViewModel()
     @Environment(\.dismiss) private var dismiss
@@ -304,7 +303,7 @@ struct DefaultsEditorView: View {
                     .foregroundStyle(Color(theme.text.secondary))
             }
 
-            ForEach([AuthMethod.publicKey, .password, .keyboardInteractive], id: \.self) { method in
+            ForEach([AuthMethod.publicKey, .keyboardInteractive, .password], id: \.self) { method in
                 let methodLabel: String = {
                     switch method {
                     case .publicKey: return "Public key"
@@ -344,7 +343,7 @@ struct DefaultsEditorView: View {
     /// available via HostEditorView. See Task 7 report for rationale.
     private var jumpChainSection: some View {
         DisclosureGroup(isExpanded: $jumpChainExpanded) {
-            Text("Set per-host")
+            Text("Set per-host — no global default")
                 .font(.subheadline)
                 .foregroundStyle(Color(theme.text.secondary))
                 .italic()
@@ -365,7 +364,7 @@ struct DefaultsEditorView: View {
     /// See Task 7 report for rationale.
     private var portForwardingSection: some View {
         DisclosureGroup(isExpanded: $portForwardingExpanded) {
-            Text("Set per-host")
+            Text("Set per-host — no global default")
                 .font(.subheadline)
                 .foregroundStyle(Color(theme.text.secondary))
                 .italic()
@@ -614,6 +613,12 @@ struct DefaultsEditorView: View {
                     Text("Automatically use tmux -CC if tmux is running (default on).")
                         .font(.caption)
                         .foregroundStyle(Color(theme.text.secondary))
+                }
+            }
+            .swipeActions {
+                if case .explicit = vm.defaults.glymr {
+                    Button("Clear override") { vm.defaults.glymr = .inherit }
+                        .tint(Color(theme.accent.primary))
                 }
             }
 
