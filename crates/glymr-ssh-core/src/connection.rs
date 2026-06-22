@@ -43,7 +43,9 @@ pub enum ConnectError {
 
 impl From<russh::Error> for ConnectError {
     fn from(e: russh::Error) -> Self {
-        ConnectError::Transport { message: e.to_string() }
+        ConnectError::Transport {
+            message: e.to_string(),
+        }
     }
 }
 
@@ -64,7 +66,10 @@ pub enum AuthOutcome {
 fn outcome(result: russh::client::AuthResult) -> AuthOutcome {
     match result {
         russh::client::AuthResult::Success => AuthOutcome::Success,
-        russh::client::AuthResult::Failure { partial_success: true, .. } => AuthOutcome::PartialSuccess,
+        russh::client::AuthResult::Failure {
+            partial_success: true,
+            ..
+        } => AuthOutcome::PartialSuccess,
         russh::client::AuthResult::Failure { .. } => AuthOutcome::Failure,
     }
 }
@@ -106,10 +111,10 @@ pub struct ShellSession {
     cmd_tx: tokio::sync::mpsc::Sender<ShellCommand>,
 }
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use russh::client;
 use russh::keys::ssh_key::HashAlg;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::algorithms::build_preferred;
 
@@ -253,8 +258,12 @@ impl Connection {
         user: String,
         private_key_openssh: String,
     ) -> Result<AuthOutcome, ConnectError> {
-        let key = russh::keys::PrivateKey::from_openssh(private_key_openssh.as_bytes())
-            .map_err(|e| ConnectError::Transport { message: format!("invalid private key: {e}") })?;
+        let key =
+            russh::keys::PrivateKey::from_openssh(private_key_openssh.as_bytes()).map_err(|e| {
+                ConnectError::Transport {
+                    message: format!("invalid private key: {e}"),
+                }
+            })?;
         let mut handle = self.handle.lock().await;
         // For RSA keys, advertise the strongest server-supported SHA-2 hash;
         // ignored for ed25519/ecdsa.
@@ -274,11 +283,17 @@ impl Connection {
         private_key_openssh: String,
         cert_openssh: String,
     ) -> Result<AuthOutcome, ConnectError> {
-        let key = russh::keys::PrivateKey::from_openssh(private_key_openssh.as_bytes())
-            .map_err(|e| ConnectError::Transport { message: format!("invalid private key: {e}") })?;
+        let key =
+            russh::keys::PrivateKey::from_openssh(private_key_openssh.as_bytes()).map_err(|e| {
+                ConnectError::Transport {
+                    message: format!("invalid private key: {e}"),
+                }
+            })?;
         let cert = cert_openssh
             .parse::<russh::keys::ssh_key::Certificate>()
-            .map_err(|e| ConnectError::CertificateInvalid { message: format!("malformed certificate: {e}") })?;
+            .map_err(|e| ConnectError::CertificateInvalid {
+                message: format!("malformed certificate: {e}"),
+            })?;
         // Pair sanity: the cert must certify this private key.
         if key.public_key().key_data() != cert.public_key() {
             return Err(ConnectError::CertificateInvalid {
@@ -330,7 +345,9 @@ impl Connection {
         for _ in 0..10 {
             match reply {
                 Kir::Success => return Ok(AuthOutcome::Success),
-                Kir::Failure { partial_success, .. } => {
+                Kir::Failure {
+                    partial_success, ..
+                } => {
                     return Ok(if partial_success {
                         AuthOutcome::PartialSuccess
                     } else {
@@ -338,8 +355,12 @@ impl Connection {
                     });
                 }
                 Kir::InfoRequest { prompts, .. } => {
-                    let batch: Vec<String> =
-                        responses.iter().skip(sent).take(prompts.len()).cloned().collect();
+                    let batch: Vec<String> = responses
+                        .iter()
+                        .skip(sent)
+                        .take(prompts.len())
+                        .cloned()
+                        .collect();
                     sent += prompts.len();
                     reply = handle
                         .authenticate_keyboard_interactive_respond(batch)
@@ -424,7 +445,9 @@ impl Connection {
             let handle = self.handle.lock().await;
             handle.channel_open_session().await?
         };
-        channel.request_pty(true, &term, cols, rows, 0, 0, &[]).await?;
+        channel
+            .request_pty(true, &term, cols, rows, 0, 0, &[])
+            .await?;
         channel.request_shell(true).await?;
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(32);
         tokio::spawn(pump(channel, cmd_rx, output));
@@ -455,7 +478,9 @@ impl Connection {
             let handle = self.handle.lock().await;
             handle.channel_open_session().await?
         };
-        channel.request_pty(true, &term, cols, rows, 0, 0, &[]).await?;
+        channel
+            .request_pty(true, &term, cols, rows, 0, 0, &[])
+            .await?;
         channel.exec(true, command.into_bytes()).await?;
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(32);
         tokio::spawn(pump(channel, cmd_rx, output));
@@ -489,11 +514,15 @@ impl Connection {
         // The handle lock is released at the block's end, before connect_stream.
         let stream = {
             let h = self.handle.lock().await;
-            h.channel_open_direct_tcpip(target_host, target_port as u32, "127.0.0.1", 0).await?
+            h.channel_open_direct_tcpip(target_host, target_port as u32, "127.0.0.1", 0)
+                .await?
         }
         .into_stream();
 
-        let handle = map_handshake(client::connect_stream(config, stream, handler).await, &rejected)?;
+        let handle = map_handshake(
+            client::connect_stream(config, stream, handler).await,
+            &rejected,
+        )?;
 
         // Keep every hop closer to the device alive: their transports carry ours.
         let mut parents = self.parents.clone();
@@ -515,7 +544,9 @@ impl ShellSession {
         self.cmd_tx
             .send(ShellCommand::Write(data))
             .await
-            .map_err(|_| ConnectError::Transport { message: "shell session closed".into() })
+            .map_err(|_| ConnectError::Transport {
+                message: "shell session closed".into(),
+            })
     }
 
     /// Tell the remote of a new terminal size (pixel dims 0).
@@ -523,7 +554,9 @@ impl ShellSession {
         self.cmd_tx
             .send(ShellCommand::Resize(cols, rows))
             .await
-            .map_err(|_| ConnectError::Transport { message: "shell session closed".into() })
+            .map_err(|_| ConnectError::Transport {
+                message: "shell session closed".into(),
+            })
     }
 
     /// End the session: EOF + close. After the shell has already exited this
@@ -532,7 +565,9 @@ impl ShellSession {
         self.cmd_tx
             .send(ShellCommand::Close)
             .await
-            .map_err(|_| ConnectError::Transport { message: "shell session closed".into() })
+            .map_err(|_| ConnectError::Transport {
+                message: "shell session closed".into(),
+            })
     }
 }
 
@@ -626,7 +661,13 @@ async fn pump(
 /// The pieces `prepare` hands back: the client config and event handler, plus
 /// the shared state the caller needs to assemble a `Connection` and to tell a
 /// host-key rejection apart from a transport error.
-type Prepared = (Arc<client::Config>, ClientHandler, Arc<Mutex<Vec<String>>>, Arc<AtomicBool>, ForwardMap);
+type Prepared = (
+    Arc<client::Config>,
+    ClientHandler,
+    Arc<Mutex<Vec<String>>>,
+    Arc<AtomicBool>,
+    ForwardMap,
+);
 
 /// Builds the russh client config and event handler shared by direct
 /// (`connect_core`) and jumped (`connect_jump`) connections.
@@ -638,7 +679,8 @@ fn prepare(
 ) -> Prepared {
     let tier3_in_use = Arc::new(Mutex::new(Vec::new()));
     let rejected = Arc::new(AtomicBool::new(false));
-    let forwards: ForwardMap = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    let forwards: ForwardMap =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
 
     // ext-info-c is a protocol marker, not a user-facing algorithm — appended
     // here, not in the 1a allowlist.

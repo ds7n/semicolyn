@@ -20,9 +20,9 @@
 //! `host_key_list_excludes_unverifiable_cert_variants` test guards against
 //! re-adding it. This lifts when russh gains client-side host-cert verification.
 
-use std::borrow::Cow;
 use russh::keys::ssh_key::{Algorithm, EcdsaCurve, HashAlg};
 use russh::{cipher, compression, kex, mac, Preferred};
+use std::borrow::Cow;
 
 /// Builds the russh negotiation preference list from the two per-host toggles.
 /// Closed set: only algorithms on a permitted tier are offered. Tier order is
@@ -56,11 +56,21 @@ pub(crate) fn build_preferred(allow_legacy: bool, allow_deprecated: bool) -> Pre
     ];
     let mut host_keys = vec![
         Algorithm::Ed25519,
-        Algorithm::Rsa { hash: Some(HashAlg::Sha512) },
-        Algorithm::Rsa { hash: Some(HashAlg::Sha256) },
-        Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 },
-        Algorithm::Ecdsa { curve: EcdsaCurve::NistP384 },
-        Algorithm::Ecdsa { curve: EcdsaCurve::NistP521 },
+        Algorithm::Rsa {
+            hash: Some(HashAlg::Sha512),
+        },
+        Algorithm::Rsa {
+            hash: Some(HashAlg::Sha256),
+        },
+        Algorithm::Ecdsa {
+            curve: EcdsaCurve::NistP256,
+        },
+        Algorithm::Ecdsa {
+            curve: EcdsaCurve::NistP384,
+        },
+        Algorithm::Ecdsa {
+            curve: EcdsaCurve::NistP521,
+        },
     ];
 
     // Tier 2 — legacy but allowed (per-host `glymr.allowLegacyAlgorithms`).
@@ -126,7 +136,10 @@ mod tests {
         p.key.iter().map(|a| a.as_str()).collect::<Vec<&str>>()
     }
     fn comp_wire(p: &russh::Preferred) -> Vec<&str> {
-        p.compression.iter().map(|n| n.as_ref()).collect::<Vec<&str>>()
+        p.compression
+            .iter()
+            .map(|n| n.as_ref())
+            .collect::<Vec<&str>>()
     }
 
     // Expected Tier-1 lists, in exact preference order (strongest first). The
@@ -220,7 +233,13 @@ mod tests {
         assert_eq!(mac_wire(&p), [T1_MAC, T3_MAC].concat());
         assert_eq!(key_wire(&p), [T1_KEY, T3_KEY].concat());
         // Tier-4 floor: dead algorithms appear in no list even with both toggles.
-        for dead in ["3des-cbc", "ssh-dss", "hmac-md5", "arcfour", "diffie-hellman-group1-sha1"] {
+        for dead in [
+            "3des-cbc",
+            "ssh-dss",
+            "hmac-md5",
+            "arcfour",
+            "diffie-hellman-group1-sha1",
+        ] {
             assert!(!kex_wire(&p).contains(&dead));
             assert!(!cipher_wire(&p).contains(&dead));
             assert!(!mac_wire(&p).contains(&dead));
@@ -265,13 +284,24 @@ mod tests {
         // and nothing the Tier-1 builder offers may be — keeps the warning hook
         // and the offered set from drifting apart.
         let tier1 = build_preferred(false, false);
-        let offered: Vec<&str> =
-            [kex_wire(&tier1), cipher_wire(&tier1), mac_wire(&tier1), key_wire(&tier1)].concat();
+        let offered: Vec<&str> = [
+            kex_wire(&tier1),
+            cipher_wire(&tier1),
+            mac_wire(&tier1),
+            key_wire(&tier1),
+        ]
+        .concat();
         for name in offered {
-            assert!(!is_tier3(name), "Tier-1 algorithm {name} must not be Tier-3");
+            assert!(
+                !is_tier3(name),
+                "Tier-1 algorithm {name} must not be Tier-3"
+            );
         }
         for name in [T3_KEX, T3_MAC, T3_KEY].concat() {
-            assert!(is_tier3(name), "appended Tier-3 algorithm {name} must classify as Tier-3");
+            assert!(
+                is_tier3(name),
+                "appended Tier-3 algorithm {name} must classify as Tier-3"
+            );
         }
     }
 }
