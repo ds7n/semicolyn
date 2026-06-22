@@ -64,10 +64,20 @@ pub(crate) async fn open_local(
         })?;
     let bound_port = listener
         .local_addr()
-        .map_err(|e| ConnectError::Transport { message: format!("local_addr: {e}") })?
+        .map_err(|e| ConnectError::Transport {
+            message: format!("local_addr: {e}"),
+        })?
         .port();
-    let task = tokio::spawn(local_accept_loop(listener, handle, remote_host, remote_port));
-    Ok(LocalForward { bound_port, abort: task.abort_handle() })
+    let task = tokio::spawn(local_accept_loop(
+        listener,
+        handle,
+        remote_host,
+        remote_port,
+    ));
+    Ok(LocalForward {
+        bound_port,
+        abort: task.abort_handle(),
+    })
 }
 
 /// A live dynamic (SOCKS5) forward — a device-local SOCKS5 proxy that opens a
@@ -106,16 +116,23 @@ pub(crate) async fn open_dynamic(
         })?;
     let bound_port = listener
         .local_addr()
-        .map_err(|e| ConnectError::Transport { message: format!("local_addr: {e}") })?
+        .map_err(|e| ConnectError::Transport {
+            message: format!("local_addr: {e}"),
+        })?
         .port();
     let task = tokio::spawn(dynamic_accept_loop(listener, handle));
-    Ok(DynamicForward { bound_port, abort: task.abort_handle() })
+    Ok(DynamicForward {
+        bound_port,
+        abort: task.abort_handle(),
+    })
 }
 
 async fn dynamic_accept_loop(listener: tokio::net::TcpListener, handle: Arc<Mutex<Handle>>) {
     let mut tunnels = tokio::task::JoinSet::new();
     loop {
-        let Ok((sock, _peer)) = listener.accept().await else { break };
+        let Ok((sock, _peer)) = listener.accept().await else {
+            break;
+        };
         let handle = Arc::clone(&handle);
         tunnels.spawn(async move {
             let _ = socks5_serve(sock, handle).await;
@@ -128,10 +145,7 @@ async fn dynamic_accept_loop(listener: tokio::net::TcpListener, handle: Arc<Mute
 /// then send FIN so the client sees a clean EOF rather than ECONNRESET.
 /// Unread data in the kernel socket buffer causes the OS to send RST on close;
 /// draining first ensures a graceful FIN regardless of how much was left unread.
-async fn reject(
-    mut sock: tokio::net::TcpStream,
-    reply: Option<&[u8]>,
-) -> std::io::Result<()> {
+async fn reject(mut sock: tokio::net::TcpStream, reply: Option<&[u8]>) -> std::io::Result<()> {
     use tokio::io::AsyncWriteExt;
     if let Some(r) = reply {
         let _ = sock.write_all(r).await;
@@ -211,12 +225,14 @@ async fn socks5_serve(
 
     let opened = {
         let h = handle.lock().await;
-        h.channel_open_direct_tcpip(host, port as u32, "127.0.0.1", 0).await
+        h.channel_open_direct_tcpip(host, port as u32, "127.0.0.1", 0)
+            .await
     };
     match opened {
         Ok(channel) => {
             // success, BND.ADDR=0.0.0.0:0 (clients ignore it for CONNECT)
-            sock.write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await?;
+            sock.write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+                .await?;
             pump(sock, channel).await;
         }
         Err(_) => {
@@ -248,16 +264,23 @@ impl RemoteForward {
     pub async fn close(&self) -> Result<(), ConnectError> {
         {
             let h = self.handle.lock().await;
-            h.cancel_tcpip_forward(self.bind_host.clone(), self.bound_port as u32).await?;
+            h.cancel_tcpip_forward(self.bind_host.clone(), self.bound_port as u32)
+                .await?;
         }
-        self.forwards.lock().unwrap().remove(&(self.bound_port as u32));
+        self.forwards
+            .lock()
+            .unwrap()
+            .remove(&(self.bound_port as u32));
         Ok(())
     }
 }
 
 impl Drop for RemoteForward {
     fn drop(&mut self) {
-        self.forwards.lock().unwrap().remove(&(self.bound_port as u32));
+        self.forwards
+            .lock()
+            .unwrap()
+            .remove(&(self.bound_port as u32));
         if let Ok(rt) = tokio::runtime::Handle::try_current() {
             let handle = Arc::clone(&self.handle);
             let bind_host = self.bind_host.clone();
@@ -280,16 +303,26 @@ pub(crate) async fn open_remote(
 ) -> Result<RemoteForward, ConnectError> {
     let assigned = {
         let h = handle.lock().await;
-        h.tcpip_forward(remote_bind_host.clone(), remote_bind_port as u32).await?
+        h.tcpip_forward(remote_bind_host.clone(), remote_bind_port as u32)
+            .await?
     };
     // For a fixed (non-zero) request the server listens on exactly that port and
     // the reply carries no port; for port 0 the server returns the chosen port.
-    let bound_port: u16 = if remote_bind_port == 0 { assigned as u16 } else { remote_bind_port };
+    let bound_port: u16 = if remote_bind_port == 0 {
+        assigned as u16
+    } else {
+        remote_bind_port
+    };
     forwards
         .lock()
         .unwrap()
         .insert(bound_port as u32, (local_host, local_port));
-    Ok(RemoteForward { bound_port, bind_host: remote_bind_host, handle, forwards })
+    Ok(RemoteForward {
+        bound_port,
+        bind_host: remote_bind_host,
+        handle,
+        forwards,
+    })
 }
 
 async fn local_accept_loop(
@@ -300,13 +333,16 @@ async fn local_accept_loop(
 ) {
     let mut tunnels = tokio::task::JoinSet::new();
     loop {
-        let Ok((sock, _peer)) = listener.accept().await else { break };
+        let Ok((sock, _peer)) = listener.accept().await else {
+            break;
+        };
         let handle = Arc::clone(&handle);
         let rhost = remote_host.clone();
         tunnels.spawn(async move {
             let opened = {
                 let h = handle.lock().await;
-                h.channel_open_direct_tcpip(rhost, remote_port as u32, "127.0.0.1", 0).await
+                h.channel_open_direct_tcpip(rhost, remote_port as u32, "127.0.0.1", 0)
+                    .await
             };
             if let Ok(channel) = opened {
                 pump(sock, channel).await;
