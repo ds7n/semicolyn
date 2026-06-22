@@ -1,13 +1,43 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
+import GlymrKit
 import GlymrSSHCoreFFI
 
-/// MVP host-key policy: trust on first sight, always. The real trust-on-first-use
-/// flow (prompt + persist via the already-built `HostKeyStore`) is the immediate
-/// follow-up; this stub keeps the connect path unblocked.
-final class AutoTrustVerifier: HostKeyVerifier {
-    func verify(info: HostKeyInfo) async -> Bool { true }
+/// Bridges the Rust host-key trust callback to the TOFU evaluator + the SwiftUI
+/// first-trust / mismatch modals. `present` shows the modal on the main actor and
+/// returns the user's trust decision; storage is written only after an accept.
+final class TofuHostKeyVerifier: HostKeyVerifier {
+    private let hostID: UUID
+    private let trust: HostKeyTrustEvaluator
+    private let present: @MainActor (HostKeyPrompt) async -> Bool
+
+    init(hostID: UUID, trust: HostKeyTrustEvaluator,
+         present: @escaping @MainActor (HostKeyPrompt) async -> Bool) {
+        self.hostID = hostID; self.trust = trust; self.present = present
+    }
+
+    func verify(info: HostKeyInfo) async -> Bool {
+        let decision = (try? trust.evaluate(hostID: hostID, algorithm: info.keyType,
+                                            fingerprint: info.fingerprint)) ?? .firstTrust
+        switch decision {
+        case .trusted:
+            return true
+        case .firstTrust:
+            let ok = await present(.firstTrust(hostLabel: info.hostLabel, keyType: info.keyType,
+                                               offered: info.fingerprint))
+            if ok { try? trust.trust(hostID: hostID, algorithm: info.keyType,
+                                     fingerprint: info.fingerprint, at: Date()) }
+            return ok
+        case .mismatch(let stored):
+            let ok = await present(.mismatch(hostLabel: info.hostLabel, keyType: info.keyType,
+                                             stored: stored.first?.fingerprint ?? "",
+                                             offered: info.fingerprint))
+            if ok { try? trust.replace(hostID: hostID, algorithm: info.keyType,
+                                       fingerprint: info.fingerprint, at: Date()) }
+            return ok
+        }
+    }
 }
 
 /// Receives merged stdout/stderr from the Rust PTY pump and forwards it to the

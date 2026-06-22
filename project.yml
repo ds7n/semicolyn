@@ -30,6 +30,8 @@ targets:
     dependencies:
       - package: GlymrPackage
         product: GlymrSSHCoreFFI
+      - package: GlymrPackage
+        product: GlymrKit
       - package: SwiftTerm
     settings:
       base:
