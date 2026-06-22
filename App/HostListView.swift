@@ -14,6 +14,8 @@ struct HostListView: View {
     @State private var editorMode: HostEditorMode?
     /// Whether the Defaults editor sheet is presented.
     @State private var showingDefaults = false
+    /// Non-nil when the user has tapped a saved host to connect (Task 8).
+    @State private var connectingHost: IdentifiableHost?
 
     var body: some View {
         NavigationStack {
@@ -49,6 +51,10 @@ struct HostListView: View {
             // Defaults editor sheet — Task 7.
             .sheet(isPresented: $showingDefaults) {
                 DefaultsEditorView()
+            }
+            // Session cover — Task 8: tap a saved host to connect.
+            .fullScreenCover(item: $connectingHost) { wrapper in
+                SessionView(host: wrapper.host)
             }
             // Host editor sheet — Task 3.
             .sheet(item: $editorMode, onDismiss: { vm.reload() }) { mode in
@@ -122,7 +128,7 @@ struct HostListView: View {
 
             ForEach(vm.hosts, id: \.id) { host in
                 Button {
-                    // TODO(Task 8): connect-from-saved — wire ConnectionViewModel with saved Host credentials
+                    connectingHost = IdentifiableHost(host)
                 } label: {
                     HostRow(host: host)
                 }
@@ -181,4 +187,16 @@ private enum HostEditorMode: Identifiable {
         case .editing(let host): return host.id.uuidString
         }
     }
+}
+
+// MARK: - Identifiable wrapper for Host (Task 8)
+
+/// `Host` itself does not conform to `Identifiable`, so `.fullScreenCover(item:)`
+/// (and any other `item:`-based modifier) requires a thin wrapper that provides a
+/// stable, Identifiable id. Using the host's own `UUID` keeps identity trivially
+/// stable and avoids any alloc overhead beyond the box itself.
+private struct IdentifiableHost: Identifiable {
+    let id: UUID
+    let host: Host
+    init(_ host: Host) { self.id = host.id; self.host = host }
 }
