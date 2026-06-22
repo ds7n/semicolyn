@@ -16,6 +16,8 @@
 /GlymrSSHCore.xcframework/
 # Generated UniFFI Swift wrapper (produced by scripts/build-xcframework.sh)
 /Sources/GlymrSSHCoreFFI/
+# Generated Xcode project (produced by `xcodegen generate` from project.yml)
+/Glymr.xcodeproj/
 
 # Secrets / data
 .env
