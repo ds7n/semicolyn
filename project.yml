@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 True Positive LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# XcodeGen manifest for the Glymr iOS app target. SwiftPM can't produce an iOS
+# .app bundle, so the app lives here; `xcodegen generate` (macOS) emits the
+# .xcodeproj. The Rust SSH core is linked via the local SwiftPM package's
+# GlymrSSHCoreFFI product (backed by GlymrSSHCore.xcframework, built first by
+# scripts/build-xcframework.sh). The terminal renderer is SwiftTerm.
+name: Glymr
+
+options:
+  bundleIdPrefix: com.truepositive
+  deploymentTarget:
+    iOS: "17.0"
+
+packages:
+  # The repo-root SwiftPM package (GlymrKit + the macOS/iOS-only GlymrSSHCoreFFI).
+  GlymrPackage:
+    path: .
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    from: "1.0.0"
+
+targets:
+  Glymr:
+    type: application
+    platform: iOS
+    sources:
+      - App
+    dependencies:
+      - package: GlymrPackage
+        product: GlymrSSHCoreFFI
+      - package: SwiftTerm
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.truepositive.glymr
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.1.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # MVP: Swift 5 language mode for the app target. The UniFFI callback
+        # bridges + SwiftTerm aren't Swift-6 strict-concurrency clean; tighten later.
+        SWIFT_VERSION: "5.0"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        # No signing in CI; the simulator build is the gate.
+        CODE_SIGNING_ALLOWED: NO

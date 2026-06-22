@@ -101,3 +101,15 @@ jobs:
       - name: Build GlymrKit under CryptoKit
         # On macOS GlymrKit uses system CryptoKit (no swift-crypto); confirm it compiles.
         run: swift build --target GlymrKit
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build Glymr app for iOS Simulator
+        run: |
+          xcodebuild -project Glymr.xcodeproj -scheme Glymr \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build
