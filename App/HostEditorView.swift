@@ -61,6 +61,8 @@ struct HostEditorView: View {
     /// Non-nil when a delete was refused because the host is a referenced jumphost.
     /// Cleared by the delete refusal banner's dismiss action.
     @State var deleteRefusalReferrers: [HostRef]? = nil
+    /// Non-nil when an unexpected save or delete error occurs; drives the generic error alert.
+    @State private var genericError: String? = nil
 
     // MARK: - Init
 
@@ -185,6 +187,15 @@ struct HostEditorView: View {
             if let warning = vm.saveWarning {
                 Text(warning)
             }
+        }
+        // Generic error alert — unexpected save or delete failures
+        .alert("Error", isPresented: Binding(
+            get: { genericError != nil },
+            set: { if !$0 { genericError = nil } }
+        )) {
+            Button("OK", role: .cancel) { genericError = nil }
+        } message: {
+            Text(genericError ?? "")
         }
     }
 
@@ -325,7 +336,8 @@ struct HostEditorView: View {
             if hostNameTouched && hasIssue(.missingHostName) {
                 IssueBanner(message: "Hostname is required to save.", severity: .hardBlock)
             }
-            if hasNoUserIssue {
+            // Fix 2 — gate no-user banner: suppress on a fresh untouched new-host form
+            if hasNoUserIssue && ((!vm.isNew) || labelTouched || hostNameTouched) {
                 IssueBanner(
                     message: "No user set here or in Defaults. Connecting will require setting a user.",
                     severity: .softBlock
@@ -507,8 +519,8 @@ struct HostEditorView: View {
         } catch StoreError.jumpHostInUse(let referrers) {
             deleteRefusalReferrers = referrers
         } catch {
-            // Unexpected store error — surface as a generic refusal banner.
-            deleteRefusalReferrers = []
+            // Unexpected store error — surface via the generic error alert.
+            genericError = "Couldn't delete this host. \(error.localizedDescription)"
         }
     }
 
@@ -532,9 +544,8 @@ struct HostEditorView: View {
             // The Save button is disabled when hard blocks exist, so this branch
             // should not be reached in practice; it guards against race conditions.
         } catch {
-            // Unexpected storage error — surface via an issue banner is
-            // outside scope for v1; the error is intentionally swallowed here.
-            // TODO(Task N): surface unexpected save errors in a top-level banner.
+            // Unexpected storage error — surface via the generic error alert.
+            genericError = "Couldn't save this host. \(error.localizedDescription)"
         }
     }
 }
