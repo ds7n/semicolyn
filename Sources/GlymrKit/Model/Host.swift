@@ -39,33 +39,115 @@ public struct Host: Codable, Equatable, Sendable {
     public var label: String
     public var hostName: String
 
-    // OpenSSH Tier 1 (subset modeled in Phase 0; remaining fields follow the
-    // identical Inherited<T> pattern and are added as later phases consume them).
+    // OpenSSH Tier 1 — all optional, inherit from Defaults if undefined.
     public var user: Inherited<String>
     public var port: Inherited<Int>
     public var identities: Inherited<[IdentityRef]>
+    public var passwordRef: Inherited<UUID>
     public var proxyJump: Inherited<[JumpHop]>
+    public var localForwards: Inherited<[LocalForward]>
+    public var remoteForwards: Inherited<[RemoteForward]>
+    public var dynamicForwards: Inherited<[DynamicForward]>
+
+    // OpenSSH Tier 2 — all optional.
+    public var serverAliveInterval: Inherited<Int>
+    public var serverAliveCountMax: Inherited<Int>
+    public var compression: Inherited<Bool>
+    public var strictHostKeyChecking: Inherited<StrictHostKeyChecking>
+    public var forwardAgent: Inherited<Bool>
+    public var preferredAuthentications: Inherited<[AuthMethod]>
+
+    // Glymr extensions — all optional, namespaced.
+    public var mosh: Inherited<MoshConfig>
+    public var tailscale: Inherited<TailscaleConfig>
+    public var glymr: Inherited<GlymrConfig>
 
     public init(id: UUID, label: String, hostName: String,
                 user: Inherited<String> = .inherit,
                 port: Inherited<Int> = .inherit,
                 identities: Inherited<[IdentityRef]> = .inherit,
-                proxyJump: Inherited<[JumpHop]> = .inherit) {
+                proxyJump: Inherited<[JumpHop]> = .inherit,
+                passwordRef: Inherited<UUID> = .inherit,
+                localForwards: Inherited<[LocalForward]> = .inherit,
+                remoteForwards: Inherited<[RemoteForward]> = .inherit,
+                dynamicForwards: Inherited<[DynamicForward]> = .inherit,
+                serverAliveInterval: Inherited<Int> = .inherit,
+                serverAliveCountMax: Inherited<Int> = .inherit,
+                compression: Inherited<Bool> = .inherit,
+                strictHostKeyChecking: Inherited<StrictHostKeyChecking> = .inherit,
+                forwardAgent: Inherited<Bool> = .inherit,
+                preferredAuthentications: Inherited<[AuthMethod]> = .inherit,
+                mosh: Inherited<MoshConfig> = .inherit,
+                tailscale: Inherited<TailscaleConfig> = .inherit,
+                glymr: Inherited<GlymrConfig> = .inherit) {
         self.id = id; self.label = label; self.hostName = hostName
         self.user = user; self.port = port
         self.identities = identities; self.proxyJump = proxyJump
+        self.passwordRef = passwordRef
+        self.localForwards = localForwards; self.remoteForwards = remoteForwards
+        self.dynamicForwards = dynamicForwards
+        self.serverAliveInterval = serverAliveInterval
+        self.serverAliveCountMax = serverAliveCountMax
+        self.compression = compression
+        self.strictHostKeyChecking = strictHostKeyChecking
+        self.forwardAgent = forwardAgent
+        self.preferredAuthentications = preferredAuthentications
+        self.mosh = mosh; self.tailscale = tailscale; self.glymr = glymr
     }
 
     /// The resolved jump chain (empty when inherited/unset for cycle-checking).
     public var resolvedJumpChain: [JumpHop] { proxyJump.value ?? [] }
 }
 
-/// Singleton defaults record: same optional fields as Host, no required ones.
+/// Singleton defaults record: same optional fields as Host (it is `Partial<Host>`),
+/// no required ones. Same names/types/semantics; resolution falls through here.
 public struct Defaults: Codable, Equatable, Sendable {
     public var user: Inherited<String>
     public var port: Inherited<Int>
+    public var identities: Inherited<[IdentityRef]>
+    public var passwordRef: Inherited<UUID>
+    public var proxyJump: Inherited<[JumpHop]>
+    public var localForwards: Inherited<[LocalForward]>
+    public var remoteForwards: Inherited<[RemoteForward]>
+    public var dynamicForwards: Inherited<[DynamicForward]>
+    public var serverAliveInterval: Inherited<Int>
+    public var serverAliveCountMax: Inherited<Int>
+    public var compression: Inherited<Bool>
+    public var strictHostKeyChecking: Inherited<StrictHostKeyChecking>
+    public var forwardAgent: Inherited<Bool>
+    public var preferredAuthentications: Inherited<[AuthMethod]>
+    public var mosh: Inherited<MoshConfig>
+    public var tailscale: Inherited<TailscaleConfig>
+    public var glymr: Inherited<GlymrConfig>
+
     public init(user: Inherited<String> = .inherit,
-                port: Inherited<Int> = .inherit) {
+                port: Inherited<Int> = .inherit,
+                identities: Inherited<[IdentityRef]> = .inherit,
+                passwordRef: Inherited<UUID> = .inherit,
+                proxyJump: Inherited<[JumpHop]> = .inherit,
+                localForwards: Inherited<[LocalForward]> = .inherit,
+                remoteForwards: Inherited<[RemoteForward]> = .inherit,
+                dynamicForwards: Inherited<[DynamicForward]> = .inherit,
+                serverAliveInterval: Inherited<Int> = .inherit,
+                serverAliveCountMax: Inherited<Int> = .inherit,
+                compression: Inherited<Bool> = .inherit,
+                strictHostKeyChecking: Inherited<StrictHostKeyChecking> = .inherit,
+                forwardAgent: Inherited<Bool> = .inherit,
+                preferredAuthentications: Inherited<[AuthMethod]> = .inherit,
+                mosh: Inherited<MoshConfig> = .inherit,
+                tailscale: Inherited<TailscaleConfig> = .inherit,
+                glymr: Inherited<GlymrConfig> = .inherit) {
         self.user = user; self.port = port
+        self.identities = identities; self.passwordRef = passwordRef
+        self.proxyJump = proxyJump
+        self.localForwards = localForwards; self.remoteForwards = remoteForwards
+        self.dynamicForwards = dynamicForwards
+        self.serverAliveInterval = serverAliveInterval
+        self.serverAliveCountMax = serverAliveCountMax
+        self.compression = compression
+        self.strictHostKeyChecking = strictHostKeyChecking
+        self.forwardAgent = forwardAgent
+        self.preferredAuthentications = preferredAuthentications
+        self.mosh = mosh; self.tailscale = tailscale; self.glymr = glymr
     }
 }
