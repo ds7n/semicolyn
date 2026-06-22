@@ -1,100 +1,187 @@
 # Glymr
 
-iOS SSH/mosh client. Differentiator: terminal work that feels native on a touch device — context-aware key bar, smart snippet launcher, tmux control mode as the session engine for persistent, native tabs and panes, security-first credential handling.
+[![CI](https://github.com/ds7n/glymr/actions/workflows/ci.yml/badge.svg)](https://github.com/ds7n/glymr/actions/workflows/ci.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0--only-blue.svg)](LICENSE)
+![Platform: iOS / iPadOS](https://img.shields.io/badge/platform-iOS%20%7C%20iPadOS-lightgrey.svg)
 
-> The name **Glymr** is Old Norse for *"echo, resonance, ringing sound"* — what the predictor does (echoes your vocabulary back) and what a remote command does (rings across distance to another shell).
+**An iOS SSH / mosh terminal client built for touch.** Glymr's wager is that
+terminal work can feel native on a phone: a context-aware key bar, a smart
+snippet launcher, tmux control mode driving persistent native tabs and panes,
+an on-device predictor that learns your vocabulary, and security-first
+credential handling with end-to-end-encrypted sync.
+
+> The name **Glymr** is Old Norse for *"echo, resonance, ringing sound"* — what
+> the predictor does (echoes your vocabulary back) and what a remote command
+> does (rings across distance to another shell).
+
+---
 
 ## Status
 
-**Phase:** Design complete; implementation underway. The SSH core is being built bottom-up — **Phase 0 (foundations), 1a (algorithm allowlist), 1b (connection + handshake + host-key trust), 1c (authentication: password / publickey / keyboard-interactive), 1c-cert (OpenSSH certificate auth), 1d (PTY shell channel: open / stream / write / resize / close + exit status), 1e (port forwarding: local direct-tcpip / dynamic SOCKS5 / remote forwarded-tcpip), and 1f (ProxyJump: jump-host chains via nested SSH over a direct-tcpip channel) are done** and on `master`. The one remaining Phase-1 item — the `ssh-ed25519-cert-v01@openssh.com` host-key (server certificate) variant — is **deferred: blocked on russh 0.61, whose client verifies the server host key only as a plain `PublicKey` (no CA / principal / validity path)**; it auto-enters when russh gains client-side host-cert verification (a guard test prevents advertising it before then). Phase 1 SSH core is otherwise complete. **Phase 3a** — the `tmux -CC` control-mode protocol parser (the Linux-testable slice of the terminal phase: streaming line buffering, `%output` octal-decode, `%begin`/`%end`/`%error` block coalescing, window/session lifecycle events, and `%layout-change` → a pane-geometry tree) — is **done** in `GlymrKit` (Swift), and **Phase 3b** — the tmux session/pane model (a pure value-type `TmuxSessionState` that applies parser events into the window/pane tree, active window/pane, and session identity the UI renders) — is **done** too, and **Phase 3c** — the tmux command encoder (the outbound counterpart to the parser: a stateless `TmuxCommand` value-encoder for `new-window` / `split-window` / `resize-pane` / `zoom` / `select-window` / `select-pane` / `kill-pane` / `send-keys` / `kill-session`, with `send-keys` hex-encoded via `-H` so arbitrary input bytes can never escape their argument or forge the newline framing, and fail-closed session-name validation) — is **done** as well, and **Phase 3d** — the tmux session controller (a pure, I/O-free `TmuxSessionController` state machine tying the parser, session model, and encoder together: `start` yields the `tmux -CC new-session -A -s <name>` exec string for atomic create-or-attach, `feed` folds channel bytes into the session model and resolves submitted commands FIFO against their `%begin`/`%end`/`%error` blocks, `submit` frames a command for the channel — gated to the attached state, with the spontaneous initial-attach block dropped) — is **done** too, and **Phase 3e** — the Rust-side tmux control-mode transport — is **done** as well: `Connection::open_exec` runs a remote command on a **PTY-backed** exec channel (a PTY is required — `tmux -CC` `tcgetattr`s on startup and emits nothing without one) and pumps its stdio, reusing the Phase 1d shell machinery; its caller is the Swift controller's `tmux -CC new-session -A -s <name>` string, and it doubles as the future mosh-bootstrap transport. Verified against real `tmux` in the `sshd` fixture (the control-mode handshake streams end to end). That verification surfaced that the real `-CC` stream is **DCS-wrapped** (`ESC P1000p … ESC \`); the **Phase 3a parser was hardened** to strip that envelope (intro glued to the first `%begin`, trailing `ESC \` terminator, fragmentation-safe across reads), tested against the captured real-tmux byte sequence — so the pure stack now parses a live `tmux -CC` stream correctly end to end. Remaining Phase 3 work (wiring `open_exec` ↔ `TmuxSessionController` over the macOS-gated UniFFI bridge, command timeouts, SwiftTerm/SwiftUI rendering) is macOS-gated. **Phase 4a** — the predictor's core probabilistic data structures — is **done**: a `CountMinSketch` (per-token frequency, one-sided over-estimate error, saturating add, pointwise merge, clamp-at-zero subtract for rollover eviction) and a `BloomFilter` (set membership, no false negatives), both over a **frozen, process-independent FNV-1a hash** (verified against canonical known-answer vectors) — determinism is a hard requirement because sketches sync and merge across a user's devices. Both serialize to a versioned, fail-closed blob format (a corrupt or hostile synced blob never yields a half-populated sketch). **Phase 4b** — prefix → ranked suggestions — is **done**: a `PrefixIndex` (sorted-unique token store, binary-search prefix lookup ordered by **UTF-8 bytes** so prefix matches form a provably contiguous run) paired with the unigram sketch in a `Vocabulary` that turns a typed prefix into frequency-ranked candidates (`clau` → `claude`), ties broken lexicographically for a deterministic order. The marquee behavior (a learned word outranking an unlearned one) is under test. **Phase 4c** — seed deference — is **done**: a `SeededSuggester` composes the learned `Vocabulary` with a pinned read-only seed and applies the spec's two-layer per-prefix gating — Layer 2 consults the seed only when the user lacks ≥`topK` confident learned candidates for a prefix (so a frequently-typed prefix never shows seed entries, a never-typed one gets day-1 help), and Layer 1 blends scores as `learned + 0.5·seed` so a comparable learned entry always out-ranks the seed. The day-1 seed retires per-prefix, continuously and invisibly. **Phase 4d** — the read-side of windowing — is **done**: a `CandidateSource` protocol and an `AggregateCandidateSource` that unions several sketches' prefix candidates and sums their counts (saturating), realizing the spec's `today ⊕ rolling_<window>` query by summing estimates rather than materializing a merged sketch per keystroke (one-sided error preserved). `SeededSuggester` was refactored into a pure ranking combiner over `any CandidateSource`, so it ranks a single vocabulary or a windowed aggregate identically. **Phase 4e** — daily rollover — is **done**: a `RollingVocabulary` state machine maintains a hot `today` sketch plus `rolling_7d/30d/90d` pre-aggregates over one shared token index; `record` writes today, `rollover` (at user-local midnight) seals today into each rolling sum and evicts the day that fell out of the window as a sliding-window sum (using the 4a `merge`/`subtract`), pruning past the 90-day horizon; `learnedSource(window:)` exposes `today ⊕ rolling` for ranking. The eviction-index arithmetic is verified at the 7-day and 90-day boundaries and after pruning is active. This completes the predictor's learn → window → rank → seed-defer path on the Linux fast loop. **Phase 4f** — the write-time privacy filter — is **done**: a `TokenFilter` predicate the recording path consults *before* learning, so secrets never enter any sketch (filter at write time, not read time). It ships deterministic exclude patterns (case-insensitive `password`/`token`/`secret`; exact-case key prefixes for GitHub classic + fine-grained PATs, OpenAI `sk-`, Stripe `sk_`/`pk_`) plus a Shannon-entropy backstop (≥4.0 bits/char over ≥16-char tokens) for pasted secrets matching no known prefix, failing toward exclusion. **Phase 4g** — bigram next-token prediction — is **done**: a `BigramVocabulary` learns `(previous, next)` adjacencies and ranks a committed token's successors (`git` → `status`), realized as a unigram over the composite key `previous + US + next` so it reuses the prefix-ranking machinery and composes with `SeededSuggester` (N-gram seed deference) and the windowed aggregate for free. **Phase 4h** — windowed next-token prediction — is **done**: a `RollingBigramVocabulary` gives bigrams the same `today ⊕ rolling_7d/30d/90d` daily rollover by wrapping `RollingVocabulary` over composite keys. **Phase 4i** — vocabulary serialization — is **done**: fail-closed `serialize`/`deserialize` for `PrefixIndex` (GPIX), `Vocabulary` (GVOC), and `BigramVocabulary` (GBGM), the foundation under bundled seeds and learned persistence. **Phases 4j/4k** — the build-time seed pipeline — are **done**: a `SeedKit` library + `glymr-seedbuild` executable ingest live **tldr-pages** (example invocations) and the **Fig autocomplete** spec corpus (structured subcommands/flags — chosen over carapace, whose tools ship as Go completers with no clean structured export) into unigram + bigram seed blobs via `scripts/build-seed.sh`. **Phase 4l** — seed runtime load — is **done**: a `SeedStore` installs the bundled seed into a single atomic `seed_pinned.sketch` on first launch / version upgrade and loads it fail-soft as the read-only seed source. **Phase 4m** — rolling-state serialization — is **done**: whole-state `serialize`/`deserialize` for the windowed learned stores (GRLV/GRBG). **Phase 4n** — the learned store — is **done**: a `LearnedStore` persists/restores the user's windowed vocabulary atomically, fail-soft to empty. **Phase 4o** — the predictor engine — is **done**: a `PredictorEngine` facade composes write-time privacy + learned stores + seed + the seed-deferring ranker into one `record` / `suggestions` / `rollover` API. **Phase 4p** — output-token harvesting — is **done**: an `OutputHarvest` (bounded, recency-ordered, ephemeral) captures tokens from command output so just-seen filenames / pod names lead suggestions on a matching prefix (the spec's killer feature), privacy-filtered at the engine boundary. This completes the predictor's v1 core suggestion experience — unigram + sub-command bigram + output harvesting — as a Linux-tested library. **Phase 2a** — the storage core (the Linux-testable, platform-agnostic slice of the Storage & sync phase) — is **done**: the `Host`/`Defaults` schema completed with every Tier 1/Tier 2/Glymr-extension field as `Inherited<T>`, the full resolution/fallback table honoring the three-state inherit / explicit-value / explicit-none distinction, a layered store stack (`BlobStore` in-memory + atomic file backends → `EncryptedRecordStore` sealing records with the AES-256-GCM `RecordEnvelope` so the backend only ever holds ciphertext; `SecretStore` + record-key helper → `HostKeyStore` for `known_hosts`), a `HostStore` repository facade enforcing the spec invariants (jump-chain cycle prevention at save, soft-unique label warning, refuse-delete of a referenced jump host or identity, identity used-by scan, Defaults singleton), and the sync taxonomy + reserved no-op audit-log stub. The Apple concrete backends — iCloud Keychain / Secure Enclave via `SecAccessControl`, CloudKit Private DB, key minting, the sync engine — are deferred to **Phase 2b** (macOS-gated). The Linux fast loop runs in a Docker dev container (Swift 6 + Rust, `russh`); SSH integration tests run against containerized `sshd` fixtures. Tests green: 9 Rust unit + 34 Rust integration (4 connect + 5 auth + 4 cert + 5 shell + 7 forward + 5 proxyjump + 4 tmux exec channel) + 384 Swift (incl. 56 for the tmux control-mode parser + 17 for the session/pane model + 25 for the command encoder + 18 for the session controller + 30 for the predictor sketches + 36 for prefix-ranked suggestions + vocabulary serialization + 12 for seed deference + 6 for candidate aggregation + 15 for daily rollover + rolling-state serialization + 14 for the privacy filter + 17 for bigram next-token + 12 for windowed bigram + 10 for seed install/load + 8 for the learned store + 19 for the predictor engine + 8 for output harvesting + 29 for the tldr/Fig seed-ingestion pipeline + 32 for the Phase-2a storage core: host schema, resolution table, blob/record/secret/host-key stores, HostStore invariants, sync taxonomy). macOS-gated work (the UniFFI XCFramework bridge, iOS UI) and CI are deferred. Roadmap and per-phase plans live in `docs/superpowers/plans/`.
+**Design complete; implementation underway. There is no installable app yet.**
+The protocol and logic layers — the parts that are hard to get right — are built
+and tested on a Linux fast loop. The app shell (iOS target, UniFFI bridge
+wiring, terminal rendering, UI) is the remaining work and is gated on macOS /
+Xcode.
 
-**Locked so far:**
-- Concept, product positioning, security posture
-- Connection scope (SSH + mosh + jump hosts + port forwards + Tailscale)
-- Session engine: tmux control mode (`tmux -CC`)
-- Credential storage: native iOS Keychain / Secure Enclave only — no 3rd-party password-manager integration
-- Snippet model (flat list, smart sort, parameterized)
-- **Window switching:** pill in keybar + four gestures (tap/swipe/long-press picker), terminal-area swipe as secondary path
-- **Pane management:** second pill in keybar + four gestures, terminal area kept clear for iOS-native text selection
-- **Copy/paste:** iOS-native (long-press in pane → magnifier → copy menu), per-pane selection
-- **Cursor placement:** 60pt halo around the cursor, delta-based mouse-like drag (no joystick), loupe above cursor, vertical dead-zone to protect against shell-history surprise
-- **Connection status:** transient banner from the top of the screen, only when something is wrong (Blink-style); amber for degraded, red for broken
-- **Predictive input:** on-device learning vocabulary backed by probabilistic data structures (CMS + Bloom); thin auto-hiding suggestion row above the keybar; bundled seed (tldr-pages + Fig autocomplete specs — carapace dropped, no clean structured export; curated dotfiles deferred) that defers per-prefix as the user gains signal. Full spec: `docs/superpowers/specs/2026-06-13-predictor-design.md`
-- **Brand palette:** "Bell bronze" — bronze accent on cool-dark, with verdigris patina as a secondary color. Sidesteps AI/terminal/Norse stereotypes. See `mockups/specs/design-system.html` for swatches and applied examples.
-- **Keybar scope (v1):** in-app accessory bar above iOS's native keyboard. iOS owns the letters; the keybar carries window/pane pills + iOS-absent keys (Esc, Tab, Ctrl/Alt/Shift, arrows) + convenience defaults. Custom inputView with long-press alts on letter keys deferred as a potential v2.
-- **Keybar interaction model:** three actions per slot (tap = primary, swipe-up = secondary, swipe-down = tertiary), long-press = edit. Dim swipe chars rendered on the same key. Ctrl/Alt/Shift sticky-for-one-keystroke; Esc/Tab fire on tap. Arrow keys collapsed into a single Blink-style drag-from-center pad.
-- **Keybar default slots (v0 draft):** 10 slots — Esc · Ctrl/Alt/Shift · Tab · arrow-pad · `/` · `\|` · `~` · `-` · `(` · `)`. Tagged core vs convenience; convenience slots are removable. Full spec: `mockups/specs/keybar.html`. Expect telemetry-driven revision in v1.5. (Composition revised — see Keybar layout entry below for the locked-left default `Esc pill · Pad · Modifier · Tab`.)
-- **Macros / snippets unification:** keybar items and launcher snippets are one concept — "a recorded sequence of input events" (a keystroke chord, a typed string, or a mix). Launcher is the searchable full list; keybar is the user's pinned subset. Placeholders are an optional per-item property.
-- **Keybar structure (revised — see keybar layout/customization spec below for the current locked design):** the bar is **locked left** + **horizontally scrollable right**. Scrolling preserves muscle memory while letting contextual content land in a stable position.
-- **Context detection:** per-pane foreground process detected via tmux `pane_current_command` (zero host cooperation needed). Drives **additive symbol promotions** in the scroll region — bronze-tint + top-edge accent, asymmetric anti-flap (250ms engage / 1500ms disengage). Bundled defaults for vim, less, python, psql, mysql, sqlite3, redis-cli, node. Full spec: `docs/superpowers/specs/2026-06-14-context-detection-design.md`.
-- **Function keys:** `Fn` slot in the keybar toggles F-key mode (the scroll region becomes F1–F12). Caps-lock state machine (tap = armed one-shot, double-tap = locked). Auto-engages in `htop`/`top`/`mc` via the context-detection state machine; respects user override per episode. Companion change: **Ctrl** also gets double-tap-to-lock (Alt/Shift stay sticky-only). Full spec: `docs/superpowers/specs/2026-06-14-function-keys-design.md`.
-- **Degraded mode & tmux requirements:** minimum tmux **3.0**. Missing/too-old/crashed tmux drops to raw-PTY mode (single shell, no pills, no context detection; predictor/snippets/keybar modifiers still work). Connect-time amber banner, reoccurs each reconnect, per-host suppression after a few dismissals. Mid-session crash gets the one persistent banner in the app (Reattach / Start new tmux / Dismiss). No auto-install, no power-user "raw" toggle. Full spec: `docs/superpowers/specs/2026-06-14-degraded-mode-design.md`.
-- **Host management & settings access (entry point):** **multiple simultaneous live connections** (soft cap of 8 awake; LRU demotion is silent — see Multi-connection switching below). Entry point is **long-press Esc** (dim `≡` hint below the slot — no chip, no top bar, no menu slot). Picker sheet anchored above keybar; contents = Live → Recent → + Connect → ⚙ Settings. "Live" = resumable without re-auth (SSH/mosh unified). Per-row swipes: Edit + Disconnect (live) / Edit + Delete with confirm (recent). Banners still at top. Settings tree: Hosts / Identities & Keys / Security / App preferences / About. **Mockup:** `mockups/drafts/host-management.html`.
-- **Host config model:** `ssh_config(5)`-faithful naming, strict subset of OpenSSH options (Tier 1 + Tier 2 typed; no escape hatch in v1), UUID stable IDs + free-form labels, single-Defaults inheritance, ordered identity refs, mixed-mode `proxyJump` (ref or inline per hop), all three port-forward types. Mosh and Tailscale modeled as namespaced extensions. **Identities are first-class entities** with two flavors: **iCloud Keychain (default — synced E2EE, device-portable)** and **Secure Enclave (opt-in "Enhanced" — hardware-bound, single device)**. **Storage backbone:** iCloud Keychain for secrets and `known_hosts`; CloudKit Private DB + client-side AES-256-GCM for host records and metadata; local-only for recents / live state. Full spec: `docs/superpowers/specs/2026-06-15-host-config-model-design.md`.
-- **Host CRUD flow:** single scrollable form (same for create and edit), nine sections, aggressive default-collapse (only Basics + Auth open on new host; auto-expand on edit if non-default). Mosh / Tailscale as named sections with **show + explain** conditional behavior — fields are disabled with tooltips, never hidden. Identity sub-flow = half-sheet with three tabs (Pick existing · Create new · Import existing); ssh-copy-id auto-install deferred to v1.5. Hybrid validation (required-field markers live, content checks on Save). Refused-if-referenced delete with tappable jumphost back-references. Quick-edit (picker swipe) = half-sheet; deep-edit (Settings → Hosts) = full-screen push; same form. Defaults editor reuses the shell with **inherit vs set** rows and swipe-to-clear-override. Full spec: `docs/superpowers/specs/2026-06-15-host-crud-design.md`. Mockup: `mockups/specs/host-crud.html`.
+| Phase | Scope | State |
+|---|---|---|
+| **0 — Foundations** | Cargo + SwiftPM workspace, UniFFI bridge proof, design tokens, data model, AES-256-GCM record envelope | ✅ Done |
+| **1 — SSH core** | russh behind UniFFI: handshake, host-key TOFU, auth (password / publickey / keyboard-interactive), OpenSSH cert auth, PTY shell, local/remote/dynamic forwards, ProxyJump, 4-tier algorithm allowlist | ✅ Done¹ |
+| **2a — Storage core** | Full host/identity schema + resolution table; `BlobStore`→`EncryptedRecordStore`, `SecretStore`, `HostKeyStore`; repository invariants; sync taxonomy | ✅ Done |
+| **2b — Storage backends** | iCloud Keychain / Secure Enclave (`SecAccessControl`), CloudKit Private DB + sync engine, key minting | ⏳ macOS-gated |
+| **3 — Terminal + tmux** | `tmux -CC` parser, session/pane model, command encoder, session controller, Rust transport (all done²); SwiftTerm/SwiftUI rendering + bridge wiring | ◐ Core done, rendering macOS-gated |
+| **4 — Keybar, input & predictor** | On-device predictor: CMS + Bloom vocabulary, prefix + bigram ranking, daily rollover, seed deference, write-time privacy filter, output harvesting, engine facade (all done); keybar UI + app-edge wiring | ◐ Engine done, UI macOS-gated |
+| **5–7 — UI & ship** | Host/Identity CRUD UI, connection-management UI, settings, IAP, App Store polish | ⏳ Not started (macOS-gated) |
 
-- **Identities & Keys management surface:** standalone list at `Settings → Identities & Keys`, alphabetical by display name with flavor chips (`iCloud` / `SE`) and "Used by N" indicator. Per-identity detail screen with inline-editable display name + auth policy (`Never` / `Per-unlock` / `Per-use`), copyable public key + fingerprint, "Used by N hosts" drill-down to filtered host list, bottom-anchored Delete. Delete via iOS action sheet (no biometric — app unlock is the gate; matches Blink / Termius / Secretive / 1Password convention); flavor-specific copy (iCloud mentions cross-device removal, SE bolds irreversibility). Refused-if-referenced delete mirrors host CRUD jumphost pattern. Standalone create/import reuses the host CRUD half-sheet (Pick existing hidden in standalone). Imported keys always land in iCloud Keychain (SE can't accept external material). Rotation wizard deferred to v1.5 (depends on `ssh-copy-id` auto-install). Full spec: `docs/superpowers/specs/2026-06-15-identities-keys-management-design.md`. Mockup: `mockups/specs/identities-keys.html`.
-- **Mockup organization:** `mockups/specs/` for decided MVP visual record; `mockups/drafts/` for exploration files that compared options pre-decision.
-- **Multi-connection switching runtime semantics:** four-state lifecycle (**Active · Live·Awake · Live·Sleeping · Recent**). Mosh genuinely roams across iOS backgrounding and cold launch (server holds session); SSH demotes to Sleeping on backgrounding (TCP gone, tmux server-side preserved for fast reattach). Eager reattach on foreground for the active connection only; others wake on tap. Soft cap of 8 Awake; LRU demotion is silent. Mosh resume tries token → transparent fallback to fresh `mosh-server` bootstrap → drop to Recent only on full failure. Disconnect swipe = client-only abandon (server-side state preserved within its own timeout). Banner stays single-subject (foreground); background-connection health surfaces as a picker-row dot. Storage-is-the-security framing clarified: app-level biometric is the user-facing gate; `anyUse` is opt-in escape hatch. Full spec: `docs/superpowers/specs/2026-06-15-multi-connection-switching-design.md`. Mockup: `mockups/drafts/multi-connection-banner.html`.
-- **Keybar layout / customization / gesture-ownership (revisit):** default locked-left fuses the previous separate Esc slot + Window pill into one **Esc pill** (Esc keystroke + window navigation + unified picker) and the arrow-pad + Pane pill into one **Pad** (arrow drag + tap-zoom + long-press-armed split mode). Default locked-left = **Esc pill · Pad · Modifier · Tab** — Esc pill and Pad are constrained to locked; all other slots are reorderable / removable / movable across the locked-vs-scroll divider via a single editable list at Settings → Keybar. Custom slots bind four gestures (tap / swipe-up / swipe-down / long-press) to macros; horizontal swipes on user slots deferred to v1.5+ (Blink-pattern pan-collision avoidance). Long-press-to-edit shortcut removed; long-press becomes a bindable gesture. Reverse-bar (locked-right) toggle for left-thumb users. Gesture ownership decided at touch-down — Esc pill and Pad own their bounds; pan engages from anywhere else. Full spec: `docs/superpowers/specs/2026-06-15-keybar-customization-design.md`. Mockup: `mockups/drafts/esc-pill.html`.
-- **iCloud sync scope:** organizing principle "configuration syncs, behavior/history doesn't" — with predictor sketches as the explicit exception. Macros and keybar customizations sync via CloudKit + client-side AES, default ON (per-macro "don't sync" flag for sensitive entries). **Audit log dropped from v1 entirely**; code-level stub reserved for a future Pro compliance feature. **Predictor sketches sync via CloudKit + AES, default ON, opt-out** — revises the predictor spec's "no cloud" promise; the synced data is a structurally lossy frequency fingerprint (CMS + Bloom), not recoverable text, encrypted E2EE. New-device restore is automatic via sync; snapshot time-travel deferred to v1.5+. Full spec: `docs/superpowers/specs/2026-06-16-icloud-sync-scope-design.md`.
-- **First-host onboarding & Tips & Gestures:** no forced walkthrough, no JIT tooltips. Empty state = centered **"Add your first host"** CTA + micro-copy + secondary row **Settings · Tips & Gestures** (keybar hidden until first connection). Esc-pill picker (post-connection) gains a permanent **? Tips & Gestures** row. Both lead to the same single scrollable screen with six sections — keybar / Esc pill / Pad / context promotions / modifiers / Fn keys — each with prose + static SVG. No badges, no read-state tracking, no localisation in v1. Label "Tips & Gestures" chosen over "Getting Started" (temporally wrong once user has started). Full spec: `docs/superpowers/specs/2026-06-16-first-host-onboarding-design.md`. Mockup: `mockups/specs/first-host-onboarding.html`.
-- **Settings sub-screens (Security · App preferences · About & Help):** three narrow sub-screens, power-user knobs deferred. **Security** = App lock (opt-in, off by default — revises the previously locked "Face ID once per session" framing) + Predictor (toggle + Wipe; off pauses, doesn't delete) + Host fingerprints (drill-down list, swipe-to-forget). **App preferences** = Keybar (drill-down to existing customization spec) + iCloud sync (per-category toggles for macros / keybar customizations / predictor sketches) + Haptics (master toggle). **About & Help** = Tips & Gestures (link) + Privacy statement + Open source + Send feedback (mail composer with version pre-filled) + version row (tap to copy). No theme picker, no Terms of Service, no rate-the-app, no changelog in v1. Full spec: `docs/superpowers/specs/2026-06-16-settings-sub-screens-design.md`. Mockup: `mockups/specs/settings-sub-screens.html`.
-- **Pro / paid scope:** **Free + one-time Pro purchase** (single non-consumable IAP, Family Sharing on, $5–10 band). **No subscription**, no tiers above Pro, no trial mode. **Qualification rule:** *"a feature qualifies as Pro only if it is cosmetic, optional, or a thank-you — the moment 'I need Pro to do X' is a real sentence, the feature is wrong for Pro."* v1 Pro inventory = three cosmetic perks (alternative app icons · alternative color themes when a second palette exists · Supporter badge in About & Help). Entry point = one row at the top of About & Help; no upsell prompts anywhere else. Enterprise (audit log, team-shared hosts, MDM-friendly config, centralized policy, SSO, premium support) explicitly deferred to v2+ with candidate list captured for future evaluation. Resolves the Monetization thread. Full spec: `docs/superpowers/specs/2026-06-16-pro-paid-scope-design.md`. Mockup: `mockups/specs/pro-paid.html`.
-- **Connection-status banner — expanded view:** tap the transient banner → it **expands in place** (banner grows downward, terminal scrolls under). Two templates: **"Live in trouble"** (amber — reconnecting/high latency) = stats grid + inline 60s RTT graph + Retry / Copy diag / Disconnect; **"Connection failed"** (red — auth/unreachable/disconnected) = fault details (DNS · TCP · method · identity) + verbatim error strip + Retry / Edit host / Copy diag / Disconnect. Dismissal: tap header · swipe up on bottom grab-handle (with `↑` chevron — banner came from the top, so **up = away**, never down) · auto-collapse on recovery. Copy diagnostics writes a JSON snapshot (no redaction — explicit user action). Fields refresh once per second. tmux-crashed banner unchanged (already has inline actions). Full spec: `docs/superpowers/specs/2026-06-16-banner-expanded-design.md`. Mockups: `mockups/drafts/banner-expanded-layouts.html` · `mockups/specs/banner-expanded-templates.html`.
-- **iPad scope (v1):** Glymr v1 ships as a universal iPhone + iPad binary, but **iPad-compatible, not iPad-native**. iPad runs the iPhone UX in a single iPad window — layouts use size classes so nothing looks wrong at iPad size, but no iPad-specific affordances are added. **Deferred to v1.5+:** multi-window via `UISceneSession` (Stage Manager / Split View), landscape-specific layouts (wider keybar, side-by-side panes), trackpad / pointer integration (Magic Keyboard pointer vs the touch-oriented cursor halo). Apple Pencil not considered. Constraint going forward: every v1 mockup must render reasonably at iPad size in single-window mode; if it doesn't, the layout needs a size-class branch in the same spec. External keyboard support is in-scope regardless of device. Full spec: `docs/superpowers/specs/2026-06-17-ipad-scope-design.md`.
-- **External keyboard support (v1):** when a hardware keyboard is connected (BT/USB-C iPhone, Magic Keyboard iPad), iOS suppresses the software keyboard and Glymr adapts. **Keybar** stays visible as a **compact floating bar** (Esc pill · Pad · Modifier · Tab) above the home indicator, with a setting to hide entirely. Predictor strip governed independently. **Raw passthrough** for letters/numbers/symbols/arrows/Tab/Esc; Ctrl/Option/Shift become **real held modifiers** (no sticky dance) — the headline win. Esc-on-Magic-Keyboard handled via the iOS system Caps-as-Esc remap (documented in Tips & Gestures); in-app Esc rebind deferred to v1.5. Cmd-shortcut map = **18 actions / 20 shortcuts** (`⌘D`/`⌘|` vertical split, `⇧⌘D`/`⌘-` horizontal split, `⌘+`/`⌘-`/`⌘0` font size). Aligns with Blink / iTerm2 / Terminal.app where they converge. Uses `⇧⌘P` for the macro launcher (VS Code command-palette convention) and `⇧⌘N` for new connection. Globe key reserved by iOS. Macro-vs-shortcut collisions: system wins. The on-screen Esc-pill picker remains the only on-screen handle to Settings; hardware Cmd-shortcuts (`⌘,` and friends) are off-screen and don't violate that rule. **Deferred:** in-app Esc rebind, custom shortcut remap, scrollback nav shortcuts, hardware F-row passthrough. Full spec: `docs/superpowers/specs/2026-06-17-external-keyboard-design.md`.
-- **Color theming plumbing:** single-layer semantic-token API (`Color.theme.surface.bg`, `Color.theme.bell.edge`, etc.) with private palette constants inside each theme file (named like `bronze500`, `coolDarkAnchor`) for color identity and drift protection. v1 ships one `bellBronze` theme; Pro picker plumbing exists but is gated by entitlement and hidden until a second theme registers. ANSI 16-color palette is **not** themed in v1 (separate axis, deferred). No light mode, no user-authored themes. Full spec: `docs/superpowers/specs/2026-06-17-design-tokens-design.md`.
-- **Terminal feedback (bell):** soft bronze **halo pulse** on the pane that rang (`bell.edge` token, ~700ms ease-in/out, 30–35% peak opacity). Rapid bells hold the glow without strobing; quiet for ~400ms then fades. Unfocused panes get the halo on their own edge so the user sees which pane rang. **Bell haptic:** `UIImpactFeedbackGenerator(.soft)`, rate-limited to ~500ms, respects the master Haptics toggle. **No sound option, ever.** Visual default ON, haptic default OFF. App preferences → Terminal → Feedback. Full spec: `docs/superpowers/specs/2026-06-17-terminal-feedback-design.md`.
-- **Terminal emulator scope:** `TERM=xterm-256color` advertised with opportunistic 24-bit rendering when apps emit `\x1b[38;2;…m`; `COLORTERM=truecolor` set. **OSC 52** (remote clipboard writes) allowed by default per host (`glymr.osc52.allow`); OSC 52 read sequences never honored. **OSC 0/2 titles** captured per window, surfaced only in the Esc-pill picker Live group as a dim suffix. **Mouse mode** is hybrid: SGR + X11 modes (1000/1002/1003/1006/1015) supported; cursor halo and iOS long-press selection auto-suspend in mouse-active panes; small bronze indicator at top-right interior corner. Closed-set escape policy — unclassified sequences not advertised; new ones wait for an app update. Out of scope: bracketed paste (likely-add later), image protocols (Sixel/Kitty/iTerm2), OSC 8 hyperlinks. Full spec: `docs/superpowers/specs/2026-06-17-terminal-emulator-scope-design.md`.
-- **Terminal UX additions:** **font size** with pinch-zoom per pane, App prefs slider 9–24pt (default 13), hardware `⌘+` / `⌘-` / `⌘0`. **URL tap-to-open** for `http(s)://` and `ssh://` (touch-down underline confirms, 250ms / 10pt lift threshold opens; `ssh://` prefills host picker; suppressed in mouse-mode panes). **Cursor:** block / underline / bar (default block), no blink default; DECSCUSR (`\x1b[<n> q`) honored for runtime per-pane override. **Scrollback:** tmux owns its own `history-limit`; raw-PTY mode default 5000 lines, slider to 1000 / 2000 / 5000 / 10000 / unlimited. **Resize policy:** `SIGWINCH` on visible-grid change incl. rotation, ~10Hz debounce, scrollback reflows, selection and mouse coords translate. **Port-forward runtime status** surfaces in the Esc-pill picker Live row as expandable rows with green/red dot + inline toggle; ad-hoc forwards deferred to v1.5. Full spec: `docs/superpowers/specs/2026-06-17-terminal-ux-additions-design.md`.
-- **SSH host-key trust UX:** default `strictHostKeyChecking = ask`. **First-trust modal** shows host label + key type + SHA256 fingerprint + Trust & Connect / Cancel (no biometric — device unlock is the gate). **Mismatch modal** red header, both fingerprints labeled Last seen / Now offering, three actions Cancel / Edit host / Replace key & connect (replace requires a secondary action-sheet confirm matching the identity-delete pattern). Storage unchanged (iCloud-Keychain `known_hosts` per host-config-model). Forget-and-retry path exists at Settings → Security → Host fingerprints. Per-algorithm independence: a key change on ed25519 doesn't invalidate the rsa-sha2-512 entry. Out of scope: SSHFP DNSSEC, CA-signed host certs (deferred), `known_hosts` bulk import. Full spec: `docs/superpowers/specs/2026-06-17-host-key-trust-design.md`.
-- **SSH algorithm allowlist:** four-tier closed-set model. **Tier 1** (silent accept) covers modern + post-quantum (`sntrup761x25519`, `mlkem768x25519`, `curve25519`, `ecdh-nistp*`, `dh-group{16,18}-sha512`, `ed25519`, `rsa-sha2-{512,256}`, `ecdsa-nistp*`, `chacha20-poly1305`, `aes-gcm`, `aes-ctr`, SHA-2 MACs with ETM preferred). **Tier 2** (per-host `glymr.allowLegacyAlgorithms`, no warning): `dh-group14-sha256`, `dh-gex-sha256`, `aes-cbc`. **Tier 3** (per-host `glymr.allowDeprecatedAlgorithms`, **warns every connect**): `dh-group14-sha1`, `ssh-rsa` (SHA-1), `hmac-sha1`. Tier 3 first connect = modal; every subsequent = persistent amber banner reusing the expanded-template chrome. **Tier 4** (never offered): `arcfour`, `3des`, `blowfish`, `hmac-md5`, `ssh-dss`, `dh-group1`. Unclassified algorithms not offered. Maintenance triggers baked into the spec (OpenSSH major release, Glymr major release, published practical attacks); no separate process doc. Full spec: `docs/superpowers/specs/2026-06-17-ssh-algorithms-design.md`.
-- **SSH certificate auth (v1):** identity schema gains optional `cert.{blob, cachedMetadata}`. Import half-sheet's "Import existing" tab adds an optional cert paste / file-pick row; validates key+cert pair on save. Identity detail screen adds a collapsible Certificate section (keyId, principals, validity, CA fingerprint, critical options, extensions); identity list shows a `cert` chip plus amber `expires Nd` / red `expired` chip when within 14 days. Auth flow presents cert+key when valid; refuses (no silent bare-key fallback) when expired. Tier 1 of the algorithm allowlist expands to include cert variants of currently-allowed signature algos. **`forwardAgent` removed entirely** from the schema; users wanting bastion multi-hop use `ProxyJump` (already in Tier 1). Out of scope: rotation wizard (v1.5), auto-renewal (v1.5), Glymr-side cert generation, per-host cert overrides, OpenSSH-only format. Full spec: `docs/superpowers/specs/2026-06-17-ssh-cert-auth-design.md`.
-- **Jump-host chain authentication:** when a `proxyJump` chain contains **≥2 `anyUse` identities**, Glymr shows a pre-flight summary modal listing each hop and its identity, with Continue / Cancel. Single-prompt chains (0 or 1 `anyUse`) stay silent — expected behavior. After Continue, Face ID prompts fire serially as each hop authenticates (SE policy forces this; cannot be coalesced into a single biometric). Mid-chain Face ID cancellation aborts the whole chain with "Authentication cancelled at hop {n}." in the existing connect-failed banner. No partial-success state, no caching, no "don't ask again." Full spec: `docs/superpowers/specs/2026-06-17-chain-auth-design.md`.
-- **tmux session naming + multi-device:** sessions named `glymr-<accountHash>` (first 8 hex chars of SHA-256 over the iCloud-Keychain-backed CloudKit key already used by the storage backbone). Devices signed into the same Apple ID **share the session** by default — start vim on iPad, switch to iPhone, keep typing. Esc-pill picker swipe-action set expands with **Disconnect & end session** (kills server-side tmux, boots other attached devices with a "Session ended from another device" banner) and **Connect in new session** (one-off `glymr-<accountHash>-<uuid>`; produces a separate picker entry labeled `<host> · alt N`). Raw-PTY mode opts out of this entire spec. No automatic GC of stale alt sessions in v1. Full spec: `docs/superpowers/specs/2026-06-17-tmux-session-design.md`.
-- **Screen-capture protection:** calibrated for SSH-client norms, not banking-app paranoia. **App-switcher overlay** always on (swap to a Glymr-branded view on background so terminal content doesn't leak into the multitasking thumbnail). **Screen-recording blank** is a Settings → Security toggle, **default OFF** (terminal demos and screencasts are common, legitimate uses); when on, panes blank during `UIScreen.isCaptured` while chrome stays visible. **No screenshot toast** — iOS can't block, and a toast is theater. About & Help → Privacy is honest about what Glymr does and what iOS won't let any app do. Full spec: `docs/superpowers/specs/2026-06-17-screen-capture-protection-design.md`.
-- **Privacy statement (App Store + in-app content):** v1 draft for About & Help → Privacy statement. Headline: Glymr collects **nothing** — no analytics, telemetry, crash reporting, ads, third-party SDKs, accounts. Documents storage backbone (iCloud Keychain / SE for identities; CloudKit private DB + client-side AES for host configs, macros, keybar customizations; local-only for recents and live state); iCloud sync (per-category toggles, E2EE-equivalent for all synced categories); third parties (none); screen capture (matches that spec); identity survival on uninstall (iCloud survives reinstall, SE does not). 17+ rating; change-notice policy; `hello@glymr.app` contact. Same content mirrored to the App Store privacy section and `glymr.app/privacy`. Maintenance triggers baked in. Full spec: `docs/superpowers/specs/2026-06-17-privacy-statement-design.md`.
+¹ The `ssh-ed25519-cert-v01@openssh.com` *host* certificate variant is deferred —
+blocked on russh 0.61, which verifies the server host key only as a plain
+`PublicKey` (no CA / principal / validity path). A guard test prevents
+advertising it until upstream support lands.
+² The control-mode stack is verified against real `tmux` in the `sshd` fixture,
+including the DCS-wrapped (`ESC P1000p … ESC \`) live `-CC` stream.
 
-- **Engineering stack:** Rust SSH core (`russh`) bridged to Swift via UniFFI; tmux `-CC` control mode; crypto backend `aws-lc-rs`; SwiftTerm terminal engine (recommended). Build/CI on GitHub Actions macOS runners + a local Swift-on-Linux fast loop. Full rationale + dependency-ordered phase sequence: `docs/superpowers/plans/2026-06-17-glymr-implementation-roadmap.md`.
-- **License:** GPL-3.0-only + `LICENSE.IOS` App Store covenant; copyright **True Positive LLC**. Open-source-plus-paid-Pro model (Blink precedent).
+**Tests green:** 9 Rust unit + 34 Rust integration (vs containerized `sshd`) +
+384 Swift (GlymrKit + SeedKit). All run on the Linux fast loop.
 
-**Unresolved / needs more brainstorm:**
-- *(nothing currently flagged — all major v1 subsystems have a locked spec)*
+## What makes it different
 
-**Rejected from v1 (v1.5+ candidates pending demand):**
-- **Importing from `~/.ssh/config`** — debated and dropped (transfer friction roughly equals manual entry; the host CRUD form is fast). Fallback if real demand surfaces: simple "paste comma/newline-separated hostnames" bulk-add tool.
-- **Exporting to `~/.ssh/config`** — dropped alongside import.
+- **Touch-native terminal UX** — context-aware key bar (locked-left + scroll,
+  fused Esc pill, arrow Pad, sticky/lockable modifiers), iOS-native selection and
+  a delta-drag cursor halo instead of a joystick.
+- **tmux control mode as the session engine** — `tmux -CC` gives real native
+  tabs and panes (not a screen-scraped TUI), with a raw-PTY degraded fallback.
+- **On-device predictor** — learns your command vocabulary with Count-Min Sketch
+  + Bloom filters (a lossy frequency fingerprint, never recoverable text),
+  defers to a bundled seed per-prefix, and harvests just-seen tokens from command
+  output. Write-time privacy filter keeps secrets out of the model.
+- **Security-first, zero-telemetry** — no analytics, crash reporting, ads, or
+  third-party SDKs. Keys live in iCloud Keychain or Secure Enclave; CloudKit
+  records are client-side AES-256-GCM so Apple sees only ciphertext.
+- **Post-quantum SSH** — `mlkem768x25519` PQC key exchange in the Tier-1 allowlist.
+- **Open-source + one-time Pro** — GPL-3.0; Pro is cosmetic-only (no feature paywall).
 
-See `docs/brainstorming-decisions.md` for the full locked-decisions table and the deferred list.
+## Architecture
 
-## Layout
+```
+┌─ Swift (GlymrKit) ─ platform-agnostic, Linux-tested ─┐   ┌─ Apple-only (macOS-gated) ─┐
+│  model · resolution · storage stack · tmux -CC       │   │  SwiftUI · SwiftTerm        │
+│  parser/model/encoder/controller · predictor engine  │   │  Keychain/SE · CloudKit     │
+└───────────────────────────┬──────────────────────────┘   └──────────────┬─────────────┘
+                            UniFFI XCFramework bridge ───────────────────────┘
+┌───────────────────────────┴──────────────────────────┐
+│  Rust (crates/glymr-ssh-core) — russh, aws-lc-rs      │
+│  handshake · auth · PTY · forwards · ProxyJump        │
+└───────────────────────────────────────────────────────┘
+```
 
-- `docs/brainstorming-decisions.md` — every locked decision, organized by topic; deferred items at the bottom
-- `docs/superpowers/specs/` — detailed subsystem specs, one file per locked design. Browse the directory rather than the file names; each spec's first paragraph is its own table of contents. The "Locked so far" list above is the topic-level index.
-- `docs/ideas/` — parked concepts not on the v1 roadmap (`system-keyboard-extension.md`)
-- `mockups/specs/` — locked MVP visual record:
-  - `design-system.html` — color palette and reusable component vocabulary; reference for every other mockup
-  - `features.html` — locked feature mockups: window switching, pane management, cursor placement, connection status banner
-  - `keybar.html` — keybar v1 locked-left composition (Esc pill · Pad · Modifier · Tab), reverse-bar toggle, Settings → Keybar editor, Fn slot, modifier states
-  - `context-detection.html` — promoted-slot visual treatments + applied shell/vim/python comparison
-  - `host-crud.html` — host create/edit form, conditional disabling, identity sub-flow, validation banners, defaults editor
-  - `identities-keys.html` — Settings → Identities & Keys: list, detail, delete sheets, create/import sub-flow
-  - `first-host-onboarding.html` — empty state, Esc-pill picker with the new Tips & Gestures row, and the Tips & Gestures screen itself
-  - `settings-sub-screens.html` — Security / App preferences / About & Help with the App-lock toggle states and the wipe-confirmation sheet
-  - `pro-paid.html` — About & Help row in free vs Pro states, and the upgrade screen in both states
-  - `banner-expanded-templates.html` — both expanded-view templates with example states (mosh reconnecting · SSH high-latency · auth failure · host unreachable)
-- `mockups/drafts/` — exploration mockups that compared options before a decision:
-  - `host-management.html` — host picker entry (long-press Esc), settings access path, multi-connection switching UI
-  - `multi-connection-banner.html` — three options for the connection-status banner under multi-connection (chose: foreground-only banner + picker-row dot)
-  - `esc-pill.html` — the fused Esc pill (Esc + window navigation + unified picker), with its gesture vocabulary and the unified picker
-  - `banner-expanded-layouts.html` — three layouts compared (expand-in-place vs half-sheet vs full-sheet)
-- `README.md` — this file
+The design keeps the Apple-only UI/SDK layer thin so the maximum surface stays
+Linux-testable. Crypto goes through swift-crypto on Linux and system CryptoKit on
+Apple behind `#if canImport(CryptoKit)`. Full rationale and the
+dependency-ordered phase plan:
+[`docs/superpowers/plans/2026-06-17-glymr-implementation-roadmap.md`](docs/superpowers/plans/2026-06-17-glymr-implementation-roadmap.md).
 
-## Resuming next session
+## Building & testing
 
-Implementation is underway (see **Phase** above). To continue:
+The platform-agnostic tier runs in a Docker dev image (Swift 6.1 + Rust) — no
+Mac required:
 
-1. Skim the **Phase** status line above and `docs/superpowers/plans/` for the per-phase plans (most recent first).
-2. Fast loop: `docker compose run --rm dev cargo test -p glymr-ssh-core` (Rust core) and `docker compose run --rm dev swift test` (GlymrKit).
-3. Natural next Linux-testable work: the predictor's v1 core (Phases 4a–4p) and the Phase-2a storage core are complete, so remaining options are optional predictor infra — incremental `today.sketch` flush + append-only event log (crash recovery), or the curated-dotfiles third seed source. macOS / app-target-gated work waits for an iOS app target: the XCFramework UniFFI bridge, SwiftUI + SwiftTerm rendering, **Phase 2b** storage backends (Keychain / Secure-Enclave via `SecAccessControl`, CloudKit Private DB + sync engine, key minting — filling the `BlobStore`/`SecretStore` seams the storage core already defines), and the predictor app-edge wiring (bundling the built `seed_*.sketch`, the Application-Support predictor dir, and feeding the keyboard's `PredictorEngine`).
+```bash
+docker compose build dev
+docker compose run --rm dev swift test                 # GlymrKit + SeedKit
+docker compose up -d sshd sshd-legacy                   # SSH fixtures for integration tests
+docker compose run --rm dev cargo test -p glymr-ssh-core
+```
+
+The Apple-gated tier needs macOS + Xcode (also run in CI on macOS runners):
+
+```bash
+swift build --target GlymrKit          # compiles under system CryptoKit
+bash scripts/build-xcframework.sh      # Rust core → all iOS triples → UniFFI XCFramework
+```
+
+CI (`.github/workflows/ci.yml`) runs all of the above: the Linux fast loop on
+every push/PR, plus a macOS job that builds the XCFramework (validating
+`aws-lc-rs` across the three iOS triples).
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `crates/glymr-ssh-core/` | Rust SSH core (russh) exposed to Swift via UniFFI |
+| `Sources/GlymrKit/` | Platform-agnostic Swift: `Model/`, `Storage/`, `Crypto/`, `Tmux/`, `Predictor/`, `Theme/` |
+| `Sources/SeedKit/`, `Sources/glymr-seedbuild/` | Build-time predictor-seed ingestion (tldr-pages + Fig specs) |
+| `Tests/` | `GlymrKitTests`, `SeedKitTests`, `BridgeTests` (macOS) |
+| `docs/superpowers/specs/` | Per-subsystem design specs (one locked design each) |
+| `docs/superpowers/plans/` | The roadmap + per-phase implementation plans |
+| `docs/brainstorming-decisions.md` | Every locked decision, by topic, with the deferred list |
+| `mockups/specs/`, `mockups/drafts/` | Locked visual record · pre-decision explorations |
+| `scripts/` | `build-xcframework.sh`, `build-seed.sh` |
+
+## Design specs
+
+Every v1 subsystem has a locked spec under `docs/superpowers/specs/`. The index
+below links each; the canonical decision log is
+[`docs/brainstorming-decisions.md`](docs/brainstorming-decisions.md).
+
+**Connection & SSH**
+- SSH algorithm allowlist (4-tier closed set; PQC in Tier 1) — `2026-06-17-ssh-algorithms-design.md`
+- Host-key trust UX (TOFU + mismatch handling) — `2026-06-17-host-key-trust-design.md`
+- SSH certificate auth — `2026-06-17-ssh-cert-auth-design.md`
+- Jump-host chain authentication — `2026-06-17-chain-auth-design.md`
+
+**Terminal & tmux**
+- Terminal emulator scope (`xterm-256color`, OSC policy, mouse modes) — `2026-06-17-terminal-emulator-scope-design.md`
+- Terminal UX additions (font zoom, URL tap, cursor, scrollback, resize) — `2026-06-17-terminal-ux-additions-design.md`
+- Terminal feedback (bell halo + haptic, never sound) — `2026-06-17-terminal-feedback-design.md`
+- Degraded mode & tmux requirements (≥3.0, raw-PTY fallback) — `2026-06-14-degraded-mode-design.md`
+- Context detection (per-pane foreground process → keybar promotions) — `2026-06-14-context-detection-design.md`
+- tmux session naming + multi-device — `2026-06-17-tmux-session-design.md`
+
+**Input — keybar & predictor**
+- Keybar layout / customization / gesture ownership — `2026-06-15-keybar-customization-design.md`
+- Function keys (Fn mode, caps-lock state machine) — `2026-06-14-function-keys-design.md`
+- External keyboard support (real modifiers, Cmd-shortcut map) — `2026-06-17-external-keyboard-design.md`
+- Predictor (CMS + Bloom, seed deference, privacy) — `2026-06-13-predictor-design.md`
+
+**Data & sync**
+- Host config model (schema, resolution, storage backbone) — `2026-06-15-host-config-model-design.md`
+- Identities & Keys management — `2026-06-15-identities-keys-management-design.md`
+- iCloud sync scope (what syncs vs stays local) — `2026-06-16-icloud-sync-scope-design.md`
+
+**UI, product & ship**
+- Host CRUD flow — `2026-06-15-host-crud-design.md`
+- Multi-connection switching semantics — `2026-06-15-multi-connection-switching-design.md`
+- Connection-status banner (transient + expanded) — `2026-06-16-banner-expanded-design.md`
+- First-host onboarding & Tips & Gestures — `2026-06-16-first-host-onboarding-design.md`
+- Settings sub-screens — `2026-06-16-settings-sub-screens-design.md`
+- Pro / paid scope — `2026-06-16-pro-paid-scope-design.md`
+- iPad scope — `2026-06-17-ipad-scope-design.md`
+- Design tokens / theming — `2026-06-17-design-tokens-design.md`
+- Screen-capture protection — `2026-06-17-screen-capture-protection-design.md`
+- Privacy statement — `2026-06-17-privacy-statement-design.md`
+
+## Roadmap
+
+Phases build bottom-up so each rests only on verified earlier work: **0**
+Foundations → **1** SSH core → **2** Storage & sync → **3** Terminal + tmux →
+**4** Keybar, input & predictor → **5** Host & identity UI → **6** Connection
+management UI → **7** Settings, security & ship polish. See the
+[implementation roadmap](docs/superpowers/plans/2026-06-17-glymr-implementation-roadmap.md)
+for exit criteria and per-phase plans.
+
+## Contributing
+
+This is an early-stage solo project with a locked, spec-driven design. If you
+want to get oriented: read this README, then `docs/brainstorming-decisions.md`,
+then the relevant spec before any code. The platform-agnostic tier (`crates/`,
+`Sources/GlymrKit/`) is fully buildable and testable on Linux via the Docker
+commands above — start there. Issues and discussion are welcome; please open an
+issue before a large PR so it can be checked against the locked specs.
+
+## License
+
+[GPL-3.0-only](LICENSE), copyright **True Positive LLC**, plus an
+[`LICENSE.IOS`](LICENSE.IOS) App Store covenant (the open-source-plus-paid-Pro
+model, following Blink's precedent). Source files carry SPDX headers and the
+project is REUSE-compliant.
