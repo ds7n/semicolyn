@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: 2026 True Positive LLC
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Glymr CI.
+#
+#   linux-swift : GlymrKit + SeedKit pure-logic tests (swift-crypto)        — the fast loop
+#   linux-rust  : Rust SSH core, unit + integration vs containerized sshd   — the fast loop
+#   lint        : cargo fmt --check + clippy
+#   macos       : the Apple-gated path Linux can't reach — builds GlymrKit under CryptoKit
+#                 and the UniFFI XCFramework (compiles the Rust core for all three iOS
+#                 triples, validating aws-lc-rs on iOS = roadmap risk D4).
+#
+# NOTE: macOS BridgeTests (the FFI bridge proof) need an iOS-Simulator destination and
+# arrive with the iOS app target; this workflow builds the bridge but does not yet run it.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Read-only token; no job needs write access.
+permissions:
+  contents: read
+
+# A newer push to the same ref cancels the older in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- Linux fast loop: platform-agnostic Swift (GlymrKit + SeedKit) ----
+  linux-swift:
+    runs-on: ubuntu-latest
+    container: swift:6.1   # same toolchain as Dockerfile.dev
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        run: swift test   # GlymrKit/SeedKit only; the macOS FFI targets are #if os(macOS)
+
+  # ---- Linux fast loop: Rust SSH core (unit + sshd integration) ----
+  linux-rust:
+    runs-on: ubuntu-latest
+    env:
+      # Run the dev container as the runner's UID so bind-mount writes are permitted.
+      HOST_UID: "1001"
+      HOST_GID: "1001"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build dev + sshd images
+        run: docker compose build dev sshd
+
+      - name: Start sshd fixtures
+        # sshd-legacy reuses the glymr-sshd image; bring both up on the compose network.
+        run: docker compose up -d sshd sshd-legacy
+
+      - name: cargo test (waits for sshd, then runs unit + integration)
+        run: |
+          docker compose run --rm dev bash -c '
+            for i in $(seq 1 30); do
+              (echo > /dev/tcp/sshd/22) 2>/dev/null \
+                && (echo > /dev/tcp/sshd-legacy/22) 2>/dev/null && break
+              sleep 1
+            done
+            cargo test -p glymr-ssh-core'
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  # ---- Rust lint ----
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust + components
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt clippy
+          rustup default stable
+      - run: cargo fmt --all --check
+      - run: cargo clippy -p glymr-ssh-core --all-targets
+
+  # ---- Apple-gated build (the reason for macOS CI) ----
+  macos:
+    runs-on: macos-14   # Apple Silicon + Xcode
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add iOS Rust targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+
+      - name: Build GlymrKit under CryptoKit
+        # On macOS GlymrKit uses system CryptoKit (no swift-crypto); confirm it compiles.
+        run: swift build --target GlymrKit
+
+      - name: Build UniFFI XCFramework (compiles Rust core for all iOS triples — D4)
+        run: bash scripts/build-xcframework.sh
