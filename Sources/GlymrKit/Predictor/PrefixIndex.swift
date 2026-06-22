@@ -97,8 +97,10 @@ public struct PrefixIndex: Equatable, Sendable {
         for _ in 0..<count {
             guard let tokenBytes = readLengthPrefixed(bytes, &p) else { return nil }
             // Reject invalid UTF-8 outright — lossy decoding would desync the
-            // stored string's bytes from the order validated here.
-            guard let token = String(validating: tokenBytes, as: UTF8.self) else { return nil }
+            // stored string's bytes from the order validated here. `String(bytes:
+            // encoding:)` returns nil on invalid UTF-8 (strict, like the stdlib
+            // `String(validating:as:)`) and, unlike it, is available on iOS 17 / macOS 14.
+            guard let token = String(bytes: tokenBytes, encoding: .utf8) else { return nil }
             // Enforce the strictly-ascending, unique invariant on read.
             if let prev = previousBytes, !prev.lexicographicallyPrecedes(tokenBytes) { return nil }
             result.append(token)
