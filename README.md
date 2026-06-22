@@ -18,11 +18,13 @@ credential handling with end-to-end-encrypted sync.
 
 ## Status
 
-**Design complete; implementation underway. There is no installable app yet.**
-The protocol and logic layers — the parts that are hard to get right — are built
-and tested on a Linux fast loop. The app shell (iOS target, UniFFI bridge
-wiring, terminal rendering, UI) is the remaining work and is gated on macOS /
-Xcode.
+**Design complete; implementation underway. A connect-and-get-a-shell MVP now
+builds for the iOS Simulator** (not yet installable on a device — that needs an
+Apple Developer account for signing). The protocol and logic layers — the parts
+that are hard to get right — are built and tested on a Linux fast loop; the app
+shell (iOS target, UniFFI bridge wiring, terminal rendering, UI) is now started
+and validated by macOS CI. See [docs/mvp-app-testing.md](docs/mvp-app-testing.md)
+to build and run it.
 
 | Phase | Scope | State |
 |---|---|---|
@@ -30,8 +32,9 @@ Xcode.
 | **1 — SSH core** | russh behind UniFFI: handshake, host-key TOFU, auth (password / publickey / keyboard-interactive), OpenSSH cert auth, PTY shell, local/remote/dynamic forwards, ProxyJump, 4-tier algorithm allowlist | ✅ Done¹ |
 | **2a — Storage core** | Full host/identity schema + resolution table; `BlobStore`→`EncryptedRecordStore`, `SecretStore`, `HostKeyStore`; repository invariants; sync taxonomy | ✅ Done |
 | **2b — Storage backends** | iCloud Keychain / Secure Enclave (`SecAccessControl`), CloudKit Private DB + sync engine, key minting | ⏳ macOS-gated |
-| **3 — Terminal + tmux** | `tmux -CC` parser, session/pane model, command encoder, session controller, Rust transport (all done²); SwiftTerm/SwiftUI rendering + bridge wiring | ◐ Core done, rendering macOS-gated |
+| **3 — Terminal + tmux** | `tmux -CC` parser, session/pane model, command encoder, session controller, Rust transport (all done²); SwiftTerm rendering now wired in the MVP (raw PTY); tmux-in-app + multi-pane pending | ◐ Core done, raw-PTY rendering live |
 | **4 — Keybar, input & predictor** | On-device predictor: CMS + Bloom vocabulary, prefix + bigram ranking, daily rollover, seed deference, write-time privacy filter, output harvesting, engine facade (all done); keybar UI + app-edge wiring | ◐ Engine done, UI macOS-gated |
+| **MVP app shell** | iOS app target (XcodeGen) + SwiftTerm wired to the Rust core via UniFFI: connect → password auth → raw-PTY shell. Auth/host-key are stubs (password-only, auto-trust) | ✅ Builds for Simulator |
 | **5–7 — UI & ship** | Host/Identity CRUD UI, connection-management UI, settings, IAP, App Store polish | ⏳ Not started (macOS-gated) |
 
 ¹ The `ssh-ed25519-cert-v01@openssh.com` *host* certificate variant is deferred —
@@ -98,16 +101,22 @@ The Apple-gated tier needs macOS + Xcode (also run in CI on macOS runners):
 ```bash
 swift build --target GlymrKit          # compiles under system CryptoKit
 bash scripts/build-xcframework.sh      # Rust core → all iOS triples → UniFFI XCFramework
+xcodegen generate                      # project.yml → Glymr.xcodeproj (brew install xcodegen)
+open Glymr.xcodeproj                    # run the MVP app in the iOS Simulator
 ```
+
+See [docs/mvp-app-testing.md](docs/mvp-app-testing.md) for running the app and
+connecting to a host.
 
 CI (`.github/workflows/ci.yml`) runs all of the above: the Linux fast loop on
 every push/PR, plus a macOS job that builds the XCFramework (validating
-`aws-lc-rs` across the three iOS triples).
+`aws-lc-rs` across the three iOS triples) and builds the app for the iOS Simulator.
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
+| `App/` + `project.yml` | iOS app target (SwiftUI MVP); `project.yml` is the XcodeGen manifest |
 | `crates/glymr-ssh-core/` | Rust SSH core (russh) exposed to Swift via UniFFI |
 | `Sources/GlymrKit/` | Platform-agnostic Swift: `Model/`, `Storage/`, `Crypto/`, `Tmux/`, `Predictor/`, `Theme/` |
 | `Sources/SeedKit/`, `Sources/glymr-seedbuild/` | Build-time predictor-seed ingestion (tldr-pages + Fig specs) |
