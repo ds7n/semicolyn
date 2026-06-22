@@ -59,5 +59,15 @@ struct ConnectView: View {
             }
             .navigationTitle("Glymr")
         }
+        .sheet(item: $vm.pendingPrompt) { prompt in
+            switch prompt {
+            case let .firstTrust(hostLabel, keyType, offered):
+                FirstTrustModal(hostLabel: hostLabel, keyType: keyType, offered: offered,
+                                onDecision: { vm.resolvePrompt($0) })
+            case let .mismatch(hostLabel, keyType, stored, offered):
+                MismatchModal(hostLabel: hostLabel, keyType: keyType, stored: stored,
+                              offered: offered, onDecision: { vm.resolvePrompt($0) })
+            }
+        }
     }
 }
