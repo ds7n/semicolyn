@@ -16,6 +16,17 @@ services:
     image: glymr-dev
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     working_dir: /work
+    # Resolver hardening: glibc's getaddrinfo sends the A and AAAA queries in
+    # parallel on one UDP socket. Against Docker's embedded DNS (127.0.0.11)
+    # under load, the two near-simultaneous packets hit a Linux conntrack insert
+    # race, one reply is dropped, and the lookup fails with EAI_AGAIN
+    # ("Temporary failure in name resolution") — the sole cause of flaky
+    # linux-rust failures on CI. single-request-reopen serialises A/AAAA so they
+    # can't race; the timeout/attempts bump is belt-and-suspenders.
+    dns_opt:
+      - single-request-reopen
+      - timeout:2
+      - attempts:3
     environment:
       CARGO_TARGET_DIR: /work/target
       GLYMR_TEST_SSHD: sshd:22
