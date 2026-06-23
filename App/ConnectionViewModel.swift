@@ -97,6 +97,20 @@ final class ConnectionViewModel: ObservableObject {
         setTmuxClientSize(cols: cols, rows: rows)
     }
 
+    // MARK: - Teardown
+
+    /// Reset all connection and pane state. Call at the start of each connect
+    /// attempt so no stale handles or buffered bytes carry over to the new session.
+    private func teardown() {
+        tmux = nil
+        session = nil
+        connection = nil
+        tmuxState = nil
+        paneViews.removeAll()
+        pendingPaneBytes.removeAll()
+        renderablePanes.removeAll()
+    }
+
     // MARK: - Auth
 
     /// Authenticate `conn` for `host`: if the host references a stored identity
@@ -227,6 +241,7 @@ final class ConnectionViewModel: ObservableObject {
     /// field cannot be resolved.
     func connect(savedHost: Host, password: String) {
         if state == .connecting || state == .shell { return }
+        teardown()
         state = .connecting
         degraded = nil
         let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
@@ -283,6 +298,7 @@ final class ConnectionViewModel: ObservableObject {
 
     func connect(host: String, port: String, user: String, password: String) {
         if state == .connecting || state == .shell { return }   // ignore re-taps
+        teardown()
         state = .connecting
         degraded = nil
         let addr = "\(host):\(port.isEmpty ? "22" : port)"
