@@ -17,6 +17,8 @@ final class AppStores {
     /// The Keychain-backed secret store. Exposed so the host editor can persist
     /// and resolve host passwords via `SecretRef.password(id:)`.
     let secrets: SecretStore
+    /// Mint/import + resolve SSH identities (publickey auth).
+    let identities: IdentityService
 
     /// Initializes the storage stack: Application Support directory, Keychain
     /// secrets, AES record key, file-backed blob store, and trust evaluator.
@@ -52,5 +54,9 @@ final class AppStores {
 
         // Trust evaluator for first-trust and key-rotation decisions.
         self.trust = HostKeyTrustEvaluator(store: hostKeys)
+
+        // Identity service: mint/import + resolve SSH identities for publickey auth.
+        // Constructed last so both `self.hosts` and `self.secrets` are already set.
+        self.identities = IdentityService(store: self.hosts, secrets: secrets, minter: CoreIdentityMinter())
     }
 }
