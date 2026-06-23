@@ -31,9 +31,22 @@ struct SessionView: View {
 
     var body: some View {
         Group {
-            if case .shell = vm.state, let session = vm.session {
-                TerminalScreen(session: session, output: vm.output)
+            if case .shell = vm.state {
+                TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
+                               output: vm.output,
+                               session: vm.session)
                     .ignoresSafeArea(.container, edges: .bottom)
+                    .overlay(alignment: .top) {
+                        if let reason = vm.degraded {
+                            DegradedBanner(reason: reason) { vm.degraded = nil }
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                                .task {
+                                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                                    vm.degraded = nil
+                                }
+                        }
+                    }
+                    .animation(.easeInOut, value: vm.degraded)
             } else if resolving {
                 // Resolution not yet run — show a neutral spinner with no label
                 // so the "Connecting to <host>…" text never flashes before we

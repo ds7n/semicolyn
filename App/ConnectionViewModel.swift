@@ -4,8 +4,9 @@ import SwiftUI
 import GlymrKit
 import GlymrSSHCoreFFI
 
-/// Drives the one MVP flow: connect → password auth → open a raw PTY shell.
-/// Retains the live `Connection` and `ShellSession` for the terminal to write to.
+/// Drives the one MVP flow: connect → password auth → probe tmux → attach
+/// control mode or degrade to a raw-PTY shell.
+/// Retains the live `Connection`, `ShellSession`, and optionally `TmuxRuntime`.
 @MainActor
 final class ConnectionViewModel: ObservableObject {
     enum State: Equatable {
@@ -17,12 +18,20 @@ final class ConnectionViewModel: ObservableObject {
 
     @Published var state: State = .idle
     @Published var pendingPrompt: HostKeyPrompt?
+    /// Non-nil when we fell back from control mode; consumed by Task 6 to show
+    /// an amber banner explaining why tmux wasn't used.
+    @Published var degraded: DegradeReason?
+
     private var promptContinuation: CheckedContinuation<Bool, Never>?
 
     private var connection: Connection?
     private(set) var session: ShellSession?
+    /// Non-nil while a tmux control-mode session is active.
+    private var tmux: TmuxRuntime?
     /// Shared output sink; the terminal view wires `onBytes` to render into itself.
     let output = TerminalShellOutput()
+
+    // MARK: - Host-key prompt
 
     /// Show a host-key modal and suspend until the user decides. One prompt is
     /// in flight per handshake; if a stale continuation somehow remains, resolve
@@ -41,6 +50,21 @@ final class ConnectionViewModel: ObservableObject {
         promptContinuation?.resume(returning: trusted)
         promptContinuation = nil
     }
+
+    // MARK: - Input routing
+
+    /// Route terminal keystrokes: through tmux `send-keys` when control mode is
+    /// attached, else straight to the raw-PTY channel.
+    func sendTerminalInput(_ bytes: [UInt8]) {
+        if let tmux {
+            tmux.sendInput(bytes)
+        } else {
+            let sess = session
+            Task { try? await sess?.write(data: Data(bytes)) }
+        }
+    }
+
+    // MARK: - Auth
 
     /// Authenticate `conn` for `host`: if the host references a stored identity
     /// whose private key is available, use publickey; otherwise fall back to the
@@ -64,6 +88,8 @@ final class ConnectionViewModel: ObservableObject {
         return try await conn.authenticatePassword(user: user, password: password)
     }
 
+    // MARK: - Host record
+
     /// Find an existing saved host matching (hostName, user) or create + persist one.
     private func findOrCreateHost(hostName: String, port: Int, user: String) throws -> Host {
         let existing = try AppStores.shared.hosts.allHosts()
@@ -75,6 +101,76 @@ final class ConnectionViewModel: ObservableObject {
         return host
     }
 
+    // MARK: - Shell paths
+
+    /// Run `tmux -V` over a one-shot exec and return its stdout (nil if nothing
+    /// came back or the channel failed). Resolves when the exec channel closes.
+    private func probeTmuxVersion(conn: Connection) async -> String? {
+        let sink = TerminalShellOutput()
+        var captured: [UInt8] = []
+        sink.onBytes = { captured.append(contentsOf: $0) }
+        let done = AsyncStream<Void> { cont in
+            sink.onExit = { _ in cont.yield(); cont.finish() }
+        }
+        guard (try? await conn.openExec(command: "tmux -V", term: "xterm-256color",
+                                        cols: 80, rows: 24, output: sink)) != nil else { return nil }
+        // Race the exec-channel close against a 2-second guard in case onExit
+        // is never fired (e.g. some server implementations don't send channel EOF
+        // on exec exit).
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for await _ in done { break }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+            await group.next()
+            group.cancelAll()
+        }
+        let text = String(decoding: captured, as: UTF8.self)
+        return text.isEmpty ? nil : text
+    }
+
+    /// Open a raw PTY shell: the original pre-tmux path. Sets `connection`,
+    /// `session`, and `state = .shell`.
+    private func openRawShell(conn: Connection) async throws {
+        let sess = try await conn.openShell(
+            term: "xterm-256color", cols: 80, rows: 24, output: output)
+        connection = conn
+        session = sess
+        state = .shell
+    }
+
+    /// Attach tmux control mode: open the `-CC` exec, pump its bytes into a
+    /// `TmuxRuntime`, and route the active pane's output into the terminal view.
+    private func attachTmux(conn: Connection) async throws {
+        let seed = (try? AppStores.shared.deviceSeed()) ?? "glymr-local"
+        let runtime = TmuxRuntime(sessionName: tmuxSessionName(seed: seed))
+        guard let startCmd = runtime.makeStartCommand() else {
+            // Controller couldn't build a start command; fall through to raw PTY.
+            try await openRawShell(conn: conn)
+            return
+        }
+        runtime.onActivePaneBytes = { [weak self] bytes in self?.output.onBytes?(bytes) }
+        runtime.onExit = { [weak self] reason in
+            self?.state = .failed(reason ?? "tmux session ended")
+        }
+        let sink = TerminalShellOutput()
+        sink.onBytes = { [weak runtime] bytes in runtime?.ingest(bytes) }
+        sink.onExit = { [weak self] exit in
+            self?.state = .failed(exit.error ?? "Session closed")
+        }
+        let sess = try await conn.openExec(command: startCmd, term: "xterm-256color",
+                                           cols: 80, rows: 24, output: sink)
+        runtime.session = sess
+        connection = conn
+        session = sess
+        self.tmux = runtime   // retain to keep control mode alive
+        state = .shell
+    }
+
+    // MARK: - Connect (saved host)
+
     /// Connect from a saved `Host` record, using its resolved config and a
     /// caller-supplied password. Does NOT create or modify any host record
     /// (contrast with `connect(host:port:user:password:)` which calls
@@ -83,6 +179,7 @@ final class ConnectionViewModel: ObservableObject {
     func connect(savedHost: Host, password: String) {
         if state == .connecting || state == .shell { return }
         state = .connecting
+        degraded = nil
         let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
         let user: String
         do {
@@ -114,11 +211,17 @@ final class ConnectionViewModel: ObservableObject {
                     state = .failed("Authentication failed")
                     return
                 }
-                let sess = try await conn.openShell(
-                    term: "xterm-256color", cols: 80, rows: 24, output: output)
-                connection = conn
-                session = sess
-                state = .shell
+                // Probe + branch on tmux availability.
+                let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+                let allow = resolveTmuxAttemptControlMode(host: savedHost, defaults: defaults2)
+                let probe = allow ? await probeTmuxVersion(conn: conn) : nil
+                switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
+                case .attach:
+                    try await attachTmux(conn: conn)
+                case .degrade(let reason):
+                    degraded = reason
+                    try await openRawShell(conn: conn)
+                }
             } catch ConnectError.HostKeyRejected {
                 state = .failed("Host key not trusted")
             } catch {
@@ -127,9 +230,12 @@ final class ConnectionViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Connect (ad-hoc)
+
     func connect(host: String, port: String, user: String, password: String) {
         if state == .connecting || state == .shell { return }   // ignore re-taps
         state = .connecting
+        degraded = nil
         let addr = "\(host):\(port.isEmpty ? "22" : port)"
         output.onExit = { [weak self] exit in
             self?.state = .failed(exit.error ?? "Session closed")
@@ -152,11 +258,17 @@ final class ConnectionViewModel: ObservableObject {
                     state = .failed("Authentication failed")
                     return
                 }
-                let sess = try await conn.openShell(
-                    term: "xterm-256color", cols: 80, rows: 24, output: output)
-                connection = conn
-                session = sess
-                state = .shell
+                // Probe + branch on tmux availability.
+                let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+                let allow = resolveTmuxAttemptControlMode(host: hostRecord, defaults: defaults2)
+                let probe = allow ? await probeTmuxVersion(conn: conn) : nil
+                switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
+                case .attach:
+                    try await attachTmux(conn: conn)
+                case .degrade(let reason):
+                    degraded = reason
+                    try await openRawShell(conn: conn)
+                }
             } catch ConnectError.HostKeyRejected {
                 state = .failed("Host key not trusted")
             } catch {

@@ -59,4 +59,24 @@ final class AppStores {
         // Constructed last so both `self.hosts` and `self.secrets` are already set.
         self.identities = IdentityService(store: self.hosts, secrets: secrets, minter: CoreIdentityMinter())
     }
+
+    // MARK: - Device seed
+
+    /// Returns a stable per-install random seed, persisted in `UserDefaults`.
+    /// Used as input to `tmuxSessionName(seed:)` so the tmux session name is
+    /// deterministic for this device across reconnects.
+    ///
+    /// This is a local stub for Plan A; Plan 2b will derive the seed from the
+    /// CloudKit-account-bound key instead.
+    ///
+    /// - Returns: A UUID string that is stable for the lifetime of the app install.
+    func deviceSeed() throws -> String {
+        let key = "glymr.deviceSeed"
+        if let existing = UserDefaults.standard.string(forKey: key) {
+            return existing
+        }
+        let fresh = UUID().uuidString
+        UserDefaults.standard.set(fresh, forKey: key)
+        return fresh
+    }
 }
