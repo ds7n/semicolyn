@@ -42,6 +42,28 @@ final class ConnectionViewModel: ObservableObject {
         promptContinuation = nil
     }
 
+    /// Authenticate `conn` for `host`: if the host references a stored identity
+    /// whose private key is available, use publickey; otherwise fall back to the
+    /// supplied password. Returns the outcome; the caller maps non-success to a
+    /// `.failed` state.
+    ///
+    /// Publickey-present-but-rejected is NOT silently promoted to password auth —
+    /// the outcome is returned as-is (matches the cert-auth no-fallback rule).
+    private func authenticate(conn: Connection, user: String, host: Host,
+                              defaults: Defaults, password: String) async throws -> AuthOutcome {
+        // Resolve the identity through Defaults inheritance, not just the host's explicit value.
+        if let identityID = resolveIdentities(host: host, defaults: defaults).first {
+            // A genuine Keychain read failure must surface (no `try?`); only a truly
+            // absent private key falls back to password (e.g. SE-flavor identity whose
+            // key isn't stored on this device).
+            if let key = try AppStores.shared.identities.privateKeyOpenSSH(for: identityID) {
+                // No silent fallback: a present-but-rejected key returns its outcome.
+                return try await conn.authenticatePublickey(user: user, privateKeyOpenssh: key)
+            }
+        }
+        return try await conn.authenticatePassword(user: user, password: password)
+    }
+
     /// Find an existing saved host matching (hostName, user) or create + persist one.
     private func findOrCreateHost(hostName: String, port: Int, user: String) throws -> Host {
         let existing = try AppStores.shared.hosts.allHosts()
@@ -84,7 +106,7 @@ final class ConnectionViewModel: ObservableObject {
                     present: { [weak self] prompt in await self?.present(prompt) ?? false })
                 let conn = try await GlymrSSHCoreFFI.connect(
                     addr: addr, allowLegacy: false, allowDeprecated: false, verifier: verifier)
-                let outcome = try await conn.authenticatePassword(user: user, password: password)
+                let outcome = try await authenticate(conn: conn, user: user, host: savedHost, defaults: defaults, password: password)
                 switch outcome {
                 case .success:
                     break
@@ -116,12 +138,13 @@ final class ConnectionViewModel: ObservableObject {
             do {
                 let portNum = Int(port) ?? 22
                 let hostRecord = try findOrCreateHost(hostName: host, port: portNum, user: user)
+                let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
                 let verifier = TofuHostKeyVerifier(
                     hostID: hostRecord.id, trust: AppStores.shared.trust,
                     present: { [weak self] prompt in await self?.present(prompt) ?? false })
                 let conn = try await GlymrSSHCoreFFI.connect(
                     addr: addr, allowLegacy: false, allowDeprecated: false, verifier: verifier)
-                let outcome = try await conn.authenticatePassword(user: user, password: password)
+                let outcome = try await authenticate(conn: conn, user: user, host: hostRecord, defaults: defaults, password: password)
                 switch outcome {
                 case .success:
                     break
