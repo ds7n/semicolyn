@@ -32,17 +32,17 @@ struct TerminalScreen: UIViewRepresentable {
 
     /// Bridges SwiftTerm's delegate callbacks to the SSH session.
     final class Coordinator: NSObject, TerminalViewDelegate {
-        private let send: ([UInt8]) -> Void
+        private let onSend: ([UInt8]) -> Void
         private let session: ShellSession?
 
         init(send: @escaping ([UInt8]) -> Void, session: ShellSession?) {
-            self.send = send
+            self.onSend = send
             self.session = session
         }
 
         // Keystrokes / pasted bytes from the user → remote (tmux or raw PTY).
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
-            send(Array(data))
+            onSend(Array(data))
         }
 
         // Grid resize (rotation, layout) → remote window-change.
