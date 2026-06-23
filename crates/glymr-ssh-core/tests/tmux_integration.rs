@@ -7,8 +7,18 @@
 use glymr_ssh_core::connection::{
     connect_core, AuthOutcome, Connection, HostKeyInfo, HostKeyVerifier, ShellExit, ShellOutput,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
+use tokio::sync::Mutex as AsyncMutex;
+
+/// Serialise all tmux control-mode tests against the shared fixture server.
+/// Two concurrent `tmux -CC` attach sessions on the same server cause one to
+/// receive `%exit server exited unexpectedly` — the close() from one test tears
+/// down the server before the other test finishes.
+fn tmux_lock() -> &'static AsyncMutex<()> {
+    static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| AsyncMutex::new(()))
+}
 
 struct TrustAll;
 #[async_trait::async_trait]
@@ -160,6 +170,7 @@ async fn tmux_control_mode_emits_handshake() {
         eprintln!("skipping: set GLYMR_TEST_SSHD");
         return;
     };
+    let _guard = tmux_lock().lock().await;
     let conn = connect_and_auth(addr).await;
     let col = Collector::new();
     let session = conn
@@ -198,6 +209,39 @@ async fn tmux_control_mode_emits_handshake() {
         col.text().contains("%begin"),
         "expected a %begin control-mode block, got: {:?}",
         col.text()
+    );
+    let _ = session.close().await;
+}
+
+#[tokio::test]
+async fn tmux_cc_new_session_produces_control_mode_handshake() {
+    let Some(addr) = sshd_addr() else {
+        eprintln!("skipping: set GLYMR_TEST_SSHD");
+        return;
+    };
+    let _guard = tmux_lock().lock().await;
+    let conn = connect_and_auth(addr).await;
+    let col = Collector::new();
+    let session = conn
+        .open_exec(
+            "tmux -CC new-session -A -s glymr-itest".into(),
+            "xterm-256color".into(),
+            80,
+            24,
+            Arc::new(col.clone()),
+        )
+        .await
+        .expect("open_exec tmux -CC");
+
+    // Control mode must emit a `%begin` command-block framing the initial
+    // exchange, and a `%session-changed`/`%output`/`%window` event proving the
+    // protocol session is live — not just an error echoed back without framing.
+    let saw = wait_until(|| col.text().contains("%begin")).await;
+    let text = col.text();
+    assert!(saw, "expected a control-mode %begin block, got: {text:?}");
+    assert!(
+        text.contains("%session-changed") || text.contains("%output") || text.contains("%window"),
+        "expected control-mode session events, got: {text:?}"
     );
     let _ = session.close().await;
 }

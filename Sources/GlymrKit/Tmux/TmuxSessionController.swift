@@ -36,10 +36,24 @@ public struct TmuxControllerOutput: Equatable, Sendable {
     public var lifecycleChanged: Bool
     public var stateChanged: Bool
     public var resolved: [ResolvedCommand]
-    public init(lifecycleChanged: Bool, stateChanged: Bool, resolved: [ResolvedCommand]) {
+    /// Pane output decoded during this feed, in arrival order. Empty when none.
+    public var paneOutput: [PaneOutputChunk]
+    public init(lifecycleChanged: Bool, stateChanged: Bool,
+                resolved: [ResolvedCommand], paneOutput: [PaneOutputChunk]) {
         self.lifecycleChanged = lifecycleChanged
         self.stateChanged = stateChanged
         self.resolved = resolved
+        self.paneOutput = paneOutput
+    }
+}
+
+/// A decoded `%output` chunk: the pane it belongs to and its raw bytes.
+public struct PaneOutputChunk: Equatable, Sendable {
+    public let pane: PaneID
+    public let data: [UInt8]
+    public init(pane: PaneID, data: [UInt8]) {
+        self.pane = pane
+        self.data = data
     }
 }
 
@@ -88,6 +102,7 @@ public final class TmuxSessionController {
         let beforeState = state
         let beforeLifecycle = lifecycle
         var resolved: [ResolvedCommand] = []
+        var paneOutput: [PaneOutputChunk] = []
 
         for event in parser.feed(bytes) {
             if case .commandResult(_, let outcome) = event {
@@ -98,6 +113,10 @@ public final class TmuxSessionController {
                 }
                 continue
             }
+            if case .output(let pane, let data) = event {
+                paneOutput.append(PaneOutputChunk(pane: pane, data: data))
+                continue   // output is application data, not a structural state event
+            }
             advanceLifecycle(for: event)
             state.apply(event)
         }
@@ -105,7 +124,8 @@ public final class TmuxSessionController {
         return TmuxControllerOutput(
             lifecycleChanged: lifecycle != beforeLifecycle,
             stateChanged: state != beforeState,
-            resolved: resolved
+            resolved: resolved,
+            paneOutput: paneOutput
         )
     }
 

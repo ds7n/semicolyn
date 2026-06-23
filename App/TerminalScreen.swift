@@ -6,12 +6,17 @@ import GlymrSSHCoreFFI
 
 /// Wraps SwiftTerm's UIKit `TerminalView` for SwiftUI. Output bytes from the
 /// Rust PTY (via `TerminalShellOutput.onBytes`) are fed into the terminal;
-/// user input and size changes go back out through the `ShellSession`.
+/// user input goes out through the `send` closure (which routes to tmux
+/// send-keys or raw-PTY write depending on the active session mode).
 struct TerminalScreen: UIViewRepresentable {
-    let session: ShellSession
+    /// Called with raw keystroke/paste bytes. In tmux mode this routes through
+    /// `TmuxRuntime.sendInput`; in raw-PTY mode it writes directly to the channel.
+    let send: ([UInt8]) -> Void
     let output: TerminalShellOutput
+    /// The live session is retained here for resize notifications only.
+    let session: ShellSession?
 
-    func makeCoordinator() -> Coordinator { Coordinator(session: session) }
+    func makeCoordinator() -> Coordinator { Coordinator(send: send, session: session) }
 
     func makeUIView(context: Context) -> TerminalView {
         let terminal = TerminalView(frame: .zero)
@@ -27,20 +32,23 @@ struct TerminalScreen: UIViewRepresentable {
 
     /// Bridges SwiftTerm's delegate callbacks to the SSH session.
     final class Coordinator: NSObject, TerminalViewDelegate {
-        private let session: ShellSession
-        init(session: ShellSession) { self.session = session }
+        private let onSend: ([UInt8]) -> Void
+        private let session: ShellSession?
 
-        // Keystrokes / pasted bytes from the user → remote PTY.
+        init(send: @escaping ([UInt8]) -> Void, session: ShellSession?) {
+            self.onSend = send
+            self.session = session
+        }
+
+        // Keystrokes / pasted bytes from the user → remote (tmux or raw PTY).
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
-            let payload = Data(data)   // ShellSession.write takes Data (Rust Vec<u8>)
-            let session = self.session
-            Task { try? await session.write(data: payload) }
+            onSend(Array(data))
         }
 
         // Grid resize (rotation, layout) → remote window-change.
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
             let session = self.session
-            Task { try? await session.resize(cols: UInt32(newCols), rows: UInt32(newRows)) }
+            Task { try? await session?.resize(cols: UInt32(newCols), rows: UInt32(newRows)) }
         }
 
         // Unused delegate methods (required by the protocol).

@@ -13,8 +13,10 @@ struct ConnectView: View {
     @State private var password = ""
 
     var body: some View {
-        if case .shell = vm.state, let session = vm.session {
-            TerminalScreen(session: session, output: vm.output)
+        if case .shell = vm.state {
+            TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
+                           output: vm.output,
+                           session: vm.session)
                 .ignoresSafeArea(.container, edges: .bottom)
         } else {
             form
