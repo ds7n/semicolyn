@@ -14,6 +14,9 @@ final class AppStores {
     let hosts: HostStore
     let hostKeys: HostKeyStore
     let trust: HostKeyTrustEvaluator
+    /// The Keychain-backed secret store. Exposed so the host editor can persist
+    /// and resolve host passwords via `SecretRef.password(id:)`.
+    let secrets: SecretStore
 
     /// Initializes the storage stack: Application Support directory, Keychain
     /// secrets, AES record key, file-backed blob store, and trust evaluator.
@@ -40,6 +43,9 @@ final class AppStores {
 
         // Encrypted record store wraps the blob store with AES-GCM sealing.
         self.hosts = HostStore(records: EncryptedRecordStore(backend: blobs, key: key))
+
+        // Expose the secret store so the host editor can persist/resolve passwords.
+        self.secrets = secrets
 
         // Host-key store for TOFU host-key tracking (Keychain-backed).
         self.hostKeys = HostKeyStore(secrets: secrets)

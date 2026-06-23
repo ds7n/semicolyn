@@ -34,8 +34,8 @@ to build and run it.
 | **2b — Storage backends** | iCloud Keychain / Secure Enclave (`SecAccessControl`), CloudKit Private DB + sync engine, key minting | ⏳ macOS-gated |
 | **3 — Terminal + tmux** | `tmux -CC` parser, session/pane model, command encoder, session controller, Rust transport (all done²); SwiftTerm rendering now wired in the MVP (raw PTY); tmux-in-app + multi-pane pending | ◐ Core done, raw-PTY rendering live |
 | **4 — Keybar, input & predictor** | On-device predictor: CMS + Bloom vocabulary, prefix + bigram ranking, daily rollover, seed deference, write-time privacy filter, output harvesting, engine facade (all done); keybar UI + app-edge wiring | ◐ Engine done, UI macOS-gated |
-| **MVP app shell** | iOS app target (XcodeGen) + SwiftTerm wired to the Rust core via UniFFI: connect → password auth → raw-PTY shell. Auth/host-key are stubs (password-only, auto-trust) | ✅ Builds for Simulator |
-| **5–7 — UI & ship** | Host/Identity CRUD UI, connection-management UI, settings, IAP, App Store polish | ⏳ Not started (macOS-gated) |
+| **MVP app shell** | iOS app target (XcodeGen) + SwiftTerm wired to the Rust core via UniFFI: connect → password auth → raw-PTY shell, with real host-key TOFU trust (Keychain-backed). Password / keyboard-interactive auth; publickey/cert connect pending 2b | ✅ Builds for Simulator |
+| **5–7 — UI & ship** | Host CRUD UI — saved-host library (empty state + list), single-form host editor (full OpenSSH + Glymr config, save-time validation), Defaults editor, inline identity picker (pick-existing), connect-from-saved (done); identity create/import, connection-management UI, settings, IAP, App Store polish (pending) | ◐ Host CRUD done, rest macOS-gated |
 
 ¹ The `ssh-ed25519-cert-v01@openssh.com` *host* certificate variant is deferred —
 blocked on russh 0.61, which verifies the server host key only as a plain
@@ -45,7 +45,7 @@ advertising it until upstream support lands.
 including the DCS-wrapped (`ESC P1000p … ESC \`) live `-CC` stream.
 
 **Tests green:** 9 Rust unit + 34 Rust integration (vs containerized `sshd`) +
-384 Swift (GlymrKit + SeedKit). All run on the Linux fast loop.
+459 Swift (GlymrKit + SeedKit). All run on the Linux fast loop.
 
 ## What makes it different
 
