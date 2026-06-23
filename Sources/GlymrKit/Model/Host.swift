@@ -10,13 +10,26 @@ public enum JumpHop: Codable, Equatable, Sendable {
 public struct LocalForward: Codable, Equatable, Sendable {
     public var bindAddress: String?; public var bindPort: Int
     public var hostAddress: String; public var hostPort: Int
+    // Explicit `public` init: the synthesized memberwise init is only `internal`,
+    // so the app module (a separate module) could not construct one otherwise.
+    public init(bindAddress: String?, bindPort: Int, hostAddress: String, hostPort: Int) {
+        self.bindAddress = bindAddress; self.bindPort = bindPort
+        self.hostAddress = hostAddress; self.hostPort = hostPort
+    }
 }
 public struct RemoteForward: Codable, Equatable, Sendable {
     public var bindAddress: String?; public var bindPort: Int
     public var hostAddress: String; public var hostPort: Int
+    public init(bindAddress: String?, bindPort: Int, hostAddress: String, hostPort: Int) {
+        self.bindAddress = bindAddress; self.bindPort = bindPort
+        self.hostAddress = hostAddress; self.hostPort = hostPort
+    }
 }
 public struct DynamicForward: Codable, Equatable, Sendable {
     public var bindAddress: String?; public var bindPort: Int
+    public init(bindAddress: String?, bindPort: Int) {
+        self.bindAddress = bindAddress; self.bindPort = bindPort
+    }
 }
 
 public enum HostKeySource: String, Codable, Equatable, Sendable {

@@ -53,6 +53,58 @@ final class ConnectionViewModel: ObservableObject {
         return host
     }
 
+    /// Connect from a saved `Host` record, using its resolved config and a
+    /// caller-supplied password. Does NOT create or modify any host record
+    /// (contrast with `connect(host:port:user:password:)` which calls
+    /// `findOrCreateHost`). Throws a user-facing `.failed` state if the user
+    /// field cannot be resolved.
+    func connect(savedHost: Host, password: String) {
+        if state == .connecting || state == .shell { return }
+        state = .connecting
+        let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+        let user: String
+        do {
+            user = try resolveUser(host: savedHost, defaults: defaults)
+        } catch ResolutionError.userUnset {
+            state = .failed("Set a user for this host or in Defaults to connect.")
+            return
+        } catch {
+            state = .failed(String(describing: error))
+            return
+        }
+        let port = resolvePort(host: savedHost, defaults: defaults)
+        let addr = "\(savedHost.hostName):\(port)"
+        output.onExit = { [weak self] exit in
+            self?.state = .failed(exit.error ?? "Session closed")
+        }
+        Task {
+            do {
+                let verifier = TofuHostKeyVerifier(
+                    hostID: savedHost.id, trust: AppStores.shared.trust,
+                    present: { [weak self] prompt in await self?.present(prompt) ?? false })
+                let conn = try await GlymrSSHCoreFFI.connect(
+                    addr: addr, allowLegacy: false, allowDeprecated: false, verifier: verifier)
+                let outcome = try await conn.authenticatePassword(user: user, password: password)
+                switch outcome {
+                case .success:
+                    break
+                default:
+                    state = .failed("Authentication failed")
+                    return
+                }
+                let sess = try await conn.openShell(
+                    term: "xterm-256color", cols: 80, rows: 24, output: output)
+                connection = conn
+                session = sess
+                state = .shell
+            } catch ConnectError.HostKeyRejected {
+                state = .failed("Host key not trusted")
+            } catch {
+                state = .failed(String(describing: error))
+            }
+        }
+    }
+
     func connect(host: String, port: String, user: String, password: String) {
         if state == .connecting || state == .shell { return }   // ignore re-taps
         state = .connecting
