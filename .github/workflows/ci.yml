@@ -58,14 +58,12 @@ jobs:
       - name: cargo test (waits for sshd, then runs unit + integration)
         run: |
           docker compose run --rm dev bash -c '
-            # Gate on the SAME path the Rust connect() uses: name resolution
-            # (getaddrinfo / getent hosts) THEN a TCP open. Resolving both
-            # fixtures here closes the race where DNS is briefly unready when
-            # the integration tests dial sshd/sshd-legacy by service name.
+            # Plain TCP readiness probe for both fixtures, then fail fast with a
+            # clear error if they never come up. Name resolution is hardened at
+            # the source via single-request-reopen (docker-compose dns_opt), so
+            # an explicit resolve check here is no longer needed.
             ready() {
-              getent hosts sshd        >/dev/null 2>&1 \
-                && getent hosts sshd-legacy >/dev/null 2>&1 \
-                && (echo > /dev/tcp/sshd/22)        2>/dev/null \
+              (echo > /dev/tcp/sshd/22)        2>/dev/null \
                 && (echo > /dev/tcp/sshd-legacy/22) 2>/dev/null
             }
             for i in $(seq 1 30); do
@@ -73,9 +71,7 @@ jobs:
               sleep 1
             done
             if ! ready; then
-              echo "::error::sshd fixtures not resolvable/reachable after 30s" >&2
-              getent hosts sshd sshd-legacy || true
-              cat /etc/resolv.conf || true
+              echo "::error::sshd fixtures not reachable after 30s" >&2
               exit 1
             fi
             cargo test -p glymr-ssh-core'
