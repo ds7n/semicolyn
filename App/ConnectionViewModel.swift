@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
+import SwiftTerm
 import GlymrKit
 import GlymrSSHCoreFFI
 
@@ -21,6 +22,14 @@ final class ConnectionViewModel: ObservableObject {
     /// Non-nil when we fell back from control mode; consumed by Task 6 to show
     /// an amber banner explaining why tmux wasn't used.
     @Published var degraded: DegradeReason?
+    /// Non-nil while attached to tmux control mode; nil in raw-PTY mode.
+    @Published var tmuxState: TmuxSessionState?
+    /// PaneID → live SwiftTerm view, populated by TmuxPaneContainer as panes appear.
+    private var paneViews: [PaneID: TerminalView] = [:]
+    private var pendingPaneBytes: [PaneID: [UInt8]] = [:]   // bytes that arrived before the view registered
+    /// Panes that currently exist in the active window's visible layout.
+    /// Bytes for panes NOT in this set are dropped rather than buffered (bounds memory).
+    private var renderablePanes: Set<PaneID> = []
 
     private var promptContinuation: CheckedContinuation<Bool, Never>?
 
@@ -62,6 +71,44 @@ final class ConnectionViewModel: ObservableObject {
             let sess = session
             Task { try? await sess?.write(data: Data(bytes)) }
         }
+    }
+
+    // MARK: - Pane registry + tmux commands
+
+    /// Called by TmuxPaneContainer when a pane's view is created. Flushes any
+    /// bytes that arrived before the view existed.
+    func registerPane(_ pane: PaneID, _ view: TerminalView) {
+        paneViews[pane] = view
+        if let buffered = pendingPaneBytes[pane] {
+            view.feed(byteArray: buffered[...]); pendingPaneBytes[pane] = nil
+        }
+    }
+
+    func unregisterPane(_ pane: PaneID) { paneViews[pane] = nil; pendingPaneBytes[pane] = nil }
+
+    func selectWindow(_ id: WindowID) { tmux?.selectWindow(id) }
+
+    func setTmuxClientSize(cols: Int, rows: Int) { tmux?.setClientSize(cols: cols, rows: rows) }
+
+    /// Convert the container's pixel size to an approximate cell grid and push it
+    /// to tmux so it re-tiles. ~8×16pt per cell for the default monospace font.
+    func sendApproxClientSize(width: Double, height: Double) {
+        let cols = max(1, Int(width / 8.0)); let rows = max(1, Int(height / 16.0))
+        setTmuxClientSize(cols: cols, rows: rows)
+    }
+
+    // MARK: - Teardown
+
+    /// Reset all connection and pane state. Call at the start of each connect
+    /// attempt so no stale handles or buffered bytes carry over to the new session.
+    private func teardown() {
+        tmux = nil
+        session = nil
+        connection = nil
+        tmuxState = nil
+        paneViews.removeAll()
+        pendingPaneBytes.removeAll()
+        renderablePanes.removeAll()
     }
 
     // MARK: - Auth
@@ -112,8 +159,10 @@ final class ConnectionViewModel: ObservableObject {
         let done = AsyncStream<Void> { cont in
             sink.onExit = { _ in cont.yield(); cont.finish() }
         }
-        guard (try? await conn.openExec(command: "tmux -V", term: "xterm-256color",
-                                        cols: 80, rows: 24, output: sink)) != nil else { return nil }
+        let probeSession = try? await conn.openExec(command: "tmux -V", term: "xterm-256color",
+                                                    cols: 80, rows: 24, output: sink)
+        guard probeSession != nil else { return nil }
+        defer { if let probeSession { Task { try? await probeSession.close() } } }
         // Race the exec-channel close against a 2-second guard in case onExit
         // is never fired (e.g. some server implementations don't send channel EOF
         // on exec exit).
@@ -138,6 +187,7 @@ final class ConnectionViewModel: ObservableObject {
             term: "xterm-256color", cols: 80, rows: 24, output: output)
         connection = conn
         session = sess
+        tmuxState = nil   // raw mode: single-terminal path
         state = .shell
     }
 
@@ -151,10 +201,25 @@ final class ConnectionViewModel: ObservableObject {
             try await openRawShell(conn: conn)
             return
         }
-        runtime.onActivePaneBytes = { [weak self] bytes in self?.output.onBytes?(bytes) }
-        runtime.onExit = { [weak self] reason in
-            self?.state = .failed(reason ?? "tmux session ended")
+        runtime.onPaneBytes = { [weak self] pane, bytes in
+            guard let self else { return }
+            if let view = self.paneViews[pane] {
+                view.feed(byteArray: bytes[...])
+            } else if self.renderablePanes.contains(pane) {
+                self.pendingPaneBytes[pane, default: []].append(contentsOf: bytes)
+            }
+            // else: pane not in visible layout — drop to prevent unbounded buffering
         }
+        runtime.onStateChanged = { [weak self] state in
+            guard let self else { return }
+            let live = Set(
+                (state.activeWindow.flatMap { state.window($0) }?.visibleLayout?.panes.map(\.pane)) ?? []
+            )
+            self.renderablePanes = live
+            self.pendingPaneBytes = self.pendingPaneBytes.filter { live.contains($0.key) }
+            self.tmuxState = state
+        }
+        runtime.onExit = { [weak self] reason in self?.state = .failed(reason ?? "tmux session ended") }
         let sink = TerminalShellOutput()
         sink.onBytes = { [weak runtime] bytes in runtime?.ingest(bytes) }
         sink.onExit = { [weak self] exit in
@@ -178,6 +243,7 @@ final class ConnectionViewModel: ObservableObject {
     /// field cannot be resolved.
     func connect(savedHost: Host, password: String) {
         if state == .connecting || state == .shell { return }
+        teardown()
         state = .connecting
         degraded = nil
         let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
@@ -234,6 +300,7 @@ final class ConnectionViewModel: ObservableObject {
 
     func connect(host: String, port: String, user: String, password: String) {
         if state == .connecting || state == .shell { return }   // ignore re-taps
+        teardown()
         state = .connecting
         degraded = nil
         let addr = "\(host):\(port.isEmpty ? "22" : port)"

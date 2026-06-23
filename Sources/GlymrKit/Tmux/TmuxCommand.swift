@@ -72,6 +72,13 @@ public enum TmuxCommand {
         return "send-keys -t \(target.targetToken) -H \(hex)"
     }
 
+    /// Tell tmux the control-client's size in cells so it re-tiles all windows.
+    /// tmux responds with `%layout-change`. Returns nil unless both are ≥ 1.
+    public static func refreshClientSize(width: Int, height: Int) -> String? {
+        guard width >= 1, height >= 1 else { return nil }
+        return "refresh-client -C \(width)x\(height)"
+    }
+
     /// Kill the session named `name`. Validates against the Glymr session charset
     /// `[a-z0-9-]+` ([[2026-06-17-tmux-session-design]]) and returns nil for
     /// anything else — names outside that set can't occur in practice, so they
