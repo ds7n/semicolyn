@@ -238,10 +238,7 @@ async fn tmux_cc_new_session_produces_control_mode_handshake() {
     // protocol session is live — not just an error echoed back without framing.
     let saw = wait_until(|| col.text().contains("%begin")).await;
     let text = col.text();
-    assert!(
-        saw,
-        "expected a control-mode %begin block, got: {text:?}"
-    );
+    assert!(saw, "expected a control-mode %begin block, got: {text:?}");
     assert!(
         text.contains("%session-changed") || text.contains("%output") || text.contains("%window"),
         "expected control-mode session events, got: {text:?}"
