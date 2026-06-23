@@ -899,7 +899,10 @@ name = "glymr-ssh-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "getrandom 0.4.3",
+ "rand_core",
  "russh",
+ "ssh-key",
  "thiserror",
  "tokio",
  "uniffi",
