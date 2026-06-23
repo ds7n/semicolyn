@@ -5,8 +5,8 @@ import GlymrKit
 
 /// Half-sheet inline identity picker opened from the Auth section's "+" button.
 ///
-/// Plan 2 ships the **Pick existing** tab. **Create new** and **Import existing**
-/// are stubbed pending Secure-Enclave key-minting support in Phase 2b.
+/// Plan 2 ships the **Pick existing** tab. **Create new** mints an ed25519 key
+/// and **Import existing** ingests an OpenSSH private key blob.
 struct IdentityPickerSheet: View {
     /// Called when the user selects an existing identity. The sheet dismisses itself.
     let onPick: (Identity) -> Void
@@ -19,6 +19,14 @@ struct IdentityPickerSheet: View {
 
     // All identities loaded once on appear.
     @State private var identities: [Identity] = []
+
+    // Shared form state
+    @State private var newName = ""
+    @State private var biometricPolicy: BiometricPolicy = .afterUnlock
+    @State private var importName = ""
+    @State private var pastedKey = ""
+    @State private var passphrase = ""
+    @State private var errorText: String?
 
     var body: some View {
         NavigationStack {
@@ -33,15 +41,16 @@ struct IdentityPickerSheet: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
+                .onChange(of: selectedTab) { _, _ in errorText = nil }
 
                 // Tab content
                 switch selectedTab {
                 case 0:
                     pickExistingTab
                 case 1:
-                    stubTab
+                    createNewTab
                 default:
-                    stubTab
+                    importExistingTab
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -89,17 +98,87 @@ struct IdentityPickerSheet: View {
         }
     }
 
-    // MARK: - Stub tab (Create new / Import existing)
+    // MARK: - Create new tab (mint ed25519, iCloud Keychain)
 
-    private var stubTab: some View {
-        VStack {
-            Spacer()
-            Text("Key generation arrives with Secure-Enclave support (Phase 2b).")
-                .font(.subheadline)
-                .foregroundStyle(Color(theme.text.secondary))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Spacer()
+    private var createNewTab: some View {
+        Form {
+            Section("New ed25519 key") {
+                TextField("Display name", text: $newName)
+                biometricPolicyPicker
+            }
+            Section {
+                Button("Generate & Save") { generate() }
+                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+            } footer: {
+                if let errorText { Text(errorText).foregroundStyle(.red) }
+            }
+            secureEnclaveExplainer
+        }
+    }
+
+    // MARK: - Import existing tab
+
+    private var importExistingTab: some View {
+        Form {
+            Section("Display name") { TextField("Display name", text: $importName) }
+            Section("Private key (OpenSSH)") {
+                TextEditor(text: $pastedKey).font(.caption.monospaced()).frame(minHeight: 120)
+            }
+            Section("Passphrase (if the key is encrypted)") {
+                SecureField("Optional", text: $passphrase)
+            }
+            Section { biometricPolicyPicker }
+            Section {
+                Button("Import & Save") { importKey() }
+                    .disabled(importName.trimmingCharacters(in: .whitespaces).isEmpty || pastedKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } footer: {
+                if let errorText { Text(errorText).foregroundStyle(.red) }
+            }
+        }
+    }
+
+    private var biometricPolicyPicker: some View {
+        Picker("Biometric", selection: $biometricPolicy) {
+            Text("Never").tag(BiometricPolicy.never)
+            Text("Per-unlock").tag(BiometricPolicy.afterUnlock)
+            Text("Per-use").tag(BiometricPolicy.anyUse)
+        }
+    }
+
+    /// SE deferral explainer (Phase 2b-i: iCloud Keychain only).
+    private var secureEnclaveExplainer: some View {
+        Section {
+            Label("Secure Enclave keys arrive in a later update.", systemImage: "bolt.slash")
+                .font(.caption).foregroundStyle(Color(theme.text.secondary))
+        }
+    }
+
+    private func generate() {
+        errorText = nil
+        do {
+            let id = try AppStores.shared.identities.createGenerated(
+                displayName: newName.trimmingCharacters(in: .whitespaces),
+                biometricPolicy: biometricPolicy, now: Date())
+            onPick(id); dismiss()
+        } catch { errorText = friendly(error) }
+    }
+
+    private func importKey() {
+        errorText = nil
+        do {
+            let id = try AppStores.shared.identities.importIdentity(
+                displayName: importName.trimmingCharacters(in: .whitespaces),
+                openssh: pastedKey, passphrase: passphrase.isEmpty ? nil : passphrase,
+                biometricPolicy: biometricPolicy, now: Date())
+            onPick(id); dismiss()
+        } catch { errorText = friendly(error) }
+    }
+
+    /// User-facing message for a service error.
+    private func friendly(_ error: Error) -> String {
+        switch error as? IdentityServiceError {
+        case .minting(let m): return "Couldn't read that key: \(m)"
+        case nil: return "Couldn't save the identity: \(error.localizedDescription)"
         }
     }
 }
