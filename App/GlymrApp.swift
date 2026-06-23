@@ -6,7 +6,7 @@ import SwiftUI
 struct GlymrApp: App {
     var body: some Scene {
         WindowGroup {
-            ConnectView()
+            HostListView()
         }
     }
 }
