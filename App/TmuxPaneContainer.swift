@@ -28,7 +28,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
     func updateUIView(_ uiView: ContainerView, context: Context) {
         uiView.apply(state: state, register: register, unregister: unregister,
-                     borderColor: UIColor(Color(theme.accent.primary)))
+                     activeBorderColor: UIColor(Color(theme.focus.paneBorder)),
+                     inactiveBorderColor: UIColor(Color(theme.focus.paneBorderInactive)))
     }
 
     /// Bridges SwiftTerm input from whichever pane is active to the VM.
@@ -51,35 +52,47 @@ struct TmuxPaneContainer: UIViewRepresentable {
         weak var coordinator: Coordinator?
         private var panes: [PaneID: TerminalView] = [:]
 
-        /// Cell metrics derived from a sample terminal's font (monospace → uniform cell).
+        /// Cached cell metrics so we don't re-measure the font on every layout pass.
+        private var cachedCell: (w: Double, h: Double)?
+
+        /// Cell metrics derived from a registered terminal's font (monospace → uniform cell).
         ///
         /// Uses `TerminalView.font` (confirmed public in SwiftTerm) for cell width via
         /// `"W".size(withAttributes:)`, and `f.lineHeight` for cell height. The
         /// brief's `getTerminal().rows`-based height is more accurate but requires
         /// `getTerminal()` to be part of the public API — cannot verify on Linux, so
         /// we use the conservative `f.lineHeight` fallback unconditionally for safety.
-        private func cellSize(_ sample: TerminalView) -> (w: Double, h: Double) {
+        /// Computed once from the first registered pane view; reused thereafter.
+        private func resolvedCell() -> (w: Double, h: Double) {
+            if let cached = cachedCell { return cached }
+            guard let sample = panes.values.first else { return (8, 16) }
             let f = sample.font
             let w = Double("W".size(withAttributes: [.font: f]).width)
             let h = Double(f.lineHeight)
-            return (w, h)
+            let metrics = (w, h)
+            cachedCell = metrics
+            return metrics
         }
 
         func apply(state: TmuxSessionState,
                    register: (PaneID, TerminalView) -> Void,
                    unregister: (PaneID) -> Void,
-                   borderColor: UIColor) {
+                   activeBorderColor: UIColor,
+                   inactiveBorderColor: UIColor) {
             guard let win = state.activeWindow, let window = state.window(win),
                   let layout = window.visibleLayout else { return }
 
-            // Derive cell metrics from any existing pane (or a throwaway sample).
-            let sample = panes.values.first ?? TerminalView(frame: bounds)
-            let cell = cellSize(sample)
+            let cell = resolvedCell()
             let rects = paneRects(in: layout, cellWidth: cell.w, cellHeight: cell.h)
             let live = Set(rects.map(\.pane))
 
-            // Remove panes tmux no longer reports.
+            // NOTE(v1): switching tmux windows destroys the off-screen window's pane views.
+            // Control mode does not replay history on select-window, so switching back shows
+            // a blank pane until new output arrives. Persisting per-window views is a future refinement.
+
+            // Remove panes tmux no longer reports; resign first-responder before removal.
             for (id, view) in panes where !live.contains(id) {
+                view.resignFirstResponder()
                 view.removeFromSuperview(); unregister(id); panes[id] = nil
             }
 
@@ -93,9 +106,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 }()
                 view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
                 let isActive = (rect.pane == window.activePane)
-                view.layer.borderColor = borderColor.cgColor
-                view.layer.borderWidth = isActive ? 1.5 : 0
-                if isActive { view.becomeFirstResponder() }
+                if isActive {
+                    view.layer.borderColor = activeBorderColor.cgColor
+                    view.layer.borderWidth = 1.5
+                    if !view.isFirstResponder { view.becomeFirstResponder() }
+                } else {
+                    view.layer.borderColor = inactiveBorderColor.cgColor
+                    view.layer.borderWidth = 0.5
+                }
             }
         }
     }
