@@ -137,4 +137,14 @@ final class TmuxCommandTests: XCTestCase {
     func testKillSessionRejectsUppercase() { // charset is [a-z0-9-]
         XCTAssertNil(TmuxCommand.killSession(name: "Glymr-ABCD"))
     }
+
+    // MARK: refresh-client -C — control-mode resize (BVA on dimensions)
+
+    func testRefreshClientSizeEncodesAndGuards() {
+        XCTAssertEqual(TmuxCommand.refreshClientSize(width: 80, height: 24), "refresh-client -C 80x24")
+        XCTAssertEqual(TmuxCommand.refreshClientSize(width: 1, height: 1), "refresh-client -C 1x1")  // min
+        XCTAssertNil(TmuxCommand.refreshClientSize(width: 0, height: 24))                              // min-1
+        XCTAssertNil(TmuxCommand.refreshClientSize(width: 80, height: 0))
+        XCTAssertNil(TmuxCommand.refreshClientSize(width: -5, height: 24))
+    }
 }

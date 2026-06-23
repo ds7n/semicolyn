@@ -6,12 +6,20 @@ import Foundation
 /// protocol. Feed it raw channel bytes; it buffers partial lines and returns the
 /// typed events parsed from each complete line.
 public final class ControlModeParser {
+    /// Maximum bytes allowed in a single (newline-terminated) line before the
+    /// accumulation is flushed as a `.malformed` event. 1 MiB.
+    static let maxLineBytes = 1 << 20
+    /// Maximum body lines allowed inside one open block before it is force-
+    /// closed as a `.malformed` event.
+    static let maxBlockLines = 100_000
+
     private var buffer: [UInt8] = []
     private var openBlock: OpenBlock?
 
     private struct OpenBlock {
         let number: Int
         var body: [String]
+        var lineCount: Int = 0
     }
 
     private enum BlockKind { case end, error }
@@ -21,6 +29,16 @@ public final class ControlModeParser {
     public func feed(_ bytes: [UInt8]) -> [ControlModeEvent] {
         buffer.append(contentsOf: bytes)
         var events: [ControlModeEvent] = []
+        // Line-length cap: if the buffer grows beyond maxLineBytes without a
+        // newline, a hostile server is streaming a pathologically long line.
+        // Flush it as malformed to prevent unbounded memory growth.
+        if buffer.count > Self.maxLineBytes && !buffer.contains(0x0A) {
+            buffer.removeAll()
+            openBlock = nil
+            events.append(.malformed(raw: "<truncated>",
+                                     reason: "line exceeded \(Self.maxLineBytes) bytes"))
+            return events
+        }
         while let nl = buffer.firstIndex(of: 0x0A) {
             var lineBytes = Array(buffer[buffer.startIndex..<nl])
             buffer.removeSubrange(buffer.startIndex...nl)
@@ -74,6 +92,12 @@ public final class ControlModeParser {
             }
             let outcome: CommandOutcome = (kind == .end) ? .ok(block.body) : .error(block.body)
             return [.commandResult(number: number, outcome: outcome)]
+        }
+        // Block-body cap: a hostile server must not grow the body slice to OOM.
+        block.lineCount += 1
+        if block.lineCount > Self.maxBlockLines {
+            openBlock = nil
+            return [.malformed(raw: line, reason: "block body exceeded \(Self.maxBlockLines) lines")]
         }
         block.body.append(line)
         openBlock = block

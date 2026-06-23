@@ -32,9 +32,22 @@ struct SessionView: View {
     var body: some View {
         Group {
             if case .shell = vm.state {
-                TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
-                               output: vm.output,
-                               session: vm.session)
+                if let tmuxState = vm.tmuxState {
+                    VStack(spacing: 0) {
+                        WindowTabStrip(windows: tmuxState.windows, active: tmuxState.activeWindow,
+                                       onSelect: { vm.selectWindow($0) })
+                        TmuxPaneContainer(
+                            state: tmuxState,
+                            register: { vm.registerPane($0, $1) },
+                            unregister: { vm.unregisterPane($0) },
+                            send: { vm.sendTerminalInput($0) },
+                            theme: theme)
+                        .background(GeometryReader { geo in
+                            Color.clear
+                                .onAppear { vm.sendApproxClientSize(width: geo.size.width, height: geo.size.height) }
+                                .onChange(of: geo.size) { _, new in vm.sendApproxClientSize(width: new.width, height: new.height) }
+                        })
+                    }
                     .ignoresSafeArea(.container, edges: .bottom)
                     .overlay(alignment: .top) {
                         if let reason = vm.degraded {
@@ -47,6 +60,23 @@ struct SessionView: View {
                         }
                     }
                     .animation(.easeInOut, value: vm.degraded)
+                } else {
+                    TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
+                                   output: vm.output,
+                                   session: vm.session)
+                        .ignoresSafeArea(.container, edges: .bottom)
+                        .overlay(alignment: .top) {
+                            if let reason = vm.degraded {
+                                DegradedBanner(reason: reason) { vm.degraded = nil }
+                                    .transition(.move(edge: .top).combined(with: .opacity))
+                                    .task {
+                                        try? await Task.sleep(nanoseconds: 4_000_000_000)
+                                        vm.degraded = nil
+                                    }
+                            }
+                        }
+                        .animation(.easeInOut, value: vm.degraded)
+                }
             } else if resolving {
                 // Resolution not yet run — show a neutral spinner with no label
                 // so the "Connecting to <host>…" text never flashes before we
