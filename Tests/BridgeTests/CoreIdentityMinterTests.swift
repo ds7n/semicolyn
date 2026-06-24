@@ -1,18 +1,18 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-import GlymrSSHCoreFFI
+import NeotildeSSHCoreFFI
 
 /// Round-trip tests for the UniFFI key-material bridge used by `CoreIdentityMinter`.
 ///
-/// `CoreIdentityMinter`'s only logic is the value mapping from `GlymrSSHCoreFFI.KeyMaterial`
-/// to `GlymrKit.KeyMaterial`; the field assertions here cover the source values that
+/// `CoreIdentityMinter`'s only logic is the value mapping from `NeotildeSSHCoreFFI.KeyMaterial`
+/// to `NeotildeKit.KeyMaterial`; the field assertions here cover the source values that
 /// mapping reads. The Xcode-linked `CoreIdentityMinter` (App target) is exercised in
 /// Tasks 4–5; its mapping correctness is validated by these field-level assertions.
 ///
 /// Generated Swift symbol names confirmed from `uniffi-bindgen` output:
-///   - `GlymrSSHCoreFFI.mintEd25519Identity()`
-///   - `GlymrSSHCoreFFI.importPrivateKey(openssh:passphrase:)`
+///   - `NeotildeSSHCoreFFI.mintEd25519Identity()`
+///   - `NeotildeSSHCoreFFI.importPrivateKey(openssh:passphrase:)`
 ///   - `KeyMaterial.privateKeyOpenssh`, `.publicKeyOpenssh`, `.fingerprintSha256`, `.algorithm`
 final class CoreIdentityMinterTests: XCTestCase {
 
@@ -21,7 +21,7 @@ final class CoreIdentityMinterTests: XCTestCase {
     /// Minting produces a well-formed ed25519 `KeyMaterial` and the private key
     /// re-imports to an identical public key + fingerprint.
     func testMintProducesParsableEd25519() throws {
-        let m = try GlymrSSHCoreFFI.mintEd25519Identity()
+        let m = try NeotildeSSHCoreFFI.mintEd25519Identity()
 
         XCTAssertEqual(m.algorithm, "ed25519")
         XCTAssertTrue(
@@ -35,7 +35,7 @@ final class CoreIdentityMinterTests: XCTestCase {
         XCTAssertFalse(m.privateKeyOpenssh.isEmpty, "private key must be non-empty")
 
         // Round-trip: the minted private key re-imports to the same public key + fingerprint.
-        let reparsed = try GlymrSSHCoreFFI.importPrivateKey(openssh: m.privateKeyOpenssh, passphrase: nil)
+        let reparsed = try NeotildeSSHCoreFFI.importPrivateKey(openssh: m.privateKeyOpenssh, passphrase: nil)
         XCTAssertEqual(reparsed.publicKeyOpenssh, m.publicKeyOpenssh)
         XCTAssertEqual(reparsed.fingerprintSha256, m.fingerprintSha256)
         XCTAssertEqual(reparsed.algorithm, "ed25519")
@@ -43,8 +43,8 @@ final class CoreIdentityMinterTests: XCTestCase {
 
     /// Each mint call produces a distinct key — the RNG is seeded fresh.
     func testMintedKeysAreDistinct() throws {
-        let a = try GlymrSSHCoreFFI.mintEd25519Identity()
-        let b = try GlymrSSHCoreFFI.mintEd25519Identity()
+        let a = try NeotildeSSHCoreFFI.mintEd25519Identity()
+        let b = try NeotildeSSHCoreFFI.mintEd25519Identity()
         XCTAssertNotEqual(a.fingerprintSha256, b.fingerprintSha256)
         XCTAssertNotEqual(a.publicKeyOpenssh, b.publicKeyOpenssh)
     }
@@ -54,7 +54,7 @@ final class CoreIdentityMinterTests: XCTestCase {
     /// Garbage input is rejected with a `KeyError.Parse` error.
     func testImportRejectsGarbage() {
         XCTAssertThrowsError(
-            try GlymrSSHCoreFFI.importPrivateKey(openssh: "nope", passphrase: nil),
+            try NeotildeSSHCoreFFI.importPrivateKey(openssh: "nope", passphrase: nil),
             "expected Parse error for malformed key"
         ) { error in
             guard case KeyError.Parse(let msg) = error else {

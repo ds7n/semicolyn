@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: 2026 True Positive LLC
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# XcodeGen manifest for the Glymr iOS app target. SwiftPM can't produce an iOS
+# XcodeGen manifest for the Neotilde iOS app target. SwiftPM can't produce an iOS
 # .app bundle, so the app lives here; `xcodegen generate` (macOS) emits the
 # .xcodeproj. The Rust SSH core is linked via the local SwiftPM package's
-# GlymrSSHCoreFFI product (backed by GlymrSSHCore.xcframework, built first by
+# NeotildeSSHCoreFFI product (backed by NeotildeSSHCore.xcframework, built first by
 # scripts/build-xcframework.sh). The terminal renderer is SwiftTerm.
-name: Glymr
+name: Neotilde
 
 options:
   bundleIdPrefix: com.truepositive
@@ -14,29 +14,29 @@ options:
     iOS: "17.0"
 
 packages:
-  # The repo-root SwiftPM package (GlymrKit + the macOS/iOS-only GlymrSSHCoreFFI).
-  GlymrPackage:
+  # The repo-root SwiftPM package (NeotildeKit + the macOS/iOS-only NeotildeSSHCoreFFI).
+  NeotildePackage:
     path: .
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
     from: "1.0.0"
 
 targets:
-  Glymr:
+  Neotilde:
     type: application
     platform: iOS
     sources:
       - App
     dependencies:
-      - package: GlymrPackage
-        product: GlymrSSHCoreFFI
-      - package: GlymrPackage
-        product: GlymrKit
+      - package: NeotildePackage
+        product: NeotildeSSHCoreFFI
+      - package: NeotildePackage
+        product: NeotildeKit
       - package: SwiftTerm
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        PRODUCT_BUNDLE_IDENTIFIER: com.truepositive.glymr
+        PRODUCT_BUNDLE_IDENTIFIER: com.truepositive.neotilde
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "0.1.0"
         TARGETED_DEVICE_FAMILY: "1,2"

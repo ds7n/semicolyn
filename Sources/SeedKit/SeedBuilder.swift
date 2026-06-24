@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import GlymrKit
+import NeotildeKit
 
 /// Accumulates parsed token sequences into a unigram ``Vocabulary`` and a
 /// next-token ``BigramVocabulary``, then serializes both to the seed blob format.

@@ -13,11 +13,11 @@
 .swiftpm/
 
 # CI build artifacts (not source)
-/GlymrSSHCore.xcframework/
+/NeotildeSSHCore.xcframework/
 # Generated UniFFI Swift wrapper (produced by scripts/build-xcframework.sh)
-/Sources/GlymrSSHCoreFFI/
+/Sources/NeotildeSSHCoreFFI/
 # Generated Xcode project (produced by `xcodegen generate` from project.yml)
-/Glymr.xcodeproj/
+/Neotilde.xcodeproj/
 
 # Secrets / data
 .env
