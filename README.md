@@ -10,9 +10,8 @@ snippet launcher, tmux control mode driving persistent native tabs and panes,
 an on-device predictor that learns your vocabulary, and security-first
 credential handling with end-to-end-encrypted sync.
 
-> The name **Neotilde** is Old Norse for *"echo, resonance, ringing sound"* — what
-> the predictor does (echoes your vocabulary back) and what a remote command
-> does (rings across distance to another shell).
+> The name **neotilde** is *neo* + *tilde* — the shell's home `~`, made new. It's
+> the symbol every terminal user types to go home, reimagined for touch.
 
 ---
 
