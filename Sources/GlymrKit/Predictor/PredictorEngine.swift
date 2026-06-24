@@ -33,6 +33,13 @@ public struct PredictorEngine {
     /// The current learned state, for the app to flush via ``LearnedStore``.
     public var state: LearnedState { learned }
 
+    // TODO(predictor): leading-space opt-out. Let users run a command without it
+    // being learned by prefixing the line with a space — the `HISTCONTROL=ignorespace`
+    // convention. Gate this UPSTREAM at input harvest (per command line, where the
+    // leading space and line boundary are observable), not here at the per-token API;
+    // the command still executes, it just isn't recorded. Decide whether to also
+    // suppress `harvest(output:)` for the ignored command. See predictor settings UX.
+
     /// Learn `count` occurrences of `token`, optionally as the successor of
     /// `previous`. Write-time privacy is applied here, once: an excluded `token` is
     /// learned nowhere; an excluded `previous` suppresses only the adjacency (the
