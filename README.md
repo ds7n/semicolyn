@@ -1,6 +1,6 @@
 # Neotilde
 
-[![CI](https://github.com/ds7n/glymr/actions/workflows/ci.yml/badge.svg)](https://github.com/ds7n/glymr/actions/workflows/ci.yml)
+[![CI](https://github.com/ds7n/neotilde/actions/workflows/ci.yml/badge.svg)](https://github.com/ds7n/neotilde/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0--only-blue.svg)](LICENSE)
 ![Platform: iOS / iPadOS](https://img.shields.io/badge/platform-iOS%20%7C%20iPadOS-lightgrey.svg)
 
