@@ -1,7 +1,7 @@
 # Naming decision — Glymr → neotilde
 
 **Date:** 2026-06-24
-**Status:** **Decided** (pending authoritative USPTO clearance — see protocol below)
+**Status:** **Decided + DIY-cleared** — USPTO wordmark search (2026-06-24) returned **no LIVE `NEOTILDE` mark**; web/index clean; domains owned. Attorney clearance opinion remains optional belt-and-suspenders.
 **Decision:** Rename the product from **Glymr** to **neotilde**.
 
 ## Why we moved off "Glymr"
@@ -48,9 +48,11 @@ Optional extra (not required): `neotil.de` (a `.de` domain-hack spelling "neotil
 - **Brandable `.com` is exhausted (2026).** Nice-sounding made-up words — short *or* long — are ~universally `.com`-taken; the rare names that own `.com` (like neotilde) are the real prizes.
 - **Great terminal names own one facet** (Blink=cursor, Warp=speed); neotilde owns the `~`.
 
-## Remaining gate — authoritative USPTO clearance (DO THIS BEFORE COMMITTING CODE/BRAND)
+## Authoritative USPTO clearance — ✅ DONE 2026-06-24
 
-The one step that can't be done from a script — run it at `tmsearch.uspto.gov`:
+Wordmark search at `tmsearch.uspto.gov`: **no LIVE `NEOTILDE` mark** (no exact results; tilde-family wildcard checked). DIY knockout passed → cleared to commit + file. Attorney clearance opinion optional.
+
+Protocol used (for the record):
 
 1. **Basic search**, one at a time: `neotilde`, then `tilde` (the dominant element, to see neighbors).
 2. **Expert mode** wildcard sweep: `neotilde*`, `*tilde*`, plus phonetic `neotild*` / `neotyld*`.
