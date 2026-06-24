@@ -12,8 +12,17 @@ final class TmuxRuntime {
     private let controller = TmuxSessionController()
     private let sessionName: String
 
-    /// The live control-mode channel; assigned after `open_exec`.
-    var session: ShellSession?
+    /// The live control-mode channel; assigned after `open_exec`. Setting it
+    /// (re)builds the serial writer so command bytes are emitted in FIFO order.
+    var session: ShellSession? {
+        didSet {
+            writer?.finish()
+            writer = session.map { SerialByteWriter(sink: ShellSessionSink(session: $0)) }
+        }
+    }
+
+    /// Serializes channel writes; nil until `session` is assigned.
+    private var writer: SerialByteWriter?
 
     /// Output bytes for a specific pane, keyed by `PaneID`. Fires for every chunk.
     var onPaneBytes: ((PaneID, [UInt8]) -> Void)?
@@ -56,10 +65,10 @@ final class TmuxRuntime {
         write(line)
     }
 
-    /// Submit a command line and write its framed bytes to the channel.
+    /// Submit a command line and enqueue its framed bytes for ordered writing.
     private func write(_ line: String) {
-        guard let sub = controller.submit(line), let session else { return }
-        Task { try? await session.write(data: Data(sub.wire)) }
+        guard let sub = controller.submit(line), let writer else { return }
+        writer.enqueue(sub.wire)
     }
 
     /// The active pane of the active window (nil until the first layout/window event).

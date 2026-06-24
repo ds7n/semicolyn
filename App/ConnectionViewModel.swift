@@ -35,6 +35,9 @@ final class ConnectionViewModel: ObservableObject {
 
     private var connection: Connection?
     private(set) var session: ShellSession?
+    /// Serializes raw-PTY keystroke writes (FIFO under channel back-pressure).
+    /// Only used in raw mode; tmux mode writes through `TmuxRuntime`'s own writer.
+    private var rawWriter: SerialByteWriter?
     /// Non-nil while a tmux control-mode session is active.
     private var tmux: TmuxRuntime?
     /// Shared output sink; the terminal view wires `onBytes` to render into itself.
@@ -68,8 +71,7 @@ final class ConnectionViewModel: ObservableObject {
         if let tmux {
             tmux.sendInput(bytes)
         } else {
-            let sess = session
-            Task { try? await sess?.write(data: Data(bytes)) }
+            rawWriter?.enqueue(bytes)
         }
     }
 
@@ -103,6 +105,8 @@ final class ConnectionViewModel: ObservableObject {
     /// attempt so no stale handles or buffered bytes carry over to the new session.
     private func teardown() {
         tmux = nil
+        rawWriter?.finish()
+        rawWriter = nil
         session = nil
         connection = nil
         tmuxState = nil
@@ -187,6 +191,7 @@ final class ConnectionViewModel: ObservableObject {
             term: "xterm-256color", cols: 80, rows: 24, output: output)
         connection = conn
         session = sess
+        rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
         tmuxState = nil   // raw mode: single-terminal path
         state = .shell
     }
