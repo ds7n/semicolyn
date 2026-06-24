@@ -19,11 +19,11 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Name | **Neotilde** — Old Norse for "echo, resonance, ringing sound." Names what the product does (the predictor echoes your vocabulary back; commands ring across distance to a remote shell), not the role of who uses it. Pronounced /ˈglɪmr/ — "GLIM-er." Lowercase `neotilde` in path / code contexts; capitalized `Neotilde` as the proper noun. |
+| Name | **neotilde** — *neo* + *tilde* (`~`, the shell's home directory and the key every terminal user reaches for). "The modern terminal." Lowercase `neotilde` in path / code contexts; capitalized `Neotilde` only as the proper noun at sentence start. (Renamed from "Glymr" 2026-06-24 — the old name collided with a LIVE registered GLYMR trademark; see `docs/2026-06-24-naming-decision-neotilde.md`.) |
 | Goal | Solve a personal annoyance (CLI / AI / security adjacent) |
 | Differentiator | Make the iOS keyboard pleasant for terminal work |
 | Security posture | Security-first: SE-default for new identities, per-host auth policy, no telemetry, public-key always copyable. (Audit log dropped from v1 entirely per `2026-06-16-icloud-sync-scope-design.md`; code-level stub reserved for a future Pro compliance feature.) |
-| Brand palette | **"Bell bronze"** — bronze accent (`#D49A5C`) on cool-near-black (`#0E1116`), verdigris patina (`#5FA89C`) as success/tension color. Leverages the name's two readings (struck bell + glimmer-in-darkness). Avoids AI / terminal / Norse stereotypes. See `mockups/specs/design-system.html`. |
+| Brand palette | **"Bell bronze"** — bronze accent (`#D49A5C`) on cool-near-black (`#0E1116`), verdigris patina (`#5FA89C`) as success/tension color. A warm metallic accent on a cool terminal-dark ground, with aged-copper verdigris as the counterpoint. Avoids AI / terminal / Norse colour stereotypes. See `mockups/specs/design-system.html`. (Palette name predates the rename — kept as-is; revisit if desired.) |
 
 ### Connections & sessions
 
