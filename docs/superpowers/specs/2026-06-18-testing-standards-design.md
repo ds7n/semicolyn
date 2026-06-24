@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-18
 **Status:** Locked
-**Applies to:** all Glymr development — existing tests (backfill audit) and future work, Rust and Swift.
+**Applies to:** all Neotilde development — existing tests (backfill audit) and future work, Rust and Swift.
 
 ## Goal
 
@@ -64,7 +64,7 @@ Every test must satisfy all of the following. These are review-gating.
 For **Critical** Rust modules, the anti-tautology rule is verified objectively, not by eyeballing.
 
 - Tool: **`cargo-mutants`** (`cargo install cargo-mutants --locked`).
-- Command (scoped to a module): `cargo mutants -p glymr-ssh-core --file crates/glymr-ssh-core/src/algorithms.rs`
+- Command (scoped to a module): `cargo mutants -p neotilde-ssh-core --file crates/neotilde-ssh-core/src/algorithms.rs`
 - A **surviving mutant** (the tool changed the implementation and no test failed) is a concrete test gap. Close it by adding the case that would have caught the mutation.
 - **Expectation:** a phase's Critical modules are mutation-clean (no survivors, or every survivor explicitly justified as equivalent/unreachable) before that phase merges to `master`. Run is **on-demand / local** while CI is deferred — it is not yet a CI gate, but it is a merge expectation.
 - **Swift:** mutation tooling is immature; Swift Critical code relies on the anti-tautology rule + review only. The same EP/BVA/adversarial *thinking* still applies.

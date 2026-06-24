@@ -37,8 +37,8 @@
 
 | File | Responsibility |
 |---|---|
-| `crates/glymr-ssh-core/src/connection.rs` | `AuthOutcome`, `outcome()`, three `authenticate_*` methods on `Connection` |
-| `crates/glymr-ssh-core/tests/auth_integration.rs` | Auth integration tests vs `sshd` |
+| `crates/neotilde-ssh-core/src/connection.rs` | `AuthOutcome`, `outcome()`, three `authenticate_*` methods on `Connection` |
+| `crates/neotilde-ssh-core/tests/auth_integration.rs` | Auth integration tests vs `sshd` |
 | `docker/sshd-entrypoint.sh` | Generate the shared test keypair + install authorized_keys at startup |
 | `docker/Dockerfile.sshd` | Use the entrypoint; add PAM for keyboard-interactive |
 | `docker-compose.yml` | `testkeys` shared volume; mount it in `dev` (ro) and `sshd` |
@@ -48,8 +48,8 @@
 ### Task 1: AuthOutcome + password authentication
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/src/connection.rs`
-- Create: `crates/glymr-ssh-core/tests/auth_integration.rs`
+- Modify: `crates/neotilde-ssh-core/src/connection.rs`
+- Create: `crates/neotilde-ssh-core/tests/auth_integration.rs`
 
 **Interfaces:**
 - Consumes: `Connection`, `ConnectError`, `connect_core` (Phase 1b).
@@ -58,12 +58,12 @@
 
 - [ ] **Step 1: Write the failing integration tests**
 
-Create `crates/glymr-ssh-core/tests/auth_integration.rs`:
+Create `crates/neotilde-ssh-core/tests/auth_integration.rs`:
 ```rust
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 use std::sync::{Arc, Mutex};
-use glymr_ssh_core::connection::{connect_core, AuthOutcome, HostKeyInfo, HostKeyVerifier};
+use neotilde_ssh_core::connection::{connect_core, AuthOutcome, HostKeyInfo, HostKeyVerifier};
 
 struct TrustAll;
 #[async_trait::async_trait]
@@ -71,11 +71,11 @@ impl HostKeyVerifier for TrustAll {
     async fn verify(&self, _info: HostKeyInfo) -> bool { true }
 }
 
-fn sshd_addr() -> Option<String> { std::env::var("GLYMR_TEST_SSHD").ok() }
+fn sshd_addr() -> Option<String> { std::env::var("NEOTILDE_TEST_SSHD").ok() }
 
 #[tokio::test]
 async fn password_auth_succeeds_with_correct_credentials() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
     let outcome = conn.authenticate_password("tester".into(), "testpass".into()).await.expect("auth call");
     assert_eq!(outcome, AuthOutcome::Success);
@@ -83,7 +83,7 @@ async fn password_auth_succeeds_with_correct_credentials() {
 
 #[tokio::test]
 async fn password_auth_fails_with_wrong_password() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
     let outcome = conn.authenticate_password("tester".into(), "wrong".into()).await.expect("auth call");
     assert_eq!(outcome, AuthOutcome::Failure);
@@ -97,12 +97,12 @@ fn _uses_mutex() -> Mutex<()> { Mutex::new(()) }
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Ensure `sshd` is up: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d sshd`
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test auth_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test auth_integration`
 Expected: FAIL — `no method named 'authenticate_password'` / `cannot find type 'AuthOutcome'`.
 
 - [ ] **Step 3: Implement `AuthOutcome` + `outcome()`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add after the `ConnectError` block:
+In `crates/neotilde-ssh-core/src/connection.rs`, add after the `ConnectError` block:
 ```rust
 /// The result of an authentication attempt. A failed auth is a normal outcome,
 /// not a `ConnectError` — the caller decides what to do (retry, try another
@@ -129,7 +129,7 @@ fn outcome(result: russh::client::AuthResult) -> AuthOutcome {
 
 - [ ] **Step 4: Implement `authenticate_password`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add a new exported impl block (separate from the existing `#[uniffi::export] impl Connection` so the async-runtime attribute applies):
+In `crates/neotilde-ssh-core/src/connection.rs`, add a new exported impl block (separate from the existing `#[uniffi::export] impl Connection` so the async-runtime attribute applies):
 ```rust
 #[uniffi::export(async_runtime = "tokio")]
 impl Connection {
@@ -148,13 +148,13 @@ impl Connection {
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test auth_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test auth_integration`
 Expected: PASS — both password tests.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/src/connection.rs crates/glymr-ssh-core/tests/auth_integration.rs
+git add crates/neotilde-ssh-core/src/connection.rs crates/neotilde-ssh-core/tests/auth_integration.rs
 git commit -m "feat: add password authentication with typed AuthOutcome"
 ```
 
@@ -166,8 +166,8 @@ git commit -m "feat: add password authentication with typed AuthOutcome"
 - Create: `docker/sshd-entrypoint.sh`
 - Modify: `docker/Dockerfile.sshd`
 - Modify: `docker-compose.yml`
-- Modify: `crates/glymr-ssh-core/src/connection.rs`
-- Modify: `crates/glymr-ssh-core/tests/auth_integration.rs`
+- Modify: `crates/neotilde-ssh-core/src/connection.rs`
+- Modify: `crates/neotilde-ssh-core/tests/auth_integration.rs`
 
 **Interfaces:**
 - Produces: `Connection::authenticate_publickey(&self, user: String, private_key_openssh: String) -> Result<AuthOutcome, ConnectError>` (async, UniFFI)
@@ -184,7 +184,7 @@ ssh-keygen -A
 mkdir -p /home/tester/.ssh
 # Generate a throwaway test keypair into the shared volume on first boot.
 if [ ! -f /testkeys/id_ed25519 ]; then
-  ssh-keygen -t ed25519 -N '' -C 'glymr-test' -f /testkeys/id_ed25519
+  ssh-keygen -t ed25519 -N '' -C 'neotilde-test' -f /testkeys/id_ed25519
 fi
 # World-readable so the (non-root) dev container can read the private key.
 # This is a disposable CI fixture key, never a real credential.
@@ -229,11 +229,11 @@ In `docker-compose.yml`: add `testkeys:/testkeys` to both `dev` (read-only) and 
 
 Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d --build sshd`
 
-Add to `crates/glymr-ssh-core/tests/auth_integration.rs`:
+Add to `crates/neotilde-ssh-core/tests/auth_integration.rs`:
 ```rust
 #[tokio::test]
 async fn publickey_auth_succeeds_with_authorized_key() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let key = match std::fs::read_to_string("/testkeys/id_ed25519") {
         Ok(k) => k,
         Err(_) => { eprintln!("skipping: /testkeys/id_ed25519 not mounted"); return }
@@ -246,12 +246,12 @@ async fn publickey_auth_succeeds_with_authorized_key() {
 
 - [ ] **Step 5: Run the test to verify it fails**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test auth_integration publickey_auth_succeeds`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test auth_integration publickey_auth_succeeds`
 Expected: FAIL — `no method named 'authenticate_publickey'`.
 
 - [ ] **Step 6: Implement `authenticate_publickey`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add inside the `#[uniffi::export(async_runtime = "tokio")] impl Connection` block:
+In `crates/neotilde-ssh-core/src/connection.rs`, add inside the `#[uniffi::export(async_runtime = "tokio")] impl Connection` block:
 ```rust
     /// Public-key authentication from an in-memory OpenSSH private key. (The
     /// Secure-Enclave / Keychain-backed signing path is Phase 2 + macOS.)
@@ -273,13 +273,13 @@ In `crates/glymr-ssh-core/src/connection.rs`, add inside the `#[uniffi::export(a
 
 - [ ] **Step 7: Run the test to verify it passes**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test auth_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test auth_integration`
 Expected: PASS — password + publickey tests.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add docker/sshd-entrypoint.sh docker/Dockerfile.sshd docker-compose.yml crates/glymr-ssh-core/src/connection.rs crates/glymr-ssh-core/tests/auth_integration.rs
+git add docker/sshd-entrypoint.sh docker/Dockerfile.sshd docker-compose.yml crates/neotilde-ssh-core/src/connection.rs crates/neotilde-ssh-core/tests/auth_integration.rs
 git commit -m "feat: add publickey authentication with shared-volume test fixture"
 ```
 
@@ -289,8 +289,8 @@ git commit -m "feat: add publickey authentication with shared-volume test fixtur
 
 **Files:**
 - Modify: `docker/Dockerfile.sshd`
-- Modify: `crates/glymr-ssh-core/src/connection.rs`
-- Modify: `crates/glymr-ssh-core/tests/auth_integration.rs`
+- Modify: `crates/neotilde-ssh-core/src/connection.rs`
+- Modify: `crates/neotilde-ssh-core/tests/auth_integration.rs`
 
 **Interfaces:**
 - Produces: `Connection::authenticate_keyboard_interactive(&self, user: String, responses: Vec<String>) -> Result<AuthOutcome, ConnectError>` (async, UniFFI)
@@ -314,11 +314,11 @@ RUN apk add --no-cache openssh-server openssh-server-pam linux-pam \
 
 Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d --build sshd`
 
-Add to `crates/glymr-ssh-core/tests/auth_integration.rs`:
+Add to `crates/neotilde-ssh-core/tests/auth_integration.rs`:
 ```rust
 #[tokio::test]
 async fn keyboard_interactive_auth_succeeds_with_password_response() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
     // PAM keyboard-interactive presents a single password prompt.
     let outcome = conn
@@ -331,12 +331,12 @@ async fn keyboard_interactive_auth_succeeds_with_password_response() {
 
 - [ ] **Step 3: Run the test to verify it fails**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test auth_integration keyboard_interactive`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test auth_integration keyboard_interactive`
 Expected: FAIL — `no method named 'authenticate_keyboard_interactive'`.
 
 - [ ] **Step 4: Implement `authenticate_keyboard_interactive`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add inside the `#[uniffi::export(async_runtime = "tokio")] impl Connection` block:
+In `crates/neotilde-ssh-core/src/connection.rs`, add inside the `#[uniffi::export(async_runtime = "tokio")] impl Connection` block:
 ```rust
     /// Keyboard-interactive authentication. `responses` answers each server
     /// prompt in order (typically a single password). Loops over `InfoRequest`
@@ -374,13 +374,13 @@ In `crates/glymr-ssh-core/src/connection.rs`, add inside the `#[uniffi::export(a
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test auth_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test auth_integration`
 Expected: PASS — all auth tests (password, publickey, keyboard-interactive).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add docker/Dockerfile.sshd crates/glymr-ssh-core/src/connection.rs crates/glymr-ssh-core/tests/auth_integration.rs
+git add docker/Dockerfile.sshd crates/neotilde-ssh-core/src/connection.rs crates/neotilde-ssh-core/tests/auth_integration.rs
 git commit -m "feat: add keyboard-interactive authentication"
 ```
 
@@ -392,7 +392,7 @@ git commit -m "feat: add keyboard-interactive authentication"
   - password: correct → `Success`, wrong → `Failure`;
   - publickey: authorized in-memory key → `Success`;
   - keyboard-interactive: password response → `Success`.
-- [ ] `cargo test -p glymr-ssh-core` (unit) and the 1b connect integration tests still pass (no regression).
+- [ ] `cargo test -p neotilde-ssh-core` (unit) and the 1b connect integration tests still pass (no regression).
 - [ ] No private key committed to git — the publickey fixture key lives only in the `testkeys` volume.
 - [ ] Three conventional commits, one per task. Every new file carries the REUSE header.
 - [ ] **macOS-gated (deferred):** Swift consumption of the async `authenticate_*` methods; the SE/Keychain `Signer`.

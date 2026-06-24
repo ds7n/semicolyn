@@ -6,15 +6,15 @@
 
 **Goal:** Maintain the structural state (windows, pane-geometry trees, active window/pane, session identity, ended-state) of the attached tmux session by applying Phase-3a `ControlModeEvent`s.
 
-**Architecture:** A pure value-type `TmuxSessionState` struct in `GlymrKit` with `mutating func apply(_ event: ControlModeEvent)`. It owns structure only — terminal content stays in SwiftTerm. Lenient: events for unknown windows are ignored. A `PaneLayout.panes` helper flattens a layout tree to leaf panes for the renderer.
+**Architecture:** A pure value-type `TmuxSessionState` struct in `NeotildeKit` with `mutating func apply(_ event: ControlModeEvent)`. It owns structure only — terminal content stays in SwiftTerm. Lenient: events for unknown windows are ignored. A `PaneLayout.panes` helper flattens a layout tree to leaf panes for the renderer.
 
-**Tech Stack:** Swift 6 (`GlymrKit`, platform-agnostic), XCTest, run on Linux via `docker compose run --rm dev swift test`.
+**Tech Stack:** Swift 6 (`NeotildeKit`, platform-agnostic), XCTest, run on Linux via `docker compose run --rm dev swift test`.
 
 ## Global Constraints
 
 - Every source/test file begins with `// SPDX-FileCopyrightText: 2026 True Positive LLC` then `// SPDX-License-Identifier: GPL-3.0-only`.
 - Spec of record: `docs/superpowers/specs/2026-06-20-tmux-session-model-design.md`.
-- Placement: Swift in `Sources/GlymrKit/Tmux/`. No Apple-only APIs (must compile + test on Linux). No `Observation`/SwiftUI — pure value type.
+- Placement: Swift in `Sources/NeotildeKit/Tmux/`. No Apple-only APIs (must compile + test on Linux). No `Observation`/SwiftUI — pure value type.
 - Model is **structure only**; ignores `.output`, `.commandResult`, `.unknown`, `.malformed`, `.sessionsChanged`.
 - Lenient: events referencing an unknown window are ignored (no crash, no synthesized window).
 - All `TmuxSessionState` fields are `private(set)`; mutation only via `apply`.
@@ -40,8 +40,8 @@ git checkout -b feat/phase-3b-tmux-model
 ### Task 1: `PaneLayout.panes` render helper
 
 **Files:**
-- Modify: `Sources/GlymrKit/Tmux/PaneLayout.swift` (append an extension)
-- Test: `Tests/GlymrKitTests/PaneLayoutPanesTests.swift`
+- Modify: `Sources/NeotildeKit/Tmux/PaneLayout.swift` (append an extension)
+- Test: `Tests/NeotildeKitTests/PaneLayoutPanesTests.swift`
 
 **Interfaces:**
 - Consumes: existing `PaneLayout` (`.leaf`/`.columns`/`.rows`), `PaneID`, `Geometry`.
@@ -50,11 +50,11 @@ git checkout -b feat/phase-3b-tmux-model
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/GlymrKitTests/PaneLayoutPanesTests.swift
+// Tests/NeotildeKitTests/PaneLayoutPanesTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class PaneLayoutPanesTests: XCTestCase {
     func testSingleLeafFlattens() {
@@ -92,7 +92,7 @@ Expected: FAIL — `value of type 'PaneLayout' has no member 'panes'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Append to `Sources/GlymrKit/Tmux/PaneLayout.swift`:
+Append to `Sources/NeotildeKit/Tmux/PaneLayout.swift`:
 
 ```swift
 extension PaneLayout {
@@ -116,7 +116,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/PaneLayout.swift Tests/GlymrKitTests/PaneLayoutPanesTests.swift
+git add Sources/NeotildeKit/Tmux/PaneLayout.swift Tests/NeotildeKitTests/PaneLayoutPanesTests.swift
 git commit -m "feat: add PaneLayout.panes depth-first flatten helper"
 ```
 
@@ -125,8 +125,8 @@ git commit -m "feat: add PaneLayout.panes depth-first flatten helper"
 ### Task 2: `TmuxSessionState` + window-lifecycle events
 
 **Files:**
-- Create: `Sources/GlymrKit/Tmux/TmuxSessionState.swift`
-- Test: `Tests/GlymrKitTests/TmuxSessionStateTests.swift`
+- Create: `Sources/NeotildeKit/Tmux/TmuxSessionState.swift`
+- Test: `Tests/NeotildeKitTests/TmuxSessionStateTests.swift`
 
 **Interfaces:**
 - Consumes: `ControlModeEvent`, `WindowID`, `SessionID`, `PaneID`, `PaneLayout`.
@@ -138,11 +138,11 @@ git commit -m "feat: add PaneLayout.panes depth-first flatten helper"
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/GlymrKitTests/TmuxSessionStateTests.swift
+// Tests/NeotildeKitTests/TmuxSessionStateTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class TmuxSessionStateTests: XCTestCase {
     private func state(_ events: [ControlModeEvent]) -> TmuxSessionState {
@@ -194,7 +194,7 @@ Expected: FAIL — `cannot find 'TmuxSessionState' in scope`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```swift
-// Sources/GlymrKit/Tmux/TmuxSessionState.swift
+// Sources/NeotildeKit/Tmux/TmuxSessionState.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
@@ -217,7 +217,7 @@ public struct TmuxWindow: Equatable, Sendable {
     }
 }
 
-/// Structural state of the single tmux session Glymr is attached to. Mutated only
+/// Structural state of the single tmux session Neotilde is attached to. Mutated only
 /// by applying control-mode events; terminal content lives elsewhere (SwiftTerm).
 public struct TmuxSessionState: Equatable, Sendable {
     public private(set) var sessionID: SessionID?
@@ -272,7 +272,7 @@ Expected: PASS (6 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/TmuxSessionState.swift Tests/GlymrKitTests/TmuxSessionStateTests.swift
+git add Sources/NeotildeKit/Tmux/TmuxSessionState.swift Tests/NeotildeKitTests/TmuxSessionStateTests.swift
 git commit -m "feat: add TmuxSessionState with window-lifecycle events"
 ```
 
@@ -281,8 +281,8 @@ git commit -m "feat: add TmuxSessionState with window-lifecycle events"
 ### Task 3: layout, session/active, exit, and ignored events
 
 **Files:**
-- Modify: `Sources/GlymrKit/Tmux/TmuxSessionState.swift` (replace the placeholder cases in `apply`)
-- Test: `Tests/GlymrKitTests/TmuxSessionStateTests.swift` (append cases)
+- Modify: `Sources/NeotildeKit/Tmux/TmuxSessionState.swift` (replace the placeholder cases in `apply`)
+- Test: `Tests/NeotildeKitTests/TmuxSessionStateTests.swift` (append cases)
 
 **Interfaces:**
 - Consumes: same Phase-3a types.
@@ -310,9 +310,9 @@ Append these methods to `final class TmuxSessionStateTests`:
         XCTAssertTrue(s.windows.isEmpty)
     }
     func testSessionChangedSetsIdentity() {
-        let s = state([.sessionChanged(SessionID(raw: 0), name: "glymr-a3f7c2e9")])
+        let s = state([.sessionChanged(SessionID(raw: 0), name: "neotilde-a3f7c2e9")])
         XCTAssertEqual(s.sessionID, SessionID(raw: 0))
-        XCTAssertEqual(s.sessionName, "glymr-a3f7c2e9")
+        XCTAssertEqual(s.sessionName, "neotilde-a3f7c2e9")
     }
     func testSessionWindowChangedSetsActiveWindow() {
         let s = state([.sessionChanged(SessionID(raw: 0), name: "s"),
@@ -397,7 +397,7 @@ Expected: PASS (14 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/TmuxSessionState.swift Tests/GlymrKitTests/TmuxSessionStateTests.swift
+git add Sources/NeotildeKit/Tmux/TmuxSessionState.swift Tests/NeotildeKitTests/TmuxSessionStateTests.swift
 git commit -m "feat: apply layout/session/exit events to TmuxSessionState"
 ```
 
@@ -408,7 +408,7 @@ git commit -m "feat: apply layout/session/exit events to TmuxSessionState"
 - [ ] **Step 1: Run the entire Swift suite**
 
 Run: `docker compose run --rm dev swift test`
-Expected: PASS — all GlymrKit suites green (prior tests + the new `PaneLayoutPanes` and `TmuxSessionState` suites).
+Expected: PASS — all NeotildeKit suites green (prior tests + the new `PaneLayoutPanes` and `TmuxSessionState` suites).
 
 - [ ] **Step 2: Squash-merge to master**
 

@@ -6,7 +6,7 @@
 
 ## Scope
 
-Six v1 features that any serious iOS SSH client must have but no Glymr spec mentioned:
+Six v1 features that any serious iOS SSH client must have but no Neotilde spec mentioned:
 
 1. Font size (with pinch-zoom, settings slider, hardware shortcuts)
 2. URL tap-to-open
@@ -104,11 +104,11 @@ Two distinct modes:
 
 ### tmux control-mode panes
 
-tmux owns the scrollback (`history-limit` in tmux configuration). Glymr reads from tmux when the user scrolls past the visible region. **No Glymr-side setting**; tmux is the source of truth. Defaulting tmux's `history-limit` is up to the user's `.tmux.conf` on the host.
+tmux owns the scrollback (`history-limit` in tmux configuration). Neotilde reads from tmux when the user scrolls past the visible region. **No Neotilde-side setting**; tmux is the source of truth. Defaulting tmux's `history-limit` is up to the user's `.tmux.conf` on the host.
 
 ### Raw-PTY (degraded) mode
 
-Glymr is the sole owner of scrollback.
+Neotilde is the sole owner of scrollback.
 
 - **Default:** 5000 lines per pane.
 - **User setting:** App preferences → Terminal → Scrollback (raw-PTY mode) — slider with five presets: **1000 / 2000 / 5000 / 10000 / unlimited**.
@@ -120,7 +120,7 @@ Glymr is the sole owner of scrollback.
 
 ## Resize policy
 
-When the visible cell grid changes — keyboard show/hide, device rotation, pane split/merge, font-size change — Glymr sends a window-change to the SSH stack, which forwards `SIGWINCH` to the remote `pty`.
+When the visible cell grid changes — keyboard show/hide, device rotation, pane split/merge, font-size change — Neotilde sends a window-change to the SSH stack, which forwards `SIGWINCH` to the remote `pty`.
 
 - **Debounced** to ~10Hz during rotation / resize animations. Avoids spamming the remote with intermediate sizes.
 - **Scrollback re-flows.** Existing scrollback wraps to the new column count. No content is lost.
@@ -129,7 +129,7 @@ When the visible cell grid changes — keyboard show/hide, device rotation, pane
 
 **Device rotation** is the same code path. Portrait ↔ landscape ↔ upside-down (iPad) triggers a grid change → `SIGWINCH` → remote redraw. The keybar adapts via size-class branching (no separate spec; [[2026-06-17-ipad-scope-design]]'s "all v1 mockups must render reasonably at iPad size" constraint covers this).
 
-**iPhone-landscape caveat.** With the software keyboard up in iPhone landscape, the visible cell rows drop dramatically — sometimes to single digits. That's a real ergonomic constraint, not a Glymr bug; we don't compensate. Documented in Tips & Gestures as "for landscape reading, dismiss the keyboard."
+**iPhone-landscape caveat.** With the software keyboard up in iPhone landscape, the visible cell rows drop dramatically — sometimes to single digits. That's a real ergonomic constraint, not a Neotilde bug; we don't compensate. Documented in Tips & Gestures as "for landscape reading, dismiss the keyboard."
 
 **Implementation note for the SSH-stack pick.** The chosen stack must expose window-change requests at any time, not just session open. `libssh2`: `libssh2_channel_request_pty_size`. Citadel / SwiftNIO SSH: equivalent. `Network.framework` SSH: unverified at spec time; if it doesn't expose runtime resize, the stack is the wrong pick.
 
@@ -139,7 +139,7 @@ The host-config schema already supports `localForward`, `remoteForward`, and `dy
 
 ### Static-config forwards
 
-When the connection establishes, Glymr requests each declared forward. Their status is surfaced in the **Esc-pill long-press picker Live row** — expanding the row reveals a small "Forwards" sub-section listing each forward on one line:
+When the connection establishes, Neotilde requests each declared forward. Their status is surfaced in the **Esc-pill long-press picker Live row** — expanding the row reveals a small "Forwards" sub-section listing each forward on one line:
 
 ```
   ● build-01.example.com          (Live)

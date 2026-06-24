@@ -35,10 +35,10 @@
 
 | File | Responsibility |
 |---|---|
-| `crates/glymr-ssh-core/src/lib.rs` | add `pub mod forward;` |
-| `crates/glymr-ssh-core/src/connection.rs` | `handle` → `Arc<Mutex<Handle>>`; `ClientHandler`→`pub(crate)`; `open_local_forward`/`open_dynamic_forward`/`open_remote_forward` on `Connection`; `ForwardMap` + the `server_channel_open_forwarded_tcpip` override (Task 3) |
-| `crates/glymr-ssh-core/src/forward.rs` | pump helper, `LocalForward`/`DynamicForward`/`RemoteForward` objects, accept loops, hand-rolled SOCKS5 |
-| `crates/glymr-ssh-core/tests/forward_integration.rs` | integration tests vs `sshd` |
+| `crates/neotilde-ssh-core/src/lib.rs` | add `pub mod forward;` |
+| `crates/neotilde-ssh-core/src/connection.rs` | `handle` → `Arc<Mutex<Handle>>`; `ClientHandler`→`pub(crate)`; `open_local_forward`/`open_dynamic_forward`/`open_remote_forward` on `Connection`; `ForwardMap` + the `server_channel_open_forwarded_tcpip` override (Task 3) |
+| `crates/neotilde-ssh-core/src/forward.rs` | pump helper, `LocalForward`/`DynamicForward`/`RemoteForward` objects, accept loops, hand-rolled SOCKS5 |
+| `crates/neotilde-ssh-core/tests/forward_integration.rs` | integration tests vs `sshd` |
 | `docker/Dockerfile.sshd` | `AllowTcpForwarding yes` (Task 1) + `GatewayPorts yes` (Task 3) |
 
 ---
@@ -46,8 +46,8 @@
 ### Task 1: Handle→Arc refactor + module + local forward (direct-tcpip)
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/src/connection.rs`, `crates/glymr-ssh-core/src/lib.rs`, `docker/Dockerfile.sshd`
-- Create: `crates/glymr-ssh-core/src/forward.rs`, `crates/glymr-ssh-core/tests/forward_integration.rs`
+- Modify: `crates/neotilde-ssh-core/src/connection.rs`, `crates/neotilde-ssh-core/src/lib.rs`, `docker/Dockerfile.sshd`
+- Create: `crates/neotilde-ssh-core/src/forward.rs`, `crates/neotilde-ssh-core/tests/forward_integration.rs`
 
 **Interfaces:**
 - Consumes: `connect_core`, `Connection`, `ConnectError`, `ClientHandler`, `authenticate_password`, `AuthOutcome` (Phases 1b/1c).
@@ -64,7 +64,7 @@ In `docker/Dockerfile.sshd`, append `AllowTcpForwarding yes` to the config `RUN`
 
 - [ ] **Step 2: Refactor `Connection.handle` to `Arc<Mutex<Handle>>` and make `ClientHandler` crate-visible**
 
-In `crates/glymr-ssh-core/src/connection.rs`:
+In `crates/neotilde-ssh-core/src/connection.rs`:
 - Change the handler struct declaration `struct ClientHandler {` → `pub(crate) struct ClientHandler {`.
 - Change the `Connection` field:
   ```rust
@@ -92,19 +92,19 @@ In `crates/glymr-ssh-core/src/connection.rs`:
 
 - [ ] **Step 3: Wire the module and write the failing local-forward test**
 
-In `crates/glymr-ssh-core/src/lib.rs`, add after `pub mod connection;`:
+In `crates/neotilde-ssh-core/src/lib.rs`, add after `pub mod connection;`:
 ```rust
 pub mod forward;
 ```
 
-Create `crates/glymr-ssh-core/tests/forward_integration.rs`:
+Create `crates/neotilde-ssh-core/tests/forward_integration.rs`:
 ```rust
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use glymr_ssh_core::connection::{
+use neotilde_ssh_core::connection::{
     connect_core, AuthOutcome, Connection, ConnectError, HostKeyInfo, HostKeyVerifier,
 };
 
@@ -114,7 +114,7 @@ impl HostKeyVerifier for TrustAll {
     async fn verify(&self, _info: HostKeyInfo) -> bool { true }
 }
 
-fn sshd_addr() -> Option<String> { std::env::var("GLYMR_TEST_SSHD").ok() }
+fn sshd_addr() -> Option<String> { std::env::var("NEOTILDE_TEST_SSHD").ok() }
 fn sshd_host() -> Option<String> { sshd_addr().map(|a| a.split(':').next().unwrap_or("sshd").to_string()) }
 
 async fn connect_and_auth(addr: String) -> Connection {
@@ -128,7 +128,7 @@ async fn connect_and_auth(addr: String) -> Connection {
 // tunnel must yield sshd's SSH banner, proving end-to-end bidirectional flow.
 #[tokio::test]
 async fn local_forward_tunnels_to_remote_service() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_and_auth(addr).await;
     let fwd = conn
         .open_local_forward("127.0.0.1".into(), 0, "127.0.0.1".into(), 22)
@@ -148,7 +148,7 @@ async fn local_forward_tunnels_to_remote_service() {
 
 #[tokio::test]
 async fn local_forward_reports_bound_port() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_and_auth(addr).await;
     let fwd = conn
         .open_local_forward("127.0.0.1".into(), 0, "127.0.0.1".into(), 22)
@@ -160,7 +160,7 @@ async fn local_forward_reports_bound_port() {
 
 #[tokio::test]
 async fn local_forward_close_frees_the_port() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_and_auth(addr).await;
     let fwd = conn
         .open_local_forward("127.0.0.1".into(), 0, "127.0.0.1".into(), 22)
@@ -186,12 +186,12 @@ fn _uses(_: Option<ConnectError>, _: fn(&mut [u8])) {}
 - [ ] **Step 4: Run the tests to verify they fail**
 
 Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d --build sshd`
-Then: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test forward_integration`
+Then: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test forward_integration`
 Expected: FAIL — `no method named open_local_forward` / unresolved `forward`.
 
 - [ ] **Step 5: Implement the pump helper and `LocalForward` in `forward.rs`**
 
-Create `crates/glymr-ssh-core/src/forward.rs`:
+Create `crates/neotilde-ssh-core/src/forward.rs`:
 ```rust
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -295,7 +295,7 @@ async fn local_accept_loop(
 
 - [ ] **Step 6: Add `open_local_forward` on `Connection`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, inside the existing `#[uniffi::export(async_runtime = "tokio")] impl Connection` block:
+In `crates/neotilde-ssh-core/src/connection.rs`, inside the existing `#[uniffi::export(async_runtime = "tokio")] impl Connection` block:
 ```rust
     /// Open a local (direct-tcpip) port forward: bind `local_host:local_port`
     /// on the device and tunnel each accepted connection to
@@ -322,18 +322,18 @@ In `crates/glymr-ssh-core/src/connection.rs`, inside the existing `#[uniffi::exp
 
 - [ ] **Step 7: Run the tests to verify they pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test forward_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test forward_integration`
 Expected: PASS — `local_forward_tunnels_to_remote_service`, `local_forward_reports_bound_port`, `local_forward_close_frees_the_port`.
 
 - [ ] **Step 8: Run the full crate suite (no regression from the handle refactor)**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core`
 Expected: PASS — unit, connect, auth, shell, cert, and the new forward tests; output pristine.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/src/lib.rs crates/glymr-ssh-core/src/connection.rs crates/glymr-ssh-core/src/forward.rs crates/glymr-ssh-core/tests/forward_integration.rs docker/Dockerfile.sshd
+git add crates/neotilde-ssh-core/src/lib.rs crates/neotilde-ssh-core/src/connection.rs crates/neotilde-ssh-core/src/forward.rs crates/neotilde-ssh-core/tests/forward_integration.rs docker/Dockerfile.sshd
 git commit -m "feat: add local (direct-tcpip) port forwarding"
 ```
 
@@ -342,7 +342,7 @@ git commit -m "feat: add local (direct-tcpip) port forwarding"
 ### Task 2: Dynamic forward (SOCKS5 proxy)
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/src/forward.rs`, `crates/glymr-ssh-core/src/connection.rs`, `crates/glymr-ssh-core/tests/forward_integration.rs`
+- Modify: `crates/neotilde-ssh-core/src/forward.rs`, `crates/neotilde-ssh-core/src/connection.rs`, `crates/neotilde-ssh-core/tests/forward_integration.rs`
 
 **Interfaces:**
 - Consumes: `pump`, `Handle`, `open_local`'s patterns (Task 1).
@@ -352,7 +352,7 @@ git commit -m "feat: add local (direct-tcpip) port forwarding"
 
 - [ ] **Step 1: Write the failing dynamic-forward tests**
 
-Add to `crates/glymr-ssh-core/tests/forward_integration.rs`:
+Add to `crates/neotilde-ssh-core/tests/forward_integration.rs`:
 ```rust
 // Perform a SOCKS5 no-auth CONNECT handshake over `sock` to `host:port`.
 // Returns the server's reply byte (0x00 = success) after the greeting.
@@ -376,7 +376,7 @@ async fn socks5_connect(sock: &mut tokio::net::TcpStream, host: &str, port: u16)
 
 #[tokio::test]
 async fn dynamic_forward_socks5_connect_reaches_target() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_and_auth(addr).await;
     let fwd = conn.open_dynamic_forward("127.0.0.1".into(), 0).await.expect("open dynamic forward");
     let mut sock = tokio::net::TcpStream::connect(("127.0.0.1", fwd.bound_port())).await.expect("connect proxy");
@@ -390,7 +390,7 @@ async fn dynamic_forward_socks5_connect_reaches_target() {
 
 #[tokio::test]
 async fn dynamic_forward_rejects_non_socks5_greeting() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_and_auth(addr).await;
     let fwd = conn.open_dynamic_forward("127.0.0.1".into(), 0).await.expect("open dynamic forward");
     let mut sock = tokio::net::TcpStream::connect(("127.0.0.1", fwd.bound_port())).await.expect("connect proxy");
@@ -409,7 +409,7 @@ async fn dynamic_forward_rejects_non_socks5_greeting() {
 
 #[tokio::test]
 async fn dynamic_forward_rejects_unsupported_command() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_and_auth(addr).await;
     let fwd = conn.open_dynamic_forward("127.0.0.1".into(), 0).await.expect("open dynamic forward");
     let mut sock = tokio::net::TcpStream::connect(("127.0.0.1", fwd.bound_port())).await.expect("connect proxy");
@@ -431,12 +431,12 @@ async fn dynamic_forward_rejects_unsupported_command() {
 
 - [ ] **Step 2: Run the new tests to verify they fail**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test forward_integration dynamic_forward`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test forward_integration dynamic_forward`
 Expected: FAIL — `no method named open_dynamic_forward`.
 
 - [ ] **Step 3: Implement the SOCKS5 handler + `DynamicForward` in `forward.rs`**
 
-In `crates/glymr-ssh-core/src/forward.rs`, add:
+In `crates/neotilde-ssh-core/src/forward.rs`, add:
 ```rust
 /// A live dynamic (SOCKS5) forward — a device-local SOCKS5 proxy that opens a
 /// direct-tcpip channel per CONNECT. Lifecycle identical to `LocalForward`.
@@ -575,7 +575,7 @@ async fn socks5_serve(
 
 - [ ] **Step 4: Add `open_dynamic_forward` on `Connection`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, inside the same exported `impl Connection` block:
+In `crates/neotilde-ssh-core/src/connection.rs`, inside the same exported `impl Connection` block:
 ```rust
     /// Open a dynamic (SOCKS5) forward: run a device-local SOCKS5 proxy on
     /// `local_host:local_port`; each CONNECT opens a direct-tcpip channel to the
@@ -593,13 +593,13 @@ In `crates/glymr-ssh-core/src/connection.rs`, inside the same exported `impl Con
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test forward_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test forward_integration`
 Expected: PASS — all local + dynamic tests.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/src/forward.rs crates/glymr-ssh-core/src/connection.rs crates/glymr-ssh-core/tests/forward_integration.rs
+git add crates/neotilde-ssh-core/src/forward.rs crates/neotilde-ssh-core/src/connection.rs crates/neotilde-ssh-core/tests/forward_integration.rs
 git commit -m "feat: add dynamic (SOCKS5) port forwarding"
 ```
 
@@ -608,7 +608,7 @@ git commit -m "feat: add dynamic (SOCKS5) port forwarding"
 ### Task 3: Remote forward (forwarded-tcpip)
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/src/connection.rs`, `crates/glymr-ssh-core/src/forward.rs`, `crates/glymr-ssh-core/tests/forward_integration.rs`, `docker/Dockerfile.sshd`
+- Modify: `crates/neotilde-ssh-core/src/connection.rs`, `crates/neotilde-ssh-core/src/forward.rs`, `crates/neotilde-ssh-core/tests/forward_integration.rs`, `docker/Dockerfile.sshd`
 
 **Interfaces:**
 - Consumes: `pump`, `Handle`, `ClientHandler`, `Connection` (Tasks 1–2).
@@ -627,7 +627,7 @@ In `docker/Dockerfile.sshd`, extend the final config `printf` to also write `Gat
 
 - [ ] **Step 2: Add the `ForwardMap` and share it into `ClientHandler` + `Connection`**
 
-In `crates/glymr-ssh-core/src/connection.rs`:
+In `crates/neotilde-ssh-core/src/connection.rs`:
 - Add near the top (after imports):
   ```rust
   /// Server-listen-port → device-local target (host, port) for active remote
@@ -651,7 +651,7 @@ In `crates/glymr-ssh-core/src/connection.rs`:
 
 - [ ] **Step 3: Implement the forwarded-tcpip handler callback**
 
-In `crates/glymr-ssh-core/src/connection.rs`, inside `impl client::Handler for ClientHandler` (alongside `check_server_key` / `kex_done`), add:
+In `crates/neotilde-ssh-core/src/connection.rs`, inside `impl client::Handler for ClientHandler` (alongside `check_server_key` / `kex_done`), add:
 ```rust
     async fn server_channel_open_forwarded_tcpip(
         &mut self,
@@ -681,7 +681,7 @@ In `crates/glymr-ssh-core/src/connection.rs`, inside `impl client::Handler for C
 
 - [ ] **Step 4: Write the failing remote-forward test**
 
-Add to `crates/glymr-ssh-core/tests/forward_integration.rs`:
+Add to `crates/neotilde-ssh-core/tests/forward_integration.rs`:
 ```rust
 // Remote forward: ask the server to listen on a fixed port and route inbound
 // connections back to a device-local target serving a known banner. Connect to
@@ -689,10 +689,10 @@ Add to `crates/glymr-ssh-core/tests/forward_integration.rs`:
 // and expect the banner.
 #[tokio::test]
 async fn remote_forward_routes_inbound_to_local_target() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let Some(host) = sshd_host() else { return };
     const REMOTE_PORT: u16 = 13389;
-    const BANNER: &[u8] = b"HELLO-GLYMR\n";
+    const BANNER: &[u8] = b"HELLO-NEOTILDE\n";
 
     // Device-local target: accept one connection and write the banner.
     let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind target");
@@ -729,12 +729,12 @@ Also delete the `#[allow(dead_code)] fn _uses(...)` placeholder from Task 1 (its
 - [ ] **Step 5: Run the test to verify it fails**
 
 Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d --build sshd`
-Then: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test forward_integration remote_forward`
+Then: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test forward_integration remote_forward`
 Expected: FAIL — `no method named open_remote_forward`.
 
 - [ ] **Step 6: Implement `RemoteForward` + `open_remote` in `forward.rs`**
 
-In `crates/glymr-ssh-core/src/forward.rs`, add:
+In `crates/neotilde-ssh-core/src/forward.rs`, add:
 ```rust
 use crate::connection::{ConnectError, ForwardMap};
 
@@ -789,7 +789,7 @@ pub(crate) async fn open_remote(
 
 - [ ] **Step 7: Add `open_remote_forward` on `Connection`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, inside the exported `impl Connection` block:
+In `crates/neotilde-ssh-core/src/connection.rs`, inside the exported `impl Connection` block:
 ```rust
     /// Open a remote (forwarded-tcpip) port forward: ask the server to listen on
     /// `remote_bind_host:remote_bind_port` and route each inbound connection
@@ -818,18 +818,18 @@ In `crates/glymr-ssh-core/src/connection.rs`, inside the exported `impl Connecti
 
 - [ ] **Step 8: Run the tests to verify they pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test forward_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test forward_integration`
 Expected: PASS — local, dynamic, and remote tests.
 
 - [ ] **Step 9: Run the entire crate suite (no regression)**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core`
 Expected: PASS — unit (8), connect (4), auth (5), shell (5), cert (4), forward (7); pristine.
 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/src/connection.rs crates/glymr-ssh-core/src/forward.rs crates/glymr-ssh-core/tests/forward_integration.rs docker/Dockerfile.sshd
+git add crates/neotilde-ssh-core/src/connection.rs crates/neotilde-ssh-core/src/forward.rs crates/neotilde-ssh-core/tests/forward_integration.rs docker/Dockerfile.sshd
 git commit -m "feat: add remote (forwarded-tcpip) port forwarding"
 ```
 
@@ -837,7 +837,7 @@ git commit -m "feat: add remote (forwarded-tcpip) port forwarding"
 
 ## Phase 1e exit criteria
 
-- [ ] `cargo test -p glymr-ssh-core` green against the rebuilt `sshd` fixture; earlier suites unaffected by the `handle` → `Arc<Mutex<_>>` refactor.
+- [ ] `cargo test -p neotilde-ssh-core` green against the rebuilt `sshd` fixture; earlier suites unaffected by the `handle` → `Arc<Mutex<_>>` refactor.
 - [ ] **Local:** tunnel delivers the remote service's bytes; `bound_port()` reports the OS-assigned port; `close()` frees the port.
 - [ ] **Dynamic:** SOCKS5 no-auth CONNECT reaches the target; non-SOCKS5 and unsupported commands get the correct rejection.
 - [ ] **Remote:** server-side listener routes an inbound connection back to the device-local target; `close()` cancels it.

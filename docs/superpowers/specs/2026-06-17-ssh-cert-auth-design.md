@@ -8,11 +8,11 @@
 
 Support SSH client certificate authentication in v1. A user whose private key is signed by an SSH CA (Smallstep, HashiCorp Vault SSH CA, Teleport, Step CA, etc.) can present `<cert> + <private key>` instead of just `<private key>` during the SSH handshake. Servers configured to trust the CA accept the connection without per-user public-key distribution.
 
-Skipping this in v1 cedes the corporate / managed-SSH user segment to Termius. Glymr's positioning as a security-first, professional SSH client warrants including it.
+Skipping this in v1 cedes the corporate / managed-SSH user segment to Termius. Neotilde's positioning as a security-first, professional SSH client warrants including it.
 
 ## Scope
 
-- Client-side cert presentation only. Glymr does **not** issue, generate, or sign certificates; that's the user's CA's job.
+- Client-side cert presentation only. Neotilde does **not** issue, generate, or sign certificates; that's the user's CA's job.
 - Cert + private-key pairing at the **identity** level. A single identity in `Settings → Identities & Keys` can have an associated cert.
 - Cert metadata visible: principals, validity window, key ID, source CA fingerprint, critical options.
 - Expiry handling: warning when near expiry, hard-fail when expired.
@@ -84,7 +84,7 @@ The half-sheet's three tabs (**Pick existing · Create new · Import existing**)
 
 - Pasting a cert auto-parses; if it doesn't match the imported key, a red validation row appears: *"This certificate does not match the imported key."* Save is disabled until either fixed or the cert is cleared.
 - The "Pick existing" tab does not gain a cert field — the existing Keychain identity already has its cert (or doesn't); editing it is a future concern.
-- The "Create new" tab does not gain a cert field — Glymr-generated keys are not certified by a CA. (User can sign the generated public key with their CA out-of-band and re-import via "Import existing.")
+- The "Create new" tab does not gain a cert field — Neotilde-generated keys are not certified by a CA. (User can sign the generated public key with their CA out-of-band and re-import via "Import existing.")
 
 ## Identity-management surface
 
@@ -129,13 +129,13 @@ The chip is informational, not blocking — at this stage the user can still rev
 
 When an identity is used to authenticate to a host:
 
-- **Cert present + not expired:** Glymr passes `<cert> + <private-key>` to the SSH stack. The stack negotiates a cert-based key exchange (algorithm name `ssh-ed25519-cert-v01@openssh.com`, etc.).
-- **Cert present + expired:** Glymr refuses to use the identity for this connection. The connect attempt fails with a clear error: *"Certificate expired on `<identity>` ({date}). Re-import or remove the certificate to use the underlying key instead."* No silent fallback to the bare key — falling back would surprise the user (their CA-signed identity suddenly auths as a different user).
+- **Cert present + not expired:** Neotilde passes `<cert> + <private-key>` to the SSH stack. The stack negotiates a cert-based key exchange (algorithm name `ssh-ed25519-cert-v01@openssh.com`, etc.).
+- **Cert present + expired:** Neotilde refuses to use the identity for this connection. The connect attempt fails with a clear error: *"Certificate expired on `<identity>` ({date}). Re-import or remove the certificate to use the underlying key instead."* No silent fallback to the bare key — falling back would surprise the user (their CA-signed identity suddenly auths as a different user).
 - **No cert:** existing behavior. Bare public-key auth.
 
 **Algorithm allowlist intersection.** The host's negotiated `HostKeyAlgorithms` and the cert's signing algorithm must both be permitted by [[2026-06-17-ssh-algorithms-design]]'s tier rules. v1's Tier 1 already includes `ssh-ed25519-cert-v01@openssh.com`; RSA cert variants (`rsa-sha2-512-cert-v01`, `rsa-sha2-256-cert-v01`) need to be added — see Cross-spec consequences.
 
-**CA trust:** Glymr does not validate the CA against any client-side trust store. The server is the only party that decides if a cert is valid (it has the CA's trusted public key in `TrustedUserCAKeys`). Client-side cert validation would duplicate the server's job without benefit. Glymr only checks that:
+**CA trust:** Neotilde does not validate the CA against any client-side trust store. The server is the only party that decides if a cert is valid (it has the CA's trusted public key in `TrustedUserCAKeys`). Client-side cert validation would duplicate the server's job without benefit. Neotilde only checks that:
 
 1. The cert's signature is well-formed (parser sanity)
 2. The cert's `validAfter` ≤ now ≤ `validBefore` (expiry)
@@ -145,10 +145,10 @@ When an identity is used to authenticate to a host:
 
 - **Cert rotation wizard.** Stays deferred to v1.5+ alongside the existing identity rotation wizard. Without `ssh-copy-id`-style auto-install of new CA-signed certs, a rotation wizard is a checklist with a hand-wave.
 - **Auto-renewal from a CA.** Some CAs (Step CA, Vault SSH) support API-based cert renewal. Real value but real surface (CA-protocol picker, API token storage, refresh scheduling). v1.5+ if demand.
-- **Cert generation from Glymr.** Glymr does not sign. Users get certs from their CA out-of-band.
+- **Cert generation from Neotilde.** Neotilde does not sign. Users get certs from their CA out-of-band.
 - **Per-host cert override.** A host can't be configured to "use cert X with identity Y." The cert is bound to the identity. Power users who need multiple cert-bearing identities create multiple identity records.
 - **Cert-format conversion.** v1 accepts OpenSSH cert format only. PEM/DER conversion is out.
-- **CA-signed host certificate validation surface.** Glymr-side trust of CA-signed host certs (different from client certs) is governed by the host-key trust UX in [[2026-06-17-host-key-trust-design]] — `ssh-ed25519-cert-v01@openssh.com` host keys go through the same fingerprint-trust flow. Trusting the underlying CA's public key as a wildcard for host certs is a separate v1.5+ feature.
+- **CA-signed host certificate validation surface.** Neotilde-side trust of CA-signed host certs (different from client certs) is governed by the host-key trust UX in [[2026-06-17-host-key-trust-design]] — `ssh-ed25519-cert-v01@openssh.com` host keys go through the same fingerprint-trust flow. Trusting the underlying CA's public key as a wildcard for host certs is a separate v1.5+ feature.
 
 ## Cross-spec consequences
 

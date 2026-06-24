@@ -6,9 +6,9 @@
 
 **Goal:** Let a user **generate** or **import** an SSH identity (iCloud-Keychain flavor, ed25519 default) and **authenticate to a host with it** — closing the "identity create/import + publickey connect" gap Plan 2 deferred to Phase 2b.
 
-**Architecture:** All SSH-key crypto (generate, parse, OpenSSH-encode, fingerprint) lives in the **Rust core** via the `ssh-key` crate already in-tree (`russh::keys::ssh_key`), exposed over UniFFI and `cargo test`-verified on Linux. A pure-Swift **`IdentityService`** in `GlymrKit` orchestrates mint → persist private key to the existing `SecretStore` → save metadata via the existing `HostStore`, behind an `IdentityMinter` protocol so the orchestration is `swift test`-verified on Linux with a fake. The real `CoreIdentityMinter` bridges to Rust (macOS-only, `BridgeTests`). The app's `ConnectionViewModel` then uses the **already-wired** `authenticatePublickey` with a stored identity, and the `IdentityPickerSheet` stub tabs become real Create/Import flows.
+**Architecture:** All SSH-key crypto (generate, parse, OpenSSH-encode, fingerprint) lives in the **Rust core** via the `ssh-key` crate already in-tree (`russh::keys::ssh_key`), exposed over UniFFI and `cargo test`-verified on Linux. A pure-Swift **`IdentityService`** in `NeotildeKit` orchestrates mint → persist private key to the existing `SecretStore` → save metadata via the existing `HostStore`, behind an `IdentityMinter` protocol so the orchestration is `swift test`-verified on Linux with a fake. The real `CoreIdentityMinter` bridges to Rust (macOS-only, `BridgeTests`). The app's `ConnectionViewModel` then uses the **already-wired** `authenticatePublickey` with a stored identity, and the `IdentityPickerSheet` stub tabs become real Create/Import flows.
 
-**Tech Stack:** Rust (`ssh-key 0.7.0-rc.10` via `russh::keys::ssh_key`, UniFFI 0.31+), Swift 6 / `GlymrKit` (XCTest, swift-crypto on Linux), SwiftUI app target (macOS-CI compile gate).
+**Tech Stack:** Rust (`ssh-key 0.7.0-rc.10` via `russh::keys::ssh_key`, UniFFI 0.31+), Swift 6 / `NeotildeKit` (XCTest, swift-crypto on Linux), SwiftUI app target (macOS-CI compile gate).
 
 ## Scope
 
@@ -28,13 +28,13 @@
 
 | File | Responsibility | Test surface |
 |---|---|---|
-| `crates/glymr-ssh-core/src/keys.rs` *(create)* | `KeyMaterial` record, `KeyError`, `mint_ed25519_identity()`, `import_private_key()` | Linux `cargo test` (Critical) |
-| `crates/glymr-ssh-core/src/lib.rs` *(modify)* | register `mod keys;` | — |
-| `crates/glymr-ssh-core/Cargo.toml` *(modify)* | add `ssh-key` direct dep w/ generation+encryption features | — |
-| `crates/glymr-ssh-core/tests/fixtures/` *(create)* | committed ed25519 test key + `.pub` for import tests | — |
-| `Sources/GlymrKit/Storage/IdentityService.swift` *(create)* | `KeyMaterial` value type, `IdentityMinter` protocol, `IdentityService`, `IdentityServiceError` | Linux `swift test` (Core) |
-| `Tests/GlymrKitTests/IdentityServiceTests.swift` *(create)* | `FakeIdentityMinter` + service behavior | Linux `swift test` |
-| `App/CoreIdentityMinter.swift` *(create, macOS-only)* | `IdentityMinter` impl bridging to `GlymrSSHCoreFFI` | macOS `BridgeTests` |
+| `crates/neotilde-ssh-core/src/keys.rs` *(create)* | `KeyMaterial` record, `KeyError`, `mint_ed25519_identity()`, `import_private_key()` | Linux `cargo test` (Critical) |
+| `crates/neotilde-ssh-core/src/lib.rs` *(modify)* | register `mod keys;` | — |
+| `crates/neotilde-ssh-core/Cargo.toml` *(modify)* | add `ssh-key` direct dep w/ generation+encryption features | — |
+| `crates/neotilde-ssh-core/tests/fixtures/` *(create)* | committed ed25519 test key + `.pub` for import tests | — |
+| `Sources/NeotildeKit/Storage/IdentityService.swift` *(create)* | `KeyMaterial` value type, `IdentityMinter` protocol, `IdentityService`, `IdentityServiceError` | Linux `swift test` (Core) |
+| `Tests/NeotildeKitTests/IdentityServiceTests.swift` *(create)* | `FakeIdentityMinter` + service behavior | Linux `swift test` |
+| `App/CoreIdentityMinter.swift` *(create, macOS-only)* | `IdentityMinter` impl bridging to `NeotildeSSHCoreFFI` | macOS `BridgeTests` |
 | `Tests/BridgeTests/CoreIdentityMinterTests.swift` *(create, macOS-only)* | mint/import round-trip against real Rust | macOS CI |
 | `App/AppStores.swift` *(modify)* | expose a built `IdentityService` | compile gate |
 | `App/ConnectionViewModel.swift` *(modify)* | connect-with-identity (publickey) path | compile gate |
@@ -43,12 +43,12 @@
 ## Global Constraints
 
 - Every source/test file begins with `// SPDX-FileCopyrightText: 2026 True Positive LLC` then `// SPDX-License-Identifier: GPL-3.0-only` (Rust uses `//`; keep first two lines).
-- **No new Apple-only APIs in `GlymrKit`** — `IdentityService` and `KeyMaterial` are pure value-type Swift that compile and test on Linux. Anything touching `GlymrSSHCoreFFI`/`Security` lives in the `App/` target (macOS-only).
+- **No new Apple-only APIs in `NeotildeKit`** — `IdentityService` and `KeyMaterial` are pure value-type Swift that compile and test on Linux. Anything touching `NeotildeSSHCoreFFI`/`Security` lives in the `App/` target (macOS-only).
 - Secrets (private-key material) live **only** in `SecretStore` via `SecretRef.privateKey(identityID:)`; identity **metadata** records (public key, fingerprint) go through `HostStore`/`EncryptedRecordStore`. Never put private-key bytes in a `BlobStore` record.
 - `cargo deny check licenses` must stay green — `ssh-key` is Apache-2.0/MIT (GPL-3-compatible); do not pull an OpenSSL-tagged dep.
 - Testing tier: **Critical** for `keys.rs` (mint/import/fingerprint correctness, adversarial: malformed key, wrong/missing passphrase, unsupported algorithm). **Core** for `IdentityService` (EP + BVA, good AND bad cases, exact-value assertions).
 - Conventional commits; commit after every green step. Branch `feat/phase-2b-i-apple-key-minting`; squash-merge at the end.
-- Rust test command: `docker compose run --rm dev cargo test -p glymr-ssh-core`. Swift test command: `docker compose run --rm dev swift test --filter IdentityServiceTests`.
+- Rust test command: `docker compose run --rm dev cargo test -p neotilde-ssh-core`. Swift test command: `docker compose run --rm dev swift test --filter IdentityServiceTests`.
 
 ---
 
@@ -76,10 +76,10 @@ git commit -m "docs: Phase 2b-i Apple key-minting plan"
 The only genuinely new crypto. Lives in the Rust core because `ssh-key` (already in-tree as `russh::keys::ssh_key`) implements OpenSSH key generation, parsing, encoding, and fingerprinting correctly and is `cargo test`-able on Linux. Exposed over UniFFI for the Swift bridge.
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/Cargo.toml`
-- Create: `crates/glymr-ssh-core/src/keys.rs`
-- Modify: `crates/glymr-ssh-core/src/lib.rs`
-- Create: `crates/glymr-ssh-core/tests/fixtures/ed25519_test_key` + `…/ed25519_test_key.pub`
+- Modify: `crates/neotilde-ssh-core/Cargo.toml`
+- Create: `crates/neotilde-ssh-core/src/keys.rs`
+- Modify: `crates/neotilde-ssh-core/src/lib.rs`
+- Create: `crates/neotilde-ssh-core/tests/fixtures/ed25519_test_key` + `…/ed25519_test_key.pub`
 
 **Interfaces:**
 - Produces (UniFFI-exported, consumed by Task 3):
@@ -90,7 +90,7 @@ The only genuinely new crypto. Lives in the Rust core because `ssh-key` (already
 
 - [ ] **Step 1: Add the `ssh-key` direct dependency with generation features**
 
-Pin to the exact version already resolved for russh so the type is identical (Cargo unifies one compiled crate; adding features here also enables them for russh's re-exported `russh::keys::ssh_key`). In `crates/glymr-ssh-core/Cargo.toml`, under `[dependencies]` (alongside `russh = "0.61"`), add:
+Pin to the exact version already resolved for russh so the type is identical (Cargo unifies one compiled crate; adding features here also enables them for russh's re-exported `russh::keys::ssh_key`). In `crates/neotilde-ssh-core/Cargo.toml`, under `[dependencies]` (alongside `russh = "0.61"`), add:
 
 ```toml
 ssh-key = { version = "=0.7.0-rc.10", default-features = false, features = ["alloc", "ed25519", "ecdsa", "rsa", "p256", "p384", "encryption", "rand_core", "getrandom"] }
@@ -102,9 +102,9 @@ thiserror = "1"
 - [ ] **Step 2: Generate and commit the import test fixture**
 
 ```bash
-cd crates/glymr-ssh-core
+cd crates/neotilde-ssh-core
 mkdir -p tests/fixtures
-ssh-keygen -t ed25519 -N '' -C "glymr-test" -f tests/fixtures/ed25519_test_key
+ssh-keygen -t ed25519 -N '' -C "neotilde-test" -f tests/fixtures/ed25519_test_key
 ssh-keygen -lf tests/fixtures/ed25519_test_key.pub   # capture the SHA256:… fingerprint
 cat tests/fixtures/ed25519_test_key.pub              # capture the exact ssh-ed25519 AAAA… line
 ```
@@ -113,14 +113,14 @@ Record the printed `SHA256:…` fingerprint and the exact `.pub` line — they b
 
 - [ ] **Step 3: Write the failing tests**
 
-Create `crates/glymr-ssh-core/src/keys.rs` ending with a `#[cfg(test)] mod tests`. Paste the **exact** captured fixture values into `EXPECTED_PUBLIC` / `EXPECTED_FINGERPRINT`.
+Create `crates/neotilde-ssh-core/src/keys.rs` ending with a `#[cfg(test)] mod tests`. Paste the **exact** captured fixture values into `EXPECTED_PUBLIC` / `EXPECTED_FINGERPRINT`.
 
 ```rust
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 //! SSH identity key material: generate a fresh ed25519 keypair or import an
 //! existing OpenSSH private key, returning its OpenSSH public form + SHA256
-//! fingerprint for storage as a Glymr identity. Private bytes are returned to
+//! fingerprint for storage as a Neotilde identity. Private bytes are returned to
 //! the caller (Swift) which stores them in the Keychain-backed SecretStore;
 //! this module never persists anything.
 
@@ -146,8 +146,8 @@ pub enum KeyError {
     UnsupportedAlgorithm { algorithm: String },
 }
 
-/// Maps an ssh-key `Algorithm` to Glymr's `KeyAlgorithm` raw value, or `None`
-/// for algorithms Glymr does not model (dsa, p521, sk-*, etc.).
+/// Maps an ssh-key `Algorithm` to Neotilde's `KeyAlgorithm` raw value, or `None`
+/// for algorithms Neotilde does not model (dsa, p521, sk-*, etc.).
 fn algorithm_tag(alg: &Algorithm) -> Option<&'static str> {
     match alg {
         Algorithm::Ed25519 => Some("ed25519"),
@@ -209,7 +209,7 @@ mod tests {
 
     const FIXTURE: &str = include_str!("../tests/fixtures/ed25519_test_key");
     // Paste the EXACT values captured in Step 2:
-    const EXPECTED_PUBLIC: &str = "ssh-ed25519 AAAA…== glymr-test";
+    const EXPECTED_PUBLIC: &str = "ssh-ed25519 AAAA…== neotilde-test";
     const EXPECTED_FINGERPRINT: &str = "SHA256:…";
 
     #[test]
@@ -278,7 +278,7 @@ mod tests {
 
 - [ ] **Step 4: Register the module**
 
-In `crates/glymr-ssh-core/src/lib.rs`, add after the existing `mod` lines:
+In `crates/neotilde-ssh-core/src/lib.rs`, add after the existing `mod` lines:
 
 ```rust
 pub mod keys;
@@ -287,7 +287,7 @@ pub mod keys;
 - [ ] **Step 5: Run the tests — expect them to pass**
 
 ```bash
-docker compose run --rm dev cargo test -p glymr-ssh-core keys
+docker compose run --rm dev cargo test -p neotilde-ssh-core keys
 ```
 
 Expected: all `keys::tests::*` pass. If `mint_…` or `import_…` fail to compile on a feature, revisit Step 1's feature list.
@@ -296,20 +296,20 @@ Expected: all `keys::tests::*` pass. If `mint_…` or `import_…` fail to compi
 
 ```bash
 docker compose run --rm dev cargo deny check licenses
-git add crates/glymr-ssh-core/Cargo.toml crates/glymr-ssh-core/src/keys.rs \
-        crates/glymr-ssh-core/src/lib.rs crates/glymr-ssh-core/tests/fixtures Cargo.lock
+git add crates/neotilde-ssh-core/Cargo.toml crates/neotilde-ssh-core/src/keys.rs \
+        crates/neotilde-ssh-core/src/lib.rs crates/neotilde-ssh-core/tests/fixtures Cargo.lock
 git commit -m "feat: ssh key minting + import in the Rust core"
 ```
 
 ---
 
-### Task 2: `IdentityService` orchestration (GlymrKit, Linux-tested)
+### Task 2: `IdentityService` orchestration (NeotildeKit, Linux-tested)
 
 Pure-Swift orchestration over the **existing** `HostStore` (identity metadata CRUD) and `SecretStore` (private-key storage), behind an `IdentityMinter` protocol so the whole flow tests on Linux with a fake. This is the heart of the feature and where the real assurance lives.
 
 **Files:**
-- Create: `Sources/GlymrKit/Storage/IdentityService.swift`
-- Test: `Tests/GlymrKitTests/IdentityServiceTests.swift`
+- Create: `Sources/NeotildeKit/Storage/IdentityService.swift`
+- Test: `Tests/NeotildeKitTests/IdentityServiceTests.swift`
 
 **Interfaces:**
 - Consumes (exist): `Identity`, `IdentityFlavor`, `KeyAlgorithm`, `BiometricPolicy` (`Model/Identity.swift`); `HostStore.saveIdentity(_:)`, `.identity(id:)`, `.allIdentities()` (`Storage/HostStore.swift`); `SecretStore.setSecret(_:for:)`, `.getSecret(_:)`, `SecretRef.privateKey(identityID:)` (`Storage/SecretStore.swift`).
@@ -328,11 +328,11 @@ Pure-Swift orchestration over the **existing** `HostStore` (identity metadata CR
 - [ ] **Step 1: Write the failing tests**
 
 ```swift
-// Tests/GlymrKitTests/IdentityServiceTests.swift
+// Tests/NeotildeKitTests/IdentityServiceTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 #if canImport(CryptoKit)
 import CryptoKit
 #else
@@ -443,7 +443,7 @@ Expected: FAIL — `KeyMaterial`/`IdentityService` undefined.
 - [ ] **Step 3: Implement `IdentityService.swift`**
 
 ```swift
-// Sources/GlymrKit/Storage/IdentityService.swift
+// Sources/NeotildeKit/Storage/IdentityService.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
@@ -465,7 +465,7 @@ public struct KeyMaterial: Equatable, Sendable {
     }
 }
 
-/// Generates and parses SSH key material. The Linux-testable seam: `GlymrKit`
+/// Generates and parses SSH key material. The Linux-testable seam: `NeotildeKit`
 /// holds only the protocol; the concrete `CoreIdentityMinter` (App target,
 /// macOS) bridges to the Rust core.
 public protocol IdentityMinter {
@@ -554,7 +554,7 @@ Expected: PASS (5/5).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Storage/IdentityService.swift Tests/GlymrKitTests/IdentityServiceTests.swift
+git add Sources/NeotildeKit/Storage/IdentityService.swift Tests/NeotildeKitTests/IdentityServiceTests.swift
 git commit -m "feat: IdentityService — mint/import + persist identities (Linux-tested)"
 ```
 
@@ -569,7 +569,7 @@ The real `IdentityMinter` that calls the Rust core. macOS-only (the bridge modul
 - Create: `Tests/BridgeTests/CoreIdentityMinterTests.swift`
 
 **Interfaces:**
-- Consumes: `GlymrSSHCoreFFI.mintEd25519Identity()`, `GlymrSSHCoreFFI.importPrivateKey(openssh:passphrase:)`, `GlymrSSHCoreFFI.KeyMaterial`, `GlymrSSHCoreFFI.KeyError` (generated from Task 1); `KeyMaterial`, `IdentityMinter`, `KeyAlgorithm` (Task 2).
+- Consumes: `NeotildeSSHCoreFFI.mintEd25519Identity()`, `NeotildeSSHCoreFFI.importPrivateKey(openssh:passphrase:)`, `NeotildeSSHCoreFFI.KeyMaterial`, `NeotildeSSHCoreFFI.KeyError` (generated from Task 1); `KeyMaterial`, `IdentityMinter`, `KeyAlgorithm` (Task 2).
 - Produces: `struct CoreIdentityMinter: IdentityMinter` (consumed by Task 4).
 
 - [ ] **Step 1: Write the bridge**
@@ -579,28 +579,28 @@ The real `IdentityMinter` that calls the Rust core. macOS-only (the bridge modul
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import GlymrKit
-import GlymrSSHCoreFFI
+import NeotildeKit
+import NeotildeSSHCoreFFI
 
 /// `IdentityMinter` backed by the Rust SSH core. Translates the UniFFI
-/// `KeyMaterial`/`KeyError` into GlymrKit's pure value types. Errors propagate
+/// `KeyMaterial`/`KeyError` into NeotildeKit's pure value types. Errors propagate
 /// as-is; `IdentityService` wraps them in `IdentityServiceError.minting`.
 struct CoreIdentityMinter: IdentityMinter {
-    func mintEd25519() throws -> GlymrKit.KeyMaterial {
-        try map(GlymrSSHCoreFFI.mintEd25519Identity())
+    func mintEd25519() throws -> NeotildeKit.KeyMaterial {
+        try map(NeotildeSSHCoreFFI.mintEd25519Identity())
     }
 
-    func importPrivateKey(_ openssh: String, passphrase: String?) throws -> GlymrKit.KeyMaterial {
-        try map(GlymrSSHCoreFFI.importPrivateKey(openssh: openssh, passphrase: passphrase))
+    func importPrivateKey(_ openssh: String, passphrase: String?) throws -> NeotildeKit.KeyMaterial {
+        try map(NeotildeSSHCoreFFI.importPrivateKey(openssh: openssh, passphrase: passphrase))
     }
 
     /// Maps an FFI `KeyMaterial`; an unmodeled algorithm string is a programmer
     /// error (the Rust side already rejects them) but is surfaced, not crashed.
-    private func map(_ m: GlymrSSHCoreFFI.KeyMaterial) throws -> GlymrKit.KeyMaterial {
+    private func map(_ m: NeotildeSSHCoreFFI.KeyMaterial) throws -> NeotildeKit.KeyMaterial {
         guard let alg = KeyAlgorithm(rawValue: m.algorithm) else {
             throw IdentityServiceError.minting("unsupported algorithm: \(m.algorithm)")
         }
-        return GlymrKit.KeyMaterial(
+        return NeotildeKit.KeyMaterial(
             privateKeyOpenSSH: m.privateKeyOpenSSH, publicKeyOpenSSH: m.publicKeyOpenSSH,
             fingerprintSHA256: m.fingerprintSha256, algorithm: alg)
     }
@@ -616,27 +616,27 @@ struct CoreIdentityMinter: IdentityMinter {
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-import GlymrSSHCoreFFI
+import NeotildeSSHCoreFFI
 
 final class CoreIdentityMinterTests: XCTestCase {
     func testMintProducesParsableEd25519() throws {
-        let m = try GlymrSSHCoreFFI.mintEd25519Identity()
+        let m = try NeotildeSSHCoreFFI.mintEd25519Identity()
         XCTAssertEqual(m.algorithm, "ed25519")
         XCTAssertTrue(m.publicKeyOpenSSH.hasPrefix("ssh-ed25519 "))
         XCTAssertTrue(m.fingerprintSha256.hasPrefix("SHA256:"))
         // Round-trips: the minted private key re-imports to the same public key.
-        let reparsed = try GlymrSSHCoreFFI.importPrivateKey(openssh: m.privateKeyOpenSSH, passphrase: nil)
+        let reparsed = try NeotildeSSHCoreFFI.importPrivateKey(openssh: m.privateKeyOpenSSH, passphrase: nil)
         XCTAssertEqual(reparsed.publicKeyOpenSSH, m.publicKeyOpenSSH)
         XCTAssertEqual(reparsed.fingerprintSha256, m.fingerprintSha256)
     }
 
     func testImportRejectsGarbage() {
-        XCTAssertThrowsError(try GlymrSSHCoreFFI.importPrivateKey(openssh: "nope", passphrase: nil))
+        XCTAssertThrowsError(try NeotildeSSHCoreFFI.importPrivateKey(openssh: "nope", passphrase: nil))
     }
 }
 ```
 
-> This test targets `GlymrSSHCoreFFI` directly (the `BridgeTests` target already links it). `CoreIdentityMinter` itself is exercised through the app in Tasks 4–5; its only logic is the value mapping, covered by the round-trip's field assertions.
+> This test targets `NeotildeSSHCoreFFI` directly (the `BridgeTests` target already links it). `CoreIdentityMinter` itself is exercised through the app in Tasks 4–5; its only logic is the value mapping, covered by the round-trip's field assertions.
 
 - [ ] **Step 3: Commit (CI builds/runs it on macOS)**
 
@@ -891,5 +891,5 @@ Once CI is green and review is clean, squash-merge the PR to `main` and delete t
 
 - **Spec coverage:** `identities-keys-management` create/import sub-flow → Tasks 2/5; private-key-in-Keychain + metadata-in-records storage backbone (`host-config-model`) → Task 2 (`IdentityService.persist`); publickey auth → Task 4; SE flavor + CloudKit explicitly deferred with rationale (Scope). Standalone Identities & Keys management screens are Phase 5 (out of scope, noted).
 - **Placeholder scan:** Two intentional capture-then-inline values in Task 1 (`EXPECTED_PUBLIC`/`EXPECTED_FINGERPRINT`) — the plan gives the exact `ssh-keygen` commands to produce them; this is a real-fixture instruction, not a TODO. No other placeholders.
-- **Type consistency:** `KeyMaterial` (GlymrKit, `fingerprintSHA256`) vs `GlymrSSHCoreFFI.KeyMaterial` (`fingerprintSha256`) are distinct types mapped in Task 3 — flagged with a verify-the-generated-name note. `IdentityServiceError.minting(String)` (single case — no unused SE case, YAGNI) raised in Task 2, consumed in Task 5's `friendly(_:)`. `IdentityMinter` method names (`mintEd25519`, `importPrivateKey`) consistent across Tasks 2/3.
+- **Type consistency:** `KeyMaterial` (NeotildeKit, `fingerprintSHA256`) vs `NeotildeSSHCoreFFI.KeyMaterial` (`fingerprintSha256`) are distinct types mapped in Task 3 — flagged with a verify-the-generated-name note. `IdentityServiceError.minting(String)` (single case — no unused SE case, YAGNI) raised in Task 2, consumed in Task 5's `friendly(_:)`. `IdentityMinter` method names (`mintEd25519`, `importPrivateKey`) consistent across Tasks 2/3.
 - **Open verification points for the implementer (flagged inline):** exact `ssh-key 0.7.0-rc.10` feature set for `PrivateKey::random`/`encrypt`/`decrypt`; UniFFI-generated Swift names (`fingerprintSha256`, `privateKeyOpenssh` param label).

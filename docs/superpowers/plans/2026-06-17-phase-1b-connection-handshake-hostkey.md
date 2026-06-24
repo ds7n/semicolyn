@@ -4,9 +4,9 @@
 
 **Goal:** Open a TCP+SSH transport connection to a host using the Phase-1a algorithm allowlist, route the server host-key decision through an async `HostKeyVerifier` delegate (a UniFFI foreign trait — Swift implements it on device; a Rust double implements it in Linux tests), detect Tier-3 negotiated algorithms via russh's `kex_done` hook, and expose an async `connect()` over UniFFI. Integration-tested against a containerized `sshd`.
 
-**Architecture:** A new `connection` module in `glymr-ssh-core`. A `ClientHandler` implements russh's `client::Handler`: its `check_server_key` calls the injected `Arc<dyn HostKeyVerifier>` (passing the host label, key type, and SHA256 fingerprint) and trusts iff the delegate returns `true`; its `kex_done` records the negotiated algorithm wire names and filters them through Phase-1a's `is_tier3`. A pure-Rust `connect_core(...)` is the testable seam (Linux integration tests call it with a Rust test-double verifier against a real `sshd`); a thin `#[uniffi::export(async_runtime = "tokio")]` wrapper exposes it to Swift. The crypto backend stays russh's default (`aws-lc-rs`), guarded by a `cargo deny` license gate.
+**Architecture:** A new `connection` module in `neotilde-ssh-core`. A `ClientHandler` implements russh's `client::Handler`: its `check_server_key` calls the injected `Arc<dyn HostKeyVerifier>` (passing the host label, key type, and SHA256 fingerprint) and trusts iff the delegate returns `true`; its `kex_done` records the negotiated algorithm wire names and filters them through Phase-1a's `is_tier3`. A pure-Rust `connect_core(...)` is the testable seam (Linux integration tests call it with a Rust test-double verifier against a real `sshd`); a thin `#[uniffi::export(async_runtime = "tokio")]` wrapper exposes it to Swift. The crypto backend stays russh's default (`aws-lc-rs`), guarded by a `cargo deny` license gate.
 
-**Tech Stack:** Rust (stable), `russh` 0.61.2, `tokio` (rt-multi-thread/net/macros/sync), `async-trait`, `uniffi` 0.31 (`tokio` async feature), `cargo-deny`, the Glymr dev container + a containerized `sshd`.
+**Tech Stack:** Rust (stable), `russh` 0.61.2, `tokio` (rt-multi-thread/net/macros/sync), `async-trait`, `uniffi` 0.31 (`tokio` async feature), `cargo-deny`, the Neotilde dev container + a containerized `sshd`.
 
 ## Global Constraints
 
@@ -43,10 +43,10 @@
 
 | File | Responsibility |
 |---|---|
-| `crates/glymr-ssh-core/Cargo.toml` | Add `tokio`, `async-trait`; enable `uniffi` `tokio` feature |
-| `crates/glymr-ssh-core/src/lib.rs` | Add `mod connection;` |
-| `crates/glymr-ssh-core/src/connection.rs` | `HostKeyVerifier` trait, `HostKeyInfo`, `ConnectError`, `ClientHandler`, `connect_core`, `Connection`, `connect` (UniFFI) |
-| `crates/glymr-ssh-core/tests/connect_integration.rs` | Integration tests vs `sshd` (Linux) |
+| `crates/neotilde-ssh-core/Cargo.toml` | Add `tokio`, `async-trait`; enable `uniffi` `tokio` feature |
+| `crates/neotilde-ssh-core/src/lib.rs` | Add `mod connection;` |
+| `crates/neotilde-ssh-core/src/connection.rs` | `HostKeyVerifier` trait, `HostKeyInfo`, `ConnectError`, `ClientHandler`, `connect_core`, `Connection`, `connect` (UniFFI) |
+| `crates/neotilde-ssh-core/tests/connect_integration.rs` | Integration tests vs `sshd` (Linux) |
 | `docker-compose.yml` | Add `sshd` (modern) + `sshd-legacy` (Tier-3) services + dev env vars |
 | `docker/Dockerfile.sshd`, `docker/sshd-legacy.conf` | sshd fixtures |
 | `deny.toml` | `cargo deny` license policy |
@@ -58,9 +58,9 @@
 The verifier trait + supporting types, plus the tokio/uniffi wiring. No network yet — a Rust unit test exercises a double implementing the trait.
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/Cargo.toml`
-- Modify: `crates/glymr-ssh-core/src/lib.rs`
-- Create: `crates/glymr-ssh-core/src/connection.rs`
+- Modify: `crates/neotilde-ssh-core/Cargo.toml`
+- Modify: `crates/neotilde-ssh-core/src/lib.rs`
+- Create: `crates/neotilde-ssh-core/src/connection.rs`
 
 **Interfaces:**
 - Produces: `pub trait HostKeyVerifier: Send + Sync { async fn verify(&self, info: HostKeyInfo) -> bool }` (UniFFI foreign trait)
@@ -69,7 +69,7 @@ The verifier trait + supporting types, plus the tokio/uniffi wiring. No network 
 
 - [ ] **Step 1: Add dependencies**
 
-In `crates/glymr-ssh-core/Cargo.toml`, change the `uniffi` line and add two deps under `[dependencies]`:
+In `crates/neotilde-ssh-core/Cargo.toml`, change the `uniffi` line and add two deps under `[dependencies]`:
 ```toml
 uniffi = { version = "0.31", features = ["cli", "tokio"] }
 russh = "0.61"
@@ -79,14 +79,14 @@ async-trait = "0.1"
 
 - [ ] **Step 2: Register the module**
 
-In `crates/glymr-ssh-core/src/lib.rs`, add after `mod algorithms;`:
+In `crates/neotilde-ssh-core/src/lib.rs`, add after `mod algorithms;`:
 ```rust
 mod connection;
 ```
 
 - [ ] **Step 3: Write the verifier trait, types, and a failing unit test**
 
-Create `crates/glymr-ssh-core/src/connection.rs`:
+Create `crates/neotilde-ssh-core/src/connection.rs`:
 ```rust
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -165,13 +165,13 @@ thiserror = "2"
 
 - [ ] **Step 4: Run the test to verify it compiles and passes**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core verifier_double`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core verifier_double`
 Expected: PASS. (This proves the async foreign-trait + tokio wiring compiles end to end.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/Cargo.toml Cargo.lock crates/glymr-ssh-core/src/lib.rs crates/glymr-ssh-core/src/connection.rs
+git add crates/neotilde-ssh-core/Cargo.toml Cargo.lock crates/neotilde-ssh-core/src/lib.rs crates/neotilde-ssh-core/src/connection.rs
 git commit -m "feat: add async host-key verifier delegate + connection error types"
 ```
 
@@ -184,8 +184,8 @@ The `sshd` test server, the `ClientHandler`, and `connect_core`. Integration-tes
 **Files:**
 - Create: `docker/Dockerfile.sshd`
 - Modify: `docker-compose.yml`
-- Modify: `crates/glymr-ssh-core/src/connection.rs`
-- Create: `crates/glymr-ssh-core/tests/connect_integration.rs`
+- Modify: `crates/neotilde-ssh-core/src/connection.rs`
+- Create: `crates/neotilde-ssh-core/tests/connect_integration.rs`
 
 **Interfaces:**
 - Consumes: `build_preferred` (Phase 1a), `HostKeyVerifier`/`HostKeyInfo`/`ConnectError` (Task 1).
@@ -216,21 +216,21 @@ In `docker-compose.yml`, add two services under `services:` and two env vars to 
     build:
       context: docker
       dockerfile: Dockerfile.sshd
-    image: glymr-sshd
+    image: neotilde-sshd
 
   sshd-legacy:
     build:
       context: docker
       dockerfile: Dockerfile.sshd
-    image: glymr-sshd
+    image: neotilde-sshd
     command: ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_legacy.conf"]
     volumes:
       - ./docker/sshd-legacy.conf:/etc/ssh/sshd_legacy.conf:ro
 ```
 And under the existing `dev` service's `environment:` block, add:
 ```yaml
-      GLYMR_TEST_SSHD: sshd:22
-      GLYMR_TEST_SSHD_LEGACY: sshd-legacy:22
+      NEOTILDE_TEST_SSHD: sshd:22
+      NEOTILDE_TEST_SSHD_LEGACY: sshd-legacy:22
 ```
 (`sshd-legacy.conf` is created in Task 3. The `sshd-legacy` service won't start until then — Task 2 only brings up `sshd`.)
 
@@ -241,12 +241,12 @@ Expected: the `sshd` container is running on the compose network, reachable as `
 
 - [ ] **Step 3: Write the failing integration tests**
 
-Create `crates/glymr-ssh-core/tests/connect_integration.rs`:
+Create `crates/neotilde-ssh-core/tests/connect_integration.rs`:
 ```rust
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 use std::sync::{Arc, Mutex};
-use glymr_ssh_core::connection::{connect_core, ConnectError, HostKeyInfo, HostKeyVerifier};
+use neotilde_ssh_core::connection::{connect_core, ConnectError, HostKeyInfo, HostKeyVerifier};
 
 /// Records what the delegate was shown, and returns a fixed decision.
 struct RecordingVerifier {
@@ -262,13 +262,13 @@ impl HostKeyVerifier for RecordingVerifier {
 }
 
 fn sshd_addr() -> Option<String> {
-    std::env::var("GLYMR_TEST_SSHD").ok()
+    std::env::var("NEOTILDE_TEST_SSHD").ok()
 }
 
 #[tokio::test]
 async fn connect_presents_well_formed_host_key_then_trusts() {
     let Some(addr) = sshd_addr() else {
-        eprintln!("skipping: set GLYMR_TEST_SSHD (run via docker compose)");
+        eprintln!("skipping: set NEOTILDE_TEST_SSHD (run via docker compose)");
         return;
     };
     let v = Arc::new(RecordingVerifier { trust: true, seen: Mutex::new(None) });
@@ -283,7 +283,7 @@ async fn connect_presents_well_formed_host_key_then_trusts() {
 #[tokio::test]
 async fn connect_aborts_when_delegate_rejects() {
     let Some(addr) = sshd_addr() else {
-        eprintln!("skipping: set GLYMR_TEST_SSHD");
+        eprintln!("skipping: set NEOTILDE_TEST_SSHD");
         return;
     };
     let v = Arc::new(RecordingVerifier { trust: false, seen: Mutex::new(None) });
@@ -291,7 +291,7 @@ async fn connect_aborts_when_delegate_rejects() {
     assert!(matches!(err, ConnectError::HostKeyRejected), "got {err:?}");
 }
 ```
-This needs `connection` to be a public module and `glymr-ssh-core` usable as a lib from `tests/`. In `crates/glymr-ssh-core/src/lib.rs`, change `mod connection;` to `pub mod connection;` (and `mod algorithms;` stays private). Add `async-trait` and `tokio` as `[dev-dependencies]` too (integration tests are a separate crate):
+This needs `connection` to be a public module and `neotilde-ssh-core` usable as a lib from `tests/`. In `crates/neotilde-ssh-core/src/lib.rs`, change `mod connection;` to `pub mod connection;` (and `mod algorithms;` stays private). Add `async-trait` and `tokio` as `[dev-dependencies]` too (integration tests are a separate crate):
 ```toml
 [dev-dependencies]
 async-trait = "0.1"
@@ -300,12 +300,12 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 - [ ] **Step 4: Run the integration tests to verify they fail**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test connect_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test connect_integration`
 Expected: FAIL — `cannot find function 'connect_core'`.
 
 - [ ] **Step 5: Implement `ClientHandler`, `connect_core`, and `Connection`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add above the `#[cfg(test)]` module:
+In `crates/neotilde-ssh-core/src/connection.rs`, add above the `#[cfg(test)]` module:
 ```rust
 use std::sync::Arc;
 use russh::client;
@@ -431,13 +431,13 @@ Err(e) => {
 
 - [ ] **Step 6: Run the integration tests to verify they pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test connect_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test connect_integration`
 Expected: PASS — both `connect_presents_well_formed_host_key_then_trusts` and `connect_aborts_when_delegate_rejects`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/Cargo.toml Cargo.lock crates/glymr-ssh-core/src/lib.rs crates/glymr-ssh-core/src/connection.rs crates/glymr-ssh-core/tests/connect_integration.rs docker/Dockerfile.sshd docker-compose.yml
+git add crates/neotilde-ssh-core/Cargo.toml Cargo.lock crates/neotilde-ssh-core/src/lib.rs crates/neotilde-ssh-core/src/connection.rs crates/neotilde-ssh-core/tests/connect_integration.rs docker/Dockerfile.sshd docker-compose.yml
 git commit -m "feat: add SSH connect + handshake + host-key verification delegate"
 ```
 
@@ -449,8 +449,8 @@ Implement `kex_done` to record negotiated wire names and filter through `is_tier
 
 **Files:**
 - Create: `docker/sshd-legacy.conf`
-- Modify: `crates/glymr-ssh-core/src/connection.rs`
-- Modify: `crates/glymr-ssh-core/tests/connect_integration.rs`
+- Modify: `crates/neotilde-ssh-core/src/connection.rs`
+- Modify: `crates/neotilde-ssh-core/tests/connect_integration.rs`
 
 **Interfaces:**
 - Consumes: `algorithms::is_tier3` (Phase 1a), `Connection::tier3_in_use` (Task 2).
@@ -474,12 +474,12 @@ Expected: `sshd-legacy:22` reachable, offering ssh-rsa + dh-group14-sha1 + hmac-
 
 - [ ] **Step 3: Write the failing Tier-3 integration test**
 
-Add to `crates/glymr-ssh-core/tests/connect_integration.rs`:
+Add to `crates/neotilde-ssh-core/tests/connect_integration.rs`:
 ```rust
 #[tokio::test]
 async fn tier3_algorithms_are_detected_when_negotiated() {
-    let Some(addr) = std::env::var("GLYMR_TEST_SSHD_LEGACY").ok() else {
-        eprintln!("skipping: set GLYMR_TEST_SSHD_LEGACY");
+    let Some(addr) = std::env::var("NEOTILDE_TEST_SSHD_LEGACY").ok() else {
+        eprintln!("skipping: set NEOTILDE_TEST_SSHD_LEGACY");
         return;
     };
     // allow_deprecated so build_preferred offers the Tier-3 algorithms the
@@ -495,8 +495,8 @@ async fn tier3_algorithms_are_detected_when_negotiated() {
 
 #[tokio::test]
 async fn modern_session_flags_no_tier3() {
-    let Some(addr) = std::env::var("GLYMR_TEST_SSHD").ok() else {
-        eprintln!("skipping: set GLYMR_TEST_SSHD");
+    let Some(addr) = std::env::var("NEOTILDE_TEST_SSHD").ok() else {
+        eprintln!("skipping: set NEOTILDE_TEST_SSHD");
         return;
     };
     let v = Arc::new(RecordingVerifier { trust: true, seen: Mutex::new(None) });
@@ -507,12 +507,12 @@ async fn modern_session_flags_no_tier3() {
 
 - [ ] **Step 4: Run the test to verify it fails**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test connect_integration tier3_algorithms_are_detected`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test connect_integration tier3_algorithms_are_detected`
 Expected: FAIL — `tier3_in_use()` is empty because `kex_done` isn't recording yet.
 
 - [ ] **Step 5: Implement `kex_done`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add this method inside `impl client::Handler for ClientHandler` (after `check_server_key`):
+In `crates/neotilde-ssh-core/src/connection.rs`, add this method inside `impl client::Handler for ClientHandler` (after `check_server_key`):
 ```rust
     async fn kex_done(
         &mut self,
@@ -541,13 +541,13 @@ In `crates/glymr-ssh-core/src/connection.rs`, add this method inside `impl clien
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test connect_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test connect_integration`
 Expected: PASS — all four integration tests (including `modern_session_flags_no_tier3`).
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/src/connection.rs crates/glymr-ssh-core/tests/connect_integration.rs docker/sshd-legacy.conf docker-compose.yml
+git add crates/neotilde-ssh-core/src/connection.rs crates/neotilde-ssh-core/tests/connect_integration.rs docker/sshd-legacy.conf docker-compose.yml
 git commit -m "feat: detect Tier-3 negotiated algorithms via kex_done"
 ```
 
@@ -558,7 +558,7 @@ git commit -m "feat: detect Tier-3 negotiated algorithms via kex_done"
 Expose `connect` over UniFFI (async, tokio) and lock the crypto backend with a license gate.
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/src/connection.rs`
+- Modify: `crates/neotilde-ssh-core/src/connection.rs`
 - Create: `deny.toml`
 
 **Interfaces:**
@@ -566,7 +566,7 @@ Expose `connect` over UniFFI (async, tokio) and lock the crypto backend with a l
 
 - [ ] **Step 1: Add the UniFFI async wrapper**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add below `connect_core`:
+In `crates/neotilde-ssh-core/src/connection.rs`, add below `connect_core`:
 ```rust
 /// UniFFI entry point: connect to `addr` ("host:port"), delegating host-key
 /// trust to the foreign `verifier`. Async over the tokio runtime.
@@ -585,14 +585,14 @@ pub async fn connect(
 
 - [ ] **Step 2: Verify the crate still builds and all tests pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core`
 Expected: PASS (unit tests; the integration tests need the sshd services up — run them too if the services are running).
 
 - [ ] **Step 3: Add the cargo-deny license policy**
 
 Create `deny.toml` at the repo root:
 ```toml
-# Glymr is GPL-3.0-only. Every dependency must resolve to a GPL-3-compatible
+# Neotilde is GPL-3.0-only. Every dependency must resolve to a GPL-3-compatible
 # license. aws-lc-rs is GPL-3-compatible since AWS-LC relicensed its
 # OpenSSL-derived sources to Apache-2.0 (PR #3091). This gate fails if an
 # OpenSSL-licensed crate (e.g. an old aws-lc-sys) sneaks back in.
@@ -623,7 +623,7 @@ Expected: `licenses ok`, `bans ok` — confirming no GPL-incompatible license an
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/src/connection.rs deny.toml
+git add crates/neotilde-ssh-core/src/connection.rs deny.toml
 git commit -m "feat: export async connect over UniFFI + cargo-deny license gate"
 ```
 

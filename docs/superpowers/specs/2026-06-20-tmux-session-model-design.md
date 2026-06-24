@@ -12,7 +12,7 @@ slices; SwiftTerm content and SwiftUI rendering are macOS-gated.
 
 ## Goal
 
-Maintain the in-memory *structure* of the single tmux session Glymr is attached
+Maintain the in-memory *structure* of the single tmux session Neotilde is attached
 to — its windows, each window's pane-geometry tree and active pane, the active
 window, and session identity / ended-state — by applying parser events. This is
 the model the native pane UI binds to. Keeping it a pure, Linux-testable value
@@ -20,7 +20,7 @@ type de-risks the rendering layer before any macOS UI work.
 
 ## Placement & representation
 
-**Swift, in `Sources/GlymrKit/Tmux/`.** A **value-type `struct TmuxSessionState`
+**Swift, in `Sources/NeotildeKit/Tmux/`.** A **value-type `struct TmuxSessionState`
 with `mutating func apply(_ event: ControlModeEvent)`** — not an observable
 class. The state logic must be Linux-testable (feed events → assert state); a
 pure value type is trivially testable with no dependency on the `Observation`
@@ -36,8 +36,8 @@ platform-agnostic.
 - **Does NOT own:** terminal *content*. `%output` bytes and scrollback belong to
   SwiftTerm, wired by the controller. The model ignores content and protocol
   events; it reacts only to structural ones.
-- **One session per connection** (per [[2026-06-17-tmux-session-design]]: Glymr
-  attaches to one `glymr-<accountHash>`). The model represents that single
+- **One session per connection** (per [[2026-06-17-tmux-session-design]]: Neotilde
+  attaches to one `neotilde-<accountHash>`). The model represents that single
   attached session, not a multi-session manager.
 
 The controller's loop is therefore: feed every event to `model.apply(_:)` for
@@ -146,4 +146,4 @@ already-validated parser event stream). EP + lifecycle + adversarial-ignore:
   consumer of that parser's events; the two together form the read path of the
   tmux session engine.
 - [[2026-06-17-tmux-session-design]] — the single attached session this model
-  represents is the `glymr-<accountHash>` session named there.
+  represents is the `neotilde-<accountHash>` session named there.

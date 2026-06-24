@@ -4,14 +4,14 @@
 
 **Goal:** Render a tmux window's **native pane layout** — one SwiftTerm view per leaf pane, positioned from `visibleLayout` geometry, with a bronze border on the active pane — and let the user **switch between tmux windows**, with the terminal size propagated back to tmux so it re-lays-out.
 
-**Architecture:** Plan A attached `tmux -CC` and rendered only the active pane in the single `TerminalScreen`. Plan B generalizes: `TmuxRuntime` routes **every** pane's `%output` (keyed by `PaneID`) and publishes the `TmuxSessionState` so the UI reacts to layout/window changes. A pure `paneRects(in:cellWidth:cellHeight:)` function (GlymrKit, Linux-tested) turns a `PaneLayout` into positioned rects; a new `TmuxPaneContainer` (UIKit-backed) hosts an N-`TerminalView` grid from those rects and feeds each pane its bytes; a window-tab strip drives `select-window`; container size changes send `refresh-client -C` so tmux re-tiles.
+**Architecture:** Plan A attached `tmux -CC` and rendered only the active pane in the single `TerminalScreen`. Plan B generalizes: `TmuxRuntime` routes **every** pane's `%output` (keyed by `PaneID`) and publishes the `TmuxSessionState` so the UI reacts to layout/window changes. A pure `paneRects(in:cellWidth:cellHeight:)` function (NeotildeKit, Linux-tested) turns a `PaneLayout` into positioned rects; a new `TmuxPaneContainer` (UIKit-backed) hosts an N-`TerminalView` grid from those rects and feeds each pane its bytes; a window-tab strip drives `select-window`; container size changes send `refresh-client -C` so tmux re-tiles.
 
-**Tech Stack:** Swift 6 `GlymrKit` (pure geometry + command encoder, XCTest/Linux), the SwiftUI/UIKit app target + SwiftTerm + `GlymrSSHCoreFFI` bridge (macOS-CI compile gate).
+**Tech Stack:** Swift 6 `NeotildeKit` (pure geometry + command encoder, XCTest/Linux), the SwiftUI/UIKit app target + SwiftTerm + `NeotildeSSHCoreFFI` bridge (macOS-CI compile gate).
 
 ## Scope
 
 **This plan (Phase 3 Plan B):**
-- Pure `paneRects` geometry (cells → positioned rects) + `TmuxCommand.refreshClientSize` encoder — GlymrKit, Linux-tested.
+- Pure `paneRects` geometry (cells → positioned rects) + `TmuxCommand.refreshClientSize` encoder — NeotildeKit, Linux-tested.
 - `TmuxRuntime`: per-pane output routing + observable session state + `selectWindow` + `setClientSize`.
 - `TmuxPaneContainer`: N SwiftTerm views laid out from `paneRects`, per-pane byte feed, **bronze border on the active pane**, input from the active pane.
 - **Multi-window** navigation: a window-tab strip (per the user's "multi-window now" decision), tap → `select-window`.
@@ -19,7 +19,7 @@
 
 **Deferred (NOT this plan):**
 - **Terminal feedback/UX polish → Plan C:** visual bell halo, haptic bell, mouse-mode passthrough + bronze-dot indicator, DECSCUSR cursor shape, per-pane pinch-to-zoom font, URL tap-to-open, OSC 52 clipboard, OSC 0/1/2 titles, port-forward status, Terminal settings sub-screen.
-- **Manual pane switching** — per the user's decision, the active pane follows only tmux's own changes (no Glymr-side pane-switch gesture); the keybar "pane pill" is Phase 4. (Window switching IS in scope.)
+- **Manual pane switching** — per the user's decision, the active pane follows only tmux's own changes (no Neotilde-side pane-switch gesture); the keybar "pane pill" is Phase 4. (Window switching IS in scope.)
 - **Context-detection state machine + mid-session tmux-crash red banner → Plan D.**
 - **Pane split/new-window/kill UI** (the encoders exist; the gestures/buttons are Phase 4 keybar / later).
 - Zoomed-pane handling beyond honoring `visibleLayout` (tmux already collapses a zoomed window's `visibleLayout` to the single zoomed pane — the renderer just renders whatever `visibleLayout` contains, so zoom "works" for free; no zoom toggle UI here).
@@ -28,8 +28,8 @@
 
 | File | Responsibility | Test surface |
 |---|---|---|
-| `Sources/GlymrKit/Tmux/PaneRects.swift` *(create)* | pure `PaneRect` + `paneRects(in:cellWidth:cellHeight:)` (cells → rects) | Linux `swift test` |
-| `Sources/GlymrKit/Tmux/TmuxCommand.swift` *(modify)* | add `refreshClientSize(width:height:) -> String?` | Linux `swift test` |
+| `Sources/NeotildeKit/Tmux/PaneRects.swift` *(create)* | pure `PaneRect` + `paneRects(in:cellWidth:cellHeight:)` (cells → rects) | Linux `swift test` |
+| `Sources/NeotildeKit/Tmux/TmuxCommand.swift` *(modify)* | add `refreshClientSize(width:height:) -> String?` | Linux `swift test` |
 | `App/TmuxRuntime.swift` *(modify)* | per-pane output routing, observable state, `selectWindow`, `setClientSize` | macOS compile |
 | `App/TmuxPaneContainer.swift` *(create)* | `UIViewRepresentable` hosting N `TerminalView`s from `paneRects`, active border, per-pane feed + input | macOS compile |
 | `App/WindowTabStrip.swift` *(create)* | SwiftUI strip of window tabs → `select-window` | macOS compile |
@@ -39,10 +39,10 @@
 ## Global Constraints
 
 - Every source/test file begins with `// SPDX-FileCopyrightText: 2026 True Positive LLC` then `// SPDX-License-Identifier: GPL-3.0-only`.
-- **No Apple-only APIs in `GlymrKit`** — `PaneRects.swift` and the `TmuxCommand` addition are pure value-type Swift, Linux-tested (use plain `Double` rects, NOT `CGRect` — CoreGraphics is unavailable on Linux). UIKit/SwiftTerm/FFI code lives only in `App/`.
-- **No inline hex in UI — colors only via theme tokens** (`Color(theme.…)`). The active-pane border uses the bronze accent token (`theme.accent.primary` — confirm the exact path in `Sources/GlymrKit/Theme`).
-- **Tmux owns geometry.** Glymr never guesses layout; it renders `TmuxWindow.visibleLayout` exactly and tells tmux its client size via `refresh-client -C` so tmux recomputes. Pane geometry is in **cells** (`Geometry.w/h/x/y: UInt16`); the renderer multiplies by the cell metrics.
-- Input goes to tmux's **active pane** only (`send-keys -t <activePane>`); the active pane is whatever tmux reports (`TmuxWindow.activePane`), never chosen Glymr-side in this plan.
+- **No Apple-only APIs in `NeotildeKit`** — `PaneRects.swift` and the `TmuxCommand` addition are pure value-type Swift, Linux-tested (use plain `Double` rects, NOT `CGRect` — CoreGraphics is unavailable on Linux). UIKit/SwiftTerm/FFI code lives only in `App/`.
+- **No inline hex in UI — colors only via theme tokens** (`Color(theme.…)`). The active-pane border uses the bronze accent token (`theme.accent.primary` — confirm the exact path in `Sources/NeotildeKit/Theme`).
+- **Tmux owns geometry.** Neotilde never guesses layout; it renders `TmuxWindow.visibleLayout` exactly and tells tmux its client size via `refresh-client -C` so tmux recomputes. Pane geometry is in **cells** (`Geometry.w/h/x/y: UInt16`); the renderer multiplies by the cell metrics.
+- Input goes to tmux's **active pane** only (`send-keys -t <activePane>`); the active pane is whatever tmux reports (`TmuxWindow.activePane`), never chosen Neotilde-side in this plan.
 - Reuse the existing `TmuxSessionController`/`TmuxCommand`/`TmuxSessionState` — do not re-implement parsing or state.
 - Testing tier: **Core** for `paneRects` (EP + BVA, exact rects for single/h-split/v-split/2×2) and `refreshClientSize` (good + bad, exact string). App views are macOS-compile-gated (no unit tests).
 - Conventional commits; commit after every green step. Branch `feat/phase-3b-multipane`; squash-merge at the end. `cargo fmt` is irrelevant here (no Rust changes) but run the full `swift test` before pushing.
@@ -68,11 +68,11 @@ git commit -m "docs: Phase 3 Plan B — multi-pane + multi-window render plan"
 
 ### Task 1: Pure pane-geometry mapping (`paneRects`)
 
-Turn a `PaneLayout` into positioned rectangles in pixels, given cell metrics. Pure GlymrKit, Linux-tested — the heart of multi-pane layout.
+Turn a `PaneLayout` into positioned rectangles in pixels, given cell metrics. Pure NeotildeKit, Linux-tested — the heart of multi-pane layout.
 
 **Files:**
-- Create: `Sources/GlymrKit/Tmux/PaneRects.swift`
-- Test: `Tests/GlymrKitTests/PaneRectsTests.swift`
+- Create: `Sources/NeotildeKit/Tmux/PaneRects.swift`
+- Test: `Tests/NeotildeKitTests/PaneRectsTests.swift`
 
 **Interfaces:**
 - Consumes (exist): `PaneLayout` + its `.panes: [(pane: PaneID, geometry: Geometry)]`, `Geometry(w/h/x/y: UInt16)`, `PaneID(raw: UInt32)`.
@@ -83,11 +83,11 @@ Turn a `PaneLayout` into positioned rectangles in pixels, given cell metrics. Pu
 - [ ] **Step 1: Write the failing tests**
 
 ```swift
-// Tests/GlymrKitTests/PaneRectsTests.swift
+// Tests/NeotildeKitTests/PaneRectsTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class PaneRectsTests: XCTestCase {
     private let cw = 8.0, ch = 16.0
@@ -144,7 +144,7 @@ Expected: FAIL — `PaneRect`/`paneRects` undefined.
 - [ ] **Step 3: Implement `PaneRects.swift`**
 
 ```swift
-// Sources/GlymrKit/Tmux/PaneRects.swift
+// Sources/NeotildeKit/Tmux/PaneRects.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -190,7 +190,7 @@ Expected: PASS (4/4).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/PaneRects.swift Tests/GlymrKitTests/PaneRectsTests.swift
+git add Sources/NeotildeKit/Tmux/PaneRects.swift Tests/NeotildeKitTests/PaneRectsTests.swift
 git commit -m "feat: pure pane-layout → positioned-rects geometry"
 ```
 
@@ -201,22 +201,22 @@ git commit -m "feat: pure pane-layout → positioned-rects geometry"
 The control-mode way to tell tmux the client's size so it re-tiles. tmux replies with `%layout-change`.
 
 **Files:**
-- Modify: `Sources/GlymrKit/Tmux/TmuxCommand.swift`
-- Test: `Tests/GlymrKitTests/TmuxCommandTests.swift` (create if absent; otherwise add a method to the existing class)
+- Modify: `Sources/NeotildeKit/Tmux/TmuxCommand.swift`
+- Test: `Tests/NeotildeKitTests/TmuxCommandTests.swift` (create if absent; otherwise add a method to the existing class)
 
 **Interfaces:**
 - Produces (consumed by Task 3): `public static func refreshClientSize(width: Int, height: Int) -> String?` — `"refresh-client -C \(width)x\(height)"`; nil unless both ≥ 1.
 
 - [ ] **Step 1: Write the failing test**
 
-If `Tests/GlymrKitTests/TmuxCommandTests.swift` does not exist, create it; if it exists, add this method to the existing `TmuxCommandTests` class instead.
+If `Tests/NeotildeKitTests/TmuxCommandTests.swift` does not exist, create it; if it exists, add this method to the existing `TmuxCommandTests` class instead.
 
 ```swift
-// Tests/GlymrKitTests/TmuxCommandTests.swift  (create OR add the method)
+// Tests/NeotildeKitTests/TmuxCommandTests.swift  (create OR add the method)
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class TmuxCommandTests: XCTestCase {
     func testRefreshClientSizeEncodesAndGuards() {
@@ -241,7 +241,7 @@ Expected: FAIL — `refreshClientSize` undefined.
 
 - [ ] **Step 3: Add the encoder**
 
-In `Sources/GlymrKit/Tmux/TmuxCommand.swift`, add inside the `TmuxCommand` enum (next to `resizePane`):
+In `Sources/NeotildeKit/Tmux/TmuxCommand.swift`, add inside the `TmuxCommand` enum (next to `resizePane`):
 
 ```swift
     /// Tell tmux the control-client's size in cells so it re-tiles all windows.
@@ -263,7 +263,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/TmuxCommand.swift Tests/GlymrKitTests/TmuxCommandTests.swift
+git add Sources/NeotildeKit/Tmux/TmuxCommand.swift Tests/NeotildeKitTests/TmuxCommandTests.swift
 git commit -m "feat: refresh-client -C resize encoder for control-mode reflow"
 ```
 
@@ -294,8 +294,8 @@ Replace the body of `App/TmuxRuntime.swift` with:
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import GlymrKit
-import GlymrSSHCoreFFI
+import NeotildeKit
+import NeotildeSSHCoreFFI
 
 /// Drives a tmux control-mode session in the app: feeds inbound channel bytes to
 /// the pure `TmuxSessionController`, fans every pane's output out by `PaneID`,
@@ -399,7 +399,7 @@ The container owns a `[PaneID: TerminalView]` and reconciles it against the acti
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
 import SwiftTerm
-import GlymrKit
+import NeotildeKit
 
 /// Renders the active tmux window's panes as a grid of SwiftTerm `TerminalView`s,
 /// positioned from `paneRects(in:visibleLayout)`. The active pane gets a bronze
@@ -495,7 +495,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
 }
 ```
 
-> macOS-only / CI-gated. Verify SwiftTerm's `TerminalView` API names against the Plan-A `TerminalScreen.swift` usage (`.font`, `.getTerminal()`, `.feed(byteArray:)`, `.terminalDelegate`). If `getTerminal().rows` isn't available, fall back to `f.lineHeight` for cell height (the comment shows the fallback). The cell-size derivation is approximate for v1; per-pane pinch-zoom font is Plan C. Confirm `UIColor(Color(theme.accent.primary))` is the right token path from `Sources/GlymrKit/Theme`.
+> macOS-only / CI-gated. Verify SwiftTerm's `TerminalView` API names against the Plan-A `TerminalScreen.swift` usage (`.font`, `.getTerminal()`, `.feed(byteArray:)`, `.terminalDelegate`). If `getTerminal().rows` isn't available, fall back to `f.lineHeight` for cell height (the comment shows the fallback). The cell-size derivation is approximate for v1; per-pane pinch-zoom font is Plan C. Confirm `UIColor(Color(theme.accent.primary))` is the right token path from `Sources/NeotildeKit/Theme`.
 
 - [ ] **Step 2: Compile-gate (macOS CI) + commit**
 
@@ -573,7 +573,7 @@ Add the registry + command methods to `ConnectionViewModel`:
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import GlymrKit
+import NeotildeKit
 
 /// A horizontal strip of tmux window tabs (temporary, until the Phase-4 keybar
 /// window pill). Tap a tab to `select-window`; the active window is bronze-tinted.
@@ -605,7 +605,7 @@ struct WindowTabStrip: View {
 }
 ```
 
-> Confirm `WindowID.raw` is accessible (it's `public let raw: UInt32`) and the theme token paths (`theme.accent.primary`, `theme.text.secondary`) against `Sources/GlymrKit/Theme`.
+> Confirm `WindowID.raw` is accessible (it's `public let raw: UInt32`) and the theme token paths (`theme.accent.primary`, `theme.text.secondary`) against `Sources/NeotildeKit/Theme`.
 
 - [ ] **Step 3: Show the strip + pane container in tmux mode in `SessionView`**
 
@@ -666,7 +666,7 @@ gh pr create --draft --base main --title "feat: Phase 3 Plan B — multi-pane + 
   --body "Render a tmux window's native pane layout (N SwiftTerm views, active-pane bronze border), switch windows via a tab strip, resize via refresh-client -C. Pure paneRects geometry + refresh-client encoder Linux-tested; app wiring macOS-gated. Bell/mouse/font/URL polish → Plan C. See plan doc."
 ```
 
-Confirm `linux-swift` (incl. `PaneRectsTests` + `TmuxCommandTests`), `linux-rust`, `lint`, and `macos` (app build with all new App files) are green. Re-run `linux-rust` once if it hits the known sshd-readiness flake. **Watch for macOS-only errors** (missing `import GlymrSSHCoreFFI` / SwiftTerm API name mismatches) — fix and re-push.
+Confirm `linux-swift` (incl. `PaneRectsTests` + `TmuxCommandTests`), `linux-rust`, `lint`, and `macos` (app build with all new App files) are green. Re-run `linux-rust` once if it hits the known sshd-readiness flake. **Watch for macOS-only errors** (missing `import NeotildeSSHCoreFFI` / SwiftTerm API name mismatches) — fix and re-push.
 
 - [ ] **Step 2: Update docs**
 

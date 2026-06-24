@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
 import SwiftTerm
-import GlymrSSHCoreFFI
+import NeotildeSSHCoreFFI
 
 /// Wraps SwiftTerm's UIKit `TerminalView` for SwiftUI. Output bytes from the
 /// Rust PTY (via `TerminalShellOutput.onBytes`) are fed into the terminal;

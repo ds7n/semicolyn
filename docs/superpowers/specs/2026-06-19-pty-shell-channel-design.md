@@ -163,19 +163,19 @@ its own state in isolation.
 
 | Test | Drives | Asserts (observable) |
 |---|---|---|
-| shell echoes input | `open_shell`, `write("echo glymr-marker\n")` | accumulated output contains `glymr-marker` (poll ≤ a few s, else fail) |
+| shell echoes input | `open_shell`, `write("echo neotilde-marker\n")` | accumulated output contains `neotilde-marker` (poll ≤ a few s, else fail) |
 | clean exit reports status 0 | `write("exit 0\n")` | `on_closed` fires once; `exit_status == Some(0)`, `signal`/`error` == `None` |
 | non-zero exit (BVA) | `write("exit 3\n")` | `on_closed`; `exit_status == Some(3)` — proves the real code, not a constant |
 | resize is accepted | `resize(120, 40)`, `write("stty size\n")` | output contains `40 120` (server observed the new size) |
 | write after close fails | `close()`, then `write(...)` | `Err(ConnectError::Transport)` — specific failure, no panic |
 
-All tests are gated behind `GLYMR_TEST_SSHD` like the existing auth/connect
+All tests are gated behind `NEOTILDE_TEST_SSHD` like the existing auth/connect
 suites. The current Alpine `sshd` fixture already provides `/bin/sh` and `stty`,
 so no fixture changes are required.
 
 ## Exit criteria
 
-- `cargo test -p glymr-ssh-core` (unit + connect + auth + the new shell suite)
+- `cargo test -p neotilde-ssh-core` (unit + connect + auth + the new shell suite)
   green against the running `sshd` fixture; no regression in earlier suites.
 - Echo round-trips; clean exit reports status 0; non-zero exit reports the real
   code; resize takes effect; write-after-close returns the typed error.

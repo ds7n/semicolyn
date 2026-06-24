@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import GlymrKit
+import NeotildeKit
 
 /// The app's composition root for the live storage stack: hosts via `HostStore`
 /// (encrypted records on disk), host keys via `HostKeyStore` (Keychain), and
@@ -26,13 +26,13 @@ final class AppStores {
     /// - Throws: `KeychainError` if Keychain operations fail, or `FileBlobStore`
     ///   errors if the Application Support directory cannot be created.
     init() throws {
-        // Application Support directory: ~/.../Library/Application Support/glymr/
+        // Application Support directory: ~/.../Library/Application Support/neotilde/
         let dir = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
-        ).appendingPathComponent("glymr", isDirectory: true)
+        ).appendingPathComponent("neotilde", isDirectory: true)
 
         // Keychain-backed secrets (iCloud Keychain synced).
         let secrets = KeychainSecretStore()
@@ -71,7 +71,7 @@ final class AppStores {
     ///
     /// - Returns: A UUID string that is stable for the lifetime of the app install.
     func deviceSeed() throws -> String {
-        let key = "glymr.deviceSeed"
+        let key = "neotilde.deviceSeed"
         if let existing = UserDefaults.standard.string(forKey: key) {
             return existing
         }
