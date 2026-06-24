@@ -5,13 +5,13 @@
 
 ## Goal
 
-Set the policy for what (if anything) Glymr charges money for, so that
+Set the policy for what (if anything) Neotilde charges money for, so that
 future feature ideas can be tested against a written rule instead of
 re-litigated case by case.
 
 ## Posture
 
-Glymr ships into a category with established competitors (Blink, Termius,
+Neotilde ships into a category with established competitors (Blink, Termius,
 Prompt 3, Secure ShellFish, etc.). Monetization is **secondary to product
 quality**. The product is for users; payment is for users who *want* to
 support development. No feature that defines the product sits behind a
@@ -69,7 +69,7 @@ positioned at the top:
 ```
 About & Help
 ─────────────────────────────────────
-  ✦  Glymr Pro                        >    ← new top row when free
+  ✦  Neotilde Pro                        >    ← new top row when free
 ─────────────────────────────────────
   ?  Tips & Gestures                  >
 ─────────────────────────────────────
@@ -78,19 +78,19 @@ About & Help
 ─────────────────────────────────────
   Send feedback                       ↗
 ─────────────────────────────────────
-  Glymr 1.0.0 (1234)
+  Neotilde 1.0.0 (1234)
 ```
 
 When Pro is active, the row changes to:
 
 ```
-  ✦  Glymr Pro — thanks!             >
+  ✦  Neotilde Pro — thanks!             >
 ```
 
 …and the row below the version becomes:
 
 ```
-  Glymr 1.0.0 (1234)        Supporter ✦
+  Neotilde 1.0.0 (1234)        Supporter ✦
 ```
 
 (That's the Supporter badge described above — present only in About,
@@ -100,16 +100,16 @@ Tapping the Pro row pushes to an **upgrade screen** described next.
 
 ### The upgrade screen
 
-A single push from `About & Help → Glymr Pro`. No modal, no full-screen
+A single push from `About & Help → Neotilde Pro`. No modal, no full-screen
 takeover. Plain settings push.
 
 Contents:
 
 ```
                   ✦
-              Glymr Pro
+              Neotilde Pro
 
-  Glymr is, and will stay, free to use in full. Pro is
+  Neotilde is, and will stay, free to use in full. Pro is
   for people who want to support development. Buy it
   once; that's it.
 
@@ -121,7 +121,7 @@ Contents:
 
   ─────────────────────────────────────
 
-           [ Unlock Glymr Pro — $X.XX ]    ← StoreKit-styled CTA
+           [ Unlock Neotilde Pro — $X.XX ]    ← StoreKit-styled CTA
 
        Restore purchase   ·   Family Sharing on
 ```
@@ -135,7 +135,7 @@ Contents:
 - **Family Sharing on** is shown as a plain note, not a sales bullet.
 
 When Pro is active, the screen replaces the CTA with a small "Thanks for
-supporting Glymr" line and shows the active perks as checkmarks instead
+supporting Neotilde" line and shows the active perks as checkmarks instead
 of selling them.
 
 ### Visibility rules
@@ -174,7 +174,7 @@ also want but pay-walled.
   identities; team members get them pushed via the admin's backend.
   Requires backend infrastructure — *real* recurring cost — so this is
   the most natural subscription candidate if there ever is one.
-- **MDM-friendly configuration.** Glymr respects an MDM-pushed
+- **MDM-friendly configuration.** Neotilde respects an MDM-pushed
   configuration profile (allowed hosts, forbidden hosts, enforced
   per-use Face ID on all identities, mandatory pattern-exclude list,
   iCloud sync off, etc.). Sells to companies that have an existing
@@ -183,21 +183,21 @@ also want but pay-walled.
   user toggles: "App lock is on, full stop." "Predictor is off, full
   stop." "These hosts require a specific identity." Composes with MDM
   but doesn't require it.
-- **SSO into the app.** Org-managed identity for unlocking Glymr itself
+- **SSO into the app.** Org-managed identity for unlocking Neotilde itself
   (in addition to or replacing app-level Face ID). Tightly coupled with
   MDM / centralized policy.
 - **Sealed bundled-snippet packs.** Org-curated snippet libraries
   pushed to all members. Lower compliance value than audit log; more
   ergonomics-flavored.
 - **Concurrent-device licensing / seat management.** The admin sees who
-  on the team has Glymr active; can revoke or rotate. Requires backend.
+  on the team has Neotilde active; can revoke or rotate. Requires backend.
 - **Premium support.** Direct support channel (not just `Send
   feedback`), SLAs, etc. Pure service offering — no product code at all.
 
 ### Why these are *not* in v1
 
 - Each requires infrastructure (backend, MDM integration, admin
-  console) Glymr does not have.
+  console) Neotilde does not have.
 - Designing them speculatively without a customer is a great way to
   build the wrong thing.
 - The qualification rule already excludes anything that would feel
@@ -224,7 +224,7 @@ also want but pay-walled.
 ## Related specs and amendments
 
 - `docs/superpowers/specs/2026-06-16-settings-sub-screens-design.md`
-  gains a **Glymr Pro** row at the top of About & Help (when free),
+  gains a **Neotilde Pro** row at the top of About & Help (when free),
   and a **Supporter** badge on the version row (when Pro). No
   re-litigation of the other About & Help contents.
 - `docs/superpowers/specs/2026-06-16-icloud-sync-scope-design.md`

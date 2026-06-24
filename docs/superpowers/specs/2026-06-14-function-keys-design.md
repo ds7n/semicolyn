@@ -8,7 +8,7 @@
 
 ## North star
 
-iPhone has no native F-key access at all. Apps that depend on F-keys — `htop`, `top`, `mc`, various TUI debuggers, occasional vim mappings, custom user setups — are otherwise unusable from Glymr. The design must surface F-keys cleanly for users who need them while staying out of the way for the much larger set of users who never touch them.
+iPhone has no native F-key access at all. Apps that depend on F-keys — `htop`, `top`, `mc`, various TUI debuggers, occasional vim mappings, custom user setups — are otherwise unusable from Neotilde. The design must surface F-keys cleanly for users who need them while staying out of the way for the much larger set of users who never touch them.
 
 The pattern every iOS terminal (Blink, Termius, a-Shell, Prompt 3) has converged on is a *layer toggle on the same row*, not a separate row or popup. We follow that convention.
 

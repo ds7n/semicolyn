@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-import GlymrSSHCoreFFI
+import NeotildeSSHCoreFFI
 
 final class BridgeTests: XCTestCase {
     func testCoreVersionRoundTripsFromRust() {

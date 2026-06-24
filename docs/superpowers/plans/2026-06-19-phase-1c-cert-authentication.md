@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Client presents, server decides.** Glymr does not validate the CA against any client trust store. Client-side checks are exactly the spec's three: parser sanity, key↔cert pair match, validity window. The server enforces CA trust via `TrustedUserCAKeys`.
+- **Client presents, server decides.** Neotilde does not validate the CA against any client trust store. Client-side checks are exactly the spec's three: parser sanity, key↔cert pair match, validity window. The server enforces CA trust via `TrustedUserCAKeys`.
 - **No silent fallback.** An expired / not-yet-valid / mismatched cert fails with `ConnectError::CertificateInvalid`; never fall back to bare-key auth.
 - **Typed outcomes, not panics.** A wrong/expired cert is `CertificateInvalid` (a client validation error). A *failed but well-formed* auth attempt against the server maps to `AuthOutcome::Failure` like the other methods — not an error.
 - **OpenSSH cert format only.** Parse via `ssh_key::Certificate` (`.parse()` / FromStr). No PEM/DER conversion.
@@ -34,8 +34,8 @@
 
 | File | Responsibility |
 |---|---|
-| `crates/glymr-ssh-core/src/connection.rs` | `ConnectError::CertificateInvalid`, `Connection::authenticate_openssh_cert` |
-| `crates/glymr-ssh-core/tests/cert_auth_integration.rs` | Cert auth integration tests vs `sshd` (valid / expired / not-yet-valid / mismatched) |
+| `crates/neotilde-ssh-core/src/connection.rs` | `ConnectError::CertificateInvalid`, `Connection::authenticate_openssh_cert` |
+| `crates/neotilde-ssh-core/tests/cert_auth_integration.rs` | Cert auth integration tests vs `sshd` (valid / expired / not-yet-valid / mismatched) |
 | `docker/sshd-entrypoint.sh` | Generate CA, sign valid/expired/not-yet-valid certs, trust the CA |
 
 ---
@@ -44,8 +44,8 @@
 
 **Files:**
 - Modify: `docker/sshd-entrypoint.sh`
-- Modify: `crates/glymr-ssh-core/src/connection.rs`
-- Create: `crates/glymr-ssh-core/tests/cert_auth_integration.rs`
+- Modify: `crates/neotilde-ssh-core/src/connection.rs`
+- Create: `crates/neotilde-ssh-core/tests/cert_auth_integration.rs`
 
 **Interfaces:**
 - Consumes: `connect_core`, `Connection`, `ConnectError`, `AuthOutcome`, `outcome()`, `HostKeyVerifier`/`HostKeyInfo` (Phases 1b/1c).
@@ -60,7 +60,7 @@ In `docker/sshd-entrypoint.sh`, after the existing `authorized_keys` block (afte
 # --- Client-certificate auth fixture (Phase 1c-cert) ---
 # A disposable CA that signs the test user key. Never a real credential.
 if [ ! -f /testkeys/ca ]; then
-  ssh-keygen -t ed25519 -N '' -C 'glymr-test-ca' -f /testkeys/ca
+  ssh-keygen -t ed25519 -N '' -C 'neotilde-test-ca' -f /testkeys/ca
 fi
 chmod 644 /testkeys/ca /testkeys/ca.pub
 # Sign id_ed25519 into three certs for principal 'tester': valid-now, expired,
@@ -70,9 +70,9 @@ chmod 644 /testkeys/ca /testkeys/ca.pub
 cp /testkeys/id_ed25519.pub /testkeys/valid.pub
 cp /testkeys/id_ed25519.pub /testkeys/expired.pub
 cp /testkeys/id_ed25519.pub /testkeys/notyet.pub
-ssh-keygen -s /testkeys/ca -I glymr-valid   -n tester -V -5m:+52w   /testkeys/valid.pub
-ssh-keygen -s /testkeys/ca -I glymr-expired -n tester -V 20000101000000:20000102000000 /testkeys/expired.pub
-ssh-keygen -s /testkeys/ca -I glymr-notyet  -n tester -V +52w:+104w /testkeys/notyet.pub
+ssh-keygen -s /testkeys/ca -I neotilde-valid   -n tester -V -5m:+52w   /testkeys/valid.pub
+ssh-keygen -s /testkeys/ca -I neotilde-expired -n tester -V 20000101000000:20000102000000 /testkeys/expired.pub
+ssh-keygen -s /testkeys/ca -I neotilde-notyet  -n tester -V +52w:+104w /testkeys/notyet.pub
 chmod 644 /testkeys/valid-cert.pub /testkeys/expired-cert.pub /testkeys/notyet-cert.pub
 # Trust the CA for user authentication (idempotent across reboots).
 grep -q '^TrustedUserCAKeys' /etc/ssh/sshd_config \
@@ -86,12 +86,12 @@ Sanity-check the fixture produced the certs:
 `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose exec sshd sh -c 'ls /testkeys/*-cert.pub && ssh-keygen -L -f /testkeys/valid-cert.pub | head'`
 Expected: three `*-cert.pub` files; `valid-cert.pub` lists principal `tester` and a valid-now window.
 
-Create `crates/glymr-ssh-core/tests/cert_auth_integration.rs`:
+Create `crates/neotilde-ssh-core/tests/cert_auth_integration.rs`:
 ```rust
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 use std::sync::Arc;
-use glymr_ssh_core::connection::{
+use neotilde_ssh_core::connection::{
     connect_core, AuthOutcome, ConnectError, HostKeyInfo, HostKeyVerifier,
 };
 
@@ -101,7 +101,7 @@ impl HostKeyVerifier for TrustAll {
     async fn verify(&self, _info: HostKeyInfo) -> bool { true }
 }
 
-fn sshd_addr() -> Option<String> { std::env::var("GLYMR_TEST_SSHD").ok() }
+fn sshd_addr() -> Option<String> { std::env::var("NEOTILDE_TEST_SSHD").ok() }
 
 fn read_testkey(name: &str) -> Option<String> {
     match std::fs::read_to_string(format!("/testkeys/{name}")) {
@@ -112,7 +112,7 @@ fn read_testkey(name: &str) -> Option<String> {
 
 #[tokio::test]
 async fn cert_auth_succeeds_with_valid_cert() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let (Some(key), Some(cert)) = (read_testkey("id_ed25519"), read_testkey("valid-cert.pub")) else { return };
     let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
     let outcome = conn
@@ -129,12 +129,12 @@ fn _uses_connect_error() -> Option<ConnectError> { None }
 
 - [ ] **Step 3: Run the test to verify it fails**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test cert_auth_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test cert_auth_integration`
 Expected: FAIL — `no method named authenticate_openssh_cert` (and `CertificateInvalid` not yet a variant).
 
 - [ ] **Step 4: Add the `CertificateInvalid` error variant**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add to the `ConnectError` enum (after the `Transport` variant):
+In `crates/neotilde-ssh-core/src/connection.rs`, add to the `ConnectError` enum (after the `Transport` variant):
 ```rust
     /// The supplied certificate is unusable on the client side: malformed,
     /// not matching the private key, or outside its validity window. Never a
@@ -145,7 +145,7 @@ In `crates/glymr-ssh-core/src/connection.rs`, add to the `ConnectError` enum (af
 
 - [ ] **Step 5: Implement `authenticate_openssh_cert`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add inside the existing `#[uniffi::export(async_runtime = "tokio")] impl Connection` block (alongside the `authenticate_*` methods):
+In `crates/neotilde-ssh-core/src/connection.rs`, add inside the existing `#[uniffi::export(async_runtime = "tokio")] impl Connection` block (alongside the `authenticate_*` methods):
 ```rust
     /// OpenSSH certificate authentication: present `<cert> + <private key>`.
     /// Performs the three client-side checks from the cert-auth design (parse,
@@ -195,13 +195,13 @@ In `crates/glymr-ssh-core/src/connection.rs`, add inside the existing `#[uniffi:
 
 - [ ] **Step 6: Run the test to verify it passes**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test cert_auth_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test cert_auth_integration`
 Expected: PASS — `cert_auth_succeeds_with_valid_cert`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add docker/sshd-entrypoint.sh crates/glymr-ssh-core/src/connection.rs crates/glymr-ssh-core/tests/cert_auth_integration.rs
+git add docker/sshd-entrypoint.sh crates/neotilde-ssh-core/src/connection.rs crates/neotilde-ssh-core/tests/cert_auth_integration.rs
 git commit -m "feat: add OpenSSH certificate authentication with CA test fixture"
 ```
 
@@ -210,18 +210,18 @@ git commit -m "feat: add OpenSSH certificate authentication with CA test fixture
 ### Task 2: Adversarial validation coverage (expired / not-yet-valid / mismatched key)
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/tests/cert_auth_integration.rs`
+- Modify: `crates/neotilde-ssh-core/tests/cert_auth_integration.rs`
 
 **Interfaces:**
 - Consumes: `authenticate_openssh_cert`, `ConnectError::CertificateInvalid` (Task 1). No production change — this task hardens the three client-side checks. **Risk tier: Critical** (auth/trust): each negative asserts the SPECIFIC `CertificateInvalid` message, not just that it errored.
 
 - [ ] **Step 1: Write the failing/again-passing adversarial tests**
 
-Replace the `#[allow(dead_code)] fn _uses_connect_error` placeholder in `crates/glymr-ssh-core/tests/cert_auth_integration.rs` with:
+Replace the `#[allow(dead_code)] fn _uses_connect_error` placeholder in `crates/neotilde-ssh-core/tests/cert_auth_integration.rs` with:
 ```rust
 #[tokio::test]
 async fn cert_auth_rejects_expired_cert() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let (Some(key), Some(cert)) = (read_testkey("id_ed25519"), read_testkey("expired-cert.pub")) else { return };
     let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
     let err = conn
@@ -236,7 +236,7 @@ async fn cert_auth_rejects_expired_cert() {
 
 #[tokio::test]
 async fn cert_auth_rejects_not_yet_valid_cert() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let (Some(key), Some(cert)) = (read_testkey("id_ed25519"), read_testkey("notyet-cert.pub")) else { return };
     let conn = connect_core(addr, false, false, Arc::new(TrustAll)).await.expect("connect");
     let err = conn
@@ -251,7 +251,7 @@ async fn cert_auth_rejects_not_yet_valid_cert() {
 
 #[tokio::test]
 async fn cert_auth_rejects_cert_for_a_different_key() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     // The CA private key is a valid ed25519 key unrelated to id_ed25519, so the
     // valid cert (which certifies id_ed25519) does not match it → pair failure.
     let (Some(wrong_key), Some(cert)) = (read_testkey("ca"), read_testkey("valid-cert.pub")) else { return };
@@ -272,18 +272,18 @@ Also delete the now-unused `_uses_connect_error` helper (replaced above).
 
 - [ ] **Step 2: Run the new tests**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test cert_auth_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test cert_auth_integration`
 Expected: all four cert tests PASS. If `cert_auth_rejects_expired_cert` reports `Ok`/`Success` instead of the error, the expiry check is wrong or the fixture's expired cert is not actually expired (check `ssh-keygen -L -f /testkeys/expired-cert.pub`). If the mismatch test panics with a different message, the pair check is missing/after the call.
 
 - [ ] **Step 3: Run the entire crate suite (no regression)**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core`
 Expected: PASS — unit (8), connect (4), auth (5), shell (5), cert (4).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/tests/cert_auth_integration.rs
+git add crates/neotilde-ssh-core/tests/cert_auth_integration.rs
 git commit -m "test: add cert auth adversarial cases (expired, not-yet-valid, key mismatch)"
 ```
 
@@ -291,7 +291,7 @@ git commit -m "test: add cert auth adversarial cases (expired, not-yet-valid, ke
 
 ## Phase 1c-cert exit criteria
 
-- [ ] `cargo test -p glymr-ssh-core` green against the rebuilt `sshd` fixture; earlier suites unaffected.
+- [ ] `cargo test -p neotilde-ssh-core` green against the rebuilt `sshd` fixture; earlier suites unaffected.
 - [ ] Valid cert + matching key + CA-trusting server → `AuthOutcome::Success`.
 - [ ] Expired / not-yet-valid / mismatched-key cert → `ConnectError::CertificateInvalid` with the specific message; never a bare-key fallback, never a panic.
 - [ ] No CA private key or signed cert committed to git — all live only in the `testkeys` volume.

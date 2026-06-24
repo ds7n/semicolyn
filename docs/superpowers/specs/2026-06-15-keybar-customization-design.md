@@ -77,7 +77,7 @@ Light haptic on window-switch wrap (matches the previous window-pill behavior). 
 
 ### Visual
 
-The pill carries the literal label **"Esc"** plus a small dim bronze `≡` glyph in the corner — the same hint-glyph pattern used elsewhere in Glymr to signal "this slot has more gestures." Window title is *not* shown on the pill itself; the user identifies the current window by terminal content or by opening a picker.
+The pill carries the literal label **"Esc"** plus a small dim bronze `≡` glyph in the corner — the same hint-glyph pattern used elsewhere in Neotilde to signal "this slot has more gestures." Window title is *not* shown on the pill itself; the user identifies the current window by terminal content or by opening a picker.
 
 Pressed state (during long-press or while the picker is open): bronze-tint fill, accent border, brighter glyph color — same treatment as the existing armed-modifier state.
 

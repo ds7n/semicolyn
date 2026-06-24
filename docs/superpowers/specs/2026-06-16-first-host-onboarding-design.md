@@ -7,7 +7,7 @@
 ## Goal
 
 Get a brand-new user from app launch to a first working SSH session without
-forced tutorials, while making Glymr's distinctive gesture vocabulary
+forced tutorials, while making Neotilde's distinctive gesture vocabulary
 discoverable on demand — before, during, and after first connection.
 
 ## Principle
@@ -33,7 +33,7 @@ secondary paths (About & Help → Tips & Gestures per
 First-launch screen. Layout:
 
 ```
-                    [ centered Glymr mark, small ]
+                    [ centered Neotilde mark, small ]
 
 
               ┌────────────────────────────────┐
@@ -115,7 +115,7 @@ the gesture or visual.
    gesture annotations.
 
 4. **Context-aware promotions**
-   When the foreground process is something Glymr recognises (vim, less,
+   When the foreground process is something Neotilde recognises (vim, less,
    python, psql, etc.), relevant symbols promote into the scroll region
    with bronze tint and a top-edge accent. Diagram: before/after shell
    vs vim. (References `docs/superpowers/specs/2026-06-14-context-detection-design.md`.)

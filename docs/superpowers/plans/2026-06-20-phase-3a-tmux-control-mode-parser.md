@@ -6,15 +6,15 @@
 
 **Goal:** Build a pure, streaming Swift parser that turns the `tmux -CC` control-mode byte stream into typed `ControlModeEvent`s for the native pane/window model.
 
-**Architecture:** A parser-only unit in `GlymrKit` (no I/O, no command-sending). `ControlModeParser.feed([UInt8]) -> [ControlModeEvent]` buffers partial lines and emits one or more typed events per complete line. Sub-units: typed ID wrappers, an octal `%output` decoder, and a recursive-descent layout-string scanner. Lenient and never-throwing.
+**Architecture:** A parser-only unit in `NeotildeKit` (no I/O, no command-sending). `ControlModeParser.feed([UInt8]) -> [ControlModeEvent]` buffers partial lines and emits one or more typed events per complete line. Sub-units: typed ID wrappers, an octal `%output` decoder, and a recursive-descent layout-string scanner. Lenient and never-throwing.
 
-**Tech Stack:** Swift 6 (`GlymrKit`, platform-agnostic), XCTest, run on Linux via `docker compose run --rm dev swift test`.
+**Tech Stack:** Swift 6 (`NeotildeKit`, platform-agnostic), XCTest, run on Linux via `docker compose run --rm dev swift test`.
 
 ## Global Constraints
 
 - Every source/test file begins with `// SPDX-FileCopyrightText: 2026 True Positive LLC` then `// SPDX-License-Identifier: GPL-3.0-only`.
 - Spec of record: `docs/superpowers/specs/2026-06-20-tmux-control-mode-parser-design.md`.
-- Placement: Swift in `Sources/GlymrKit/Tmux/`. No Apple-only APIs (must compile + test on Linux).
+- Placement: Swift in `Sources/NeotildeKit/Tmux/`. No Apple-only APIs (must compile + test on Linux).
 - Error policy: **lenient, never-throw** — no `throws`, no `fatalError`, no `precondition` on input. Unknown verb → `.unknown`; recoverable parse failure → `.malformed`.
 - Public model types are `Equatable, Sendable`; ID types also `Hashable`.
 - Testing tier: **Critical** (protocol boundary over untrusted bytes) — EP + BVA + adversarial; every assertion checks the exact event/payload, never merely "did not crash".
@@ -37,8 +37,8 @@ git checkout -b feat/phase-3a-tmux-parser
 ### Task 1: Typed tmux ID wrappers
 
 **Files:**
-- Create: `Sources/GlymrKit/Tmux/TmuxIDs.swift`
-- Test: `Tests/GlymrKitTests/TmuxIDTests.swift`
+- Create: `Sources/NeotildeKit/Tmux/TmuxIDs.swift`
+- Test: `Tests/NeotildeKitTests/TmuxIDTests.swift`
 
 **Interfaces:**
 - Produces: `PaneID(raw: UInt32)`, `WindowID(raw: UInt32)`, `SessionID(raw: UInt32)` — each `Hashable, Sendable`. Internal failable `init?(token: Substring)` parsing `%N` / `@N` / `$N` respectively (nil if the sigil is wrong or the remainder is not all decimal digits).
@@ -46,11 +46,11 @@ git checkout -b feat/phase-3a-tmux-parser
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/GlymrKitTests/TmuxIDTests.swift
+// Tests/NeotildeKitTests/TmuxIDTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class TmuxIDTests: XCTestCase {
     func testPaneIDParsesValidToken() {
@@ -81,7 +81,7 @@ Expected: FAIL — `cannot find 'PaneID' in scope`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```swift
-// Sources/GlymrKit/Tmux/TmuxIDs.swift
+// Sources/NeotildeKit/Tmux/TmuxIDs.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
@@ -134,7 +134,7 @@ Expected: PASS (5 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/TmuxIDs.swift Tests/GlymrKitTests/TmuxIDTests.swift
+git add Sources/NeotildeKit/Tmux/TmuxIDs.swift Tests/NeotildeKitTests/TmuxIDTests.swift
 git commit -m "feat: add typed tmux ID wrappers (pane/window/session)"
 ```
 
@@ -143,8 +143,8 @@ git commit -m "feat: add typed tmux ID wrappers (pane/window/session)"
 ### Task 2: `%output` octal unescaping
 
 **Files:**
-- Create: `Sources/GlymrKit/Tmux/OutputUnescape.swift`
-- Test: `Tests/GlymrKitTests/OutputUnescapeTests.swift`
+- Create: `Sources/NeotildeKit/Tmux/OutputUnescape.swift`
+- Test: `Tests/NeotildeKitTests/OutputUnescapeTests.swift`
 
 **Interfaces:**
 - Produces: `func unescapeTmuxOutput(_ s: Substring) -> [UInt8]?` — decodes tmux's `%output` data field. `\\` → one `0x5C`; `\` + exactly three octal digits (value ≤ 255) → that byte; any other printable char → its UTF-8 bytes. Returns nil on a malformed escape (lone trailing `\`, non-octal triplet, value > 255).
@@ -152,11 +152,11 @@ git commit -m "feat: add typed tmux ID wrappers (pane/window/session)"
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/GlymrKitTests/OutputUnescapeTests.swift
+// Tests/NeotildeKitTests/OutputUnescapeTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class OutputUnescapeTests: XCTestCase {
     func testPlainAsciiPassesThrough() {
@@ -196,7 +196,7 @@ Expected: FAIL — `cannot find 'unescapeTmuxOutput' in scope`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```swift
-// Sources/GlymrKit/Tmux/OutputUnescape.swift
+// Sources/NeotildeKit/Tmux/OutputUnescape.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
@@ -254,7 +254,7 @@ Expected: PASS (8 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/OutputUnescape.swift Tests/GlymrKitTests/OutputUnescapeTests.swift
+git add Sources/NeotildeKit/Tmux/OutputUnescape.swift Tests/NeotildeKitTests/OutputUnescapeTests.swift
 git commit -m "feat: add tmux %output octal unescaping"
 ```
 
@@ -263,8 +263,8 @@ git commit -m "feat: add tmux %output octal unescaping"
 ### Task 3: Layout-string parser
 
 **Files:**
-- Create: `Sources/GlymrKit/Tmux/PaneLayout.swift`
-- Test: `Tests/GlymrKitTests/PaneLayoutTests.swift`
+- Create: `Sources/NeotildeKit/Tmux/PaneLayout.swift`
+- Test: `Tests/NeotildeKitTests/PaneLayoutTests.swift`
 
 **Interfaces:**
 - Consumes: `PaneID` (Task 1).
@@ -275,11 +275,11 @@ git commit -m "feat: add tmux %output octal unescaping"
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/GlymrKitTests/PaneLayoutTests.swift
+// Tests/NeotildeKitTests/PaneLayoutTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class PaneLayoutTests: XCTestCase {
     func testSingleLeaf() {
@@ -335,7 +335,7 @@ Expected: FAIL — `cannot find 'PaneLayout' in scope`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```swift
-// Sources/GlymrKit/Tmux/PaneLayout.swift
+// Sources/NeotildeKit/Tmux/PaneLayout.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
@@ -430,7 +430,7 @@ Expected: PASS (7 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/PaneLayout.swift Tests/GlymrKitTests/PaneLayoutTests.swift
+git add Sources/NeotildeKit/Tmux/PaneLayout.swift Tests/NeotildeKitTests/PaneLayoutTests.swift
 git commit -m "feat: add tmux layout-string parser (pane geometry tree)"
 ```
 
@@ -439,9 +439,9 @@ git commit -m "feat: add tmux layout-string parser (pane geometry tree)"
 ### Task 4: Event type + parser core (framing + notifications)
 
 **Files:**
-- Create: `Sources/GlymrKit/Tmux/ControlModeEvent.swift`
-- Create: `Sources/GlymrKit/Tmux/ControlModeParser.swift`
-- Test: `Tests/GlymrKitTests/ControlModeParserTests.swift`
+- Create: `Sources/NeotildeKit/Tmux/ControlModeEvent.swift`
+- Create: `Sources/NeotildeKit/Tmux/ControlModeParser.swift`
+- Test: `Tests/NeotildeKitTests/ControlModeParserTests.swift`
 
 **Interfaces:**
 - Consumes: `PaneID`/`WindowID`/`SessionID` (Task 1), `PaneLayout` (Task 3, referenced by the `.layoutChange` case but wired in Task 7).
@@ -454,11 +454,11 @@ git commit -m "feat: add tmux layout-string parser (pane geometry tree)"
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/GlymrKitTests/ControlModeParserTests.swift
+// Tests/NeotildeKitTests/ControlModeParserTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class ControlModeParserTests: XCTestCase {
     private func feed(_ s: String) -> [ControlModeEvent] {
@@ -526,7 +526,7 @@ Expected: FAIL — `cannot find 'ControlModeParser' in scope`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```swift
-// Sources/GlymrKit/Tmux/ControlModeEvent.swift
+// Sources/NeotildeKit/Tmux/ControlModeEvent.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
@@ -554,7 +554,7 @@ public enum ControlModeEvent: Equatable, Sendable {
 ```
 
 ```swift
-// Sources/GlymrKit/Tmux/ControlModeParser.swift
+// Sources/NeotildeKit/Tmux/ControlModeParser.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
@@ -663,7 +663,7 @@ Expected: PASS (11 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/ControlModeEvent.swift Sources/GlymrKit/Tmux/ControlModeParser.swift Tests/GlymrKitTests/ControlModeParserTests.swift
+git add Sources/NeotildeKit/Tmux/ControlModeEvent.swift Sources/NeotildeKit/Tmux/ControlModeParser.swift Tests/NeotildeKitTests/ControlModeParserTests.swift
 git commit -m "feat: add tmux control-mode parser core (framing + notifications)"
 ```
 
@@ -672,8 +672,8 @@ git commit -m "feat: add tmux control-mode parser core (framing + notifications)
 ### Task 5: `%output` handling
 
 **Files:**
-- Modify: `Sources/GlymrKit/Tmux/ControlModeParser.swift` (add a `%output` case in `dispatch`)
-- Test: `Tests/GlymrKitTests/ControlModeOutputTests.swift`
+- Modify: `Sources/NeotildeKit/Tmux/ControlModeParser.swift` (add a `%output` case in `dispatch`)
+- Test: `Tests/NeotildeKitTests/ControlModeOutputTests.swift`
 
 **Interfaces:**
 - Consumes: `unescapeTmuxOutput` (Task 2), `PaneID` (Task 1).
@@ -682,11 +682,11 @@ git commit -m "feat: add tmux control-mode parser core (framing + notifications)
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/GlymrKitTests/ControlModeOutputTests.swift
+// Tests/NeotildeKitTests/ControlModeOutputTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class ControlModeOutputTests: XCTestCase {
     private func feed(_ s: String) -> [ControlModeEvent] {
@@ -749,7 +749,7 @@ Expected: PASS (5 tests). Also re-run `--filter ControlModeParserTests` → stil
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/ControlModeParser.swift Tests/GlymrKitTests/ControlModeOutputTests.swift
+git add Sources/NeotildeKit/Tmux/ControlModeParser.swift Tests/NeotildeKitTests/ControlModeOutputTests.swift
 git commit -m "feat: parse tmux %output into decoded pane bytes"
 ```
 
@@ -758,8 +758,8 @@ git commit -m "feat: parse tmux %output into decoded pane bytes"
 ### Task 6: `%begin`/`%end`/`%error` block coalescing
 
 **Files:**
-- Modify: `Sources/GlymrKit/Tmux/ControlModeParser.swift` (add open-block state + handling)
-- Test: `Tests/GlymrKitTests/ControlModeBlockTests.swift`
+- Modify: `Sources/NeotildeKit/Tmux/ControlModeParser.swift` (add open-block state + handling)
+- Test: `Tests/NeotildeKitTests/ControlModeBlockTests.swift`
 
 **Interfaces:**
 - Produces: a `%begin N` … `%end N` block → one `.commandResult(N, .ok(bodyLines))`; `%error N` terminator → `.error`. While a block is open, every non-terminator line is a verbatim body line and emits no event. A terminator whose number ≠ the open block, or a terminator with no block open, → `.malformed`, and the parser resets to no-open-block.
@@ -767,11 +767,11 @@ git commit -m "feat: parse tmux %output into decoded pane bytes"
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/GlymrKitTests/ControlModeBlockTests.swift
+// Tests/NeotildeKitTests/ControlModeBlockTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class ControlModeBlockTests: XCTestCase {
     private func feed(_ s: String) -> [ControlModeEvent] {
@@ -896,7 +896,7 @@ Expected: PASS (6 tests). Re-run `--filter ControlModeParserTests` and `--filter
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/ControlModeParser.swift Tests/GlymrKitTests/ControlModeBlockTests.swift
+git add Sources/NeotildeKit/Tmux/ControlModeParser.swift Tests/NeotildeKitTests/ControlModeBlockTests.swift
 git commit -m "feat: coalesce tmux %begin/%end/%error blocks into command results"
 ```
 
@@ -905,8 +905,8 @@ git commit -m "feat: coalesce tmux %begin/%end/%error blocks into command result
 ### Task 7: `%layout-change` handling
 
 **Files:**
-- Modify: `Sources/GlymrKit/Tmux/ControlModeParser.swift` (add a `%layout-change` case)
-- Test: `Tests/GlymrKitTests/ControlModeLayoutTests.swift`
+- Modify: `Sources/NeotildeKit/Tmux/ControlModeParser.swift` (add a `%layout-change` case)
+- Test: `Tests/NeotildeKitTests/ControlModeLayoutTests.swift`
 
 **Interfaces:**
 - Consumes: `PaneLayout.parse` (Task 3), `WindowID` (Task 1).
@@ -915,11 +915,11 @@ git commit -m "feat: coalesce tmux %begin/%end/%error blocks into command result
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/GlymrKitTests/ControlModeLayoutTests.swift
+// Tests/NeotildeKitTests/ControlModeLayoutTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class ControlModeLayoutTests: XCTestCase {
     private func feed(_ s: String) -> [ControlModeEvent] {
@@ -990,7 +990,7 @@ Expected: PASS (5 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/ControlModeParser.swift Tests/GlymrKitTests/ControlModeLayoutTests.swift
+git add Sources/NeotildeKit/Tmux/ControlModeParser.swift Tests/NeotildeKitTests/ControlModeLayoutTests.swift
 git commit -m "feat: parse tmux %layout-change into a pane geometry tree"
 ```
 
@@ -1001,7 +1001,7 @@ git commit -m "feat: parse tmux %layout-change into a pane geometry tree"
 - [ ] **Step 1: Run the entire Swift suite**
 
 Run: `docker compose run --rm dev swift test`
-Expected: PASS — all GlymrKit suites green (the original 20 Swift tests plus the new tmux tests).
+Expected: PASS — all NeotildeKit suites green (the original 20 Swift tests plus the new tmux tests).
 
 - [ ] **Step 2: Confirm no regressions in the Rust crate is unnecessary (no Rust touched); skip.**
 

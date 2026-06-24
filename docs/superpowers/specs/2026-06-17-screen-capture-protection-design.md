@@ -6,7 +6,7 @@
 
 ## Goal
 
-Define Glymr's posture toward iOS's three screen-capture surfaces: app-switcher snapshots, screen recording / mirroring, and screenshots. The goal is *more privacy-aware than the average SSH client, not paranoid* — terminal recording / mirroring is a legitimate, common use case (screencasts, demos, pair programming), so we don't blank by default.
+Define Neotilde's posture toward iOS's three screen-capture surfaces: app-switcher snapshots, screen recording / mirroring, and screenshots. The goal is *more privacy-aware than the average SSH client, not paranoid* — terminal recording / mirroring is a legitimate, common use case (screencasts, demos, pair programming), so we don't blank by default.
 
 ## What iOS lets us do
 
@@ -14,16 +14,16 @@ Define Glymr's posture toward iOS's three screen-capture surfaces: app-switcher 
 - **Screen recording / mirroring** (Control Center recording, ReplayKit, AirPlay, USB-C display): `UIScreen.main.isCaptured` is observable. Apps can swap their UI for a blank or redacted view while capture is active.
 - **App-switcher snapshot**: iOS captures a thumbnail of the foreground view when the app backgrounds. Apps can override by swapping the view at background time.
 
-## What Glymr ships
+## What Neotilde ships
 
 ### App-switcher privacy overlay — always on
 
-When the app backgrounds (`scenePhase` changes away from `.active`), Glymr swaps the on-screen content for a privacy overlay before iOS captures the switcher thumbnail. The overlay is a centered Glymr bell-bronze mark on a `surface.bg` background, no terminal content visible.
+When the app backgrounds (`scenePhase` changes away from `.active`), Neotilde swaps the on-screen content for a privacy overlay before iOS captures the switcher thumbnail. The overlay is a centered Neotilde bell-bronze mark on a `surface.bg` background, no terminal content visible.
 
 - No user setting; this is automatic.
 - Restores the real UI when the app returns to foreground.
 - The cost is essentially zero (one extra view, swapped on background-event).
-- Differentiates Glymr from Blink and Prompt 3, which leak terminal content into the switcher.
+- Differentiates Neotilde from Blink and Prompt 3, which leak terminal content into the switcher.
 
 ### Screen-recording / mirroring blank — toggle, default OFF
 
@@ -38,7 +38,7 @@ App preferences → Security gains:
 When the toggle is on and `UIScreen.main.isCaptured` is true:
 
 - Terminal pane contents render blank (just `terminal.bg` color).
-- A small caption in the center of each pane reads: *"Hidden by Glymr while screen is being captured."*
+- A small caption in the center of each pane reads: *"Hidden by Neotilde while screen is being captured."*
 - Keybar, predictor strip, Esc pill, banners, and all other chrome stay visible — only the *pane content* blanks.
 - The user can still scroll, type, run commands; just nothing of value is on screen for the capture.
 - When `isCaptured` returns to false, panes restore to normal rendering instantly.
@@ -56,9 +56,9 @@ A v1.5+ candidate if a meaningful use case surfaces (e.g., logging screenshot ev
 
 ## Positioning
 
-Glymr says, in About & Help → Privacy:
+Neotilde says, in About & Help → Privacy:
 
-> Glymr swaps your terminal content for the Glymr logo whenever the app is in the iOS app switcher. If you also want your terminal hidden during screen recording or mirroring, turn on *Hide content while screen is being captured* in Security. Glymr cannot prevent screenshots — no iOS app can — and we don't show a notification when one is taken.
+> Neotilde swaps your terminal content for the Neotilde logo whenever the app is in the iOS app switcher. If you also want your terminal hidden during screen recording or mirroring, turn on *Hide content while screen is being captured* in Security. Neotilde cannot prevent screenshots — no iOS app can — and we don't show a notification when one is taken.
 
 Honest about capabilities, honest about limits.
 
@@ -66,8 +66,8 @@ Honest about capabilities, honest about limits.
 
 - **Screenshot block / "screenshot prevention" hack** via secure-text-field overlays. Fragile, deprecated by Apple periodically, defeats user expectations. Not shipped.
 - **Per-pane sensitive flag.** A pane marked "sensitive" that blanks on capture while others stay visible. Adds surface for marginal value; defer.
-- **Audio capture protection.** Glymr doesn't produce audio (no terminal bell sound, per the terminal-feedback spec). Nothing to protect.
-- **Notification preview suppression** when the screen is captured. iOS handles notifications; out of Glymr's surface.
+- **Audio capture protection.** Neotilde doesn't produce audio (no terminal bell sound, per the terminal-feedback spec). Nothing to protect.
+- **Notification preview suppression** when the screen is captured. iOS handles notifications; out of Neotilde's surface.
 
 ## Cross-spec consequences
 

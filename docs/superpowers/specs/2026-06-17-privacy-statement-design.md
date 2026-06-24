@@ -2,13 +2,13 @@
 
 **Date:** 2026-06-17
 **Status:** Locked
-**Resolves:** punch-list item #12 in `docs/final-review-punchlist.md`. Required for App Store submission and load-bearing for Glymr's "security-first, no telemetry" marketing posture.
+**Resolves:** punch-list item #12 in `docs/final-review-punchlist.md`. Required for App Store submission and load-bearing for Neotilde's "security-first, no telemetry" marketing posture.
 
 ## Placement
 
 Reached from **About & Help → Privacy statement** per [[2026-06-16-settings-sub-screens-design]]. Full-screen push, scrollable plain-prose with section headings. No interactive elements except a single "Contact us" mail link at the bottom.
 
-The same content (slightly reformatted as HTML for the App Store privacy page) appears at the App Store privacy section. The Glymr website hosts a copy at `glymr.app/privacy` (placeholder URL; actual TLD TBD).
+The same content (slightly reformatted as HTML for the App Store privacy page) appears at the App Store privacy section. The Neotilde website hosts a copy at `neotilde.app/privacy` (placeholder URL; actual TLD TBD).
 
 The in-app page is the canonical source. App Store and website are mirrors.
 
@@ -25,21 +25,21 @@ The text below is the v1 draft. Final pass before App Store submission may tight
 
 ---
 
-### How Glymr handles your data
+### How Neotilde handles your data
 
-Glymr is an SSH client. The connections you make are between your device and the servers you choose; Glymr is not an intermediary, does not see your traffic, and does not have a server-side component.
+Neotilde is an SSH client. The connections you make are between your device and the servers you choose; Neotilde is not an intermediary, does not see your traffic, and does not have a server-side component.
 
-### What Glymr collects
+### What Neotilde collects
 
 Nothing.
 
-Glymr ships no analytics, no telemetry, no crash reporting, no usage tracking, no advertising identifiers, no third-party SDKs that collect any of the above. We do not know which hosts you connect to, when, how long, or how often. We don't know which features you use. There is no Glymr account.
+Neotilde ships no analytics, no telemetry, no crash reporting, no usage tracking, no advertising identifiers, no third-party SDKs that collect any of the above. We do not know which hosts you connect to, when, how long, or how often. We don't know which features you use. There is no Neotilde account.
 
-### What Glymr stores on your device and your iCloud
+### What Neotilde stores on your device and your iCloud
 
-To do its job, Glymr needs to remember a few things across launches and across your devices. All of it lives in places Apple controls — there is no Glymr cloud service.
+To do its job, Neotilde needs to remember a few things across launches and across your devices. All of it lives in places Apple controls — there is no Neotilde cloud service.
 
-**SSH identities (private keys).** Stored in iCloud Keychain (synced end-to-end encrypted across your Apple devices) or the Secure Enclave (hardware-bound to a single device, your choice when creating the identity). Glymr never reads the raw key bytes for any purpose other than the SSH handshake.
+**SSH identities (private keys).** Stored in iCloud Keychain (synced end-to-end encrypted across your Apple devices) or the Secure Enclave (hardware-bound to a single device, your choice when creating the identity). Neotilde never reads the raw key bytes for any purpose other than the SSH handshake.
 
 **Host configurations** (hostnames, usernames, port numbers, references to identities, port-forward rules, your custom labels and notes). Stored in CloudKit Private Database, encrypted with a key that lives in your iCloud Keychain — effectively end-to-end encrypted regardless of your Advanced Data Protection setting.
 
@@ -53,7 +53,7 @@ To do its job, Glymr needs to remember a few things across launches and across y
 
 **Live session state.** Local-only. Not synced. Includes per-connection tmux state IDs and mosh resume tokens for the lifetime of the session.
 
-### What Glymr does *not* store
+### What Neotilde does *not* store
 
 - No audit log of your activity (deferred to a future Pro/enterprise edition; the data layer reserves a stub but writes nothing in v1).
 - No record of what you typed at the prompt outside the predictor sketch above.
@@ -62,25 +62,25 @@ To do its job, Glymr needs to remember a few things across launches and across y
 
 ### iCloud sync
 
-Per-category toggles live at **Settings → App preferences → iCloud sync**. You can opt any of the synced categories out at any time. Turning sync off does not delete previously-synced data from iCloud — to remove that, delete the data itself from inside Glymr, or sign out of iCloud.
+Per-category toggles live at **Settings → App preferences → iCloud sync**. You can opt any of the synced categories out at any time. Turning sync off does not delete previously-synced data from iCloud — to remove that, delete the data itself from inside Neotilde, or sign out of iCloud.
 
 End-to-end encryption applies to all synced categories, including without Advanced Data Protection enabled. The encryption key for non-Keychain categories lives only in your iCloud Keychain.
 
 ### Third parties
 
-None. Glymr embeds no third-party SDKs that collect, transmit, or share user data. The only network requests Glymr makes are SSH and mosh connections to the hosts you configure, plus iOS-level iCloud sync that Apple handles.
+None. Neotilde embeds no third-party SDKs that collect, transmit, or share user data. The only network requests Neotilde makes are SSH and mosh connections to the hosts you configure, plus iOS-level iCloud sync that Apple handles.
 
 ### Screen capture
 
-iOS allows screenshots and screen recording of any app, and provides no way to prevent screenshots. Glymr replaces its on-screen content with a privacy overlay whenever the app appears in the iOS app switcher, so terminal content does not leak into the multitasking thumbnail. An optional setting at **Settings → Security → Hide content while screen is being captured** blanks the terminal panes during AirPlay, mirroring, or screen recording — off by default, since terminal demos and screencasts are common, legitimate uses. Glymr cannot prevent screenshots and does not show a notification when one is taken.
+iOS allows screenshots and screen recording of any app, and provides no way to prevent screenshots. Neotilde replaces its on-screen content with a privacy overlay whenever the app appears in the iOS app switcher, so terminal content does not leak into the multitasking thumbnail. An optional setting at **Settings → Security → Hide content while screen is being captured** blanks the terminal panes during AirPlay, mirroring, or screen recording — off by default, since terminal demos and screencasts are common, legitimate uses. Neotilde cannot prevent screenshots and does not show a notification when one is taken.
 
 ### Identities, certificates, and key destruction
 
-iCloud Keychain identities survive uninstalling and reinstalling Glymr — the iCloud-synced copy is restored when you sign in again. Secure Enclave identities are bound to this device and this install; uninstalling Glymr permanently destroys them. This matches what iOS does to any app's Keychain data on uninstall.
+iCloud Keychain identities survive uninstalling and reinstalling Neotilde — the iCloud-synced copy is restored when you sign in again. Secure Enclave identities are bound to this device and this install; uninstalling Neotilde permanently destroys them. This matches what iOS does to any app's Keychain data on uninstall.
 
 ### Children
 
-Glymr is rated 17+ in the App Store because it can connect to arbitrary remote servers whose content we cannot moderate.
+Neotilde is rated 17+ in the App Store because it can connect to arbitrary remote servers whose content we cannot moderate.
 
 ### Changes to this statement
 
@@ -88,7 +88,7 @@ Material changes to data handling will ship in an app update along with a one-ti
 
 ### Contact
 
-[hello@glymr.app](mailto:hello@glymr.app)
+[hello@neotilde.app](mailto:hello@neotilde.app)
 
 ---
 
@@ -96,7 +96,7 @@ Material changes to data handling will ship in an app update along with a one-ti
 
 - **Localized translations.** v1 is English-only; the privacy statement is too. Translations come with the rest of the localization work, which is deferred.
 - **Per-region variants** (e.g., GDPR-specific phrasing, CCPA notice). v1 ships one statement that the maintainer believes covers the substantive obligations of the major regimes — the simplicity ("we don't collect anything") makes regime-specific carve-outs largely unnecessary. Revisit when shipping in a market that requires specific text.
-- **Cookie policy.** Glymr has no website state to disclose; the app doesn't use cookies. Not relevant in v1.
+- **Cookie policy.** Neotilde has no website state to disclose; the app doesn't use cookies. Not relevant in v1.
 
 ## Maintenance triggers
 

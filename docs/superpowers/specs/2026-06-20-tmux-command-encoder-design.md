@@ -6,9 +6,9 @@
 
 ## Goal
 
-Define the pure, value-in/string-out encoder that turns Glymr's intents
+Define the pure, value-in/string-out encoder that turns Neotilde's intents
 (open a window, split a pane, resize, switch, send keystrokes, end the session)
-into the exact `tmux` control-mode command lines Glymr writes back over the
+into the exact `tmux` control-mode command lines Neotilde writes back over the
 SSH channel. This is the inverse of [[2026-06-20-tmux-control-mode-parser-design]]:
 the parser reads `%`-prefixed notifications *from* tmux; the encoder writes plain
 command lines *to* tmux's control-mode stdin.
@@ -22,7 +22,7 @@ the stateless encoding of individual commands. It owns no I/O and no state.
 In `tmux -CC` control mode, the client sends commands the same way it would type
 them at the tmux command prompt: **one command per line, terminated by a single
 `\n`**. tmux parses the line with its normal command-string lexer (whitespace
-splits arguments; `"`/`'`/`\` quote). Every command Glymr sends is correlated to
+splits arguments; `"`/`'`/`\` quote). Every command Neotilde sends is correlated to
 a `%begin`/`%end`/`%error` block in the reply stream (handled by the parser).
 
 **Framing rule for this encoder:** each function returns a single command line
@@ -41,8 +41,8 @@ Two classes of argument, two trust levels:
 2. **Free-form values** — only two exist: the **session name** (for
    `kill-session`) and the **key payload** (for `send-keys`). Both are handled
    so that no input value can alter command structure:
-   - **Session name** — Glymr only ever names sessions `glymr-<accountHash>` or
-     `glymr-<accountHash>-<uuid>` per [[2026-06-17-tmux-session-design]], i.e.
+   - **Session name** — Neotilde only ever names sessions `neotilde-<accountHash>` or
+     `neotilde-<accountHash>-<uuid>` per [[2026-06-17-tmux-session-design]], i.e.
      `[a-z0-9-]+`. The encoder **validates** the name against that safe charset
      and returns `nil` (fail closed) for anything else, rather than quoting. A
      name that can't appear in practice is a programming error, not a runtime

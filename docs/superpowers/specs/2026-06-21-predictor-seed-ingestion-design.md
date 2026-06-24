@@ -10,14 +10,14 @@ second source merged into the same builder) is the 4k follow-on. Implements step
 
 ## Shape: pure parser + builder in a tooling target, thin executable, fetch in a script
 
-The shipped app (`GlymrKit`) must not carry a tldr/markdown parser. So the
+The shipped app (`NeotildeKit`) must not carry a tldr/markdown parser. So the
 build-time code lives in its own targets:
 
 ```
-Sources/SeedKit/            library, depends on GlymrKit — pure, unit-tested
+Sources/SeedKit/            library, depends on NeotildeKit — pure, unit-tested
   TldrParser.swift          markdown page → command-invocation token sequences
   SeedBuilder.swift         token sequences → Vocabulary + BigramVocabulary → blobs
-Sources/glymr-seedbuild/    executable, depends on SeedKit — thin I/O glue
+Sources/neotilde-seedbuild/    executable, depends on SeedKit — thin I/O glue
   main.swift                walk a dir of .md → build → write seed_*.sketch
 Tests/SeedKitTests/         fixtures-driven tests for parser + builder
 scripts/build-seed.sh       clone tldr-pages @ pinned tag → run the tool
@@ -83,9 +83,9 @@ blobs() -> (unigram: [UInt8], bigram: [UInt8])   // Vocabulary + BigramVocabular
 - Bigram sketch sized `4 × 2^16`, unigram `4 × 2^14` — the spec defaults, matching
   ``BigramVocabulary`` / ``Vocabulary``.
 
-## glymr-seedbuild — thin executable
+## neotilde-seedbuild — thin executable
 
-`glymr-seedbuild <pages-dir> <out-dir>`: recursively find `*.md` under
+`neotilde-seedbuild <pages-dir> <out-dir>`: recursively find `*.md` under
 `pages-dir`, parse each, ingest, then write `seed_unigram_v1.sketch` and
 `seed_bigram_v1.sketch` to `out-dir`. All real logic is in `SeedKit`; `main` is
 directory walking + file read/write, deliberately too thin to need its own tests

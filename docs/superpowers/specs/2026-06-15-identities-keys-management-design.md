@@ -195,8 +195,8 @@ No orphaned key material. The user expectation when they tap "delete a key" is t
 
 Documented here for completeness, since it's a deletion path the user can take outside the app:
 
-- **iCloud Keychain identities** *survive* app uninstall + reinstall. iOS removes the local Keychain item on uninstall (iOS 10.3+ default), but the iCloud-Keychain-synced copy lives in iCloud and is restored when the user reinstalls Glymr and re-signs in. Effectively: uninstalling Glymr does not destroy iCloud-flavor identities; signing out of iCloud (or removing the device from the Apple ID) does.
-- **Secure Enclave identities** are *destroyed* on app uninstall. The Keychain reference to the SE-bound key is deleted, the SE key material is no longer accessible, and there is no recovery path. Same outcome as tapping Delete inside the app. This is expected iOS behavior, not a Glymr quirk.
+- **iCloud Keychain identities** *survive* app uninstall + reinstall. iOS removes the local Keychain item on uninstall (iOS 10.3+ default), but the iCloud-Keychain-synced copy lives in iCloud and is restored when the user reinstalls Neotilde and re-signs in. Effectively: uninstalling Neotilde does not destroy iCloud-flavor identities; signing out of iCloud (or removing the device from the Apple ID) does.
+- **Secure Enclave identities** are *destroyed* on app uninstall. The Keychain reference to the SE-bound key is deleted, the SE key material is no longer accessible, and there is no recovery path. Same outcome as tapping Delete inside the app. This is expected iOS behavior, not a Neotilde quirk.
 
 This contrast is surfaced in two places:
 
@@ -238,7 +238,7 @@ Fields (vertical stack):
 
 On `Create`:
 
-1. Glymr generates the key via `SecKeyCreateRandomKey` (iCloud Keychain flavor) or `SecKeyCreateRandomKey` with `kSecAttrTokenIDSecureEnclave` (SE flavor), applying the chosen auth policy via `SecAccessControl`.
+1. Neotilde generates the key via `SecKeyCreateRandomKey` (iCloud Keychain flavor) or `SecKeyCreateRandomKey` with `kSecAttrTokenIDSecureEnclave` (SE flavor), applying the chosen auth policy via `SecAccessControl`.
 2. The `Identity` metadata record is written to CloudKit.
 3. The sheet dismisses, returning to the entry context (list refreshes with the new identity in alphabetical position; or host form's identity pill row gets the new ref appended).
 
@@ -266,7 +266,7 @@ No Share Extension in v1.
 
 On `Save`:
 
-1. Glymr re-stores the key in iCloud Keychain with the chosen auth policy via `SecAccessControl`.
+1. Neotilde re-stores the key in iCloud Keychain with the chosen auth policy via `SecAccessControl`.
 2. The `Identity` metadata record is written to CloudKit.
 3. The sheet dismisses, same as Create new.
 
@@ -298,7 +298,7 @@ Unchanged from the host-crud spec. Scrollable list of existing identities using 
 
 ### Not deferred — intentionally out of scope
 
-- **ssh-agent emulation surface.** Glymr is the client; it does not expose its keys as an SSH agent to other apps. (iOS doesn't have an agent IPC primitive in any case.)
+- **ssh-agent emulation surface.** Neotilde is the client; it does not expose its keys as an SSH agent to other apps. (iOS doesn't have an agent IPC primitive in any case.)
 - **Password manager integration.** Locked out at the storage layer per `host-crud-design.md` — iCloud Keychain *is* the password manager backend for this app's primary use case; import covers the rest.
 - **Key revocation tracking.** "Mark this key as compromised, refuse to use it anywhere" — a meaningful feature in an enterprise context, no clear user need at v1.
 

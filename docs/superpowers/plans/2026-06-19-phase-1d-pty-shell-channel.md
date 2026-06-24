@@ -16,7 +16,7 @@
 - **Channel is single-owner.** Only the pump task touches the `Channel`; `ShellSession` never holds it. No `Mutex` around the channel.
 - **`on_closed` fires exactly once**, when the pump task exits (clean exit, signal, EOF, session drop, or transport error).
 - **Typed outcomes, not panics.** Post-close `write`/`resize`/`close` return `ConnectError::Transport { message: "shell session closed" }` — never panic.
-- **No fixture changes.** The current Alpine `sshd` already provides `/bin/sh` and `stty`; all tests gate behind `GLYMR_TEST_SSHD`.
+- **No fixture changes.** The current Alpine `sshd` already provides `/bin/sh` and `stty`; all tests gate behind `NEOTILDE_TEST_SSHD`.
 - **License header** (`// SPDX-FileCopyrightText: 2026 True Positive LLC` / `// SPDX-License-Identifier: GPL-3.0-only`) on every new `.rs`; **conventional commits**, one per task; run everything in the dev container.
 - **macOS-gated, deferred:** the SwiftTerm/AsyncStream consumption of `ShellOutput`; custom terminal modes / pixel dimensions.
 
@@ -36,16 +36,16 @@
 
 | File | Responsibility |
 |---|---|
-| `crates/glymr-ssh-core/src/connection.rs` | `ShellOutput` delegate, `ShellExit`, `ShellSession`, `ShellCommand` (internal), `Connection::open_shell`, the `pump` task |
-| `crates/glymr-ssh-core/tests/shell_integration.rs` | Shell channel integration tests vs `sshd` (test double + condition polling) |
+| `crates/neotilde-ssh-core/src/connection.rs` | `ShellOutput` delegate, `ShellExit`, `ShellSession`, `ShellCommand` (internal), `Connection::open_shell`, the `pump` task |
+| `crates/neotilde-ssh-core/tests/shell_integration.rs` | Shell channel integration tests vs `sshd` (test double + condition polling) |
 
 ---
 
 ### Task 1: Shell open + stream + write + close + exit status
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/src/connection.rs`
-- Create: `crates/glymr-ssh-core/tests/shell_integration.rs`
+- Modify: `crates/neotilde-ssh-core/src/connection.rs`
+- Create: `crates/neotilde-ssh-core/tests/shell_integration.rs`
 
 **Interfaces:**
 - Consumes: `connect_core`, `Connection`, `ConnectError`, `AuthOutcome`, `authenticate_password`, `HostKeyVerifier`, `HostKeyInfo` (Phases 1b/1c).
@@ -59,13 +59,13 @@
 
 - [ ] **Step 1: Write the failing integration tests**
 
-Create `crates/glymr-ssh-core/tests/shell_integration.rs`:
+Create `crates/neotilde-ssh-core/tests/shell_integration.rs`:
 ```rust
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use glymr_ssh_core::connection::{
+use neotilde_ssh_core::connection::{
     connect_core, AuthOutcome, Connection, ConnectError, HostKeyInfo, HostKeyVerifier,
     ShellExit, ShellOutput,
 };
@@ -96,7 +96,7 @@ impl ShellOutput for Collector {
     fn on_closed(&self, exit: ShellExit) { self.0.lock().unwrap().exit = Some(exit); }
 }
 
-fn sshd_addr() -> Option<String> { std::env::var("GLYMR_TEST_SSHD").ok() }
+fn sshd_addr() -> Option<String> { std::env::var("NEOTILDE_TEST_SSHD").ok() }
 
 /// Poll `pred` up to ~5s (100 × 50ms). Returns its final value — true once the
 /// async condition holds, false if it never did (so the test fails on a real
@@ -121,22 +121,22 @@ async fn connect_and_auth(addr: String) -> Connection {
 
 #[tokio::test]
 async fn shell_echoes_written_input() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_and_auth(addr).await;
     let col = Collector::new();
     let session = conn
         .open_shell("xterm".into(), 80, 24, Arc::new(col.clone()))
         .await
         .expect("open shell");
-    session.write(b"echo glymr-marker\n".to_vec()).await.expect("write");
-    let saw = wait_until(|| col.text().contains("glymr-marker")).await;
+    session.write(b"echo neotilde-marker\n".to_vec()).await.expect("write");
+    let saw = wait_until(|| col.text().contains("neotilde-marker")).await;
     assert!(saw, "expected shell output to contain marker, got: {:?}", col.text());
     let _ = session.close().await;
 }
 
 #[tokio::test]
 async fn shell_clean_exit_reports_status_zero() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_and_auth(addr).await;
     let col = Collector::new();
     let session = conn
@@ -160,12 +160,12 @@ fn _uses_connect_error() -> Option<ConnectError> { None }
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Ensure `sshd` is up: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d sshd`
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test shell_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test shell_integration`
 Expected: FAIL — `no ShellExit/ShellOutput in connection`, `no method named open_shell`.
 
 - [ ] **Step 3: Add the delegate, `ShellExit`, `ShellCommand`, and `ShellSession`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add after the `AuthOutcome` / `outcome()` block:
+In `crates/neotilde-ssh-core/src/connection.rs`, add after the `AuthOutcome` / `outcome()` block:
 ```rust
 /// Sink for shell output and lifecycle. Swift implements it (forwarding into an
 /// AsyncStream); Linux tests use a Rust double. Methods are synchronous and MUST
@@ -207,7 +207,7 @@ pub struct ShellSession {
 
 - [ ] **Step 4: Add the `pump` task**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add a free function (near `connect_core`):
+In `crates/neotilde-ssh-core/src/connection.rs`, add a free function (near `connect_core`):
 ```rust
 /// Sole owner of the russh channel for a shell session. Multiplexes channel
 /// reads and `ShellSession` commands; pushes output to `output` and fires
@@ -273,7 +273,7 @@ async fn pump(
 
 - [ ] **Step 5: Implement `open_shell` on `Connection`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add inside the existing `#[uniffi::export(async_runtime = "tokio")] impl Connection` block (alongside the `authenticate_*` methods):
+In `crates/neotilde-ssh-core/src/connection.rs`, add inside the existing `#[uniffi::export(async_runtime = "tokio")] impl Connection` block (alongside the `authenticate_*` methods):
 ```rust
     /// Open a PTY-backed login shell. Requests a PTY (`term`/`cols`/`rows`,
     /// pixel dims 0, no extra modes) then a shell, and starts pumping output to
@@ -300,7 +300,7 @@ In `crates/glymr-ssh-core/src/connection.rs`, add inside the existing `#[uniffi:
 
 - [ ] **Step 6: Implement `write` and `close` on `ShellSession`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add a new exported impl block (separate, so the tokio async-runtime attribute applies):
+In `crates/neotilde-ssh-core/src/connection.rs`, add a new exported impl block (separate, so the tokio async-runtime attribute applies):
 ```rust
 #[uniffi::export(async_runtime = "tokio")]
 impl ShellSession {
@@ -325,7 +325,7 @@ impl ShellSession {
 
 - [ ] **Step 7: Drop the now-stale `#[allow(dead_code)]` on `handle`**
 
-The `handle` field is now used by auth (1c) and `open_shell` (1d). In `crates/glymr-ssh-core/src/connection.rs`, in the `Connection` struct, change:
+The `handle` field is now used by auth (1c) and `open_shell` (1d). In `crates/neotilde-ssh-core/src/connection.rs`, in the `Connection` struct, change:
 ```rust
     #[allow(dead_code)] // consumed by Phase 1c (auth) and 1d (channels)
     handle: tokio::sync::Mutex<client::Handle<ClientHandler>>,
@@ -337,13 +337,13 @@ to:
 
 - [ ] **Step 8: Run the tests to verify they pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test shell_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test shell_integration`
 Expected: PASS — `shell_echoes_written_input`, `shell_clean_exit_reports_status_zero`.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/src/connection.rs crates/glymr-ssh-core/tests/shell_integration.rs
+git add crates/neotilde-ssh-core/src/connection.rs crates/neotilde-ssh-core/tests/shell_integration.rs
 git commit -m "feat: add PTY shell channel with streamed output and exit status"
 ```
 
@@ -352,8 +352,8 @@ git commit -m "feat: add PTY shell channel with streamed output and exit status"
 ### Task 2: Window resize
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/src/connection.rs`
-- Modify: `crates/glymr-ssh-core/tests/shell_integration.rs`
+- Modify: `crates/neotilde-ssh-core/src/connection.rs`
+- Modify: `crates/neotilde-ssh-core/tests/shell_integration.rs`
 
 **Interfaces:**
 - Consumes: `ShellSession`, `ShellCommand::Resize` (Task 1).
@@ -361,11 +361,11 @@ git commit -m "feat: add PTY shell channel with streamed output and exit status"
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `crates/glymr-ssh-core/tests/shell_integration.rs`:
+Add to `crates/neotilde-ssh-core/tests/shell_integration.rs`:
 ```rust
 #[tokio::test]
 async fn shell_resize_changes_window_size() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_and_auth(addr).await;
     let col = Collector::new();
     let session = conn
@@ -383,12 +383,12 @@ async fn shell_resize_changes_window_size() {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test shell_integration shell_resize`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test shell_integration shell_resize`
 Expected: FAIL — `no method named resize`.
 
 - [ ] **Step 3: Implement `resize`**
 
-In `crates/glymr-ssh-core/src/connection.rs`, add inside the `#[uniffi::export(async_runtime = "tokio")] impl ShellSession` block:
+In `crates/neotilde-ssh-core/src/connection.rs`, add inside the `#[uniffi::export(async_runtime = "tokio")] impl ShellSession` block:
 ```rust
     /// Tell the remote of a new terminal size (pixel dims 0).
     pub async fn resize(&self, cols: u32, rows: u32) -> Result<(), ConnectError> {
@@ -401,13 +401,13 @@ In `crates/glymr-ssh-core/src/connection.rs`, add inside the `#[uniffi::export(a
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test shell_integration shell_resize`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test shell_integration shell_resize`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/src/connection.rs crates/glymr-ssh-core/tests/shell_integration.rs
+git add crates/neotilde-ssh-core/src/connection.rs crates/neotilde-ssh-core/tests/shell_integration.rs
 git commit -m "feat: add shell window resize"
 ```
 
@@ -416,18 +416,18 @@ git commit -m "feat: add shell window resize"
 ### Task 3: Adversarial / boundary coverage
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/tests/shell_integration.rs`
+- Modify: `crates/neotilde-ssh-core/tests/shell_integration.rs`
 
 **Interfaces:**
 - Consumes: `open_shell`, `ShellSession::{write, close}`, `ShellExit`, `ConnectError` (Task 1). No new production code — this task hardens coverage of Task 1's contract (BVA on the exit code; the typed post-close failure).
 
 - [ ] **Step 1: Write the failing tests**
 
-Replace the `_uses_connect_error` placeholder in `crates/glymr-ssh-core/tests/shell_integration.rs` with:
+Replace the `_uses_connect_error` placeholder in `crates/neotilde-ssh-core/tests/shell_integration.rs` with:
 ```rust
 #[tokio::test]
 async fn shell_nonzero_exit_reports_real_code() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_and_auth(addr).await;
     let col = Collector::new();
     let session = conn
@@ -443,7 +443,7 @@ async fn shell_nonzero_exit_reports_real_code() {
 
 #[tokio::test]
 async fn write_after_close_returns_typed_error() {
-    let Some(addr) = sshd_addr() else { eprintln!("skipping: set GLYMR_TEST_SSHD"); return };
+    let Some(addr) = sshd_addr() else { eprintln!("skipping: set NEOTILDE_TEST_SSHD"); return };
     let conn = connect_and_auth(addr).await;
     let col = Collector::new();
     let session = conn
@@ -466,18 +466,18 @@ Also delete the now-unused `#[allow(dead_code)] fn _uses_connect_error` helper (
 
 - [ ] **Step 2: Run the tests to verify they fail (or pass) for the right reason**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core --test shell_integration`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core --test shell_integration`
 Expected: both new tests compile and PASS against the Task-1 implementation. If `write_after_close_returns_typed_error` fails with `write after close must fail` (i.e. the write returned `Ok`), the close-then-wait ordering regressed — confirm the test waits for `col.exit().is_some()` before writing. If `shell_nonzero_exit_reports_real_code` reports `Some(0)`, the pump is overwriting/ignoring `ExitStatus` — re-check Task 1 Step 4.
 
 - [ ] **Step 3: Run the entire crate suite (no regression)**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p glymr-ssh-core`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core`
 Expected: PASS — unit tests, `connect_integration` (4), `auth_integration` (5), `shell_integration` (5).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/tests/shell_integration.rs
+git add crates/neotilde-ssh-core/tests/shell_integration.rs
 git commit -m "test: add shell non-zero exit (BVA) and write-after-close negative cases"
 ```
 
@@ -485,7 +485,7 @@ git commit -m "test: add shell non-zero exit (BVA) and write-after-close negativ
 
 ## Phase 1d exit criteria
 
-- [ ] `cargo test -p glymr-ssh-core` green against the running `sshd` fixture; earlier suites (unit / connect / auth) unaffected.
+- [ ] `cargo test -p neotilde-ssh-core` green against the running `sshd` fixture; earlier suites (unit / connect / auth) unaffected.
 - [ ] Echo round-trips; clean exit → `exit_status Some(0)`; non-zero exit → `Some(3)`; resize reflected by `stty size`; write-after-close → `ConnectError::Transport { "shell session closed" }`.
 - [ ] No leaked pump tasks — dropping the `ShellSession` (all senders gone) makes the task close the channel and exit, firing `on_closed` once.
 - [ ] New test file carries the REUSE header; three conventional commits, one per task.

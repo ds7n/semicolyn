@@ -4,15 +4,15 @@
 
 **Goal:** On connect, probe the remote `tmux`, and — when it's ≥3.0 and the host allows it — **attach a `tmux -CC` control-mode session** and render the **active pane** end-to-end in the terminal (output + keyboard), otherwise fall back to a raw-PTY shell with an amber "degraded" banner.
 
-**Architecture:** The tmux control-mode *engine* (parser, `TmuxSessionController`, session model) already exists and is tested in `GlymrKit/Tmux/`. This plan adds (1) a small engine change to **surface `%output` pane bytes** (currently dropped), (2) **pure launch-decision logic** in `GlymrKit` (version parsing, session naming, attach-vs-degrade decision) — all Linux-tested, and (3) the **iOS app glue** that runs the probe over the existing `open_exec` transport, drives the controller, routes the active pane's bytes to the existing single SwiftTerm view, and shows the degraded banner. A Rust integration test against the tmux-equipped CI sshd fixture proves the transport.
+**Architecture:** The tmux control-mode *engine* (parser, `TmuxSessionController`, session model) already exists and is tested in `NeotildeKit/Tmux/`. This plan adds (1) a small engine change to **surface `%output` pane bytes** (currently dropped), (2) **pure launch-decision logic** in `NeotildeKit` (version parsing, session naming, attach-vs-degrade decision) — all Linux-tested, and (3) the **iOS app glue** that runs the probe over the existing `open_exec` transport, drives the controller, routes the active pane's bytes to the existing single SwiftTerm view, and shows the degraded banner. A Rust integration test against the tmux-equipped CI sshd fixture proves the transport.
 
-**Tech Stack:** Swift 6 `GlymrKit` (XCTest, Linux), the `GlymrSSHCoreFFI` UniFFI bridge + SwiftUI app target (macOS-CI compile gate), Rust integration test (`glymr-ssh-core`, linux-rust against the `tmux`-equipped sshd fixture).
+**Tech Stack:** Swift 6 `NeotildeKit` (XCTest, Linux), the `NeotildeSSHCoreFFI` UniFFI bridge + SwiftUI app target (macOS-CI compile gate), Rust integration test (`neotilde-ssh-core`, linux-rust against the `tmux`-equipped sshd fixture).
 
 ## Scope
 
 **This plan (Phase 3 Plan A):**
-- Connect-time `tmux -V` probe over `open_exec`; decision = attach / degrade, honoring the host's `glymr.tmux.attemptControlMode`.
-- Attach `tmux -CC new-session -A -s glymr-<hash>` (session name via a swappable stub provider).
+- Connect-time `tmux -V` probe over `open_exec`; decision = attach / degrade, honoring the host's `neotilde.tmux.attemptControlMode`.
+- Attach `tmux -CC new-session -A -s neotilde-<hash>` (session name via a swappable stub provider).
 - Surface `%output` from the controller; route the **active pane's** bytes into the existing single SwiftTerm `TerminalScreen`.
 - Keyboard input → `send-keys` to the active pane.
 - Amber transient "degraded — running as plain SSH" banner on fallback (tmux <3.0 / not found / opted out).
@@ -28,9 +28,9 @@
 
 | File | Responsibility | Test surface |
 |---|---|---|
-| `Sources/GlymrKit/Tmux/TmuxSessionController.swift` *(modify)* | add `paneOutput` to `TmuxControllerOutput`; collect `.output` events in `feed` | Linux `swift test` |
-| `Sources/GlymrKit/Tmux/TmuxLaunch.swift` *(create)* | pure: `parseTmuxVersion`, `tmuxSupportsControlMode`, `TmuxLaunchDecision`, `tmuxLaunchDecision(...)`, `SessionNameProvider` + `StubSessionNameProvider`, `tmuxSessionName(seed:)` | Linux `swift test` |
-| `crates/glymr-ssh-core/tests/tmux_integration.rs` *(modify)* | add a `tmux -CC new-session -A` attach assertion | linux-rust (fixture-gated) |
+| `Sources/NeotildeKit/Tmux/TmuxSessionController.swift` *(modify)* | add `paneOutput` to `TmuxControllerOutput`; collect `.output` events in `feed` | Linux `swift test` |
+| `Sources/NeotildeKit/Tmux/TmuxLaunch.swift` *(create)* | pure: `parseTmuxVersion`, `tmuxSupportsControlMode`, `TmuxLaunchDecision`, `tmuxLaunchDecision(...)`, `SessionNameProvider` + `StubSessionNameProvider`, `tmuxSessionName(seed:)` | Linux `swift test` |
+| `crates/neotilde-ssh-core/tests/tmux_integration.rs` *(modify)* | add a `tmux -CC new-session -A` attach assertion | linux-rust (fixture-gated) |
 | `App/TmuxRuntime.swift` *(create)* | app-side control-mode driver: owns `TmuxSessionController`, a `ShellOutput` sink that feeds it, active-pane output routing + `send-keys` input | macOS-CI compile |
 | `App/ConnectionViewModel.swift` *(modify)* | probe → decision → attach-or-degrade; set degraded banner | macOS-CI compile |
 | `App/DegradedBanner.swift` *(create)* | transient amber banner view | macOS-CI compile |
@@ -39,13 +39,13 @@
 ## Global Constraints
 
 - Every source/test file begins with `// SPDX-FileCopyrightText: 2026 True Positive LLC` then `// SPDX-License-Identifier: GPL-3.0-only` (Rust uses `//`).
-- **No Apple-only APIs in `GlymrKit`** — `TmuxLaunch.swift` and the controller change are pure value-type Swift, Linux-tested. Anything touching `GlymrSSHCoreFFI`/UIKit lives in `App/`.
+- **No Apple-only APIs in `NeotildeKit`** — `TmuxLaunch.swift` and the controller change are pure value-type Swift, Linux-tested. Anything touching `NeotildeSSHCoreFFI`/UIKit lives in `App/`.
 - **Control-mode requires tmux ≥ 3.0**; below that → raw-PTY degraded mode (roadmap cross-cutting constraint).
-- Session name format is `glymr-<accountHash>` where `<accountHash>` is 8 lowercase hex chars; the real hash (`SHA-256` of the CloudKit account key) is enrollment-gated, so Plan A uses a **stub provider** — keep the `SessionNameProvider` seam so 2b-ii swaps the real one in. The attach command is exactly `tmux -CC new-session -A -s <name>` (atomic create-or-attach) — produced by the existing `TmuxSessionController.start(sessionName:)`, do not hand-roll it.
+- Session name format is `neotilde-<accountHash>` where `<accountHash>` is 8 lowercase hex chars; the real hash (`SHA-256` of the CloudKit account key) is enrollment-gated, so Plan A uses a **stub provider** — keep the `SessionNameProvider` seam so 2b-ii swaps the real one in. The attach command is exactly `tmux -CC new-session -A -s <name>` (atomic create-or-attach) — produced by the existing `TmuxSessionController.start(sessionName:)`, do not hand-roll it.
 - The probe/attach reuse the existing `Connection.openExec(command:term:cols:rows:output:)` transport — do NOT add a new Rust channel type.
 - Testing tier: **Core** for `TmuxLaunch` pure logic (EP + BVA on versions, good AND bad cases, exact-value assertions) and the `%output` surfacing (assert exact pane id + exact bytes). The Rust attach test is an **integration smoke** (fixture-gated, asserts the handshake is control-mode).
 - Conventional commits; commit after every green step. Branch `feat/phase-3a-tmux-attach`; squash-merge at the end.
-- Test commands: `docker compose run --rm dev swift test --filter <Class>`; `docker compose run --rm dev cargo test -p glymr-ssh-core` (the tmux attach test is gated behind the existing `GLYMR_TEST_SSHD` env the suite already uses).
+- Test commands: `docker compose run --rm dev swift test --filter <Class>`; `docker compose run --rm dev cargo test -p neotilde-ssh-core` (the tmux attach test is gated behind the existing `NEOTILDE_TEST_SSHD` env the suite already uses).
 
 ---
 
@@ -71,8 +71,8 @@ git commit -m "docs: Phase 3 Plan A — tmux attach bridge plan"
 The parser already decodes `%output <pane> <data>` into `ControlModeEvent.output(pane:data:)`, but `TmuxSessionController.feed` passes it to `state.apply()` which **drops it** (`TmuxSessionState.apply` breaks on `.output`). Collect those bytes into the `feed` return value so the app can route them to a terminal view.
 
 **Files:**
-- Modify: `Sources/GlymrKit/Tmux/TmuxSessionController.swift`
-- Test: `Tests/GlymrKitTests/TmuxControllerOutputTests.swift` (create)
+- Modify: `Sources/NeotildeKit/Tmux/TmuxSessionController.swift`
+- Test: `Tests/NeotildeKitTests/TmuxControllerOutputTests.swift` (create)
 
 **Interfaces:**
 - Consumes (exist): `ControlModeEvent.output(pane: PaneID, data: [UInt8])`, `PaneID(raw: UInt32)`, `TmuxControllerOutput`, `TmuxSessionController.feed(_:)`.
@@ -81,20 +81,20 @@ The parser already decodes `%output <pane> <data>` into `ControlModeEvent.output
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/GlymrKitTests/TmuxControllerOutputTests.swift
+// Tests/NeotildeKitTests/TmuxControllerOutputTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class TmuxControllerOutputTests: XCTestCase {
     /// Drives the controller through a minimal attach so it is `.attached`, then
     /// feeds a `%output` line and asserts the bytes surface on `paneOutput`.
     func testFeedSurfacesPaneOutputBytes() {
         let c = TmuxSessionController()
-        _ = c.start(sessionName: "glymr-test")
+        _ = c.start(sessionName: "neotilde-test")
         // Attach handshake: a spontaneous %begin/%end block + %session-changed.
-        _ = c.feed(Array("\u{1b}P1000p%begin 1 0\r\n%end 1 0\r\n%session-changed $1 glymr-test\r\n".utf8))
+        _ = c.feed(Array("\u{1b}P1000p%begin 1 0\r\n%end 1 0\r\n%session-changed $1 neotilde-test\r\n".utf8))
 
         // tmux escapes output octally; "hi" is plain ASCII so it passes through.
         let out = c.feed(Array("%output %1 hi\r\n".utf8))
@@ -107,8 +107,8 @@ final class TmuxControllerOutputTests: XCTestCase {
     /// A feed with no %output yields an empty paneOutput (not nil, not garbage).
     func testFeedWithoutOutputHasEmptyPaneOutput() {
         let c = TmuxSessionController()
-        _ = c.start(sessionName: "glymr-test")
-        let out = c.feed(Array("\u{1b}P1000p%begin 1 0\r\n%end 1 0\r\n%session-changed $1 glymr-test\r\n".utf8))
+        _ = c.start(sessionName: "neotilde-test")
+        let out = c.feed(Array("\u{1b}P1000p%begin 1 0\r\n%end 1 0\r\n%session-changed $1 neotilde-test\r\n".utf8))
         XCTAssertTrue(out.paneOutput.isEmpty)
     }
 }
@@ -209,7 +209,7 @@ Expected: all existing tmux tests still pass (the `.output`-drops-into-state beh
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/TmuxSessionController.swift Tests/GlymrKitTests/TmuxControllerOutputTests.swift
+git add Sources/NeotildeKit/Tmux/TmuxSessionController.swift Tests/NeotildeKitTests/TmuxControllerOutputTests.swift
 git commit -m "feat: surface tmux %output pane bytes from the controller"
 ```
 
@@ -217,11 +217,11 @@ git commit -m "feat: surface tmux %output pane bytes from the controller"
 
 ### Task 2: Pure launch logic — version probe, decision, session name
 
-All the attach-vs-degrade reasoning as pure functions in `GlymrKit`, so the app layer is thin I/O. Linux-tested.
+All the attach-vs-degrade reasoning as pure functions in `NeotildeKit`, so the app layer is thin I/O. Linux-tested.
 
 **Files:**
-- Create: `Sources/GlymrKit/Tmux/TmuxLaunch.swift`
-- Test: `Tests/GlymrKitTests/TmuxLaunchTests.swift`
+- Create: `Sources/NeotildeKit/Tmux/TmuxLaunch.swift`
+- Test: `Tests/NeotildeKitTests/TmuxLaunchTests.swift`
 
 **Interfaces:**
 - Produces (consumed by Task 4/5):
@@ -232,17 +232,17 @@ All the attach-vs-degrade reasoning as pure functions in `GlymrKit`, so the app 
   - `enum DegradeReason: Equatable, Sendable { case optedOut; case tmuxNotFound; case tooOld(TmuxVersion) }`
   - `func tmuxLaunchDecision(attemptControlMode: Bool, versionProbe: String?) -> TmuxLaunchDecision` — `attemptControlMode == false` → `.degrade(.optedOut)`; `versionProbe == nil` or unparseable → `.degrade(.tmuxNotFound)`; parsed but <3.0 → `.degrade(.tooOld(v))`; else `.attach`.
   - `protocol SessionNameProvider { func sessionName() -> String }`
-  - `func tmuxSessionName(seed: String) -> String` — `"glymr-" + first 8 lowercase hex of SHA-256(seed)`.
+  - `func tmuxSessionName(seed: String) -> String` — `"neotilde-" + first 8 lowercase hex of SHA-256(seed)`.
   - `struct StubSessionNameProvider: SessionNameProvider { let seed: String; init(seed: String); func sessionName() -> String { tmuxSessionName(seed: seed) } }`
 
 - [ ] **Step 1: Write the failing tests**
 
 ```swift
-// Tests/GlymrKitTests/TmuxLaunchTests.swift
+// Tests/NeotildeKitTests/TmuxLaunchTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import GlymrKit
+@testable import NeotildeKit
 
 final class TmuxLaunchTests: XCTestCase {
     func testParseVersionVariants() {
@@ -272,8 +272,8 @@ final class TmuxLaunchTests: XCTestCase {
 
     func testSessionNameIsStableHexSlug() {
         let name = tmuxSessionName(seed: "device-abc")
-        XCTAssertTrue(name.hasPrefix("glymr-"))
-        let hex = name.dropFirst("glymr-".count)
+        XCTAssertTrue(name.hasPrefix("neotilde-"))
+        let hex = name.dropFirst("neotilde-".count)
         XCTAssertEqual(hex.count, 8)
         XCTAssertTrue(hex.allSatisfy { "0123456789abcdef".contains($0) })
         XCTAssertEqual(tmuxSessionName(seed: "device-abc"), name)             // deterministic
@@ -293,7 +293,7 @@ Expected: FAIL — symbols undefined.
 - [ ] **Step 3: Implement `TmuxLaunch.swift`**
 
 ```swift
-// Sources/GlymrKit/Tmux/TmuxLaunch.swift
+// Sources/NeotildeKit/Tmux/TmuxLaunch.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
@@ -332,9 +332,9 @@ public func tmuxSupportsControlMode(_ v: TmuxVersion) -> Bool {
     v >= TmuxVersion(major: 3, minor: 0)
 }
 
-/// Why Glymr fell back to a raw-PTY shell instead of attaching control mode.
+/// Why Neotilde fell back to a raw-PTY shell instead of attaching control mode.
 public enum DegradeReason: Equatable, Sendable {
-    case optedOut                 // host's glymr.tmux.attemptControlMode == false
+    case optedOut                 // host's neotilde.tmux.attemptControlMode == false
     case tmuxNotFound             // probe empty / unparseable
     case tooOld(TmuxVersion)      // tmux < 3.0
 }
@@ -360,11 +360,11 @@ public protocol SessionNameProvider {
     func sessionName() -> String
 }
 
-/// `glymr-<first 8 lowercase hex of SHA-256(seed)>`.
+/// `neotilde-<first 8 lowercase hex of SHA-256(seed)>`.
 public func tmuxSessionName(seed: String) -> String {
     let digest = SHA256.hash(data: Data(seed.utf8))
     let hex = digest.map { String(format: "%02x", $0) }.joined()
-    return "glymr-" + hex.prefix(8)
+    return "neotilde-" + hex.prefix(8)
 }
 
 /// Stub provider: a deterministic name from a local seed. Swap for a
@@ -387,7 +387,7 @@ Expected: PASS (4/4 methods).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/GlymrKit/Tmux/TmuxLaunch.swift Tests/GlymrKitTests/TmuxLaunchTests.swift
+git add Sources/NeotildeKit/Tmux/TmuxLaunch.swift Tests/NeotildeKitTests/TmuxLaunchTests.swift
 git commit -m "feat: pure tmux launch decision + session-name logic"
 ```
 
@@ -398,15 +398,15 @@ git commit -m "feat: pure tmux launch decision + session-name logic"
 Prove the transport end-to-end against the CI sshd fixture (which has `tmux` installed). Extend the existing `tmux_integration.rs`.
 
 **Files:**
-- Modify: `crates/glymr-ssh-core/tests/tmux_integration.rs`
+- Modify: `crates/neotilde-ssh-core/tests/tmux_integration.rs`
 
 **Interfaces:**
-- Consumes (exist): `connect_core`, `Connection.open_exec`, the `Collector` test sink, `TrustAll`, the `GLYMR_TEST_SSHD` gate (read the file's existing helpers/setup first and reuse them).
+- Consumes (exist): `connect_core`, `Connection.open_exec`, the `Collector` test sink, `TrustAll`, the `NEOTILDE_TEST_SSHD` gate (read the file's existing helpers/setup first and reuse them).
 
 - [ ] **Step 1: Read the existing test file and its helpers**
 
 ```bash
-sed -n '1,140p' crates/glymr-ssh-core/tests/tmux_integration.rs
+sed -n '1,140p' crates/neotilde-ssh-core/tests/tmux_integration.rs
 ```
 
 Identify the existing connect+auth helper and how a `tmux -CC` exec smoke (if present) is structured. Reuse that scaffolding.
@@ -418,11 +418,11 @@ Add a test that runs the exact attach command and asserts the stream is control-
 ```rust
 #[tokio::test]
 async fn tmux_cc_new_session_produces_control_mode_handshake() {
-    let Some(conn) = connect_and_auth().await else { return };  // skips when GLYMR_TEST_SSHD unset
+    let Some(conn) = connect_and_auth().await else { return };  // skips when NEOTILDE_TEST_SSHD unset
     let collector = Collector::new();
     let _session = conn
         .open_exec(
-            "tmux -CC new-session -A -s glymr-itest".to_string(),
+            "tmux -CC new-session -A -s neotilde-itest".to_string(),
             "xterm-256color".to_string(), 80, 24,
             Arc::new(collector.clone()),
         )
@@ -438,12 +438,12 @@ async fn tmux_cc_new_session_produces_control_mode_handshake() {
 }
 ```
 
-> Match the real helper names in the file (`connect_and_auth`/`wait_until` are illustrative — use whatever the file already defines; if there's no poll helper, loop with `tokio::time::sleep` up to ~5s checking `collector.text()`). Keep the test behind the same `GLYMR_TEST_SSHD` skip guard the other integration tests use, so it no-ops in environments without the fixture.
+> Match the real helper names in the file (`connect_and_auth`/`wait_until` are illustrative — use whatever the file already defines; if there's no poll helper, loop with `tokio::time::sleep` up to ~5s checking `collector.text()`). Keep the test behind the same `NEOTILDE_TEST_SSHD` skip guard the other integration tests use, so it no-ops in environments without the fixture.
 
 - [ ] **Step 3: Run the integration test**
 
 ```bash
-docker compose run --rm dev cargo test -p glymr-ssh-core --test tmux_integration
+docker compose run --rm dev cargo test -p neotilde-ssh-core --test tmux_integration
 ```
 
 Expected: PASS (the dev compose brings up the `tmux`-equipped sshd fixture; the new test sees a `%begin` handshake). If the suite skips when the fixture env isn't set, confirm it at least compiles and the existing tmux tests run.
@@ -451,7 +451,7 @@ Expected: PASS (the dev compose brings up the `tmux`-equipped sshd fixture; the 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add crates/glymr-ssh-core/tests/tmux_integration.rs
+git add crates/neotilde-ssh-core/tests/tmux_integration.rs
 git commit -m "test: tmux -CC attach produces a control-mode handshake over open_exec"
 ```
 
@@ -465,7 +465,7 @@ The app-side object that owns a `TmuxSessionController`, exposes a `ShellOutput`
 - Create: `App/TmuxRuntime.swift`
 
 **Interfaces:**
-- Consumes: `TmuxSessionController` (`start`, `submit`, `feed`, `lifecycle`, `state`), `TmuxControllerOutput.paneOutput` (Task 1), `PaneOutputChunk`, `TmuxCommand.sendKeys(target:bytes:)`, `TmuxSessionState.window(_:).activePane` / `state.activeWindow`, `GlymrSSHCoreFFI.ShellOutput` (the foreign trait `TerminalShellOutput` already implements in `App/Bridges.swift`), `ShellSession.write`.
+- Consumes: `TmuxSessionController` (`start`, `submit`, `feed`, `lifecycle`, `state`), `TmuxControllerOutput.paneOutput` (Task 1), `PaneOutputChunk`, `TmuxCommand.sendKeys(target:bytes:)`, `TmuxSessionState.window(_:).activePane` / `state.activeWindow`, `NeotildeSSHCoreFFI.ShellOutput` (the foreign trait `TerminalShellOutput` already implements in `App/Bridges.swift`), `ShellSession.write`.
 - Produces (consumed by Task 5): `final class TmuxRuntime` with `var onActivePaneBytes: (([UInt8]) -> Void)?`, `var onAttached: (() -> Void)?`, `var onExit: ((String?) -> Void)?`, `func makeStartCommand() -> String?`, `func ingest(_ bytes: [UInt8])`, `func sendInput(_ bytes: [UInt8])`, and `var session: ShellSession?` (set by Task 5 after `open_exec`).
 
 - [ ] **Step 1: Implement `TmuxRuntime`**
@@ -475,7 +475,7 @@ The app-side object that owns a `TmuxSessionController`, exposes a `ShellOutput`
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import GlymrKit
+import NeotildeKit
 
 /// Drives a tmux control-mode session in the app: feeds inbound channel bytes to
 /// the pure `TmuxSessionController`, forwards the active pane's output to the
@@ -528,7 +528,7 @@ final class TmuxRuntime {
 }
 ```
 
-> Verify the generated `ShellSession.write` label (`write(data:)` per the MVP shell — `ConnectionViewModel` already calls `session.write(data:)`). If `TmuxSessionState.activeWindow`/`window(_:)`/`TmuxWindow.activePane` names differ, match the real `GlymrKit/Tmux/TmuxSessionState.swift` (Task research confirmed `state.activeWindow: WindowID?`, `state.window(_:) -> TmuxWindow?`, `TmuxWindow.activePane: PaneID?`).
+> Verify the generated `ShellSession.write` label (`write(data:)` per the MVP shell — `ConnectionViewModel` already calls `session.write(data:)`). If `TmuxSessionState.activeWindow`/`window(_:)`/`TmuxWindow.activePane` names differ, match the real `NeotildeKit/Tmux/TmuxSessionState.swift` (Task research confirmed `state.activeWindow: WindowID?`, `state.window(_:) -> TmuxWindow?`, `TmuxWindow.activePane: PaneID?`).
 
 - [ ] **Step 2: Commit (App target — macOS CI compiles it; no Linux test)**
 
@@ -595,7 +595,7 @@ Extract the current `openShell(...) → connection/session/state = .shell` body 
     /// Attach tmux control mode: open the -CC exec, pump its bytes into a
     /// TmuxRuntime, and route the active pane's output into the terminal view.
     private func attachTmux(conn: Connection) async throws {
-        let seed = (try? AppStores.shared.deviceSeed()) ?? "glymr-local"
+        let seed = (try? AppStores.shared.deviceSeed()) ?? "neotilde-local"
         let runtime = TmuxRuntime(sessionName: tmuxSessionName(seed: seed))
         guard let startCmd = runtime.makeStartCommand() else { try await openRawShell(conn: conn); return }
         runtime.onActivePaneBytes = { [weak self] bytes in self?.output.onBytes?(bytes) }
@@ -660,7 +660,7 @@ A transient amber banner shown over the terminal when control mode was declined/
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import GlymrKit
+import NeotildeKit
 
 /// Transient amber banner: control mode was declined/failed, running plain SSH.
 struct DegradedBanner: View {
@@ -692,7 +692,7 @@ struct DegradedBanner: View {
 }
 ```
 
-> If the design tokens define an amber/warning color, use it instead of `Color.orange` to match the app's token discipline; check `Sources/GlymrKit/Theme` for a warning token and substitute. `Color.orange` is the fallback only.
+> If the design tokens define an amber/warning color, use it instead of `Color.orange` to match the app's token discipline; check `Sources/NeotildeKit/Theme` for a warning token and substitute. `Color.orange` is the fallback only.
 
 - [ ] **Step 2: Host the banner in `SessionView` with auto-dismiss**
 
@@ -741,7 +741,7 @@ Update `README.md` Phase 3 row: control-mode attach + single-pane round-trip shi
 
 ```bash
 docker compose run --rm dev cargo fmt --all
-git add README.md crates/glymr-ssh-core
+git add README.md crates/neotilde-ssh-core
 git commit -m "docs: Phase 3 Plan A status; fmt"
 ```
 
@@ -751,7 +751,7 @@ git commit -m "docs: Phase 3 Plan A status; fmt"
 
 ## Self-Review (author checklist — completed)
 
-- **Spec coverage:** probe + decision (degraded-mode spec) → Tasks 2/5; session naming `glymr-<hash>` + `-A` attach (tmux-session spec) → Tasks 2/4; `glymr.tmux.attemptControlMode` honored → Task 5 via existing `resolveTmuxAttemptControlMode`; `%output` surfacing (the engine prerequisite) → Task 1; transport proof (control-channel spec) → Task 3; degraded banner (degraded-mode spec, connect-time amber) → Task 6. Multi-pane render, terminal UX (OSC/mouse/bell/URL), context detection, mid-session crash banner are explicitly **deferred to Plans B/C/D** (Scope) — not gaps.
+- **Spec coverage:** probe + decision (degraded-mode spec) → Tasks 2/5; session naming `neotilde-<hash>` + `-A` attach (tmux-session spec) → Tasks 2/4; `neotilde.tmux.attemptControlMode` honored → Task 5 via existing `resolveTmuxAttemptControlMode`; `%output` surfacing (the engine prerequisite) → Task 1; transport proof (control-channel spec) → Task 3; degraded banner (degraded-mode spec, connect-time amber) → Task 6. Multi-pane render, terminal UX (OSC/mouse/bell/URL), context detection, mid-session crash banner are explicitly **deferred to Plans B/C/D** (Scope) — not gaps.
 - **Placeholder scan:** the Rust test (Task 3) names illustrative helpers (`connect_and_auth`/`wait_until`) with an explicit instruction to match the file's real helpers read in Step 1 — that's a "use the existing scaffolding" directive, not a TODO. No other placeholders.
 - **Type consistency:** `PaneOutputChunk` (Task 1) consumed in `TmuxRuntime.ingest` (Task 4); `TmuxLaunchDecision`/`DegradeReason` (Task 2) consumed in Tasks 5/6; `TmuxRuntime` surface (Task 4) consumed in Task 5; `ConnectionViewModel.degraded: DegradeReason?` (Task 5) consumed in Task 6.
 - **Open verification points flagged inline for implementers:** the attach-handshake priming bytes (Task 1), the real `tmux_integration.rs` helper names (Task 3), `ShellSession.write`/`TerminalShellOutput` member names + `TmuxSessionState` accessors (Tasks 4/5), a warning color token vs `Color.orange` (Task 6).

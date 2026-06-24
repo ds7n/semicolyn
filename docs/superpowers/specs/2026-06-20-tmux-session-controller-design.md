@@ -68,7 +68,7 @@ struct ResolvedCommand: Equatable { let id: UInt64; let outcome: CommandOutcome 
 
 ## Attach handshake
 
-Glymr runs **`tmux -CC new-session -A -s <name>`** as the channel's exec command
+Neotilde runs **`tmux -CC new-session -A -s <name>`** as the channel's exec command
 (`start` returns exactly this string). Rationale:
 
 - `-CC` enters control mode; the stream is control-mode from the first byte.
@@ -79,7 +79,7 @@ Glymr runs **`tmux -CC new-session -A -s <name>`** as the channel's exec command
 - **No `-D`** — detaching other clients would break the multi-device sharing the
   session-naming spec is built around.
 
-`<name>` is the caller-computed `glymr-<accountHash>` (or alt-session variant);
+`<name>` is the caller-computed `neotilde-<accountHash>` (or alt-session variant);
 the controller stays agnostic of how it's derived (that's iOS-Keychain
 territory) but **validates** it against the session charset (below) and refuses
 otherwise.
@@ -132,7 +132,7 @@ forget.
 
 ## Validation / fail-closed
 
-- `start`: `sessionName` must satisfy the Glymr session charset `^[a-z0-9-]+$`
+- `start`: `sessionName` must satisfy the Neotilde session charset `^[a-z0-9-]+$`
   ([[2026-06-17-tmux-session-design]]); else `nil`. This rule is **shared** with
   the 3c encoder's `killSession` via a single `isValidTmuxSessionName` helper —
   one definition, both call sites (no drift between attach and kill).
