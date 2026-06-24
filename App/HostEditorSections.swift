@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import GlymrKit
+import NeotildeKit
 
 // MARK: - Connection section
 
@@ -557,24 +557,24 @@ extension HostEditorView {
     }
 }
 
-// MARK: - Glymr behavior section
+// MARK: - Neotilde behavior section
 
 extension HostEditorView {
 
-    /// Glymr behavior section: predictor incognito and tmux control mode toggles.
-    /// Collapsed by default; auto-expands on edit when `glymr` is explicitly configured.
-    var glymrSection: some View {
-        DisclosureGroup(isExpanded: $glymrExpanded) {
+    /// Neotilde behavior section: predictor incognito and tmux control mode toggles.
+    /// Collapsed by default; auto-expands on edit when `neotilde` is explicitly configured.
+    var neotildeSection: some View {
+        DisclosureGroup(isExpanded: $neotildeExpanded) {
 
             // Predictor incognito — default false per resolution
             Toggle(isOn: Binding(
-                get: { vm.host.glymr.value?.predictor?.incognito ?? false },
+                get: { vm.host.neotilde.value?.predictor?.incognito ?? false },
                 set: { newIncognito in
-                    var cfg = vm.host.glymr.value ?? GlymrConfig()
+                    var cfg = vm.host.neotilde.value ?? NeotildeConfig()
                     var predictor = cfg.predictor ?? PredictorConfig()
                     predictor.incognito = newIncognito
                     cfg.predictor = predictor
-                    vm.host.glymr = .explicit(cfg)
+                    vm.host.neotilde = .explicit(cfg)
                     vm.revalidate()
                 }
             )) {
@@ -586,17 +586,17 @@ extension HostEditorView {
                         .foregroundStyle(Color(theme.text.secondary))
                 }
             }
-            .onChange(of: vm.host.glymr) { _, _ in vm.revalidate() }
+            .onChange(of: vm.host.neotilde) { _, _ in vm.revalidate() }
 
             // Tmux control mode — default true per resolution
             Toggle(isOn: Binding(
-                get: { vm.host.glymr.value?.tmux?.attemptControlMode ?? true },
+                get: { vm.host.neotilde.value?.tmux?.attemptControlMode ?? true },
                 set: { newAttempt in
-                    var cfg = vm.host.glymr.value ?? GlymrConfig()
+                    var cfg = vm.host.neotilde.value ?? NeotildeConfig()
                     var tmux = cfg.tmux ?? TmuxConfig()
                     tmux.attemptControlMode = newAttempt
                     cfg.tmux = tmux
-                    vm.host.glymr = .explicit(cfg)
+                    vm.host.neotilde = .explicit(cfg)
                     vm.revalidate()
                 }
             )) {
@@ -610,7 +610,7 @@ extension HostEditorView {
             }
 
         } label: {
-            Text("Glymr behavior")
+            Text("Neotilde behavior")
                 .font(.headline)
                 .foregroundStyle(Color(theme.text.primary))
         }
@@ -713,7 +713,7 @@ private struct JumpHopRow: View {
     @ViewBuilder
     private var refModeContent: some View {
         // TODO(perf): allHosts() is re-fetched on every render; cache in the view model and observe store changes.
-        let savedHosts: [GlymrKit.Host] = (try? AppStores.shared.hosts.allHosts())
+        let savedHosts: [NeotildeKit.Host] = (try? AppStores.shared.hosts.allHosts())
             ?? []
         let eligible = savedHosts.filter { $0.id != editingHostId }
 

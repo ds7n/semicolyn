@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import GlymrKit
+import NeotildeKit
 
 /// View-model for the Defaults editor. Owns the in-flight `Defaults` draft and
 /// exposes a single `save()` method that writes it back to the store.

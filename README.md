@@ -1,16 +1,16 @@
-# Glymr
+# Neotilde
 
 [![CI](https://github.com/ds7n/glymr/actions/workflows/ci.yml/badge.svg)](https://github.com/ds7n/glymr/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0--only-blue.svg)](LICENSE)
 ![Platform: iOS / iPadOS](https://img.shields.io/badge/platform-iOS%20%7C%20iPadOS-lightgrey.svg)
 
-**An iOS SSH / mosh terminal client built for touch.** Glymr's wager is that
+**An iOS SSH / mosh terminal client built for touch.** Neotilde's wager is that
 terminal work can feel native on a phone: a context-aware key bar, a smart
 snippet launcher, tmux control mode driving persistent native tabs and panes,
 an on-device predictor that learns your vocabulary, and security-first
 credential handling with end-to-end-encrypted sync.
 
-> The name **Glymr** is Old Norse for *"echo, resonance, ringing sound"* — what
+> The name **Neotilde** is Old Norse for *"echo, resonance, ringing sound"* — what
 > the predictor does (echoes your vocabulary back) and what a remote command
 > does (rings across distance to another shell).
 
@@ -36,7 +36,7 @@ to build and run it.
 | **3 — Terminal + tmux** | `tmux -CC` parser, session/pane model, command encoder, controller, Rust transport (all done²); **Plans A+B done**: `tmux -V` probe → attach `tmux -CC`, render the window's **native pane layout** (one SwiftTerm view per leaf pane, active-pane bronze border), **switch windows** via a tab strip, resize via `refresh-client -C`; else degrade to raw PTY with an amber banner. UX polish — bell/mouse/font/URL/OSC (C), context-SM + crash banner (D) — pending | ◐ Multi-pane + multi-window live; UX polish pending |
 | **4 — Keybar, input & predictor** | On-device predictor: CMS + Bloom vocabulary, prefix + bigram ranking, daily rollover, seed deference, write-time privacy filter, output harvesting, engine facade (all done); keybar UI + app-edge wiring | ◐ Engine done, UI macOS-gated |
 | **MVP app shell** | iOS app target (XcodeGen) + SwiftTerm wired to the Rust core via UniFFI: connect → password auth → raw-PTY shell, with real host-key TOFU trust (Keychain-backed). Password / keyboard-interactive / **publickey** auth (from a minted or imported iCloud-Keychain identity); cert connect + Secure-Enclave signing pending 2b-ii | ✅ Builds for Simulator |
-| **5–7 — UI & ship** | Host CRUD UI — saved-host library (empty state + list), single-form host editor (full OpenSSH + Glymr config, save-time validation), Defaults editor, inline identity picker (pick-existing + **create/import** half-sheet), connect-from-saved (done); standalone Identities & Keys management, connection-management UI, settings, IAP, App Store polish (pending) | ◐ Host CRUD + identity create/import done, rest macOS-gated |
+| **5–7 — UI & ship** | Host CRUD UI — saved-host library (empty state + list), single-form host editor (full OpenSSH + Neotilde config, save-time validation), Defaults editor, inline identity picker (pick-existing + **create/import** half-sheet), connect-from-saved (done); standalone Identities & Keys management, connection-management UI, settings, IAP, App Store polish (pending) | ◐ Host CRUD + identity create/import done, rest macOS-gated |
 
 ¹ The `ssh-ed25519-cert-v01@openssh.com` *host* certificate variant is deferred —
 blocked on russh 0.61, which verifies the server host key only as a plain
@@ -46,7 +46,7 @@ advertising it until upstream support lands.
 including the DCS-wrapped (`ESC P1000p … ESC \`) live `-CC` stream.
 
 **Tests green:** 9 Rust unit + 34 Rust integration (vs containerized `sshd`) +
-459 Swift (GlymrKit + SeedKit). All run on the Linux fast loop.
+459 Swift (NeotildeKit + SeedKit). All run on the Linux fast loop.
 
 ## What makes it different
 
@@ -68,13 +68,13 @@ including the DCS-wrapped (`ESC P1000p … ESC \`) live `-CC` stream.
 ## Architecture
 
 ```
-┌─ Swift (GlymrKit) ─ platform-agnostic, Linux-tested ─┐   ┌─ Apple-only (macOS-gated) ─┐
+┌─ Swift (NeotildeKit) ─ platform-agnostic, Linux-tested ─┐   ┌─ Apple-only (macOS-gated) ─┐
 │  model · resolution · storage stack · tmux -CC       │   │  SwiftUI · SwiftTerm        │
 │  parser/model/encoder/controller · predictor engine  │   │  Keychain/SE · CloudKit     │
 └───────────────────────────┬──────────────────────────┘   └──────────────┬─────────────┘
                             UniFFI XCFramework bridge ───────────────────────┘
 ┌───────────────────────────┴──────────────────────────┐
-│  Rust (crates/glymr-ssh-core) — russh, aws-lc-rs      │
+│  Rust (crates/neotilde-ssh-core) — russh, aws-lc-rs      │
 │  handshake · auth · PTY · forwards · ProxyJump        │
 └───────────────────────────────────────────────────────┘
 ```
@@ -83,7 +83,7 @@ The design keeps the Apple-only UI/SDK layer thin so the maximum surface stays
 Linux-testable. Crypto goes through swift-crypto on Linux and system CryptoKit on
 Apple behind `#if canImport(CryptoKit)`. Full rationale and the
 dependency-ordered phase plan:
-[`docs/superpowers/plans/2026-06-17-glymr-implementation-roadmap.md`](docs/superpowers/plans/2026-06-17-glymr-implementation-roadmap.md).
+[`docs/superpowers/plans/2026-06-17-neotilde-implementation-roadmap.md`](docs/superpowers/plans/2026-06-17-neotilde-implementation-roadmap.md).
 
 ## Building & testing
 
@@ -92,18 +92,18 @@ Mac required:
 
 ```bash
 docker compose build dev
-docker compose run --rm dev swift test                 # GlymrKit + SeedKit
+docker compose run --rm dev swift test                 # NeotildeKit + SeedKit
 docker compose up -d sshd sshd-legacy                   # SSH fixtures for integration tests
-docker compose run --rm dev cargo test -p glymr-ssh-core
+docker compose run --rm dev cargo test -p neotilde-ssh-core
 ```
 
 The Apple-gated tier needs macOS + Xcode (also run in CI on macOS runners):
 
 ```bash
-swift build --target GlymrKit          # compiles under system CryptoKit
+swift build --target NeotildeKit          # compiles under system CryptoKit
 bash scripts/build-xcframework.sh      # Rust core → all iOS triples → UniFFI XCFramework
-xcodegen generate                      # project.yml → Glymr.xcodeproj (brew install xcodegen)
-open Glymr.xcodeproj                    # run the MVP app in the iOS Simulator
+xcodegen generate                      # project.yml → Neotilde.xcodeproj (brew install xcodegen)
+open Neotilde.xcodeproj                    # run the MVP app in the iOS Simulator
 ```
 
 See [docs/mvp-app-testing.md](docs/mvp-app-testing.md) for running the app and
@@ -118,10 +118,10 @@ every push/PR, plus a macOS job that builds the XCFramework (validating
 | Path | Contents |
 |---|---|
 | `App/` + `project.yml` | iOS app target (SwiftUI MVP); `project.yml` is the XcodeGen manifest |
-| `crates/glymr-ssh-core/` | Rust SSH core (russh) exposed to Swift via UniFFI |
-| `Sources/GlymrKit/` | Platform-agnostic Swift: `Model/`, `Storage/`, `Crypto/`, `Tmux/`, `Predictor/`, `Theme/` |
-| `Sources/SeedKit/`, `Sources/glymr-seedbuild/` | Build-time predictor-seed ingestion (tldr-pages + Fig specs) |
-| `Tests/` | `GlymrKitTests`, `SeedKitTests`, `BridgeTests` (macOS) |
+| `crates/neotilde-ssh-core/` | Rust SSH core (russh) exposed to Swift via UniFFI |
+| `Sources/NeotildeKit/` | Platform-agnostic Swift: `Model/`, `Storage/`, `Crypto/`, `Tmux/`, `Predictor/`, `Theme/` |
+| `Sources/SeedKit/`, `Sources/neotilde-seedbuild/` | Build-time predictor-seed ingestion (tldr-pages + Fig specs) |
+| `Tests/` | `NeotildeKitTests`, `SeedKitTests`, `BridgeTests` (macOS) |
 | `docs/superpowers/specs/` | Per-subsystem design specs (one locked design each) |
 | `docs/superpowers/plans/` | The roadmap + per-phase implementation plans |
 | `docs/brainstorming-decisions.md` | Every locked decision, by topic, with the deferred list |
@@ -177,7 +177,7 @@ Phases build bottom-up so each rests only on verified earlier work: **0**
 Foundations → **1** SSH core → **2** Storage & sync → **3** Terminal + tmux →
 **4** Keybar, input & predictor → **5** Host & identity UI → **6** Connection
 management UI → **7** Settings, security & ship polish. See the
-[implementation roadmap](docs/superpowers/plans/2026-06-17-glymr-implementation-roadmap.md)
+[implementation roadmap](docs/superpowers/plans/2026-06-17-neotilde-implementation-roadmap.md)
 for exit criteria and per-phase plans.
 
 ## Contributing
@@ -185,7 +185,7 @@ for exit criteria and per-phase plans.
 This is an early-stage solo project with a locked, spec-driven design. If you
 want to get oriented: read this README, then `docs/brainstorming-decisions.md`,
 then the relevant spec before any code. The platform-agnostic tier (`crates/`,
-`Sources/GlymrKit/`) is fully buildable and testable on Linux via the Docker
+`Sources/NeotildeKit/`) is fully buildable and testable on Linux via the Docker
 commands above — start there. Issues and discussion are welcome; please open an
 issue before a large PR so it can be checked against the locked specs.
 

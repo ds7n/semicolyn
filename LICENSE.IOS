@@ -1,10 +1,10 @@
-Glymr — GPL / App Store distribution exception
+Neotilde — GPL / App Store distribution exception
 ================================================
 
 Copyright (C) 2026 True Positive LLC.
 
-Glymr is licensed under the GNU General Public License, version 3.0 (see the
-LICENSE file). The Glymr copyright holder is True Positive LLC, a Virginia
+Neotilde is licensed under the GNU General Public License, version 3.0 (see the
+LICENSE file). The Neotilde copyright holder is True Positive LLC, a Virginia
 limited liability company.
 
 The Apple App Store, and other similar app-distribution channels, impose terms
@@ -12,22 +12,22 @@ on the apps they distribute that are incompatible with the GNU GPL — in
 particular the usage and DRM-style restrictions described at
 <https://www.gnu.org/licenses/gpl-faq.html#GiveUpKeys>.
 
-In order to make Glymr available through the App Store while keeping its source
+In order to make Neotilde available through the App Store while keeping its source
 licensed under the GPLv3, True Positive LLC grants the following additional
 permission:
 
     True Positive LLC will not pursue any claim of GPL violation
     that results solely from the conflict between the GNU General Public
-    License (version 3, or any later version under which Glymr is offered) and
+    License (version 3, or any later version under which Neotilde is offered) and
     the Apple App Store Terms of Service (or the equivalent terms of another
     app-distribution channel through which the copyright holders themselves
-    distribute Glymr).
+    distribute Neotilde).
 
 This permission is limited to that specific conflict. In every other respect
 the GNU General Public License continues to apply in full: you remain free to
-obtain the source code, modify it, and build and run your own copy of Glymr,
+obtain the source code, modify it, and build and run your own copy of Neotilde,
 including on your own devices, under the terms of the GPL.
 
-This exception is granted only by the copyright holder, and only for Glymr's
+This exception is granted only by the copyright holder, and only for Neotilde's
 own code. It does not, and cannot, relicense any third-party dependency, nor
 grant any permission on behalf of a third party.
