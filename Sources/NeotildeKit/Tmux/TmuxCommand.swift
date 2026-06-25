@@ -79,6 +79,13 @@ public enum TmuxCommand {
         return "refresh-client -C \(width)x\(height)"
     }
 
+    /// List every pane across all windows as `<pane_id> <pane_current_command>`,
+    /// one per line, for context detection. The format string is a constant (no
+    /// interpolated input) and contains no `\n`/`\r`, so framing is never forgeable.
+    public static func listPaneCommands() -> String {
+        "list-panes -a -F \"#{pane_id} #{pane_current_command}\""
+    }
+
     /// Kill the session named `name`. Validates against the Neotilde session charset
     /// `[a-z0-9-]+` ([[2026-06-17-tmux-session-design]]) and returns nil for
     /// anything else — names outside that set can't occur in practice, so they
