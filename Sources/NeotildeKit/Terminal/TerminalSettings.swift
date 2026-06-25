@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: 2026 True Positive LLC
+// SPDX-License-Identifier: GPL-3.0-only
+import Foundation
+
+/// Caret rendering style, independent of blink (mirrors DECSCUSR families).
+public enum CursorStyle: Equatable, Sendable { case block, underline, bar }
+
+/// Terminal rendering preferences. Pure value type; defaults baked in per the
+/// Plan C spec. A future Settings screen binds to this; Plan C ships defaults.
+public struct TerminalSettings: Equatable, Sendable {
+    public var fontSize: Double
+    public var cursorStyle: CursorStyle
+    public var cursorBlink: Bool
+    public var scrollbackLines: Int
+
+    /// Allowed font-point range (touch-legible floor, sane ceiling).
+    public static let fontRange: ClosedRange<Double> = 9...24
+    /// Raw-PTY scrollback presets; `Int.max` represents "unlimited".
+    public static let scrollbackPresets: [Int] = [1000, 2000, 5000, 10000, Int.max]
+
+    public init(fontSize: Double = 13,
+                cursorStyle: CursorStyle = .block,
+                cursorBlink: Bool = false,
+                scrollbackLines: Int = 5000) {
+        self.fontSize = TerminalSettings.clampFont(fontSize)
+        self.cursorStyle = cursorStyle
+        self.cursorBlink = cursorBlink
+        self.scrollbackLines = scrollbackLines
+    }
+
+    /// Clamp a requested font size into the legible range.
+    public static func clampFont(_ pt: Double) -> Double {
+        min(max(pt, fontRange.lowerBound), fontRange.upperBound)
+    }
+
+    /// Map a DECSCUSR parameter (`ESC [ <n> q`) to caret style + blink.
+    public static func cursorStyle(fromDECSCUSR n: Int) -> (style: CursorStyle, blink: Bool) {
+        switch n {
+        case 0, 1: return (.block, true)
+        case 2:    return (.block, false)
+        case 3:    return (.underline, true)
+        case 4:    return (.underline, false)
+        case 5:    return (.bar, true)
+        case 6:    return (.bar, false)
+        default:   return (.block, false)
+        }
+    }
+}

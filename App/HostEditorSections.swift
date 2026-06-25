@@ -609,6 +609,25 @@ extension HostEditorView {
                 }
             }
 
+            // OSC 52 clipboard — default true per resolution
+            Toggle(isOn: Binding(
+                get: { vm.host.neotilde.value?.osc52?.allow ?? true },
+                set: { newAllow in
+                    var cfg = vm.host.neotilde.value ?? NeotildeConfig()
+                    var osc52 = cfg.osc52 ?? Osc52Config()
+                    osc52.allow = newAllow
+                    cfg.osc52 = osc52
+                    vm.host.neotilde = .explicit(cfg)
+                    vm.revalidate()
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Allow OSC 52 clipboard").foregroundStyle(Color(theme.text.primary))
+                    Text("Let remote programs copy to your clipboard (default on).")
+                        .font(.caption).foregroundStyle(Color(theme.text.secondary))
+                }
+            }
+
         } label: {
             Text("Neotilde behavior")
                 .font(.headline)

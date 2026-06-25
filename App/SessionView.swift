@@ -41,7 +41,11 @@ struct SessionView: View {
                             register: { vm.registerPane($0, $1) },
                             unregister: { vm.unregisterPane($0) },
                             send: { vm.sendTerminalInput($0) },
-                            theme: theme)
+                            theme: theme,
+                            settings: AppStores.shared.terminalSettings.settings,
+                            osc52Allowed: vm.osc52Allowed,
+                            onTitle: { [weak vm] t in vm?.terminalTitle = t },
+                            onTmuxResize: { [weak vm] cols, rows in vm?.setTmuxClientSize(cols: cols, rows: rows) })
                         .background(GeometryReader { geo in
                             Color.clear
                                 .onAppear { vm.sendApproxClientSize(width: geo.size.width, height: geo.size.height) }
@@ -63,7 +67,9 @@ struct SessionView: View {
                 } else {
                     TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
                                    output: vm.output,
-                                   session: vm.session)
+                                   session: vm.session,
+                                   osc52Allowed: vm.osc52Allowed,
+                                   onTitle: { [weak vm] t in vm?.terminalTitle = t })
                         .ignoresSafeArea(.container, edges: .bottom)
                         .overlay(alignment: .top) {
                             if let reason = vm.degraded {
