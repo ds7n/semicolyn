@@ -64,6 +64,16 @@ struct SessionView: View {
                         }
                     }
                     .animation(.easeInOut, value: vm.degraded)
+                    .overlay(alignment: .top) {
+                        if vm.crashBanner != nil {
+                            CrashBanner(
+                                onReattach: { vm.reattachTmux() },
+                                onStartNew: { vm.startNewTmux() },
+                                onDismiss: { vm.dismissCrashBanner() })
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.easeInOut, value: vm.crashBanner)
                 } else {
                     TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
                                    output: vm.output,
@@ -82,6 +92,16 @@ struct SessionView: View {
                             }
                         }
                         .animation(.easeInOut, value: vm.degraded)
+                        .overlay(alignment: .top) {
+                            if vm.crashBanner != nil {
+                                CrashBanner(
+                                    onReattach: { vm.reattachTmux() },
+                                    onStartNew: { vm.startNewTmux() },
+                                    onDismiss: { vm.dismissCrashBanner() })
+                                    .transition(.move(edge: .top).combined(with: .opacity))
+                            }
+                        }
+                        .animation(.easeInOut, value: vm.crashBanner)
                 }
             } else if resolving {
                 // Resolution not yet run — show a neutral spinner with no label
