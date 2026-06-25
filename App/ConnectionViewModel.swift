@@ -30,6 +30,9 @@ final class ConnectionViewModel: ObservableObject {
     /// Whether OSC 52 clipboard writes are permitted for the active session.
     /// Resolved from `resolveOsc52Allow` at connect time; read by the terminal views.
     private(set) var osc52Allowed: Bool = true
+    /// Per-pane engaged context (process name) for the keybar (Phase 4). Empty in
+    /// raw-PTY mode. Re-derived from the runtime whenever a poll changes a pane.
+    @Published private(set) var paneContexts: [PaneID: String] = [:]
     /// PaneID → live SwiftTerm view, populated by TmuxPaneContainer as panes appear.
     private var paneViews: [PaneID: TerminalView] = [:]
     private var pendingPaneBytes: [PaneID: [UInt8]] = [:]   // bytes that arrived before the view registered
@@ -110,7 +113,9 @@ final class ConnectionViewModel: ObservableObject {
     /// Reset all connection and pane state. Call at the start of each connect
     /// attempt so no stale handles or buffered bytes carry over to the new session.
     private func teardown() {
+        tmux?.stop()
         tmux = nil
+        paneContexts = [:]
         rawWriter?.finish()
         rawWriter = nil
         session = nil
@@ -230,6 +235,14 @@ final class ConnectionViewModel: ObservableObject {
             self.pendingPaneBytes = self.pendingPaneBytes.filter { live.contains($0.key) }
             self.tmuxState = state
         }
+        runtime.onContextsChanged = { [weak self, weak runtime] in
+            guard let self, let runtime else { return }
+            var map: [PaneID: String] = [:]
+            for pane in self.renderablePanes {
+                if let ctx = runtime.paneContext(pane) { map[pane] = ctx }
+            }
+            self.paneContexts = map
+        }
         runtime.onExit = { [weak self] reason in self?.state = .failed(reason ?? "tmux session ended") }
         let sink = TerminalShellOutput()
         sink.onBytes = { [weak runtime] bytes in runtime?.ingest(bytes) }
@@ -243,6 +256,7 @@ final class ConnectionViewModel: ObservableObject {
         session = sess
         self.tmux = runtime   // retain to keep control mode alive
         state = .shell
+        runtime.startContextPolling()
     }
 
     // MARK: - Connect (saved host)
