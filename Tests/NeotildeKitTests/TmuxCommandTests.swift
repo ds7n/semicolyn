@@ -147,4 +147,12 @@ final class TmuxCommandTests: XCTestCase {
         XCTAssertNil(TmuxCommand.refreshClientSize(width: 80, height: 0))
         XCTAssertNil(TmuxCommand.refreshClientSize(width: -5, height: 24))
     }
+
+    func testListPaneCommandsFormat() {
+        XCTAssertEqual(TmuxCommand.listPaneCommands(),
+                       "list-panes -a -F \"#{pane_id} #{pane_current_command}\"")
+        // Framing-safe: never contains a raw newline/carriage return.
+        XCTAssertFalse(TmuxCommand.listPaneCommands().contains("\n"))
+        XCTAssertFalse(TmuxCommand.listPaneCommands().contains("\r"))
+    }
 }
