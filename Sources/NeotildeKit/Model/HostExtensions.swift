@@ -60,13 +60,21 @@ public struct TmuxConfig: Codable, Equatable, Sendable {
     }
 }
 
+/// `neotilde.osc52.*` — per-host clipboard policy.
+public struct Osc52Config: Codable, Equatable, Sendable {
+    public var allow: Bool?
+    public init(allow: Bool? = nil) { self.allow = allow }
+}
+
 /// `neotilde.*` Neotilde-namespaced extension bundle.
 public struct NeotildeConfig: Codable, Equatable, Sendable {
     public var predictor: PredictorConfig?
     public var tmux: TmuxConfig?
+    public var osc52: Osc52Config?
 
-    public init(predictor: PredictorConfig? = nil, tmux: TmuxConfig? = nil) {
+    public init(predictor: PredictorConfig? = nil, tmux: TmuxConfig? = nil, osc52: Osc52Config? = nil) {
         self.predictor = predictor
         self.tmux = tmux
+        self.osc52 = osc52
     }
 }

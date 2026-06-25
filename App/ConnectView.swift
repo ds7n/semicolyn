@@ -16,7 +16,9 @@ struct ConnectView: View {
         if case .shell = vm.state {
             TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
                            output: vm.output,
-                           session: vm.session)
+                           session: vm.session,
+                           osc52Allowed: vm.osc52Allowed,
+                           onTitle: { [weak vm] t in vm?.terminalTitle = t })
                 .ignoresSafeArea(.container, edges: .bottom)
         } else {
             form

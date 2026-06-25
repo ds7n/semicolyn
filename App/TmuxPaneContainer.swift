@@ -17,12 +17,28 @@ struct TmuxPaneContainer: UIViewRepresentable {
     /// Active-pane keystrokes/paste bytes → remote.
     let send: ([UInt8]) -> Void
     let theme: Theme
+    /// Terminal rendering preferences (font, cursor, scrollback). Defaults from
+    /// `AppStores.shared.terminalSettings.settings` at the call site.
+    var settings: TerminalSettings = AppStores.shared.terminalSettings.settings
+    /// Whether OSC 52 clipboard writes are allowed for this session (resolved at connect time).
+    var osc52Allowed: Bool = true
+    /// Called with the sanitized OSC 0/2 title; routes to `vm.terminalTitle`.
+    var onTitle: ((String) -> Void)? = nil
+    /// Called with debounced (cols, rows) when terminal grid size changes; routes to tmux client-size.
+    var onTmuxResize: ((Int, Int) -> Void)? = nil
 
-    func makeCoordinator() -> Coordinator { Coordinator(send: send) }
+    func makeCoordinator() -> Coordinator {
+        let c = Coordinator(send: send, theme: theme, settings: settings, osc52Allowed: osc52Allowed, onTitle: onTitle)
+        c.onTmuxResize = onTmuxResize
+        return c
+    }
 
     func makeUIView(context: Context) -> ContainerView {
         let v = ContainerView()
         v.coordinator = context.coordinator
+        // Wire the coordinator's cache-invalidation hook so a pinch font change
+        // forces pane-rect metrics to recompute on the next layout pass.
+        context.coordinator.onInvalidateCachedCell = { [weak v] in v?.invalidateCachedCell() }
         return v
     }
 
@@ -30,30 +46,245 @@ struct TmuxPaneContainer: UIViewRepresentable {
         uiView.apply(state: state, register: register, unregister: unregister,
                      activeBorderColor: UIColor(Color(theme.focus.paneBorder)),
                      inactiveBorderColor: UIColor(Color(theme.focus.paneBorderInactive)))
+        // Refresh halo and dot colors on theme changes.
+        context.coordinator.bellHaloColor = UIColor(Color(theme.bell.edge))
+        context.coordinator.accentDotColor = UIColor(Color(theme.accent.primary.alpha(0.40)))
+        // Keep the resize callback current (parent may re-create the closure).
+        context.coordinator.onTmuxResize = onTmuxResize
+        // Update mouse-active dot visibility and selection gesture state for all panes.
+        context.coordinator.updateMouseDots(for: uiView.panes)
     }
 
     /// Bridges SwiftTerm input from whichever pane is active to the VM.
     final class Coordinator: NSObject, TerminalViewDelegate {
         private let send: ([UInt8]) -> Void
-        init(send: @escaping ([UInt8]) -> Void) { self.send = send }
+        /// Per-pane bell state machines keyed by the TerminalView identity.
+        /// Using ObjectIdentifier allows weak-ref-free keying without PaneID exposure here.
+        private var bellMachines: [ObjectIdentifier: BellStateMachine] = [:]
+        /// Per-pane halo views (installed as subviews on each TerminalView).
+        private var haloViews: [ObjectIdentifier: BellHaloView] = [:]
+        /// Per-pane mouse-active dot views (4pt, accent primary @ 40% opacity).
+        private var mouseDots: [ObjectIdentifier: UIView] = [:]
+        // TODO(phase4): wired when the connect-prefill / Esc-pill lands
+        /// Per-pane selection long-press gesture recognizers. Suspended while mouse mode is active.
+        var selectionLongPresses: [ObjectIdentifier: UILongPressGestureRecognizer] = [:]
+        /// Per-pane pinch-zoom gesture recognizers keyed by TerminalView identity.
+        private var pinchRecognizers: [ObjectIdentifier: UIPinchGestureRecognizer] = [:]
+        /// Baseline font size for pinch-zoom; shared across all panes in this window.
+        /// Updated on `.ended`; persists for the window's lifetime only (not stored to host — v1.5+).
+        var baseFontSize: Double
+        /// Called after a pinch font change to invalidate `ContainerView.cachedCell`.
+        var onInvalidateCachedCell: (() -> Void)?
+        /// Current bell halo color, refreshed from the theme in updateUIView.
+        var bellHaloColor: UIColor {
+            didSet { haloViews.values.forEach { $0.configure(color: bellHaloColor) } }
+        }
+        /// Current accent primary color for mouse dots, refreshed from the theme in updateUIView.
+        var accentDotColor: UIColor {
+            didSet { mouseDots.values.forEach { $0.backgroundColor = accentDotColor } }
+        }
+        /// Whether OSC 52 clipboard writes are permitted for this session.
+        private let osc52Allowed: Bool
+        /// Called with sanitized OSC 0/2 title strings.
+        private let onTitle: ((String) -> Void)?
+        // TODO(phase4): wired when the connect-prefill / Esc-pill lands
+        /// Called when the user taps an ssh:// link; set by the connect view to prefill the connect form.
+        var onSSHLink: ((URL) -> Void)?
+        /// Debounces rapid resize events across all panes (tmux client size).
+        private var resizeDebounce: ResizeDebounce = ResizeDebounce()
+        /// Routes debounced resize to the tmux client-size command.
+        var onTmuxResize: ((Int, Int) -> Void)?
+
+        /// Terminal rendering preferences; used to seed `baseFontSize` and apply font
+        /// to each pane `TerminalView` at creation time.
+        let settings: TerminalSettings
+
+        init(send: @escaping ([UInt8]) -> Void, theme: Theme, settings: TerminalSettings,
+             osc52Allowed: Bool = true, onTitle: ((String) -> Void)? = nil) {
+            self.send = send
+            self.settings = settings
+            self.baseFontSize = settings.fontSize
+            self.bellHaloColor = UIColor(Color(theme.bell.edge))
+            self.accentDotColor = UIColor(Color(theme.accent.primary.alpha(0.40)))
+            self.osc52Allowed = osc52Allowed
+            self.onTitle = onTitle
+        }
+
+        // MARK: - Halo + mouse dot lifecycle
+
+        /// Called from ContainerView when a TerminalView is first created.
+        func installHalo(on view: TerminalView) {
+            let key = ObjectIdentifier(view)
+            guard haloViews[key] == nil else { return }
+            let halo = BellHaloView(frame: view.bounds)
+            halo.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            halo.configure(color: bellHaloColor)
+            view.addSubview(halo)
+            haloViews[key] = halo
+            bellMachines[key] = BellStateMachine()
+
+            // Install mouse-active indicator dot (top-left corner, fixed 4pt).
+            let dot = UIView(frame: CGRect(x: 8, y: 8, width: 4, height: 4))
+            dot.layer.cornerRadius = 2
+            dot.backgroundColor = accentDotColor
+            dot.isUserInteractionEnabled = false
+            dot.isHidden = true
+            view.addSubview(dot)
+            mouseDots[key] = dot
+
+            // Attach pinch-to-zoom gesture (shared baseline across all panes).
+            let pinch = UIPinchGestureRecognizer(
+                target: self,
+                action: #selector(handlePinch(_:))
+            )
+            view.addGestureRecognizer(pinch)
+            pinchRecognizers[key] = pinch
+        }
+
+        /// Called from ContainerView when a TerminalView is removed.
+        func removeHalo(from view: TerminalView) {
+            let key = ObjectIdentifier(view)
+            haloViews[key]?.removeFromSuperview()
+            haloViews[key] = nil
+            bellMachines[key] = nil
+            mouseDots[key]?.removeFromSuperview()
+            mouseDots[key] = nil
+            selectionLongPresses[key] = nil
+            if let pinch = pinchRecognizers[key] {
+                view.removeGestureRecognizer(pinch)
+                pinchRecognizers[key] = nil
+            }
+        }
+
+        /// Handles pinch-to-zoom across all panes. The baseline (`baseFontSize`) is
+        /// shared so all panes stay at the same point size. On `.changed`, applies the
+        /// clamped size to every live pane and resets `scale` to 1 so deltas compound
+        /// correctly. On `.ended`, commits the final `baseFontSize` and resets scale.
+        ///
+        /// After each font change `onInvalidateCachedCell` is called so
+        /// `ContainerView.resolvedCell()` re-measures on the next layout pass.
+        ///
+        /// - Assumption: `TerminalView.font` is a settable `UIFont` property (public in
+        ///   SwiftTerm 1.x). Setting it replaces the terminal's monospace font immediately.
+        ///   Not verifiable on Linux; macOS CI is the correctness gate.
+        @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+            guard let tappedView = recognizer.view as? TerminalView else { return }
+            switch recognizer.state {
+            case .changed:
+                let newSize = TerminalSettings.clampFont(baseFontSize * Double(recognizer.scale))
+                let font = UIFont.monospacedSystemFont(ofSize: CGFloat(newSize), weight: .regular)
+                // Apply to the pane being pinched immediately; apply to all registered
+                // panes so the window stays visually consistent.
+                for view in pinchRecognizers.keys.compactMap({ paneView(for: $0) }) {
+                    view.font = font
+                }
+                tappedView.font = font   // fallback: ensure the direct pane is always updated
+                recognizer.scale = 1
+                baseFontSize = newSize
+                onInvalidateCachedCell?()
+            case .ended:
+                baseFontSize = TerminalSettings.clampFont(baseFontSize)
+                recognizer.scale = 1
+                onInvalidateCachedCell?()
+            default:
+                break
+            }
+        }
+
+        /// Returns the TerminalView associated with an ObjectIdentifier, by scanning
+        /// pinch recognizers for their attached view. Used to fan out font changes.
+        private func paneView(for key: ObjectIdentifier) -> TerminalView? {
+            pinchRecognizers[key]?.view as? TerminalView
+        }
+
+        /// Poll mouse mode for each visible pane and update dot + gesture state.
+        ///
+        /// Called from `updateUIView` on each SwiftUI pass.
+        ///
+        /// - Assumption: `TerminalView.getTerminal().mouseMode` returns a value that
+        ///   compares unequal to `.off` when mouse reporting is active.
+        ///   This is the best-known SwiftTerm 1.x public API; not verifiable on Linux.
+        func updateMouseDots(for panes: [PaneID: TerminalView]) {
+            for (_, view) in panes {
+                let key = ObjectIdentifier(view)
+                let mouseActive = view.getTerminal().mouseMode != .off
+                mouseDots[key]?.isHidden = !mouseActive
+                if let gr = selectionLongPresses[key] {
+                    if mouseActive {
+                        gr.isEnabled = false
+                        // TODO(phase4): also suspend cursor-placement halo here
+                    } else {
+                        gr.isEnabled = true
+                    }
+                }
+            }
+        }
+
+        // MARK: - TerminalViewDelegate
+
         func send(source: TerminalView, data: ArraySlice<UInt8>) { send(Array(data)) }
-        func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}  // tmux owns geometry
+
+        // Tmux owns the visible geometry, but we still need to inform tmux of the
+        // client size so it can re-tile. Debounce rapid bursts (rotation / keyboard).
+        func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+            resizeDebounce.note(cols: newCols, rows: newRows, at: Date())
+            DispatchQueue.main.asyncAfter(deadline: .now() + ResizeDebounce.quiet) { [weak self] in
+                guard let self else { return }
+                if let size = self.resizeDebounce.tick(at: Date()) {
+                    self.onTmuxResize?(size.cols, size.rows)
+                }
+            }
+        }
         func scrolled(source: TerminalView, position: Double) {}
-        func setTerminalTitle(source: TerminalView, title: String) {}
+        func setTerminalTitle(source: TerminalView, title: String) {
+            if let t = sanitizeTerminalTitle(title) { onTitle?(t) }
+        }
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-        func clipboardCopy(source: TerminalView, content: Data) {}
-        func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
-        func bell(source: TerminalView) {}
+        func clipboardCopy(source: TerminalView, content: Data) {
+            if case let .write(bytes) = osc52Action(allow: osc52Allowed, content: Array(content)) {
+                UIPasteboard.general.string = String(decoding: bytes, as: UTF8.self)
+            }
+        }
+        func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+            guard let kind = classifyURL(link), let url = URL(string: link) else { return }
+            switch kind {
+            case .http, .https:
+                UIApplication.shared.open(url)
+            case .ssh:
+                onSSHLink?(url)
+            }
+        }
         func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+
+        /// Visual bell: pulse halo on the ringing pane + optional haptic (throttled).
+        func bell(source: TerminalView) {
+            let key = ObjectIdentifier(source)
+            var machine = bellMachines[key] ?? BellStateMachine()
+            let haptic = machine.ring(at: Date())
+            bellMachines[key] = machine
+            if let halo = haloViews[key] {
+                halo.start(machine: machine)
+            }
+            if haptic {
+                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            }
+        }
     }
 
     /// UIKit container that lays out one `TerminalView` per pane and tracks the set.
     final class ContainerView: UIView {
         weak var coordinator: Coordinator?
-        private var panes: [PaneID: TerminalView] = [:]
+        /// Pane-ID → live TerminalView; exposed for coordinator mouse-dot updates.
+        var panes: [PaneID: TerminalView] = [:]
 
         /// Cached cell metrics so we don't re-measure the font on every layout pass.
+        /// Nil'd by `invalidateCachedCell()` after a pinch font change.
         private var cachedCell: (w: Double, h: Double)?
+
+        /// Clears the cached cell metrics so `resolvedCell()` re-measures on the next
+        /// layout pass. Called by the coordinator's `onInvalidateCachedCell` hook after
+        /// a pinch-zoom font change, ensuring pane rects reflect the new font geometry.
+        func invalidateCachedCell() { cachedCell = nil }
 
         /// Cell metrics derived from a registered terminal's font (monospace → uniform cell).
         ///
@@ -93,6 +324,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Remove panes tmux no longer reports; resign first-responder before removal.
             for (id, view) in panes where !live.contains(id) {
                 view.resignFirstResponder()
+                coordinator?.removeHalo(from: view)
                 view.removeFromSuperview(); unregister(id); panes[id] = nil
             }
 
@@ -101,7 +333,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 let view = panes[rect.pane] ?? {
                     let t = TerminalView(frame: .zero)
                     t.terminalDelegate = coordinator
+                    // Apply configured font so rendered pane matches the pinch baseline.
+                    if let fontSize = coordinator?.settings.fontSize {
+                        t.font = UIFont.monospacedSystemFont(ofSize: CGFloat(fontSize), weight: .regular)
+                    }
                     addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
+                    coordinator?.installHalo(on: t)
                     return t
                 }()
                 view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)

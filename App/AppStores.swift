@@ -19,6 +19,8 @@ final class AppStores {
     let secrets: SecretStore
     /// Mint/import + resolve SSH identities (publickey auth).
     let identities: IdentityService
+    /// Terminal rendering preferences (font, cursor, scrollback).
+    let terminalSettings = TerminalSettingsStore()
 
     /// Initializes the storage stack: Application Support directory, Keychain
     /// secrets, AES record key, file-backed blob store, and trust evaluator.
