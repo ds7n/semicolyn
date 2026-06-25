@@ -33,6 +33,13 @@ final class TerminalSettingsTests: XCTestCase {
         XCTAssertEqual(TerminalSettings.cursorStyle(fromDECSCUSR: 5).style, .bar)
         XCTAssertTrue(TerminalSettings.cursorStyle(fromDECSCUSR: 5).blink)
         XCTAssertEqual(TerminalSettings.cursorStyle(fromDECSCUSR: 99).style, .block) // unknown → default
+        XCTAssertEqual(TerminalSettings.cursorStyle(fromDECSCUSR: 1).style, .block)
+        XCTAssertTrue(TerminalSettings.cursorStyle(fromDECSCUSR: 1).blink)
+        XCTAssertEqual(TerminalSettings.cursorStyle(fromDECSCUSR: 3).style, .underline)
+        XCTAssertTrue(TerminalSettings.cursorStyle(fromDECSCUSR: 3).blink)
+        XCTAssertEqual(TerminalSettings.cursorStyle(fromDECSCUSR: 6).style, .bar)
+        XCTAssertFalse(TerminalSettings.cursorStyle(fromDECSCUSR: 6).blink)
+        XCTAssertFalse(TerminalSettings.cursorStyle(fromDECSCUSR: 99).blink)  // unknown → steady
     }
 
     func testScrollbackPresetsIncludeSpecValues() {

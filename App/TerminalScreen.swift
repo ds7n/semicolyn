@@ -35,7 +35,7 @@ struct TerminalScreen: UIViewRepresentable {
         // Apply terminal rendering preferences from settings.
         let s = context.coordinator.settings
         terminal.font = UIFont.monospacedSystemFont(ofSize: CGFloat(s.fontSize), weight: .regular)
-        terminal.getTerminal().options.scrollback = s.scrollbackLines == Int.max ? Int.max : s.scrollbackLines
+        terminal.getTerminal().options.scrollback = s.scrollbackLines
         applyCursor(to: terminal, style: s.cursorStyle, blink: s.cursorBlink)
 
         // Install bell halo overlay (full-frame, non-interactive).
@@ -81,6 +81,7 @@ struct TerminalScreen: UIViewRepresentable {
         private let osc52Allowed: Bool
         /// Called with sanitized OSC 0/2 title strings.
         private let onTitle: ((String) -> Void)?
+        // TODO(phase4): wired when the connect-prefill / Esc-pill lands
         /// Called when the user taps an ssh:// link; set by the connect view to prefill the connect form.
         var onSSHLink: ((URL) -> Void)?
         /// Debounces rapid resize events (rotation / keyboard show-hide) into a
@@ -89,6 +90,7 @@ struct TerminalScreen: UIViewRepresentable {
         /// Mouse-active indicator dot (4pt, accent primary @ 40% opacity).
         /// Installed as a subview of the TerminalView in makeUIView.
         let mouseDot: UIView
+        // TODO(phase4): wired when the connect-prefill / Esc-pill lands
         /// Long-press gesture recognizer used for text selection. Suspended while
         /// the terminal's mouse mode is active so mouse events reach the app.
         var selectionLongPress: UILongPressGestureRecognizer?

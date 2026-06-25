@@ -65,6 +65,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private var haloViews: [ObjectIdentifier: BellHaloView] = [:]
         /// Per-pane mouse-active dot views (4pt, accent primary @ 40% opacity).
         private var mouseDots: [ObjectIdentifier: UIView] = [:]
+        // TODO(phase4): wired when the connect-prefill / Esc-pill lands
         /// Per-pane selection long-press gesture recognizers. Suspended while mouse mode is active.
         var selectionLongPresses: [ObjectIdentifier: UILongPressGestureRecognizer] = [:]
         /// Per-pane pinch-zoom gesture recognizers keyed by TerminalView identity.
@@ -86,6 +87,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private let osc52Allowed: Bool
         /// Called with sanitized OSC 0/2 title strings.
         private let onTitle: ((String) -> Void)?
+        // TODO(phase4): wired when the connect-prefill / Esc-pill lands
         /// Called when the user taps an ssh:// link; set by the connect view to prefill the connect form.
         var onSSHLink: ((URL) -> Void)?
         /// Debounces rapid resize events across all panes (tmux client size).
