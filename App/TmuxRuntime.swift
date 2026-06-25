@@ -47,6 +47,10 @@ final class TmuxRuntime {
     /// The current structural state (windows, layouts, active window/pane).
     var state: TmuxSessionState { controller.state }
 
+    /// The controller's lifecycle, read when the channel closes to tell a clean
+    /// `%exit` from a crash (degraded-mode spec).
+    var lifecycle: TmuxLifecycle { controller.lifecycle }
+
     /// The `tmux -CC new-session -A -s <name>` command to run via `open_exec`.
     func makeStartCommand() -> String? { controller.start(sessionName: sessionName) }
 

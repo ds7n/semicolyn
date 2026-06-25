@@ -5,6 +5,9 @@ import SwiftTerm
 import NeotildeKit
 import NeotildeSSHCoreFFI
 
+/// Crash-banner presentation state (degraded-mode spec). One case today.
+enum CrashBannerState: Equatable { case tmuxEnded }
+
 /// Drives the one MVP flow: connect → password auth → probe tmux → attach
 /// control mode or degrade to a raw-PTY shell.
 /// Retains the live `Connection`, `ShellSession`, and optionally `TmuxRuntime`.
@@ -33,6 +36,9 @@ final class ConnectionViewModel: ObservableObject {
     /// Per-pane engaged context (process name) for the keybar (Phase 4). Empty in
     /// raw-PTY mode. Re-derived from the runtime whenever a poll changes a pane.
     @Published private(set) var paneContexts: [PaneID: String] = [:]
+    /// Set when tmux crashed mid-session and we dropped to a raw shell on the same
+    /// connection. The crash banner persists until the user acts.
+    @Published var crashBanner: CrashBannerState?
     /// PaneID → live SwiftTerm view, populated by TmuxPaneContainer as panes appear.
     private var paneViews: [PaneID: TerminalView] = [:]
     private var pendingPaneBytes: [PaneID: [UInt8]] = [:]   // bytes that arrived before the view registered
@@ -246,8 +252,14 @@ final class ConnectionViewModel: ObservableObject {
         runtime.onExit = { [weak self] reason in self?.state = .failed(reason ?? "tmux session ended") }
         let sink = TerminalShellOutput()
         sink.onBytes = { [weak runtime] bytes in runtime?.ingest(bytes) }
-        sink.onExit = { [weak self] exit in
-            self?.state = .failed(exit.error ?? "Session closed")
+        sink.onExit = { [weak self, weak runtime] exit in
+            guard let self else { return }
+            // A clean %exit is already handled by runtime.onExit (session ended).
+            // An unexpected EOF while the connection is alive is a tmux crash:
+            // drop to a raw shell on the same conn and raise the persistent banner.
+            if let runtime, case .crashed = classifyTmuxClosure(lifecycle: runtime.lifecycle) {
+                Task { await self.recoverFromTmuxCrash(conn: conn) }
+            }
         }
         let sess = try await conn.openExec(command: startCmd, term: "xterm-256color",
                                            cols: 80, rows: 24, output: sink)
@@ -258,6 +270,42 @@ final class ConnectionViewModel: ObservableObject {
         state = .shell
         runtime.startContextPolling()
     }
+
+    // MARK: - Crash recovery + banner actions
+
+    /// Tmux crashed: reuse the live connection for a raw shell, then show the
+    /// persistent crash banner. If the connection is also gone, surface a failure.
+    private func recoverFromTmuxCrash(conn: Connection) async {
+        tmux?.stop(); tmux = nil
+        do {
+            try await openRawShell(conn: conn)   // sets session/rawWriter, tmuxState=nil, state=.shell
+            paneContexts = [:]
+            crashBanner = .tmuxEnded
+        } catch {
+            state = .failed("tmux ended and the connection is no longer reachable.")
+        }
+    }
+
+    /// Banner action — reattach control mode on the live connection. `-CC
+    /// new-session -A` attaches to the server-side session if it survived, else
+    /// creates a fresh one.
+    func reattachTmux() {
+        guard let conn = connection else { return }
+        crashBanner = nil
+        Task { try? await attachTmux(conn: conn) }
+    }
+
+    /// Banner action — start a fresh tmux. Same `-CC new-session -A` path; if the
+    /// old session somehow survived this reattaches to it (acceptable for v1 —
+    /// distinct fresh-session naming is a follow-up).
+    func startNewTmux() {
+        guard let conn = connection else { return }
+        crashBanner = nil
+        Task { try? await attachTmux(conn: conn) }
+    }
+
+    /// Banner action — stay in degraded raw-shell mode for the rest of the session.
+    func dismissCrashBanner() { crashBanner = nil }
 
     // MARK: - Connect (saved host)
 
