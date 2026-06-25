@@ -28,3 +28,8 @@
 
 # Superpowers scratch — SDD progress ledger + brainstorm visual-companion sessions
 /.superpowers/
+
+# These are committed project docs here — override the global core.excludesFile
+# (~/.config/git/ignore) that ignores CLAUDE.md / TODO.md by default.
+!/CLAUDE.md
+!/TODO.md
