@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — neotilde "neon midnight": ONE full-screen app scene,
+     hue + night-depth switched in place via tabs (no scrolling). Verdigris success
+     + amber/error constant. Self-contained; open directly in a browser. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neotilde — neon hue switch</title>
+<style>
+  :root{
+    color-scheme:dark;
+    --ground:#07090E; --termbg:#05070B; --panel:#0E1118; --panelhi:#161A24; --line:#232A3A;
+    --tx:#E8EBF0; --tx2:#8A93A3; --ok:#5FB0A2; --warn:#F5A524; --err:#E5455E;
+    /* accent set by JS */
+    --acc:#FF6A4E; --acchi:#FFB59B; --acc14:rgba(255,106,78,.15); --acc30:rgba(255,106,78,.30);
+    --glow:0 0 7px rgba(255,106,78,.55); --glowbox:0 0 11px rgba(255,106,78,.45);
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{margin:0;background:#04050a;color:var(--tx);overflow:hidden;
+       display:flex;flex-direction:column;
+       font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;}
+
+  /* control bar */
+  .ctrl{flex:none;display:flex;align-items:center;gap:18px;padding:12px 20px;background:#070810;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  .ctrl .grp{display:flex;align-items:center;gap:8px;}
+  .ctrl .cap{font:700 10px ui-sans-serif;letter-spacing:.7px;text-transform:uppercase;color:var(--tx2);}
+  .tab{font:600 12px ui-sans-serif;padding:7px 13px;border-radius:8px;background:var(--panelhi);border:1px solid var(--line);color:var(--tx);cursor:pointer;display:flex;align-items:center;gap:7px;}
+  .tab .sw{width:13px;height:13px;border-radius:4px;}
+  .tab.active{border-color:var(--acc);box-shadow:var(--glowbox);}
+  .tab .hex{font:600 10px ui-monospace;color:var(--tx2);}
+  .depth{font:600 11px ui-sans-serif;padding:6px 11px;border-radius:7px;background:var(--panelhi);border:1px solid var(--line);color:var(--tx);cursor:pointer;}
+  .depth.active{border-color:var(--acc);color:var(--acc);}
+
+  /* app frame fills the rest */
+  .app{flex:1;display:flex;min-height:0;}
+  .rail{width:220px;flex:none;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;}
+  .brand{padding:18px 18px 15px;font:800 18px ui-sans-serif;border-bottom:1px solid var(--line);}
+  .brand em{font-style:normal;color:var(--acc);text-shadow:var(--glow);}
+  .rail .lbl{padding:15px 18px 7px;font:700 10px ui-sans-serif;letter-spacing:.8px;text-transform:uppercase;color:var(--tx2);}
+  .host{padding:10px 18px;font-size:13px;color:var(--tx2);display:flex;align-items:center;gap:9px;}
+  .host .d{width:7px;height:7px;border-radius:50%;background:var(--line);}
+  .host.on{color:var(--tx);background:var(--acc14);box-shadow:inset 2px 0 0 var(--acc);}
+  .host.on .d{background:var(--acc);box-shadow:var(--glow);}
+
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;}
+  .chrome{flex:none;display:flex;align-items:center;gap:7px;padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line);}
+  .dot{width:11px;height:11px;border-radius:50%;}
+  .wt{margin-left:9px;color:var(--tx2);font-size:11.5px;font-weight:600;}
+  .panes{flex:1;display:flex;min-height:0;}
+  .term{flex:1.7;background:var(--termbg);padding:20px;overflow:hidden;
+        font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:13.5px;line-height:2;}
+  .pane2{flex:1;background:var(--termbg);padding:20px;overflow:hidden;font-family:ui-monospace,monospace;font-size:12.5px;line-height:1.9;color:var(--tx2);
+         outline:1.5px solid var(--acc);outline-offset:-1.5px;box-shadow:inset var(--glowbox);}
+  .pane2 .ttl{color:var(--acc);font-weight:700;font-size:11.5px;margin-bottom:9px;text-shadow:var(--glow);}
+  .p{color:var(--acc);font-weight:700;text-shadow:var(--glow);}
+  .dim{color:var(--tx2);} .fg{color:var(--tx);}
+  .ok{color:var(--ok);} .warn{color:var(--warn);} .err{color:var(--err);}
+  .link{color:var(--acc);text-decoration:underline;text-underline-offset:2px;}
+  .cur{background:var(--acc);color:#05070B;padding:0 3px;border-radius:2px;box-shadow:var(--glowbox);}
+
+  .keybar{flex:none;display:flex;gap:8px;padding:14px 16px;background:var(--panel);border-top:1px solid var(--line);}
+  .slot{font:600 12px ui-sans-serif;padding:8px 13px;border-radius:8px;background:var(--panelhi);border:1px solid var(--line);color:var(--tx);}
+  .slot.prom{background:var(--acc14);border-color:transparent;color:var(--acc);}
+  .slot.armed{background:var(--acc);border-color:var(--acc);color:#05070B;box-shadow:var(--glowbox);}
+  .slot.lock{background:var(--acc30);border-color:transparent;color:var(--acchi);}
+  .statusbar{flex:none;display:flex;gap:9px;padding:12px 16px;background:var(--ground);border-top:1px solid var(--line);}
+  .badge{font:600 11.5px ui-sans-serif;padding:6px 10px;border-radius:7px;display:flex;gap:5px;}
+  .b-ok{background:rgba(95,176,162,.16);color:var(--ok);}
+  .b-warn{background:rgba(245,165,36,.15);color:var(--warn);}
+  .b-err{background:rgba(229,69,94,.16);color:var(--err);}
+</style>
+</head>
+<body>
+
+  <div class="ctrl">
+    <div class="grp"><span class="cap">Neon hue</span>
+      <button class="tab" data-hue="coral"><span class="sw" style="background:#FF6F5E"></span>coral-lean <span class="hex">#FF6F5E</span></button>
+      <button class="tab" data-hue="balanced"><span class="sw" style="background:#FF6A4E"></span>balanced <span class="hex">#FF6A4E</span></button>
+      <button class="tab" data-hue="neon"><span class="sw" style="background:#FF5C3A"></span>true neon-orange <span class="hex">#FF5C3A</span></button>
+    </div>
+    <div class="grp"><span class="cap">Night depth</span>
+      <button class="depth" data-depth="current">current</button>
+      <button class="depth" data-depth="darker">darker</button>
+      <button class="depth" data-depth="near">near-black</button>
+    </div>
+  </div>
+
+  <div class="app">
+    <div class="rail">
+      <div class="brand"><em>~</em>neotilde</div>
+      <div class="lbl">Hosts</div>
+      <div class="host on"><span class="d"></span>prod-web</div>
+      <div class="host"><span class="d"></span>staging</div>
+      <div class="host"><span class="d"></span>db-primary</div>
+      <div class="host"><span class="d"></span>edge-eu</div>
+    </div>
+    <div class="main">
+      <div class="chrome"><span class="dot" style="background:var(--err)"></span><span class="dot" style="background:var(--warn)"></span><span class="dot" style="background:var(--ok)"></span><span class="wt">~/src — ssh prod-web · 2 panes</span></div>
+      <div class="panes">
+        <div class="term">
+          <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">git pull &amp;&amp; deploy</span></div>
+          <div class="ok">✓ release 1.4.0 live</div>
+          <div class="warn">⚠ 1 host using a legacy cipher</div>
+          <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">open</span> <span class="link">https://status.app</span></div>
+          <div class="err">✗ permission denied (publickey)</div>
+          <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="cur">█</span></div>
+        </div>
+        <div class="pane2"><div class="ttl">● logs ~ active</div><div>12:02 request ok</div><div>12:02 cache hit</div><div>12:03 worker spawned</div></div>
+      </div>
+      <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot lock">⇧ lock</span><span class="slot">^C</span><span class="slot">~</span><span class="slot">/</span></div>
+      <div class="statusbar"><span class="badge b-ok">✓ connected · prod-web</span><span class="badge b-warn">⚠ legacy cipher</span><span class="badge b-err">✗ 1 forward failed</span></div>
+    </div>
+  </div>
+
+<script>
+  var HUES = {
+    coral:    { acc:'#FF6F5E', hi:'#FFB7A6', rgb:'255,111,94' },
+    balanced: { acc:'#FF6A4E', hi:'#FFB59B', rgb:'255,106,78' },
+    neon:     { acc:'#FF5C3A', hi:'#FFA589', rgb:'255,92,58' }
+  };
+  var DEPTHS = {
+    current: { ground:'#0E1116', term:'#0A0C10' },
+    darker:  { ground:'#07090E', term:'#05070B' },
+    near:    { ground:'#04060B', term:'#03040A' }
+  };
+  var r = document.documentElement.style;
+  function setHue(k){
+    var h = HUES[k];
+    r.setProperty('--acc', h.acc);
+    r.setProperty('--acchi', h.hi);
+    r.setProperty('--acc14', 'rgba('+h.rgb+',.15)');
+    r.setProperty('--acc30', 'rgba('+h.rgb+',.30)');
+    r.setProperty('--glow', '0 0 7px rgba('+h.rgb+',.55)');
+    r.setProperty('--glowbox', '0 0 11px rgba('+h.rgb+',.45)');
+    document.querySelectorAll('.tab').forEach(function(t){ t.classList.toggle('active', t.dataset.hue===k); });
+  }
+  function setDepth(k){
+    var d = DEPTHS[k];
+    r.setProperty('--ground', d.ground);
+    r.setProperty('--termbg', d.term);
+    document.querySelectorAll('.depth').forEach(function(t){ t.classList.toggle('active', t.dataset.depth===k); });
+  }
+  document.querySelectorAll('.tab').forEach(function(t){ t.onclick=function(){ setHue(t.dataset.hue); }; });
+  document.querySelectorAll('.depth').forEach(function(t){ t.onclick=function(){ setDepth(t.dataset.depth); }; });
+  setHue('balanced'); setDepth('darker');
+</script>
+</body>
+</html>

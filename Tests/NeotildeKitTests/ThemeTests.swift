@@ -18,9 +18,40 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(promoted, ThemeColor("#D49A5C", opacity: 0.12))
     }
 
-    func testRegistryContainsOnlyBellBronzeInV1() {
-        XCTAssertEqual(Theme.all.count, 1)
-        XCTAssertEqual(Theme.all.first, Theme.bellBronze)
+    func testRegistryHasNeonMidnightDefaultThenBellBronze() {
+        XCTAssertEqual(Theme.all.count, 2)
+        XCTAssertEqual(Theme.all.first, Theme.neonMidnight)   // default is first
+        XCTAssertEqual(Theme.all.last, Theme.bellBronze)   // bronze retained, second
+    }
+
+    func testNeonMidnightAccentIsCoral() {
+        XCTAssertEqual(Theme.neonMidnight.accent.primary, ThemeColor("#FF6F5E"))
+        XCTAssertEqual(Theme.neonMidnight.accent.highlight, ThemeColor("#FFB7A6"))
+    }
+
+    func testNeonMidnightBellEdgeMatchesAccent() {
+        XCTAssertEqual(Theme.neonMidnight.bell.edge, Theme.neonMidnight.accent.primary)
+    }
+
+    func testNeonMidnightErrorIsDistinctFromAccent() {
+        // The coral-vs-error separation: error must be its own cooler crimson.
+        XCTAssertEqual(Theme.neonMidnight.state.broken, ThemeColor("#E5455E"))
+        XCTAssertNotEqual(Theme.neonMidnight.state.broken, Theme.neonMidnight.accent.primary)
+    }
+
+    func testNeonMidnightSurfacesAreDarkerNight() {
+        XCTAssertEqual(Theme.neonMidnight.surface.bg, ThemeColor("#07090E"))
+        XCTAssertEqual(Theme.neonMidnight.terminal.bg, ThemeColor("#05070B"))
+    }
+
+    func testNeonMidnightSuccessIsVerdigris() {
+        XCTAssertEqual(Theme.neonMidnight.state.success, ThemeColor("#5FB0A2"))
+    }
+
+    func testNeonMidnightKeybarLadder() {
+        XCTAssertEqual(Theme.neonMidnight.keybar.slotBgPromoted, ThemeColor("#FF6F5E", opacity: 0.12))
+        XCTAssertEqual(Theme.neonMidnight.keybar.slotBgArmed,    ThemeColor("#FF6F5E", opacity: 0.20))
+        XCTAssertEqual(Theme.neonMidnight.keybar.slotBgLocked,   ThemeColor("#FF6F5E", opacity: 0.30))
     }
 
     func testRgbaParsesHexAndOpacity() {
