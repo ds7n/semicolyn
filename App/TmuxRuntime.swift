@@ -31,10 +31,25 @@ final class TmuxRuntime {
     /// Fired when control mode ends; carries the exit reason if any.
     var onExit: ((String?) -> Void)?
 
+    /// Per-pane foreground-process context (context-detection spec). Updated by the
+    /// ~1 Hz `list-panes` poll; the keybar (Phase 4) is the only future consumer.
+    private var contextStore = PaneContextStore(
+        knownProcesses: PromotionRegistry.bundledDefault.knownProcesses)
+    /// Fired after a poll changed any pane's engaged context.
+    var onContextsChanged: (() -> Void)?
+    /// In-flight context-poll submission ids awaiting their result block.
+    private var contextPollIDs: Set<UInt64> = []
+    /// The repeating poll task; cancelled on teardown via `stop()`.
+    private var pollTask: Task<Void, Never>?
+
     init(sessionName: String) { self.sessionName = sessionName }
 
     /// The current structural state (windows, layouts, active window/pane).
     var state: TmuxSessionState { controller.state }
+
+    /// The controller's lifecycle, read when the channel closes to tell a clean
+    /// `%exit` from a crash (degraded-mode spec).
+    var lifecycle: TmuxLifecycle { controller.lifecycle }
 
     /// The `tmux -CC new-session -A -s <name>` command to run via `open_exec`.
     func makeStartCommand() -> String? { controller.start(sessionName: sessionName) }
@@ -44,6 +59,14 @@ final class TmuxRuntime {
         let out = controller.feed(bytes)
         for chunk in out.paneOutput { onPaneBytes?(chunk.pane, chunk.data) }
         if out.stateChanged { onStateChanged?(controller.state) }
+        for resolved in out.resolved where contextPollIDs.remove(resolved.id) != nil {
+            if case .ok(let lines) = resolved.outcome {
+                let now = ProcessInfo.processInfo.systemUptime
+                if !contextStore.observe(parsePaneCommandListing(lines), at: now).isEmpty {
+                    onContextsChanged?()
+                }
+            }
+        }
         if out.lifecycleChanged, case .exited(let reason) = controller.lifecycle { onExit?(reason) }
     }
 
@@ -70,6 +93,36 @@ final class TmuxRuntime {
         guard let sub = controller.submit(line), let writer else { return }
         writer.enqueue(sub.wire)
     }
+
+    /// Submit a command and return its correlation id (nil unless attached).
+    private func writeTracked(_ line: String) -> UInt64? {
+        guard let sub = controller.submit(line), let writer else { return nil }
+        writer.enqueue(sub.wire)
+        return sub.id
+    }
+
+    /// Begin polling `pane_current_command` once control mode is attached.
+    func startContextPolling() {
+        guard pollTask == nil else { return }
+        pollTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if let id = self.writeTracked(TmuxCommand.listPaneCommands()) {
+                    self.contextPollIDs.insert(id)
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)   // ~1 Hz
+            }
+        }
+    }
+
+    /// Stop polling and release the channel (called on teardown).
+    func stop() {
+        pollTask?.cancel(); pollTask = nil
+        writer?.finish(); writer = nil
+    }
+
+    /// The engaged context for `pane`, or nil.
+    func paneContext(_ pane: PaneID) -> String? { contextStore.context(for: pane) }
 
     /// The active pane of the active window (nil until the first layout/window event).
     private var activePane: PaneID? {
