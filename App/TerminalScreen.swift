@@ -20,7 +20,7 @@ struct TerminalScreen: UIViewRepresentable {
     /// `AppStores.shared.terminalSettings.settings` at the call site.
     var settings: TerminalSettings = TerminalSettings()
     /// Active theme (used for bell halo color).
-    var theme: Theme = Theme.default
+    var theme: Theme = Theme.bellBronze
     /// Whether OSC 52 clipboard writes are allowed for this session (resolved at connect time).
     var osc52Allowed: Bool = true
     /// Called with the sanitized OSC 0/2 title; routes to `vm.terminalTitle`.
@@ -216,22 +216,24 @@ struct TerminalScreen: UIViewRepresentable {
     }
 }
 
-/// Map a `CursorStyle` + blink flag onto SwiftTerm's `CursorStyle` enum and
-/// apply it to the given `TerminalView`.
+/// Apply the caret style + blink to `terminal` by feeding the matching DECSCUSR
+/// sequence (`ESC [ <n> SP q`).
 ///
-/// - Note: SwiftTerm's `CursorStyle` and the `nativeCursorStyle` property are
-///   assumed from the SwiftTerm 1.x public API (`.blinkBlock`, `.steadyBlock`,
-///   `.blinkUnderline`, `.steadyUnderline`, `.blinkBar`, `.steadyBar`).
-///   This mapping is CI-verified on macOS only; it cannot be compiled on Linux.
-private func applyCursor(to terminal: TerminalView, style: CursorStyle, blink: Bool) {
-    let swiftTermStyle: SwiftTerm.CursorStyle
+/// This is the mechanism the Plan C spec calls for ("engine applies `\x1b[<n> q`
+/// overrides") and uses only SwiftTerm's `feed` — already exercised for PTY
+/// output — so it avoids any dependency on a native cursor-style property. The
+/// `style` parameter is qualified to `NeotildeKit.CursorStyle` to disambiguate
+/// from SwiftTerm's own `CursorStyle`.
+private func applyCursor(to terminal: TerminalView, style: NeotildeKit.CursorStyle, blink: Bool) {
+    let n: Int
     switch (style, blink) {
-    case (.block, true):       swiftTermStyle = .blinkBlock
-    case (.block, false):      swiftTermStyle = .steadyBlock
-    case (.underline, true):   swiftTermStyle = .blinkUnderline
-    case (.underline, false):  swiftTermStyle = .steadyUnderline
-    case (.bar, true):         swiftTermStyle = .blinkBar
-    case (.bar, false):        swiftTermStyle = .steadyBar
+    case (.block, true):       n = 1
+    case (.block, false):      n = 2
+    case (.underline, true):   n = 3
+    case (.underline, false):  n = 4
+    case (.bar, true):         n = 5
+    case (.bar, false):        n = 6
     }
-    terminal.nativeCursorStyle = swiftTermStyle
+    let seq = Array("\u{1b}[\(n) q".utf8)
+    terminal.feed(byteArray: seq[...])
 }
