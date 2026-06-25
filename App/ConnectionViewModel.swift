@@ -127,6 +127,7 @@ final class ConnectionViewModel: ObservableObject {
         session = nil
         connection = nil
         tmuxState = nil
+        crashBanner = nil
         paneViews.removeAll()
         pendingPaneBytes.removeAll()
         renderablePanes.removeAll()
@@ -280,6 +281,9 @@ final class ConnectionViewModel: ObservableObject {
         do {
             try await openRawShell(conn: conn)   // sets session/rawWriter, tmuxState=nil, state=.shell
             paneContexts = [:]
+            paneViews.removeAll()
+            pendingPaneBytes.removeAll()
+            renderablePanes.removeAll()
             crashBanner = .tmuxEnded
         } catch {
             state = .failed("tmux ended and the connection is no longer reachable.")
@@ -292,7 +296,10 @@ final class ConnectionViewModel: ObservableObject {
     func reattachTmux() {
         guard let conn = connection else { return }
         crashBanner = nil
-        Task { try? await attachTmux(conn: conn) }
+        Task {
+            do { try await attachTmux(conn: conn) }
+            catch { state = .failed("Could not reattach: the connection is no longer reachable.") }
+        }
     }
 
     /// Banner action — start a fresh tmux. Same `-CC new-session -A` path; if the
@@ -301,7 +308,10 @@ final class ConnectionViewModel: ObservableObject {
     func startNewTmux() {
         guard let conn = connection else { return }
         crashBanner = nil
-        Task { try? await attachTmux(conn: conn) }
+        Task {
+            do { try await attachTmux(conn: conn) }
+            catch { state = .failed("Could not start tmux: the connection is no longer reachable.") }
+        }
     }
 
     /// Banner action — stay in degraded raw-shell mode for the rest of the session.
