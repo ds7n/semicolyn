@@ -65,4 +65,14 @@ final class ResolutionTests: XCTestCase {
             host: host { $0.neotilde = .explicit(NeotildeConfig(tmux: TmuxConfig(attemptControlMode: false))) },
             defaults: Defaults()))
     }
+
+    func testOsc52AllowResolves() {
+        XCTAssertTrue(resolveOsc52Allow(host: host(), defaults: Defaults()))   // builtin true
+        XCTAssertFalse(resolveOsc52Allow(
+            host: host { $0.neotilde = .explicit(NeotildeConfig(osc52: Osc52Config(allow: false))) },
+            defaults: Defaults()))
+        XCTAssertTrue(resolveOsc52Allow(                                       // host inherits, defaults set true
+            host: host(),
+            defaults: Defaults(neotilde: .explicit(NeotildeConfig(osc52: Osc52Config(allow: true))))))
+    }
 }

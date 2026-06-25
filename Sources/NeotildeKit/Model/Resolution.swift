@@ -105,6 +105,11 @@ public func resolveTmuxAttemptControlMode(host: Host, defaults: Defaults) -> Boo
     resolveOptional(host.neotilde, defaults.neotilde)?.tmux?.attemptControlMode ?? true
 }
 
+/// Resolve whether OSC 52 clipboard writes are permitted (builtin default: true).
+public func resolveOsc52Allow(host: Host, defaults: Defaults) -> Bool {
+    resolveOptional(host.neotilde, defaults.neotilde)?.osc52?.allow ?? true
+}
+
 /// Returns true if saving `savingHostId` with `chain` would loop back through a
 /// host already reachable in the chain. Walks `ref` hops via `hosts`.
 public func hasCycle(savingHostId: UUID, chain: [JumpHop],

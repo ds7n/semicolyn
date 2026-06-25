@@ -24,6 +24,12 @@ final class ConnectionViewModel: ObservableObject {
     @Published var degraded: DegradeReason?
     /// Non-nil while attached to tmux control mode; nil in raw-PTY mode.
     @Published var tmuxState: TmuxSessionState?
+    /// Last OSC 0/2 title received from the remote (sanitized). Phase-4 Esc-pill
+    /// Live row reads this to display the current window title.
+    @Published var terminalTitle: String?
+    /// Whether OSC 52 clipboard writes are permitted for the active session.
+    /// Resolved from `resolveOsc52Allow` at connect time; read by the terminal views.
+    private(set) var osc52Allowed: Bool = true
     /// PaneID → live SwiftTerm view, populated by TmuxPaneContainer as panes appear.
     private var paneViews: [PaneID: TerminalView] = [:]
     private var pendingPaneBytes: [PaneID: [UInt8]] = [:]   // bytes that arrived before the view registered
@@ -284,6 +290,7 @@ final class ConnectionViewModel: ObservableObject {
                 }
                 // Probe + branch on tmux availability.
                 let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+                osc52Allowed = resolveOsc52Allow(host: savedHost, defaults: defaults2)
                 let allow = resolveTmuxAttemptControlMode(host: savedHost, defaults: defaults2)
                 let probe = allow ? await probeTmuxVersion(conn: conn) : nil
                 switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
@@ -332,6 +339,7 @@ final class ConnectionViewModel: ObservableObject {
                 }
                 // Probe + branch on tmux availability.
                 let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+                osc52Allowed = resolveOsc52Allow(host: hostRecord, defaults: defaults2)
                 let allow = resolveTmuxAttemptControlMode(host: hostRecord, defaults: defaults2)
                 let probe = allow ? await probeTmuxVersion(conn: conn) : nil
                 switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
