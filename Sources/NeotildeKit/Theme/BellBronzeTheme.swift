@@ -37,6 +37,7 @@ extension Theme {
         terminal: .init(bg: ThemeColor("#0A0C10"), fg: ThemeColor("#CFD6E4"))
     )
 
-    /// The v1 theme registry. Picker UI stays hidden while this has one entry.
-    public static let all: [Theme] = [.bellBronze]
+    // Neon Midnight is the default (first); Bell-bronze retained as a switchable
+    // alternate (candidate Pro cosmetic). Picker UI is Phase 4.
+    public static let all: [Theme] = [.neonMidnight, .bellBronze]
 }

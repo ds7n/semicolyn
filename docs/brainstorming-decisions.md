@@ -23,7 +23,7 @@ Two complementary input mechanisms central to the differentiation:
 | Goal | Solve a personal annoyance (CLI / AI / security adjacent) |
 | Differentiator | Make the iOS keyboard pleasant for terminal work |
 | Security posture | Security-first: SE-default for new identities, per-host auth policy, no telemetry, public-key always copyable. (Audit log dropped from v1 entirely per `2026-06-16-icloud-sync-scope-design.md`; code-level stub reserved for a future Pro compliance feature.) |
-| Brand palette | **"Bell bronze"** — bronze accent (`#D49A5C`) on cool-near-black (`#0E1116`), verdigris patina (`#5FA89C`) as success/tension color. A warm metallic accent on a cool terminal-dark ground, with aged-copper verdigris as the counterpoint. Avoids AI / terminal / Norse colour stereotypes. See `mockups/specs/design-system.html`. (Palette name predates the rename — kept as-is; revisit if desired.) |
+| Brand palette | **"Neon Midnight"** — coral accent `#FF6F5E` (the orange-red glow of neon) on darker blue-near-black `#07090E`, verdigris `#5FB0A2` as success/tension color, error `#E5455E`. Bell-only glow (accent solid at rest; anti-CP2077). Bell-bronze kept as a Pro-cosmetic alternate. See `mockups/specs/design-system.html` and `docs/superpowers/specs/2026-06-25-neon-midnight-theme-design.md`. |
 
 ### Connections & sessions
 
