@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — neotilde "Neon Midnight" FINAL candidate.
+     Anti-CP2077: coral-lean #FF6F5E, darker blue night #07090E (not pure black),
+     muted verdigris, single restrained accent, NO glitch/aberration. Glow is
+     BELL-ONLY: solid at rest, a transient bloom only when the bell rings.
+     Shown as rest vs. bell-moment. Plain flow; no viewport-height/JS/color-mix. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neotilde — Neon Midnight (final)</title>
+<style>
+  :root{ color-scheme:dark; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:#05060b; color:#E8EBF0;
+        font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap{ max-width:1180px; margin:0 auto; padding:32px 22px 70px; }
+  h1{ font-size:23px; margin:0 0 6px; }
+  h1 em{ font-style:normal; color:#FF6F5E; }
+  .lede{ color:#8A93A3; font-size:13.5px; max-width:840px; line-height:1.6; margin:0 0 8px; }
+  .lede b{ color:#CFD6E4; }
+  .recipe{ color:#8A93A3; font-size:12px; margin:0 0 24px; }
+  .recipe code{ color:#CFD6E4; font-family:ui-monospace; }
+
+  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(380px,1fr)); gap:20px; }
+
+  .card{ border:1px solid #232A3A; border-radius:15px; overflow:hidden; background:#07090E; }
+  .label{ display:flex; align-items:center; gap:9px; padding:12px 15px; background:#0E1118; border-bottom:1px solid #232A3A; }
+  .label h3{ margin:0; font-size:15px; } .label em{ font-style:normal; color:#FF6F5E; }
+  .label .t{ margin-left:auto; font:700 10px ui-sans-serif; letter-spacing:.4px; padding:3px 9px; border-radius:20px; background:#161A24; color:#8A93A3; }
+  .label .t.live{ background:rgba(255,111,94,.16); color:#FF6F5E; }
+
+  .chrome{ display:flex; align-items:center; gap:7px; padding:11px 15px; background:#0E1118; border-bottom:1px solid #232A3A; }
+  .dot{ width:10px; height:10px; border-radius:50%; }
+  .wt{ margin-left:8px; color:#8A93A3; font-size:11px; font-weight:600; }
+
+  .term{ background:#05070B; padding:16px; font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+         font-size:12.5px; line-height:1.95; }
+  /* AT REST: accent is solid — no text-shadow, no box-shadow anywhere */
+  .p{ color:#FF6F5E; font-weight:700; }
+  .dim{ color:#8A93A3; } .fg{ color:#E8EBF0; }
+  .ok{ color:#5FB0A2; } .warn{ color:#F5A524; } .err{ color:#E5455E; }
+  .link{ color:#FF6F5E; text-decoration:underline; text-underline-offset:2px; }
+  .cur{ background:#FF6F5E; color:#05070B; padding:0 3px; border-radius:2px; }
+
+  .surf{ padding:14px 15px; display:flex; flex-direction:column; gap:11px; background:#07090E; border-top:1px solid #232A3A; }
+  .row{ display:flex; gap:9px; }
+  .pane{ flex:1; border:1.5px solid #FF6F5E; border-radius:8px; padding:9px 11px; font:600 11px ui-sans-serif;
+         color:#CFD6E4; background:#05070B; position:relative; }   /* solid border, no glow at rest */
+  .pane.off{ border:1px solid #232A3A; color:#8A93A3; }
+  /* the ONE glow: bell moment */
+  .pane.ringing{ box-shadow:inset 0 0 20px rgba(255,111,94,.6), 0 0 16px rgba(255,111,94,.4); }
+  .belltag{ position:absolute; top:-9px; right:9px; font:700 9px ui-sans-serif; background:#FF6F5E; color:#05070B;
+            padding:2px 7px; border-radius:10px; box-shadow:0 0 12px rgba(255,111,94,.8); }
+  .keybar{ display:flex; gap:7px; }
+  .slot{ font:600 11.5px ui-sans-serif; padding:7px 11px; border-radius:7px; background:#161A24; border:1px solid #232A3A; color:#E8EBF0; }
+  .slot.prom{ background:rgba(255,111,94,.15); border-color:transparent; color:#FF6F5E; }
+  .slot.armed{ background:#FF6F5E; border-color:#FF6F5E; color:#05070B; }   /* solid, no glow at rest */
+  .badges{ display:flex; gap:8px; flex-wrap:wrap; }
+  .badge{ font:600 11.5px ui-sans-serif; padding:6px 10px; border-radius:7px; }
+  .b-ok{ background:rgba(95,176,162,.16); color:#5FB0A2; }
+  .b-warn{ background:rgba(245,165,36,.15); color:#F5A524; }
+  .b-err{ background:rgba(229,69,94,.16); color:#E5455E; }
+
+  .meta{ padding:13px 15px 17px; color:#8A93A3; font-size:12px; line-height:1.55; }
+  .meta em{ color:#CFD6E4; font-style:normal; font-weight:600; }
+  .note{ margin-top:26px; color:#8A93A3; font-size:12.5px; line-height:1.55; border-left:2px solid #232A3A; padding-left:12px; }
+  .note b{ color:#CFD6E4; }
+  .legend{ margin-top:22px; display:flex; gap:9px; flex-wrap:wrap; }
+  .tok{ display:flex; align-items:center; gap:8px; padding:7px 11px; background:#0E1118; border:1px solid #232A3A; border-radius:9px; font-size:11.5px; }
+  .tok i{ width:18px; height:18px; border-radius:5px; }
+  .tok span{ font:600 10px ui-monospace; color:#8A93A3; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><em>~</em>neotilde — Neon Midnight <span style="color:#8A93A3;font-size:14px;font-weight:400">· final candidate</span></h1>
+  <p class="lede"><b>Same scene, two states.</b> The accent is <b>solid coral at rest</b> (left) — calm, modern, no neon-sign bloom. The glow is a <b>transient bell moment</b> (right): when a bell fires, the active pane blooms, then fades back to flat in ~650ms.</p>
+  <p class="recipe">Anti-CP2077 recipe: coral-lean <code>#FF6F5E</code> · darker blue night <code>#07090E</code> (not pure black) · muted verdigris <code>#5FB0A2</code> · one restrained accent · no glitch/aberration/scanlines.</p>
+
+  <div class="grid">
+
+    <!-- AT REST -->
+    <div class="card">
+      <div class="label"><h3>At rest</h3><span class="t">default state · 99% of the time</span></div>
+      <div class="chrome"><span class="dot" style="background:#E5455E"></span><span class="dot" style="background:#F5A524"></span><span class="dot" style="background:#5FB0A2"></span><span class="wt">~/src — ssh prod-web · 2 panes</span></div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">git pull &amp;&amp; deploy</span></div>
+        <div class="ok">✓ release 1.4.0 live</div>
+        <div class="warn">⚠ legacy cipher on 1 host</div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">open</span> <span class="link">https://status.app</span></div>
+        <div class="err">✗ permission denied (publickey)</div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="cur">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="row"><span class="pane">● logs ~ active</span><span class="pane off">shell</span></div>
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot">^C</span><span class="slot">~</span></div>
+        <div class="badges"><span class="badge b-ok">✓ connected · prod-web</span><span class="badge b-err">✗ 1 forward failed</span></div>
+      </div>
+      <div class="meta">Solid coral on every accent surface — prompt <code style="font-family:ui-monospace">~</code>, cursor, active border, armed key, link. <em>No bloom.</em> Reads "modern terminal," not neon sign.</div>
+    </div>
+
+    <!-- BELL MOMENT -->
+    <div class="card">
+      <div class="label"><h3>Bell rings <em>(momentary)</em></h3><span class="t live">~650ms, then fades to rest</span></div>
+      <div class="chrome"><span class="dot" style="background:#E5455E"></span><span class="dot" style="background:#F5A524"></span><span class="dot" style="background:#5FB0A2"></span><span class="wt">~/src — ssh prod-web · 2 panes</span></div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">make test</span></div>
+        <div class="fg">running 482 tests…</div>
+        <div class="err">✗ 1 test failed  <span class="dim">\a</span></div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="cur">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="row"><span class="pane ringing"><span class="belltag">🔔 bell</span>● logs ~ active</span><span class="pane off">shell</span></div>
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot">^C</span><span class="slot">~</span></div>
+        <div class="badges"><span class="badge b-ok">✓ connected · prod-web</span><span class="badge b-err">✗ 1 forward failed</span></div>
+      </div>
+      <div class="meta">A bell (<code style="font-family:ui-monospace">\a</code>) fires → the active pane blooms once (the halo we built in Phase 3c), with a soft haptic. Everything else stays flat. The glow is an <em>event</em>, not the resting look — that's what keeps it out of cyberpunk territory.</div>
+    </div>
+
+  </div>
+
+  <div class="legend">
+    <div class="tok"><i style="background:#FF6F5E"></i><span>accent #FF6F5E</span></div>
+    <div class="tok"><i style="background:#07090E;border:1px solid #232A3A"></i><span>night #07090E</span></div>
+    <div class="tok"><i style="background:#5FB0A2"></i><span>verdigris #5FB0A2</span></div>
+    <div class="tok"><i style="background:#F5A524"></i><span>amber #F5A524</span></div>
+    <div class="tok"><i style="background:#E5455E"></i><span>error #E5455E</span></div>
+    <div class="tok"><i style="background:#E8EBF0"></i><span>text #E8EBF0</span></div>
+  </div>
+
+  <p class="note"><b>This is the look I'd lock.</b> Solid coral on deep blue at rest; the neon "glow" is reserved for the bell pulse. Concept kept, costume shed. If this lands, I write the spec — last open call is just whether Neon Midnight <b>replaces</b> Bell-bronze or we keep both with a picker.</p>
+</div>
+</body>
+</html>

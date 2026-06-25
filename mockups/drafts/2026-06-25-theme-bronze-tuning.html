@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — neotilde: tuning the accent toward a truer bronze.
+     Background (very dark blue-black) + verdigris + states held EXACTLY as today.
+     Only the accent (and its highlight) move off yellow-gold toward bronze.
+     Self-contained; open directly in a browser. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neotilde — truer bronze</title>
+<style>
+  :root { color-scheme:dark; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#07090c; color:#E8EBF0;
+         font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:1240px; margin:0 auto; padding:36px 24px 80px; }
+  h1 { font-size:24px; margin:0 0 6px; }
+  .lede { color:#8A93A3; font-size:14px; max-width:800px; line-height:1.6; margin:0 0 8px; }
+  .lede strong { color:#CFD6E4; }
+  .note { color:#8A93A3; font-size:12.5px; max-width:800px; line-height:1.55; margin:0 0 26px;
+          border-left:2px solid #2A323F; padding-left:12px; }
+  .note b { color:#CFD6E4; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:18px; }
+
+  .card { border:1px solid #2A323F; border-radius:15px; overflow:hidden; background:#0E1116; }
+  .card.cur { outline:1px dashed #3a4456; outline-offset:-1px; }
+
+  .chrome { display:flex; align-items:center; gap:7px; padding:9px 13px;
+            background:#161A22; border-bottom:1px solid #2A323F; }
+  .dot { width:10px; height:10px; border-radius:50%; }
+  .wt { margin-left:7px; color:#8A93A3; font-size:11px; font-weight:600; }
+  .term { background:#0A0C10; padding:15px; min-height:120px;
+          font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+          font-size:12px; line-height:1.7; color:#CFD6E4; }
+  .p   { color:var(--acc); font-weight:700; }
+  .dim { color:#8A93A3; }
+  .fg  { color:#E8EBF0; }
+  .acct{ color:var(--acc); }            /* accent used as text — bronze read */
+  .ok  { color:#5FA89C; }
+  .cur-blk { background:var(--acc); color:#0A0C10; padding:0 3px; border-radius:2px; }
+
+  .surf { padding:12px 13px; display:flex; flex-direction:column; gap:10px;
+          background:#0E1116; border-top:1px solid #2A323F; }
+  .keybar { display:flex; gap:5px; }
+  .slot { font-size:10.5px; font-weight:600; padding:5px 8px; border-radius:6px;
+          background:#161A22; border:1px solid #2A323F; color:#E8EBF0; }
+  .slot.prom { background:var(--acc12); border-color:transparent; color:var(--acc); }
+  .slot.armed{ background:var(--acc); border-color:var(--acc); color:#0A0C10; }
+  .row { display:flex; gap:8px; }
+  .pane { flex:1; border:1.5px solid var(--acc); border-radius:7px; padding:7px 9px;
+          font:600 10.5px ui-sans-serif; color:#CFD6E4; background:#0A0C10; }
+  .pane.inactive { border:1px solid #2A323F; color:#8A93A3; }
+
+  .meta { padding:13px 15px 17px; }
+  .meta h3 { margin:0 0 4px; font-size:14.5px; }
+  .meta p { margin:0; color:#8A93A3; font-size:12px; line-height:1.5; }
+  .meta em { color:#CFD6E4; font-style:normal; font-weight:600; }
+  .sw { display:flex; gap:6px; margin-top:10px; align-items:center; }
+  .sw i { width:30px; height:30px; border-radius:7px; }
+  .hex { margin-top:7px; font:600 10.5px ui-monospace; color:#8A93A3; }
+  .tag { font-size:10.5px; font-weight:600; color:#8A93A3; }
+  .axis { margin:20px 0 26px; height:18px; border-radius:9px;
+          background:linear-gradient(90deg,#D49A5C,#C8843C,#B5742E,#9c5f24); position:relative; }
+  .axis span { position:absolute; top:24px; font-size:11px; color:#8A93A3; transform:translateX(-50%); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>neotilde — pulling the accent toward a truer <em style="font-style:normal;color:#C8843C">bronze</em></h1>
+  <p class="lede"><strong>Background, verdigris success, and states are unchanged</strong> — exactly today's very dark blue-black. The current accent <code style="font-family:ui-monospace">#D49A5C</code> reads <strong>yellow-gold</strong>; these candidates rotate it toward orange-brown and desaturate slightly so it reads as <strong>metal bronze</strong>. Current is pinned first.</p>
+  <div class="axis"><span style="left:0">yellow-gold (now)</span><span style="left:38%">warm bronze</span><span style="left:68%">deep bronze</span><span style="left:100%">brown</span></div>
+  <p class="note"><b>Trade-off to watch:</b> the browner/darker the bronze, the less it pops against the dark blue. So there's a floor — too brown and the prompt/borders get muddy. Judge the accent both as a <b>fill</b> (armed slot, cursor) and as <b>thin chrome</b> (prompt <code style="font-family:ui-monospace">~</code>, pane border) on the dark blue.</p>
+
+  <div class="grid">
+
+    <!-- current -->
+    <div class="card cur" style="--acc:#D49A5C; --acc12:rgba(212,154,92,.14)">
+      <div class="chrome"><span class="dot" style="background:#E06B6B"></span><span class="dot" style="background:#F5A524"></span><span class="dot" style="background:#5FA89C"></span><span class="wt">~ — current</span></div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">git status</span></div>
+        <div><span class="acct">●</span> <span class="fg">2 files changed</span></div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="cur-blk">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot">~</span></div>
+        <div class="row"><span class="pane">active</span><span class="pane inactive">pane</span></div>
+      </div>
+      <div class="meta"><h3>Current <span class="tag">(yellow-gold)</span></h3><p>Today's accent. Leans yellow.</p>
+        <div class="sw"><i style="background:#D49A5C"></i><i style="background:#F2C58A"></i></div>
+        <div class="hex">#D49A5C · hi #F2C58A</div>
+      </div>
+    </div>
+
+    <!-- B1 warm bronze -->
+    <div class="card" style="--acc:#C8843C; --acc12:rgba(200,132,60,.16)">
+      <div class="chrome"><span class="dot" style="background:#E06B6B"></span><span class="dot" style="background:#F5A524"></span><span class="dot" style="background:#5FA89C"></span><span class="wt">~ — warm bronze</span></div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">git status</span></div>
+        <div><span class="acct">●</span> <span class="fg">2 files changed</span></div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="cur-blk">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot">~</span></div>
+        <div class="row"><span class="pane">active</span><span class="pane inactive">pane</span></div>
+      </div>
+      <div class="meta"><h3>1 · Warm bronze</h3><p>Hue rotated toward orange-brown, lightly desaturated. <em>Clearly bronze, still bright.</em> The safe evolution.</p>
+        <div class="sw"><i style="background:#C8843C"></i><i style="background:#E6B06A"></i></div>
+        <div class="hex">#C8843C · hi #E6B06A</div>
+      </div>
+    </div>
+
+    <!-- B2 deep bronze -->
+    <div class="card" style="--acc:#B5742E; --acc12:rgba(181,116,46,.17)">
+      <div class="chrome"><span class="dot" style="background:#E06B6B"></span><span class="dot" style="background:#F5A524"></span><span class="dot" style="background:#5FA89C"></span><span class="wt">~ — deep bronze</span></div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">git status</span></div>
+        <div><span class="acct">●</span> <span class="fg">2 files changed</span></div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="cur-blk">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot">~</span></div>
+        <div class="row"><span class="pane">active</span><span class="pane inactive">pane</span></div>
+      </div>
+      <div class="meta"><h3>2 · Deep bronze</h3><p>Browner and a touch darker — the most "aged metal." More committed; watch it doesn't get muddy on thin chrome.</p>
+        <div class="sw"><i style="background:#B5742E"></i><i style="background:#D99F55"></i></div>
+        <div class="hex">#B5742E · hi #D99F55</div>
+      </div>
+    </div>
+
+    <!-- B3 antique bronze -->
+    <div class="card" style="--acc:#B98D5A; --acc12:rgba(185,141,90,.16)">
+      <div class="chrome"><span class="dot" style="background:#E06B6B"></span><span class="dot" style="background:#F5A524"></span><span class="dot" style="background:#5FA89C"></span><span class="wt">~ — antique bronze</span></div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">git status</span></div>
+        <div><span class="acct">●</span> <span class="fg">2 files changed</span></div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="cur-blk">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot">~</span></div>
+        <div class="row"><span class="pane">active</span><span class="pane inactive">pane</span></div>
+      </div>
+      <div class="meta"><h3>3 · Antique bronze</h3><p>Muted/desaturated brown-bronze — soft and sophisticated rather than punchy. Least yellow, but also least vivid.</p>
+        <div class="sw"><i style="background:#B98D5A"></i><i style="background:#DCBA8A"></i></div>
+        <div class="hex">#B98D5A · hi #DCBA8A</div>
+      </div>
+    </div>
+
+  </div>
+
+  <p class="note" style="margin-top:26px"><b>Tell me which sits right</b> — or that it's between two and I'll mock an intermediate. Once the accent's dialed, I'll confirm the matching highlight + the keybar-tint opacities and we're done. (If even #C8843C still reads yellow to you, we go browner still; if it reads muddy, we keep more brightness.)</p>
+</div>
+</body>
+</html>

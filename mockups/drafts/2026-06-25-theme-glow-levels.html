@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — neotilde: coral neon on midnight, three GLOW levels.
+     Same accent (#FF6F5E), same night (#07090E), same states. Only the bloom
+     changes — full / bell-only / flat — to find the line before cyberpunk.
+     Plain document flow (no viewport-height, no JS, no color-mix). Self-contained. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neotilde — glow levels</title>
+<style>
+  :root{ color-scheme:dark; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:#05060b; color:#E8EBF0;
+        font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap{ max-width:1280px; margin:0 auto; padding:32px 22px 70px; }
+  h1{ font-size:23px; margin:0 0 6px; }
+  h1 em{ font-style:normal; color:#FF6F5E; }
+  .lede{ color:#8A93A3; font-size:13.5px; max-width:840px; line-height:1.6; margin:0 0 24px; }
+  .lede b{ color:#CFD6E4; }
+
+  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); gap:20px; }
+
+  .card{ border:1px solid #232A3A; border-radius:15px; overflow:hidden; background:#07090E;
+         --glow:none; --glowbox:none; }                 /* default flat; .full overrides */
+  .card.full{ --glow:0 0 6px rgba(255,111,94,.9); --glowbox:0 0 12px rgba(255,111,94,.55); }
+
+  .label{ display:flex; align-items:center; gap:9px; padding:12px 15px; background:#0E1118; border-bottom:1px solid #232A3A; }
+  .label h3{ margin:0; font-size:15px; }
+  .label .cp{ margin-left:auto; font:700 10px ui-sans-serif; letter-spacing:.4px; padding:3px 8px; border-radius:20px; }
+  .cp.hi{ background:rgba(229,69,94,.16); color:#E5455E; }
+  .cp.mid{ background:rgba(245,165,36,.15); color:#F5A524; }
+  .cp.lo{ background:rgba(95,176,162,.16); color:#5FB0A2; }
+
+  .brand{ padding:11px 15px; font:800 15px ui-sans-serif; border-bottom:1px solid #232A3A; background:#0E1118; }
+  .brand em{ font-style:normal; color:#FF6F5E; text-shadow:var(--glow); }
+
+  .term{ background:#05070B; padding:15px; font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+         font-size:12.5px; line-height:1.85; }
+  .p{ color:#FF6F5E; font-weight:700; text-shadow:var(--glow); }
+  .dim{ color:#8A93A3; } .fg{ color:#E8EBF0; }
+  .ok{ color:#5FB0A2; } .warn{ color:#F5A524; } .err{ color:#E5455E; }
+  .link{ color:#FF6F5E; text-decoration:underline; text-underline-offset:2px; text-shadow:var(--glow); }
+  .cur{ background:#FF6F5E; color:#05070B; padding:0 3px; border-radius:2px; box-shadow:var(--glowbox); }
+
+  .surf{ padding:13px 15px; display:flex; flex-direction:column; gap:10px; background:#07090E; border-top:1px solid #232A3A; }
+  .row{ display:flex; gap:8px; }
+  .pane{ flex:1; border:1.5px solid #FF6F5E; border-radius:8px; padding:8px 10px; font:600 11px ui-sans-serif;
+         color:#CFD6E4; background:#05070B; box-shadow:var(--glowbox); position:relative; }
+  .pane.off{ border:1px solid #232A3A; color:#8A93A3; box-shadow:none; }
+  /* bell-only: the ONE place a glow appears — a ringing pane */
+  .pane.ringing{ box-shadow:inset 0 0 18px rgba(255,111,94,.6); }
+  .belltag{ position:absolute; top:-9px; right:8px; font:700 9px ui-sans-serif; background:#FF6F5E; color:#05070B; padding:2px 6px; border-radius:10px; box-shadow:0 0 10px rgba(255,111,94,.7); }
+  .keybar{ display:flex; gap:6px; }
+  .slot{ font:600 11px ui-sans-serif; padding:6px 10px; border-radius:7px; background:#161A24; border:1px solid #232A3A; color:#E8EBF0; }
+  .slot.prom{ background:rgba(255,111,94,.15); border-color:transparent; color:#FF6F5E; }
+  .slot.armed{ background:#FF6F5E; border-color:#FF6F5E; color:#05070B; box-shadow:var(--glowbox); }
+  .badges{ display:flex; gap:7px; flex-wrap:wrap; }
+  .badge{ font:600 11px ui-sans-serif; padding:5px 9px; border-radius:6px; }
+  .b-ok{ background:rgba(95,176,162,.16); color:#5FB0A2; }
+  .b-warn{ background:rgba(245,165,36,.15); color:#F5A524; }
+  .b-err{ background:rgba(229,69,94,.16); color:#E5455E; }
+
+  .meta{ padding:12px 15px 16px; color:#8A93A3; font-size:12px; line-height:1.5; }
+  .meta em{ color:#CFD6E4; font-style:normal; font-weight:600; }
+  .note{ margin-top:26px; color:#8A93A3; font-size:12.5px; line-height:1.55; border-left:2px solid #232A3A; padding-left:12px; }
+  .note b{ color:#CFD6E4; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>neotilde — coral neon, three <em>glow</em> levels</h1>
+  <p class="lede"><b>Identical accent (#FF6F5E), night, and states in all three.</b> Only the bloom changes. The "CP2077-risk" tag is my read on how cyberpunk each reads — watch it drop as the glow pulls back. The accent hue itself never changes.</p>
+
+  <div class="grid">
+
+    <!-- FULL -->
+    <div class="card full">
+      <div class="label"><h3>Full glow</h3><span class="cp hi">CP2077 risk: high</span></div>
+      <div class="brand"><em>~</em>neotilde</div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">deploy</span></div>
+        <div class="ok">✓ 1.4.0 live</div>
+        <div><span class="p">~</span> $ <span class="fg">open</span> <span class="link">https://status.app</span></div>
+        <div class="err">✗ permission denied</div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="cur">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="row"><span class="pane">● logs ~ active</span><span class="pane off">shell</span></div>
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot">~</span></div>
+        <div class="badges"><span class="badge b-ok">✓ connected</span><span class="badge b-err">✗ forward</span></div>
+      </div>
+      <div class="meta">Persistent bloom on prompt, cursor, border, slot, link, brand. Glows like a neon sign — <em>this is the cyberpunk version.</em></div>
+    </div>
+
+    <!-- BELL ONLY -->
+    <div class="card">
+      <div class="label"><h3>Bell-only glow</h3><span class="cp lo">CP2077 risk: low</span></div>
+      <div class="brand"><em>~</em>neotilde</div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">deploy</span></div>
+        <div class="ok">✓ 1.4.0 live</div>
+        <div><span class="p">~</span> $ <span class="fg">open</span> <span class="link">https://status.app</span></div>
+        <div class="err">✗ permission denied</div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="cur">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="row"><span class="pane ringing"><span class="belltag">🔔 bell</span>● logs ~ active</span><span class="pane off">shell</span></div>
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot">~</span></div>
+        <div class="badges"><span class="badge b-ok">✓ connected</span><span class="badge b-err">✗ forward</span></div>
+      </div>
+      <div class="meta"><em>Recommended.</em> Accent is solid coral at rest — no bloom anywhere. Glow appears only as a <em>moment</em> when the bell rings (the pane shown ringing). Keeps the neon story, sheds the costume.</div>
+    </div>
+
+    <!-- FLAT -->
+    <div class="card">
+      <div class="label"><h3>Flat (no glow)</h3><span class="cp lo">CP2077 risk: none</span></div>
+      <div class="brand"><em>~</em>neotilde</div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">deploy</span></div>
+        <div class="ok">✓ 1.4.0 live</div>
+        <div><span class="p">~</span> $ <span class="fg">open</span> <span class="link">https://status.app</span></div>
+        <div class="err">✗ permission denied</div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="cur">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="row"><span class="pane">● logs ~ active</span><span class="pane off">shell</span></div>
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot">~</span></div>
+        <div class="badges"><span class="badge b-ok">✓ connected</span><span class="badge b-err">✗ forward</span></div>
+      </div>
+      <div class="meta">Zero bloom — solid coral on deep blue. Clean and modern (Warp/Fig-like). The "neon" lives only in the name + story, not the pixels.</div>
+    </div>
+
+  </div>
+
+  <p class="note"><b>Where's the line for you?</b> Full = neon sign (cyberpunk). Bell-only = solid at rest, glow only when the bell fires — my pick. Flat = no glow at all. Note the bell halo we already built (Phase 3c) IS the bell-only behavior, so "bell-only" is essentially free. Pick the level and I'll lock the palette + glow rule and write the spec.</p>
+</div>
+</body>
+</html>

@@ -20,7 +20,7 @@ struct TerminalScreen: UIViewRepresentable {
     /// `AppStores.shared.terminalSettings.settings` at the call site.
     var settings: TerminalSettings = TerminalSettings()
     /// Active theme (used for bell halo color).
-    var theme: Theme = Theme.bellBronze
+    var theme: Theme = Theme.neonMidnight
     /// Whether OSC 52 clipboard writes are allowed for this session (resolved at connect time).
     var osc52Allowed: Bool = true
     /// Called with the sanitized OSC 0/2 title; routes to `vm.terminalTitle`.
