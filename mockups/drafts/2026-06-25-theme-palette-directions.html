@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — neotilde theme: evolving the warm accent.
+     Self-contained; open directly in a browser. No build/deps. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neotilde — accent directions</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#07090c; color:#E8EBF0;
+         font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:1180px; margin:0 auto; padding:36px 24px 80px; }
+  h1 { font-size:24px; margin:0 0 6px; }
+  .lede { color:#8A93A3; font-size:14px; max-width:760px; line-height:1.6; margin:0 0 28px; }
+  .lede strong { color:#CFD6E4; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:22px; }
+
+  .card { border:1px solid #2A323F; border-radius:16px; overflow:hidden; background:#0E1116; }
+  .card.cur { outline:1px dashed #3a4456; outline-offset:-1px; }
+
+  /* terminal */
+  .chrome { display:flex; align-items:center; gap:7px; padding:10px 14px;
+            background:#161A22; border-bottom:1px solid #2A323F; }
+  .dot { width:11px; height:11px; border-radius:50%; }
+  .wt { margin-left:8px; color:#8A93A3; font-size:11.5px; font-weight:600; }
+  .term { background:#0A0C10; padding:16px; min-height:132px;
+          font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+          font-size:12.5px; line-height:1.75; color:#CFD6E4; }
+  .p { color:var(--acc); font-weight:700; }       /* ~ prompt glyph */
+  .dim { color:#8A93A3; }
+  .fg { color:#E8EBF0; }
+  .ok { color:#5FA89C; }                            /* verdigris success */
+  .err { color:#E06B6B; }
+  .cur-blk { background:var(--acc); color:#0A0C10; padding:0 3px; border-radius:2px; }
+
+  /* surfaces strip */
+  .surf { padding:13px 14px; display:flex; flex-direction:column; gap:11px;
+          background:#0E1116; border-top:1px solid #2A323F; }
+  .keybar { display:flex; gap:6px; }
+  .slot { font-size:11px; font-weight:600; padding:5px 9px; border-radius:7px;
+          background:#161A22; border:1px solid #2A323F; color:#E8EBF0; }
+  .slot.prom { background:var(--acc12); border-color:transparent; color:var(--acc); }
+  .slot.armed{ background:var(--acc); border-color:var(--acc); color:#0A0C10; }
+  .slot.lock { background:var(--acc30); border-color:transparent; color:var(--acc); }
+  .row { display:flex; gap:9px; align-items:stretch; }
+  .pane { flex:1; border:1.5px solid var(--acc); border-radius:8px; padding:8px 10px;
+          font:600 11px ui-sans-serif; color:#CFD6E4; background:#0A0C10; }
+  .pane.inactive { border:1px solid #2A323F; color:#8A93A3; }
+  .banner { flex:1; border-radius:8px; padding:7px 10px; font:600 11px ui-sans-serif;
+            display:flex; align-items:center; gap:6px; }
+  .b-ok { background:rgba(95,168,156,.15); color:#5FA89C; }
+  .b-amber { background:rgba(245,165,36,.15); color:#F5A524; }
+
+  /* meta */
+  .meta { padding:14px 16px 18px; }
+  .meta h3 { margin:0 0 5px; font-size:15.5px; }
+  .meta p { margin:0; color:#8A93A3; font-size:12.5px; line-height:1.55; }
+  .meta em { color:#CFD6E4; font-style:normal; font-weight:600; }
+  .sw { display:flex; gap:6px; margin-top:11px; }
+  .sw i { width:22px; height:22px; border-radius:6px; }
+  .hex { margin-top:7px; font:600 10.5px ui-monospace; color:#8A93A3; letter-spacing:.2px; }
+  .tag { font-size:11px; font-weight:600; color:#8A93A3; }
+
+  .const { margin-top:30px; padding:16px 18px; border:1px solid #2A323F;
+           border-radius:12px; background:#0c0f14; color:#8A93A3; font-size:12.5px; line-height:1.6; }
+  .const b { color:#CFD6E4; } .const code { color:#CFD6E4; font-family:ui-monospace; }
+  .swrow { display:inline-flex; gap:4px; vertical-align:middle; margin:0 4px; }
+  .swrow i { width:13px; height:13px; border-radius:3px; display:inline-block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>neotilde — evolving the warm accent</h1>
+  <p class="lede">Three directions. <strong>What's held constant in all of them:</strong> the cool near-black surfaces (<code style="font-family:ui-monospace">#0E1116</code>), the text colors, the <strong>verdigris success</strong> (<code style="font-family:ui-monospace">#5FA89C</code>), and the amber/red state colors. <strong>Only the accent moves</strong> — the prompt glyph, active-pane border, keybar promoted/armed/locked states, and the bell. Each is shown as a terminal plus a strip of the real UI surfaces that use the accent.</p>
+
+  <div class="grid">
+
+    <!-- A: bronze (current) -->
+    <div class="card cur" style="--acc:#D49A5C; --acc12:rgba(212,154,92,.14); --acc30:rgba(212,154,92,.30)">
+      <div class="chrome"><span class="dot" style="background:#E06B6B"></span><span class="dot" style="background:#F5A524"></span><span class="dot" style="background:#5FA89C"></span><span class="wt">~/src — ssh prod   ·   <span style="color:var(--acc)">current</span></span></div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">deploy --prod</span></div>
+        <div class="ok">✓ release 1.4.0 live</div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">tail -f log</span> <span class="cur-blk">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot lock">⇧</span><span class="slot">^C</span><span class="slot">~</span></div>
+        <div class="row"><span class="pane">pane ✓ active</span><span class="pane inactive">pane</span></div>
+        <div class="row"><span class="banner b-ok">✓ connected</span><span class="banner b-amber">⚠ degraded → raw PTY</span></div>
+      </div>
+      <div class="meta">
+        <h3>A · Bronze <span class="tag">(current colors)</span></h3>
+        <p>Warm gold light on dark. <em>No pixels change</em> — only the story: re-grounded as "lit terminal," dropping the bell/glimmer etymology.</p>
+        <div class="sw"><i style="background:#D49A5C"></i><i style="background:#F2C58A"></i><i style="background:#5FA89C"></i><i style="background:#161A22;border:1px solid #2A323F"></i></div>
+        <div class="hex">#D49A5C accent&nbsp;·&nbsp;#F2C58A highlight&nbsp;·&nbsp;#5FA89C patina</div>
+      </div>
+    </div>
+
+    <!-- B: lit amber-gold -->
+    <div class="card" style="--acc:#E6B25C; --acc12:rgba(230,178,92,.15); --acc30:rgba(230,178,92,.30)">
+      <div class="chrome"><span class="dot" style="background:#E06B6B"></span><span class="dot" style="background:#F5A524"></span><span class="dot" style="background:#5FA89C"></span><span class="wt">~/src — ssh prod</span></div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">deploy --prod</span></div>
+        <div class="ok">✓ release 1.4.0 live</div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">tail -f log</span> <span class="cur-blk">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot lock">⇧</span><span class="slot">^C</span><span class="slot">~</span></div>
+        <div class="row"><span class="pane">pane ✓ active</span><span class="pane inactive">pane</span></div>
+        <div class="row"><span class="banner b-ok">✓ connected</span><span class="banner b-amber">⚠ degraded → raw PTY</span></div>
+      </div>
+      <div class="meta">
+        <h3>B · Lit amber-gold</h3>
+        <p>Accent nudged brighter and warmer — the glow of a <em>lamp-lit terminal</em>. More luminous than bronze, still firmly metallic (not neon CRT-amber).</p>
+        <div class="sw"><i style="background:#E6B25C"></i><i style="background:#F7D08A"></i><i style="background:#5FA89C"></i><i style="background:#161A22;border:1px solid #2A323F"></i></div>
+        <div class="hex">#E6B25C accent&nbsp;·&nbsp;#F7D08A highlight&nbsp;·&nbsp;#5FA89C patina</div>
+      </div>
+    </div>
+
+    <!-- C: copper-rose -->
+    <div class="card" style="--acc:#D98A6A; --acc12:rgba(217,138,106,.15); --acc30:rgba(217,138,106,.30)">
+      <div class="chrome"><span class="dot" style="background:#E06B6B"></span><span class="dot" style="background:#F5A524"></span><span class="dot" style="background:#5FA89C"></span><span class="wt">~/src — ssh prod</span></div>
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">deploy --prod</span></div>
+        <div class="ok">✓ release 1.4.0 live</div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">tail -f log</span> <span class="cur-blk">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot lock">⇧</span><span class="slot">^C</span><span class="slot">~</span></div>
+        <div class="row"><span class="pane">pane ✓ active</span><span class="pane inactive">pane</span></div>
+        <div class="row"><span class="banner b-ok">✓ connected</span><span class="banner b-amber">⚠ degraded → raw PTY</span></div>
+      </div>
+      <div class="meta">
+        <h3>C · Copper-rose</h3>
+        <p>Accent shifted warmer/redder toward copper. Distinctive against the gold field — and the verdigris success color becomes the <em>literal patina of copper</em>, a tight material story.</p>
+        <div class="sw"><i style="background:#D98A6A"></i><i style="background:#F0A988"></i><i style="background:#5FA89C"></i><i style="background:#161A22;border:1px solid #2A323F"></i></div>
+        <div class="hex">#D98A6A accent&nbsp;·&nbsp;#F0A988 highlight&nbsp;·&nbsp;#5FA89C patina</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="const">
+    <b>Constant across all three</b> (the semantic-token system means these don't change with the accent):
+    surfaces <span class="swrow"><i style="background:#0E1116;border:1px solid #2A323F"></i><i style="background:#161A22"></i><i style="background:#1F2530"></i><i style="background:#2A323F"></i></span>
+    · text <span class="swrow"><i style="background:#E8EBF0"></i><i style="background:#8A93A3"></i></span>
+    · success/patina <span class="swrow"><i style="background:#5FA89C"></i></span>
+    · warning/amber <span class="swrow"><i style="background:#F5A524"></i></span>
+    · broken/red <span class="swrow"><i style="background:#E06B6B"></i></span>
+    · terminal bg <code>#0A0C10</code> / fg <code>#CFD6E4</code>.
+    <br><br>Open question for the next mockup if you want to go further: should the <b>verdigris</b> success color also shift, or does it stay the universal counterpoint?
+  </div>
+</div>
+</body>
+</html>

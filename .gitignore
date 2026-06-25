@@ -25,3 +25,6 @@
 
 # Build-time seed artifacts (produced by scripts/build-seed.sh; bundled later)
 /seeds/
+
+# Superpowers scratch — SDD progress ledger + brainstorm visual-companion sessions
+/.superpowers/

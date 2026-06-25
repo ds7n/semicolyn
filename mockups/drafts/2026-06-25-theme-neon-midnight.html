@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — neotilde "Neon midnight" palette.
+     Story: neon gas glows orange-red; deep blue-near-black night; lit ~ sign.
+     Glow on accent chrome only (prompt/cursor/focus/armed slot/bell), never body
+     text. Self-contained; open directly in a browser. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neotilde — neon midnight</title>
+<style>
+  :root{
+    color-scheme:dark;
+    --ground:#07090E;       /* darker blue-near-black */
+    --termbg:#05070B;
+    --panel:#0E1118;
+    --panelhi:#161A24;
+    --line:#232A3A;
+    --tx:#E8EBF0; --tx2:#8A93A3;
+    --acc:#FF6A4E;          /* neon glow (orange-red) */
+    --acchi:#FFB59B;        /* hot core / highlight */
+    --acc14:rgba(255,106,78,.15); --acc30:rgba(255,106,78,.30);
+    --glow:0 0 7px rgba(255,106,78,.55);
+    --glowbox:0 0 10px rgba(255,106,78,.45);
+    --ok:#5FB0A2;           /* verdigris — cool complement */
+    --warn:#F5A524;         /* amber */
+    --err:#E5455E;          /* unlit cool crimson */
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:#04050a;color:var(--tx);
+       font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1080px;margin:0 auto;padding:34px 24px 80px;}
+  h1{font-size:24px;margin:0 0 4px;}
+  h1 em{font-style:normal;color:var(--acc);text-shadow:var(--glow);}
+  .lede{color:var(--tx2);font-size:13.5px;max-width:760px;line-height:1.6;margin:0 0 24px;}
+  .lede b{color:#CFD6E4;}
+
+  /* hero terminal */
+  .hero{border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--ground);}
+  .chrome{display:flex;align-items:center;gap:7px;padding:11px 15px;background:var(--panel);border-bottom:1px solid var(--line);}
+  .dot{width:11px;height:11px;border-radius:50%;}
+  .wt{margin-left:9px;color:var(--tx2);font-size:11.5px;font-weight:600;}
+  .body{display:flex;}
+  .term{flex:1.6;background:var(--termbg);padding:16px;
+        font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.85;}
+  .pane2{flex:1;background:var(--termbg);border-left:1px solid var(--line);padding:16px;
+         font-family:ui-monospace,monospace;font-size:12px;line-height:1.8;color:var(--tx2);}
+  .p{color:var(--acc);font-weight:700;text-shadow:var(--glow);}   /* lit ~ */
+  .dim{color:var(--tx2);} .fg{color:var(--tx);}
+  .ok{color:var(--ok);} .warn{color:var(--warn);} .err{color:var(--err);}
+  .cur{background:var(--acc);color:#05070B;padding:0 3px;border-radius:2px;box-shadow:var(--glowbox);}
+  .link{color:var(--acc);text-decoration:underline;text-underline-offset:2px;}
+
+  /* active (right) pane glows; this hero shows it as the focused split */
+  .body{position:relative;}
+  .pane2{outline:1.5px solid var(--acc);outline-offset:-1.5px;box-shadow:inset var(--glowbox);}
+  .pane2 .ttl{color:var(--acc);font-weight:700;font-size:11px;margin-bottom:6px;text-shadow:var(--glow);}
+
+  .keybar{display:flex;gap:6px;padding:12px 15px;background:var(--panel);border-top:1px solid var(--line);}
+  .slot{font:600 11px ui-sans-serif;padding:6px 11px;border-radius:7px;background:var(--panelhi);border:1px solid var(--line);color:var(--tx);}
+  .slot.prom{background:var(--acc14);border-color:transparent;color:var(--acc);}
+  .slot.armed{background:var(--acc);border-color:var(--acc);color:#05070B;box-shadow:var(--glowbox);}
+  .slot.lock{background:var(--acc30);border-color:transparent;color:var(--acchi);}
+
+  .statusbar{display:flex;gap:8px;padding:10px 15px;background:var(--ground);border-top:1px solid var(--line);}
+  .badge{font:600 11px ui-sans-serif;padding:5px 9px;border-radius:6px;display:flex;gap:5px;}
+  .b-ok{background:rgba(95,176,162,.16);color:var(--ok);}
+  .b-warn{background:rgba(245,165,36,.15);color:var(--warn);}
+  .b-err{background:rgba(229,69,94,.16);color:var(--err);}
+
+  /* token legend */
+  .legend{margin-top:26px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+  .tok{display:flex;align-items:center;gap:10px;padding:9px 11px;background:var(--panel);border:1px solid var(--line);border-radius:10px;}
+  .tok i{width:26px;height:26px;border-radius:7px;flex:none;}
+  .tok b{font-size:12px;color:var(--tx);display:block;}
+  .tok span{font:600 10px ui-monospace;color:var(--tx2);}
+
+  /* dials */
+  .dials{margin-top:30px;}
+  .dials h3{font-size:14px;margin:0 0 4px;} .dials p{color:var(--tx2);font-size:12px;margin:0 0 12px;}
+  .swrow{display:flex;gap:12px;flex-wrap:wrap;}
+  .opt{border:1px solid var(--line);border-radius:11px;padding:12px 14px;background:var(--panel);min-width:150px;}
+  .opt .big{height:34px;border-radius:8px;margin-bottom:8px;}
+  .opt b{font-size:12px;} .opt span{font:600 10px ui-monospace;color:var(--tx2);}
+  .note{margin-top:26px;color:var(--tx2);font-size:12.5px;line-height:1.55;border-left:2px solid var(--line);padding-left:12px;}
+  .note b{color:#CFD6E4;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>neotilde — <em>neon</em> midnight</h1>
+  <p class="lede"><b>The story, made literal:</b> deeper blue-near-black <b>night</b>; the accent is the orange-red <b>glow of neon</b> (the color the gas actually emits); the prompt <code style="font-family:ui-monospace">~</code> is the <b>lit sign</b>. Verdigris success is the cool complement; the error red is a separate, <b>unlit</b> cooler crimson. Glow lives only on accent chrome — body text stays calm.</p>
+
+  <div class="hero">
+    <div class="chrome"><span class="dot" style="background:var(--err)"></span><span class="dot" style="background:var(--warn)"></span><span class="dot" style="background:var(--ok)"></span><span class="wt">~/src — ssh prod   ·   2 panes</span></div>
+    <div class="body">
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">git pull &amp;&amp; deploy</span></div>
+        <div class="ok">✓ release 1.4.0 live</div>
+        <div class="warn">⚠ 1 host using a legacy cipher</div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="fg">open</span> <span class="link">https://status.app</span></div>
+        <div class="err">✗ permission denied (publickey)</div>
+        <div><span class="p">~</span> <span class="dim">prod</span> $ <span class="cur">█</span></div>
+      </div>
+      <div class="pane2">
+        <div class="ttl">● logs ~ active</div>
+        <div>12:02 request ok</div>
+        <div>12:02 cache hit</div>
+        <div>12:03 worker spawned</div>
+      </div>
+    </div>
+    <div class="keybar"><span class="slot armed">esc</span><span class="slot prom">tab</span><span class="slot lock">⇧ lock</span><span class="slot">^C</span><span class="slot">~</span><span class="slot">/</span></div>
+    <div class="statusbar"><span class="badge b-ok">✓ connected · prod</span><span class="badge b-warn">⚠ legacy cipher</span><span class="badge b-err">✗ 1 forward failed</span></div>
+  </div>
+
+  <div class="legend">
+    <div class="tok"><i style="background:#05070B;border:1px solid var(--line)"></i><div><b>terminal / night</b><span>#05070B · #07090E</span></div></div>
+    <div class="tok"><i style="background:#FF6A4E;box-shadow:0 0 9px rgba(255,106,78,.7)"></i><div><b>neon accent</b><span>#FF6A4E · hi #FFB59B</span></div></div>
+    <div class="tok"><i style="background:#5FB0A2"></i><div><b>success (verdigris)</b><span>#5FB0A2</span></div></div>
+    <div class="tok"><i style="background:#F5A524"></i><div><b>warning (amber)</b><span>#F5A524</span></div></div>
+    <div class="tok"><i style="background:#E5455E"></i><div><b>error (unlit red)</b><span>#E5455E</span></div></div>
+    <div class="tok"><i style="background:#E8EBF0"></i><div><b>text</b><span>#E8EBF0 · #8A93A3</span></div></div>
+  </div>
+
+  <div class="dials">
+    <h3>Dial 1 — exact neon hue</h3>
+    <p>How orange vs. how coral should the glow be? (The more orange, the further from error-red.)</p>
+    <div class="swrow">
+      <div class="opt"><div class="big" style="background:#FF6F5E;box-shadow:0 0 10px rgba(255,111,94,.6)"></div><b>coral-lean</b> <span>#FF6F5E</span></div>
+      <div class="opt"><div class="big" style="background:#FF6A4E;box-shadow:0 0 10px rgba(255,106,78,.6)"></div><b>balanced ◄ hero</b> <span>#FF6A4E</span></div>
+      <div class="opt"><div class="big" style="background:#FF5C3A;box-shadow:0 0 10px rgba(255,92,58,.6)"></div><b>true neon-orange</b> <span>#FF5C3A</span></div>
+    </div>
+    <h3 style="margin-top:22px">Dial 2 — how deep the night</h3>
+    <p>All keep the blue tint; just how close to black.</p>
+    <div class="swrow">
+      <div class="opt"><div class="big" style="background:#0A0C10"></div><b>current depth</b> <span>#0A0C10</span></div>
+      <div class="opt"><div class="big" style="background:#07090E"></div><b>darker ◄ hero</b> <span>#07090E</span></div>
+      <div class="opt"><div class="big" style="background:#04060B"></div><b>near-black</b> <span>#04060B</span></div>
+    </div>
+  </div>
+
+  <p class="note"><b>Does the whole scene cohere?</b> The hero uses balanced neon <code style="font-family:ui-monospace">#FF6A4E</code> on darker night <code style="font-family:ui-monospace">#07090E</code>. Tell me: (1) neon hue — coral-lean / balanced / true-orange? (2) night depth — darker / near-black? (3) does verdigris-teal success still feel right next to neon-orange, or do you want it tuned? Then I lock hexes, run WCAG contrast, and write the spec.</p>
+</div>
+</body>
+</html>
