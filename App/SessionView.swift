@@ -74,6 +74,9 @@ struct SessionView: View {
                         }
                     }
                     .animation(.easeInOut, value: vm.crashBanner)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        KeybarView(layout: .default, vm: vm)
+                    }
                 } else {
                     TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
                                    output: vm.output,
@@ -102,6 +105,9 @@ struct SessionView: View {
                             }
                         }
                         .animation(.easeInOut, value: vm.crashBanner)
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            KeybarView(layout: .default, vm: vm)
+                        }
                 }
             } else if resolving {
                 // Resolution not yet run — show a neutral spinner with no label

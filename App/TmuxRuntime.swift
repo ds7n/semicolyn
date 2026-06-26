@@ -82,6 +82,12 @@ final class TmuxRuntime {
         write(TmuxCommand.selectWindow(target: id))
     }
 
+    /// Toggle zoom on the active pane (tmux emits the layout change).
+    func zoomActivePane() {
+        guard let pane = activePane else { return }
+        write(TmuxCommand.zoomPane(target: pane))
+    }
+
     /// Tell tmux the client size in cells so it re-tiles; ignored if degenerate.
     func setClientSize(cols: Int, rows: Int) {
         guard let line = TmuxCommand.refreshClientSize(width: cols, height: rows) else { return }

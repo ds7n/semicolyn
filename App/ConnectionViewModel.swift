@@ -58,6 +58,15 @@ final class ConnectionViewModel: ObservableObject {
     /// Shared output sink; the terminal view wires `onBytes` to render into itself.
     let output = TerminalShellOutput()
 
+    /// Routes keybar gesture events to terminal bytes. Modifier-state changes
+    /// publish through the VM so the keybar's armed/locked slot visuals re-render.
+    private(set) lazy var keybar: KeybarInputRouter = {
+        let r = KeybarInputRouter(applicationCursorKeys: { false },
+                                  send: { [weak self] bytes in self?.sendTerminalInput(bytes) })
+        r.onModifierChange = { [weak self] in self?.objectWillChange.send() }
+        return r
+    }()
+
     // MARK: - Host-key prompt
 
     /// Show a host-key modal and suspend until the user decides. One prompt is
@@ -104,6 +113,22 @@ final class ConnectionViewModel: ObservableObject {
     func unregisterPane(_ pane: PaneID) { paneViews[pane] = nil; pendingPaneBytes[pane] = nil }
 
     func selectWindow(_ id: WindowID) { tmux?.selectWindow(id) }
+
+    /// Toggle zoom on the active pane (Pad tap). No-op in raw-PTY mode.
+    func zoomActivePane() { tmux?.zoomActivePane() }
+
+    /// Esc-pill swipe-right: next tmux window (wraps). No-op with <2 windows.
+    func selectNextWindow() { stepWindow(+1) }
+    /// Esc-pill swipe-left: previous tmux window (wraps).
+    func selectPrevWindow() { stepWindow(-1) }
+
+    private func stepWindow(_ delta: Int) {
+        guard let state = tmuxState, state.windows.count > 1,
+              let active = state.activeWindow,
+              let idx = state.windows.firstIndex(where: { $0.id == active }) else { return }
+        let next = state.windows[(idx + delta + state.windows.count) % state.windows.count]
+        selectWindow(next.id)
+    }
 
     func setTmuxClientSize(cols: Int, rows: Int) { tmux?.setClientSize(cols: cols, rows: rows) }
 
