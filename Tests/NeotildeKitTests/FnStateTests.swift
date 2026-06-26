@@ -60,4 +60,15 @@ final class FnStateTests: XCTestCase {
         f.reset()
         f.autoEngage(); XCTAssertEqual(f.mode, .locked)  // override cleared by reset
     }
+
+    func testAutoDisengageDoesNotClobberManualFn() {
+        var f = FnState()
+        f.tap()                          // user manually arms in a non-auto context
+        XCTAssertEqual(f.mode, .armed)
+        f.autoDisengage()                // routine poll, no auto-episode active
+        XCTAssertEqual(f.mode, .armed)   // must NOT be cleared
+        f.doubleTap()                    // user manually locks
+        f.autoDisengage()                // poll again
+        XCTAssertEqual(f.mode, .locked)  // manual lock survives
+    }
 }

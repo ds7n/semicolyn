@@ -44,8 +44,11 @@ public struct FnState: Equatable, Sendable {
         if !userOverride { mode = .locked; autoLocked = true }
     }
 
-    /// Context left the auto-Fn process: end the episode and return to off.
+    /// Context left the auto-Fn process: end the episode and return to off. A
+    /// no-op when no auto-episode is active, so a manually-armed/locked Fn (toggled
+    /// by the user in a non-auto context) is never clobbered by routine polls.
     public mutating func autoDisengage() {
+        guard autoActive else { return }
         autoActive = false
         userOverride = false
         autoLocked = false
