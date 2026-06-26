@@ -12,6 +12,7 @@ public enum KeyInput: Equatable, Sendable {
     case enter
     case backspace
     case arrow(ArrowDirection)
+    case function(Int)   // F1–F12
 }
 
 /// The modifier set armed against a keystroke.
@@ -50,6 +51,22 @@ public func encodeKey(_ key: KeyInput, modifiers: KeyModifiers, applicationCurso
                                             case .right: return "C"; case .left: return "D" } }()
         let prefix = applicationCursorKeys ? "\u{1b}O" : "\u{1b}["
         return Array((prefix + String(final)).utf8)
+    case .function(let n):
+        switch n {
+        case 1:  return Array("\u{1b}OP".utf8)
+        case 2:  return Array("\u{1b}OQ".utf8)
+        case 3:  return Array("\u{1b}OR".utf8)
+        case 4:  return Array("\u{1b}OS".utf8)
+        case 5:  return Array("\u{1b}[15~".utf8)
+        case 6:  return Array("\u{1b}[17~".utf8)
+        case 7:  return Array("\u{1b}[18~".utf8)
+        case 8:  return Array("\u{1b}[19~".utf8)
+        case 9:  return Array("\u{1b}[20~".utf8)
+        case 10: return Array("\u{1b}[21~".utf8)
+        case 11: return Array("\u{1b}[23~".utf8)
+        case 12: return Array("\u{1b}[24~".utf8)
+        default: return []   // outside F1–F12
+        }
     case .char(let ch):
         var base: [UInt8]
         if modifiers.control, let cb = controlByte(for: ch) {
