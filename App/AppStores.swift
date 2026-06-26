@@ -21,6 +21,9 @@ final class AppStores {
     let identities: IdentityService
     /// Terminal rendering preferences (font, cursor, scrollback).
     let terminalSettings = TerminalSettingsStore()
+    /// Base Application Support directory (`…/neotilde/`). Retained so store
+    /// factory methods can build sub-paths without repeating the FileManager call.
+    private let baseDirectory: URL
 
     /// Initializes the storage stack: Application Support directory, Keychain
     /// secrets, AES record key, file-backed blob store, and trust evaluator.
@@ -35,6 +38,7 @@ final class AppStores {
             appropriateFor: nil,
             create: true
         ).appendingPathComponent("neotilde", isDirectory: true)
+        self.baseDirectory = dir
 
         // Keychain-backed secrets (iCloud Keychain synced).
         let secrets = KeychainSecretStore()
@@ -60,6 +64,18 @@ final class AppStores {
         // Identity service: mint/import + resolve SSH identities for publickey auth.
         // Constructed last so both `self.hosts` and `self.secrets` are already set.
         self.identities = IdentityService(store: self.hosts, secrets: secrets, minter: CoreIdentityMinter())
+    }
+
+    // MARK: - Predictor stores
+
+    /// The on-device predictor learned-state store (per the predictor spec path).
+    func predictorLearnedStore() -> LearnedStore {
+        LearnedStore(directory: baseDirectory.appendingPathComponent("predictor", isDirectory: true))
+    }
+
+    /// The bundled/installed predictor seed, or nil if none is installed yet.
+    func predictorSeed() -> PredictorSeed? {
+        SeedStore(directory: baseDirectory.appendingPathComponent("predictor", isDirectory: true)).loadSeed()
     }
 
     // MARK: - Device seed

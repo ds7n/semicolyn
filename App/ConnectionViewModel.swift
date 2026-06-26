@@ -36,6 +36,13 @@ final class ConnectionViewModel: ObservableObject {
     /// Per-pane engaged context (process name) for the keybar (Phase 4). Empty in
     /// raw-PTY mode. Re-derived from the runtime whenever a poll changes a pane.
     @Published private(set) var paneContexts: [PaneID: String] = [:]
+    /// Top-K predictor chips for the current input token (empty → strip hidden).
+    @Published private(set) var predictorSuggestions: [String] = []
+    /// Nil when the predictor is disabled for this session (incognito).
+    private var engine: PredictorEngine?
+    private var tracker = InputTokenTracker()
+    private var learnedStore: LearnedStore?
+
     /// Bundled promotion sets (user override is a 4d concern).
     private let promotionRegistry = PromotionRegistry.bundledDefault
     /// Fn-layer state for the active pane. Published so the keybar re-renders the
@@ -114,6 +121,7 @@ final class ConnectionViewModel: ObservableObject {
     /// Route terminal keystrokes: through tmux `send-keys` when control mode is
     /// attached, else straight to the raw-PTY channel.
     func sendTerminalInput(_ bytes: [UInt8]) {
+        observePredictorInput(bytes)
         if let tmux {
             tmux.sendInput(bytes)
         } else {
@@ -188,6 +196,10 @@ final class ConnectionViewModel: ObservableObject {
         paneViews.removeAll()
         pendingPaneBytes.removeAll()
         renderablePanes.removeAll()
+        if let engine, let learnedStore { try? learnedStore.save(engine.state) }
+        engine = nil
+        tracker.reset()
+        predictorSuggestions = []
     }
 
     // MARK: - Auth
@@ -268,6 +280,13 @@ final class ConnectionViewModel: ObservableObject {
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
         tmuxState = nil   // raw mode: single-terminal path
+        // Harvest raw-shell output for the predictor.
+        // NOTE: TerminalScreen.makeUIView subsequently overwrites output.onBytes with
+        // its render closure; raw-shell harvest is a v1 known limitation (deferred
+        // until TerminalShellOutput gains a second callback slot).
+        output.onBytes = { [weak self] bytes in
+            self?.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
+        }
         state = .shell
     }
 
@@ -303,6 +322,8 @@ final class ConnectionViewModel: ObservableObject {
                 self.pendingPaneBytes[pane, default: []].append(contentsOf: bytes)
             }
             // else: pane not in visible layout — drop to prevent unbounded buffering
+            // Harvest pane output for the predictor (all visible panes; not filtered by active).
+            self.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
         }
         runtime.onStateChanged = { [weak self] state in
             guard let self else { return }
@@ -391,6 +412,44 @@ final class ConnectionViewModel: ObservableObject {
     /// Banner action — stay in degraded raw-shell mode for the rest of the session.
     func dismissCrashBanner() { crashBanner = nil }
 
+    // MARK: - Predictor
+
+    /// Build the session predictor unless incognito is on for this host.
+    private func startPredictor(host: Host, defaults: Defaults) {
+        guard !resolvePredictorIncognito(host: host, defaults: defaults) else {
+            engine = nil; return
+        }
+        let store = AppStores.shared.predictorLearnedStore()
+        learnedStore = store
+        engine = PredictorEngine(learned: store.load(), seed: AppStores.shared.predictorSeed())
+    }
+
+    /// Fold outgoing bytes into the token tracker, learn committed tokens, and
+    /// refresh the suggestion chips.
+    private func observePredictorInput(_ bytes: [UInt8]) {
+        guard engine != nil else { return }
+        for committed in tracker.observe(bytes) {
+            engine?.record(committed.token, after: committed.previous)
+        }
+        refreshPredictorSuggestions()
+    }
+
+    private func refreshPredictorSuggestions() {
+        guard let engine else { predictorSuggestions = []; return }
+        let raw = engine.suggestions(forPrefix: tracker.current, after: tracker.previous)
+        predictorSuggestions = predictorChips(current: tracker.current, suggestions: raw)
+    }
+
+    /// Accept a chip: send only the missing suffix so the existing input is kept
+    /// (never rewritten). The suffix flows back through `sendTerminalInput`, so the
+    /// tracker and suggestions update automatically.
+    func acceptSuggestion(_ s: String) {
+        guard s.hasPrefix(tracker.current) else { return }
+        let suffix = String(s.dropFirst(tracker.current.count))
+        guard !suffix.isEmpty else { return }
+        sendTerminalInput(Array(suffix.utf8))
+    }
+
     // MARK: - Connect (saved host)
 
     /// Connect from a saved `Host` record, using its resolved config and a
@@ -437,6 +496,7 @@ final class ConnectionViewModel: ObservableObject {
                 // Probe + branch on tmux availability.
                 let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
                 osc52Allowed = resolveOsc52Allow(host: savedHost, defaults: defaults2)
+                startPredictor(host: savedHost, defaults: defaults2)
                 let allow = resolveTmuxAttemptControlMode(host: savedHost, defaults: defaults2)
                 let probe = allow ? await probeTmuxVersion(conn: conn) : nil
                 switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
@@ -486,6 +546,7 @@ final class ConnectionViewModel: ObservableObject {
                 // Probe + branch on tmux availability.
                 let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
                 osc52Allowed = resolveOsc52Allow(host: hostRecord, defaults: defaults2)
+                startPredictor(host: hostRecord, defaults: defaults2)
                 let allow = resolveTmuxAttemptControlMode(host: hostRecord, defaults: defaults2)
                 let probe = allow ? await probeTmuxVersion(conn: conn) : nil
                 switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
