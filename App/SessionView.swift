@@ -75,7 +75,10 @@ struct SessionView: View {
                     }
                     .animation(.easeInOut, value: vm.crashBanner)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
-                        KeybarView(layout: .default, vm: vm)
+                        VStack(spacing: 0) {
+                            PredictorStripView(vm: vm)
+                            KeybarView(layout: .default, vm: vm)
+                        }
                     }
                 } else {
                     TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
@@ -106,7 +109,10 @@ struct SessionView: View {
                         }
                         .animation(.easeInOut, value: vm.crashBanner)
                         .safeAreaInset(edge: .bottom, spacing: 0) {
-                            KeybarView(layout: .default, vm: vm)
+                            VStack(spacing: 0) {
+                                PredictorStripView(vm: vm)
+                                KeybarView(layout: .default, vm: vm)
+                            }
                         }
                 }
             } else if resolving {
