@@ -69,4 +69,10 @@ final class KeybarInputRouterTests: XCTestCase {
         r.tapSymbol("c")         // fire() consumes the armed ctrl → notify
         XCTAssertEqual(changes, 2)
     }
+
+    func testTapFKeyEmitsSequence() {
+        let (r, spy) = make()
+        r.tapFKey(5)
+        XCTAssertEqual(spy.sent, [Array("\u{1b}[15~".utf8)])
+    }
 }

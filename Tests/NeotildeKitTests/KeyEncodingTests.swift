@@ -54,4 +54,18 @@ final class KeyEncodingTests: XCTestCase {
         XCTAssertEqual(enc(.arrow(.up), app: true), Array("\u{1b}OA".utf8))
         XCTAssertEqual(enc(.arrow(.right), app: true), Array("\u{1b}OC".utf8))
     }
+
+    func testFunctionKeysSS3AndCSI() {
+        XCTAssertEqual(enc(.function(1)),  Array("\u{1b}OP".utf8))
+        XCTAssertEqual(enc(.function(4)),  Array("\u{1b}OS".utf8))
+        XCTAssertEqual(enc(.function(5)),  Array("\u{1b}[15~".utf8))
+        XCTAssertEqual(enc(.function(10)), Array("\u{1b}[21~".utf8))
+        XCTAssertEqual(enc(.function(11)), Array("\u{1b}[23~".utf8))  // note: skips 22
+        XCTAssertEqual(enc(.function(12)), Array("\u{1b}[24~".utf8))
+    }
+
+    func testFunctionKeyOutOfRangeIsEmpty() {
+        XCTAssertEqual(enc(.function(0)), [])
+        XCTAssertEqual(enc(.function(13)), [])
+    }
 }

@@ -33,6 +33,8 @@ public final class KeybarInputRouter {
     public func tapEscape()               { fire(.escape) }
     public func tapTab()                  { fire(.tab) }
     public func arrow(_ d: ArrowDirection) { fire(.arrow(d)) }
+    /// Emit a function key F1–F12. Modifiers are not applied to F-keys in v1.
+    public func tapFKey(_ n: Int) { fire(.function(n)) }
 
     private func fire(_ key: KeyInput) {
         let bytes = encodeKey(key, modifiers: state.current(),
