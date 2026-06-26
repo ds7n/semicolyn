@@ -21,6 +21,8 @@ final class AppStores {
     let identities: IdentityService
     /// Terminal rendering preferences (font, cursor, scrollback).
     let terminalSettings = TerminalSettingsStore()
+    /// User keybar customization (slot layout + reverse-bar direction), persisted.
+    let keybarSettings = KeybarSettingsStore()
     /// Base Application Support directory (`…/neotilde/`). Retained so store
     /// factory methods can build sub-paths without repeating the FileManager call.
     private let baseDirectory: URL
