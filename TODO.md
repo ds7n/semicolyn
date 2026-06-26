@@ -7,7 +7,7 @@ The canonical status + pending-work list. Architecture and the spec/plan map liv
 
 **Headline:** design complete; a connect-and-get-a-shell MVP builds for the iOS Simulator. The protocol + logic tiers are built and Linux-tested; the app shell is built and validated by macOS CI. Not yet device-installable (needs Apple Developer signing).
 
-**Tests green:** 17 Rust unit + 35 Rust integration (vs containerized `sshd`) + 561 Swift (NeotildeKit + SeedKit), all on the Linux fast loop.
+**Tests green:** 17 Rust unit + 35 Rust integration (vs containerized `sshd`) + 579 Swift (NeotildeKit + SeedKit), all on the Linux fast loop.
 
 ## Phase status
 
@@ -19,7 +19,7 @@ The canonical status + pending-work list. Architecture and the spec/plan map liv
 | **2b-i — Key minting** | ed25519 generation + OpenSSH-key import in the Rust core; `IdentityService` (mint→Keychain→metadata); `CoreIdentityMinter` bridge; publickey connect from a stored identity | ✅ Done (iCloud-Keychain flavor) |
 | **2b-ii — Sync + SE** | CloudKit Private DB + sync engine; Secure-Enclave flavor (`SecAccessControl` + russh→SE signing bridge) | ⏳ enrollment-gated |
 | **3 — Terminal + tmux** | Control-mode stack done²; **Plans A+B+C+D done**: probe→attach `tmux -CC`, native pane layout, multi-window, debounced resize, raw-PTY degrade; terminal UX (bell, OSC 52, titles, URL tap, cursor, mouse dot, pinch-zoom); per-pane context detection (engine + `pane_current_command` poll + observable) + mid-session crash banner. | ✅ Done³ |
-| **4 — Keybar, input & predictor** | Predictor engine done. **4a MVP keybar done**: mount + core input slots (Esc·Pad·Modifier·Tab + symbols), keystroke codec, Ctrl-lock modifier SM, input router — compile-validated on macОS CI (interaction/visual unverified pending a Simulator/device). **4b–4e pending**: promotions+Fn, predictor strip, customization, external keyboard. | ◐ Engine + 4a done; 4b–4e pending |
+| **4 — Keybar, input & predictor** | Predictor engine done. **4a + 4b done**: 4a mount + core input slots (Esc·Pad·Modifier·Tab + symbols), keystroke codec, Ctrl-lock modifier SM, input router; 4b context promotions (bronze slots from `paneContexts`) + Fn mode (F1–F12 codec, Fn state machine, htop/top/mc auto-engage) + per-pane DECCKM — all compile-validated on macОS CI (interaction/visual unverified pending a Simulator/device). **4c–4e pending**: predictor strip, customization, external keyboard. | ◐ Engine + 4a/4b done; 4c–4e pending |
 | **MVP app shell** | iOS app target + SwiftTerm wired via UniFFI: connect → password/keyboard-interactive/**publickey** auth → shell, real host-key TOFU trust | ✅ Builds for Simulator |
 | **5–7 — UI & ship** | Host CRUD UI + identity create/import + connect-from-saved done. Standalone Identities & Keys mgmt, connection-management UI, settings, IAP, App Store polish pending | ◐ Host CRUD done, rest pending |
 
@@ -29,7 +29,8 @@ The canonical status + pending-work list. Architecture and the spec/plan map liv
 
 ## Next (unblocked dev work)
 
-- **Phase 4 — keybar UI (4a done, merged #14).** Remaining slices: **4b** promotions render (consume Plan-D `paneContexts` + `PromotionRegistry`) + Fn mode/auto-engage + per-pane DECCKM arrow mode; **4c** predictor strip (consume the done engine); **4d** Settings→Keybar editor + custom slots + macro creation + reverse-bar; **4e** external keyboard (`UIKeyCommand` map, hardware modifiers, compact bar). Specs: `2026-06-15-keybar-customization-design.md`, `2026-06-14-function-keys-design.md`, `2026-06-17-external-keyboard-design.md`. **Plus a Simulator/device pass on 4a** (mount-above-keyboard via `inputAccessoryView`, slot recolor, gestures) — currently compile-only-validated.
+- **Phase 4 — keybar UI (4a #14, 4b #15 done).** Remaining slices: **4c** predictor strip (consume the done engine); **4d** Settings→Keybar editor + custom slots + macro creation + reverse-bar; **4e** external keyboard (`UIKeyCommand` map, hardware modifiers, compact bar). Specs: `2026-06-15-keybar-customization-design.md`, `2026-06-17-external-keyboard-design.md` (`2026-06-14-function-keys-design.md` now implemented in 4b).
+- **Simulator/device pass on the keybar (4a + 4b)** — compile-only-validated so far. Verify: mount-above-keyboard (`inputAccessoryView` vs the v1 `safeAreaInset`), slot recolor, gestures; **plus the unrendered spec visuals** — promoted-slot bronze top-edge accent (context spec §"Promoted slot visual") and Fn-locked brighter glyph + 4pt lock-dot (function-keys spec §"Visual"). Gated on Apple enrollment for device.
 - **Theme picker + Pro-gating** — Settings UI to switch themes; gate **Bell-bronze** as a Pro cosmetic (Neon Midnight is the free default). Specs: `2026-06-16-settings-sub-screens-design.md`, `2026-06-16-pro-paid-scope-design.md`.
 - **Phase 3c deferred seams** (`TODO(phase4)` markers in `App/`): `onSSHLink` connect-prefill; selection-suspend gesture + cursor-placement-halo suspend; active-pane title keying (currently last-pane-wins); unify the crude `sendApproxClientSize` with the new debounced resize path.
 
