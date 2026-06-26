@@ -67,15 +67,26 @@ struct ModifierSlotView: View {
     }
 }
 
-/// Esc pill: tap=Esc; swipe-left/right = prev/next window. (Pickers = later slice.)
+/// Esc pill: tap=Esc; swipe-left/right = prev/next window; long-press opens the
+/// Settings tree (4d wires the Settings→Keybar leaf; the full unified picker —
+/// windows/hosts/recent — is a later slice). The dim `≡` glyph hints at the
+/// extra gestures (keybar-customization spec "Esc pill → Visual").
 struct EscPillView: View {
     let vm: ConnectionViewModel
+    /// Invoked on long-press to surface the Settings tree.
+    var onOpenSettings: () -> Void = {}
     @Environment(\.theme) private var theme
     var body: some View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
-            Text("Esc").font(.caption).foregroundStyle(Color(theme.text.primary))
+            ZStack(alignment: .topTrailing) {
+                Text("Esc").font(.caption).foregroundStyle(Color(theme.text.primary))
+                Text("≡").font(.system(size: 8))
+                    .foregroundStyle(Color(theme.text.secondary))
+                    .offset(x: 4, y: -3)
+            }
         }
         .onTapGesture { vm.keybar.tapEscape() }
+        .onLongPressGesture { onOpenSettings() }
         .gesture(DragGesture(minimumDistance: 18).onEnded { g in
             if g.translation.width > 18 { vm.selectNextWindow() }
             else if g.translation.width < -18 { vm.selectPrevWindow() }
