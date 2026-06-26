@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: 2026 True Positive LLC
+// SPDX-License-Identifier: GPL-3.0-only
+import XCTest
+@testable import NeotildeKit
+
+final class KeybarInputRouterTests: XCTestCase {
+    /// Captures bytes the router emits.
+    private final class Spy {
+        var sent: [[UInt8]] = []
+        func send(_ b: [UInt8]) { sent.append(b) }
+    }
+
+    private func make(app: Bool = false) -> (KeybarInputRouter, Spy) {
+        let spy = Spy()
+        let router = KeybarInputRouter(applicationCursorKeys: { app }, send: spy.send)
+        return (router, spy)
+    }
+
+    func testArmedCtrlAppliesToNextSymbolThenClears() {
+        let (r, spy) = make()
+        r.tapCtrl()
+        r.tapSymbol("c")
+        XCTAssertEqual(spy.sent, [[0x03]])              // Ctrl+C
+        r.tapSymbol("c")
+        XCTAssertEqual(spy.sent, [[0x03], [0x63]])      // second is plain 'c' (one-shot cleared)
+    }
+
+    func testLockedCtrlAppliesToMultipleKeystrokes() {
+        let (r, spy) = make()
+        r.doubleTapCtrl()
+        r.tapSymbol("x"); r.tapSymbol("s")
+        XCTAssertEqual(spy.sent, [[0x18], [0x13]])      // Ctrl+X, Ctrl+S — lock persists
+    }
+
+    func testAltSymbolEmitsMetaEscapeOnce() {
+        let (r, spy) = make()
+        r.armAlt()
+        r.tapSymbol("x")
+        XCTAssertEqual(spy.sent, [[0x1b, 0x78]])        // Alt+x
+        r.tapSymbol("x")
+        XCTAssertEqual(spy.sent.last, [0x78])           // plain after consume
+    }
+
+    func testEscTabAndArrowsEmitExpectedBytes() {
+        let (r, spy) = make()
+        r.tapEscape(); r.tapTab(); r.arrow(.up)
+        XCTAssertEqual(spy.sent, [[0x1b], [0x09], Array("\u{1b}[A".utf8)])
+    }
+
+    func testArrowRespectsApplicationCursorKeys() {
+        let (r, spy) = make(app: true)
+        r.arrow(.left)
+        XCTAssertEqual(spy.sent, [Array("\u{1b}OD".utf8)])
+    }
+
+    func testModifierGestureDoesNotSendUntilAKeyFires() {
+        let (r, spy) = make()
+        r.tapCtrl()
+        XCTAssertTrue(spy.sent.isEmpty)                  // arming alone sends nothing
+        XCTAssertEqual(r.modifiers.ctrl, .armed)
+    }
+}
