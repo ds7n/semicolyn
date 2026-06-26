@@ -18,8 +18,8 @@ struct KeybarView: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(Array(layout.scroll.enumerated()), id: \.offset) { _, slot in
-                        slotView(slot)
+                    ForEach(Array(scrollItems.enumerated()), id: \.offset) { _, item in
+                        scrollItemView(item)
                     }
                 }
             }
@@ -27,6 +27,24 @@ struct KeybarView: View {
         .padding(.horizontal, 8).padding(.vertical, 5)
         .frame(maxWidth: .infinity)
         .background(Color(theme.surface.panel))
+    }
+
+    private var scrollItems: [KeybarScrollItem] {
+        let symbols = layout.scroll.compactMap { slot -> String? in
+            if case .symbol(let s) = slot { return s } else { return nil }
+        }
+        return keybarScrollItems(promotions: vm.activePromotions,
+                                 defaultSymbols: symbols,
+                                 fnEngaged: vm.fnState.engaged)
+    }
+
+    @ViewBuilder private func scrollItemView(_ item: KeybarScrollItem) -> some View {
+        switch item {
+        case .promotion(let s): PromotionSlotView(slot: s, vm: vm)
+        case .symbol(let s):    SymbolSlotView(symbol: s, vm: vm)
+        case .fn:               FnSlotView(mode: vm.fnState.mode, vm: vm)
+        case .fkey(let n):      FkeySlotView(n: n, vm: vm)
+        }
     }
 
     @ViewBuilder private func slotView(_ slot: KeybarSlot) -> some View {

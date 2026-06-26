@@ -36,6 +36,18 @@ final class ConnectionViewModel: ObservableObject {
     /// Per-pane engaged context (process name) for the keybar (Phase 4). Empty in
     /// raw-PTY mode. Re-derived from the runtime whenever a poll changes a pane.
     @Published private(set) var paneContexts: [PaneID: String] = [:]
+    /// Bundled promotion sets (user override is a 4d concern).
+    private let promotionRegistry = PromotionRegistry.bundledDefault
+
+    /// The active pane's promotion set (empty when its context is unknown or
+    /// there is no active pane). Drives the keybar's bronze promotion slots.
+    var activePromotions: [PromotionSlot] {
+        guard let win = tmuxState?.activeWindow,
+              let pane = tmuxState?.window(win)?.activePane,
+              let process = paneContexts[pane],
+              let set = promotionRegistry.set(for: process) else { return [] }
+        return set.promote
+    }
     /// Set when tmux crashed mid-session and we dropped to a raw shell on the same
     /// connection. The crash banner persists until the user acts.
     @Published var crashBanner: CrashBannerState?
@@ -61,8 +73,9 @@ final class ConnectionViewModel: ObservableObject {
     /// Routes keybar gesture events to terminal bytes. Modifier-state changes
     /// publish through the VM so the keybar's armed/locked slot visuals re-render.
     private(set) lazy var keybar: KeybarInputRouter = {
-        let r = KeybarInputRouter(applicationCursorKeys: { false },
-                                  send: { [weak self] bytes in self?.sendTerminalInput(bytes) })
+        let r = KeybarInputRouter(
+            applicationCursorKeys: { [weak self] in self?.activePaneApplicationCursor() ?? false },
+            send: { [weak self] bytes in self?.sendTerminalInput(bytes) })
         r.onModifierChange = { [weak self] in self?.objectWillChange.send() }
         return r
     }()
@@ -97,6 +110,15 @@ final class ConnectionViewModel: ObservableObject {
         } else {
             rawWriter?.enqueue(bytes)
         }
+    }
+
+    /// DECCKM (application-cursor-keys) state of the active pane's terminal, or
+    /// false if unavailable. Best-effort SwiftTerm read (cf. the mouse-mode poll).
+    private func activePaneApplicationCursor() -> Bool {
+        guard let win = tmuxState?.activeWindow,
+              let pane = tmuxState?.window(win)?.activePane,
+              let tv = paneViews[pane] else { return false }
+        return tv.getTerminal().applicationCursor
     }
 
     // MARK: - Pane registry + tmux commands
