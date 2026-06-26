@@ -77,7 +77,7 @@ struct SessionView: View {
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         VStack(spacing: 0) {
                             PredictorStripView(vm: vm)
-                            KeybarView(layout: .default, vm: vm)
+                            KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm)
                         }
                     }
                 } else {
@@ -111,7 +111,7 @@ struct SessionView: View {
                         .safeAreaInset(edge: .bottom, spacing: 0) {
                             VStack(spacing: 0) {
                                 PredictorStripView(vm: vm)
-                                KeybarView(layout: .default, vm: vm)
+                                KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm)
                             }
                         }
                 }

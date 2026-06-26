@@ -4,12 +4,18 @@ import SwiftUI
 import NeotildeKit
 
 /// The keyboard accessory bar. Locked region renders fixed at the leading edge;
-/// the scroll region pans horizontally. 4a renders `KeybarLayout.default`;
-/// customization (4d) will supply a user layout.
+/// the scroll region pans horizontally. 4d drives the composition from the
+/// user's persisted `KeybarSettings`; reverse-bar flips the whole layout via
+/// `layoutDirection` (a pure mirror — gestures are unaffected, per spec).
 struct KeybarView: View {
-    let layout: KeybarLayout
+    @ObservedObject var keybarSettings: KeybarSettingsStore
     @ObservedObject var vm: ConnectionViewModel
     @Environment(\.theme) private var theme
+    /// Opens Settings→Keybar (long-press the Esc pill). Seed of the spec's
+    /// unified picker; the rest of that picker is a later slice.
+    @State private var showingSettings = false
+
+    private var layout: KeybarLayout { keybarSettings.settings.layout }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -27,32 +33,38 @@ struct KeybarView: View {
         .padding(.horizontal, 8).padding(.vertical, 5)
         .frame(maxWidth: .infinity)
         .background(Color(theme.surface.panel))
+        // Reverse-bar: a layout-mirror only. RTL flips HStack order + the
+        // ScrollView's leading edge so the locked region anchors right and the
+        // Esc pill lands far-right; DragGesture translations are unaffected, so
+        // gesture semantics stay physical (keybar-customization spec).
+        .environment(\.layoutDirection,
+                     keybarSettings.settings.direction == .lockedRight ? .rightToLeft : .leftToRight)
+        .sheet(isPresented: $showingSettings) {
+            KeybarSettingsSheet(store: keybarSettings)
+        }
     }
 
     private var scrollItems: [KeybarScrollItem] {
-        let symbols = layout.scroll.compactMap { slot -> String? in
-            if case .symbol(let s) = slot { return s } else { return nil }
-        }
-        return keybarScrollItems(promotions: vm.activePromotions,
-                                 defaultSymbols: symbols,
-                                 fnEngaged: vm.fnState.engaged)
+        keybarScrollItems(promotions: vm.activePromotions,
+                          scrollSlots: layout.scroll,
+                          fnEngaged: vm.fnState.engaged)
     }
 
     @ViewBuilder private func scrollItemView(_ item: KeybarScrollItem) -> some View {
         switch item {
         case .promotion(let s): PromotionSlotView(slot: s, vm: vm)
-        case .symbol(let s):    SymbolSlotView(symbol: s, vm: vm)
-        case .fn:               FnSlotView(mode: vm.fnState.mode, vm: vm)
         case .fkey(let n):      FkeySlotView(n: n, vm: vm)
+        case .slot(let slot):   slotView(slot)
         }
     }
 
     @ViewBuilder private func slotView(_ slot: KeybarSlot) -> some View {
         switch slot {
-        case .escPill:        EscPillView(vm: vm)
+        case .escPill:        EscPillView(vm: vm, onOpenSettings: { showingSettings = true })
         case .pad:            PadView(vm: vm)
         case .modifier:       ModifierSlotView(ctrl: vm.keybar.modifiers.ctrl, vm: vm)
         case .tab:            TabSlotView(vm: vm)
+        case .fn:             FnSlotView(mode: vm.fnState.mode, vm: vm)
         case .symbol(let s):  SymbolSlotView(symbol: s, vm: vm)
         }
     }

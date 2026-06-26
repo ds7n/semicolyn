@@ -9,8 +9,10 @@ final class KeybarLayoutTests: XCTestCase {
     }
 
     func testDefaultScrollSymbolsMatchSpec() {
+        // Fn is now an explicit, reorderable/removable scroll slot (4d) rather
+        // than auto-appended at render time.
         XCTAssertEqual(KeybarLayout.default.scroll,
-                       [.symbol("/"), .symbol("|"), .symbol("~"), .symbol("-"), .symbol("("), .symbol(")")])
+                       [.symbol("/"), .symbol("|"), .symbol("~"), .symbol("-"), .symbol("("), .symbol(")"), .fn])
     }
 
     func testEscAndPadAreLockedNotInScroll() {
