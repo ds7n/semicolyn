@@ -10,6 +10,9 @@ import NeotildeKit
 struct KeybarView: View {
     @ObservedObject var keybarSettings: KeybarSettingsStore
     @ObservedObject var vm: ConnectionViewModel
+    /// True when a hardware keyboard is connected — the bar shrinks to its compact
+    /// built-in subset, or hides entirely per the user's setting (4e).
+    var hardwareKeyboardConnected: Bool = false
     @Environment(\.theme) private var theme
     /// Opens Settings→Keybar (long-press the Esc pill). Seed of the spec's
     /// unified picker; the rest of that picker is a later slice.
@@ -17,7 +20,43 @@ struct KeybarView: View {
 
     private var layout: KeybarLayout { keybarSettings.settings.layout }
 
+    /// Hardware keyboard connected + the user opted to hide the keybar (4e). The
+    /// predictor strip is governed independently and stays put.
+    private var hidden: Bool {
+        hardwareKeyboardConnected && keybarSettings.settings.hideKeybarWithHardwareKeyboard
+    }
+
     var body: some View {
+        Group {
+            if hidden {
+                EmptyView()
+            } else if hardwareKeyboardConnected {
+                barChrome { compactContent }
+            } else {
+                barChrome { fullContent }
+            }
+        }
+        // Reverse-bar: a layout-mirror only. RTL flips HStack order + the
+        // ScrollView's leading edge so the locked region anchors right and the
+        // Esc pill lands far-right; DragGesture translations are unaffected, so
+        // gesture semantics stay physical (keybar-customization spec).
+        .environment(\.layoutDirection,
+                     keybarSettings.settings.direction == .lockedRight ? .rightToLeft : .leftToRight)
+        .sheet(isPresented: $showingSettings) {
+            KeybarSettingsSheet(store: keybarSettings)
+        }
+    }
+
+    /// Shared bar chrome: themed panel background + insets.
+    @ViewBuilder private func barChrome<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        content()
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .frame(maxWidth: .infinity)
+            .background(Color(theme.surface.panel))
+    }
+
+    /// Full bar: locked region + horizontally-scrollable region.
+    private var fullContent: some View {
         HStack(spacing: 6) {
             ForEach(Array(layout.locked.enumerated()), id: \.offset) { _, slot in
                 slotView(slot)
@@ -30,17 +69,15 @@ struct KeybarView: View {
                 }
             }
         }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .frame(maxWidth: .infinity)
-        .background(Color(theme.surface.panel))
-        // Reverse-bar: a layout-mirror only. RTL flips HStack order + the
-        // ScrollView's leading edge so the locked region anchors right and the
-        // Esc pill lands far-right; DragGesture translations are unaffected, so
-        // gesture semantics stay physical (keybar-customization spec).
-        .environment(\.layoutDirection,
-                     keybarSettings.settings.direction == .lockedRight ? .rightToLeft : .leftToRight)
-        .sheet(isPresented: $showingSettings) {
-            KeybarSettingsSheet(store: keybarSettings)
+    }
+
+    /// Compact bar (hardware keyboard): the built-in widgets from the user's
+    /// locked region only — no scroll region (4e "Keybar behavior").
+    private var compactContent: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(compactKeybarSlots(locked: layout.locked).enumerated()), id: \.offset) { _, slot in
+                slotView(slot)
+            }
         }
     }
 

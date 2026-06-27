@@ -88,6 +88,29 @@ final class TmuxRuntime {
         write(TmuxCommand.zoomPane(target: pane))
     }
 
+    /// Open a new tmux window (Phase 4e `⌘T`).
+    func newWindow() {
+        write(TmuxCommand.newWindow())
+    }
+
+    /// Kill the active window (Phase 4e `⌘W`). No-op until a window exists.
+    func closeActiveWindow() {
+        guard let win = controller.state.activeWindow else { return }
+        write(TmuxCommand.killWindow(target: win))
+    }
+
+    /// Split the active pane; `direction` names the resulting divider (Phase 4e
+    /// `⌘D`/`⌘|` side-by-side, `⇧⌘D`/`⌘-` stacked).
+    func splitActivePane(direction: SplitDirection) {
+        guard let pane = activePane else { return }
+        write(TmuxCommand.splitWindow(target: pane, direction: direction))
+    }
+
+    /// Move to the next/previous pane in the active window (Phase 4e `⌘[`/`⌘]`).
+    func selectPaneRelative(next: Bool) {
+        write(TmuxCommand.selectPaneRelative(next: next))
+    }
+
     /// Tell tmux the client size in cells so it re-tiles; ignored if degenerate.
     func setClientSize(cols: Int, rows: Int) {
         guard let line = TmuxCommand.refreshClientSize(width: cols, height: rows) else { return }
