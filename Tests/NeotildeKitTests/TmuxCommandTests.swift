@@ -25,6 +25,18 @@ final class TmuxCommandTests: XCTestCase {
         XCTAssertEqual(TmuxCommand.killPane(target: PaneID(raw: 0)), "kill-pane -t %0")
     }
 
+    func testKillWindowRendersAtSigil() {
+        XCTAssertEqual(TmuxCommand.killWindow(target: WindowID(raw: 2)), "kill-window -t @2")
+    }
+
+    func testSelectNextPaneUsesPlusTarget() {
+        XCTAssertEqual(TmuxCommand.selectPaneRelative(next: true), "select-pane -t +")
+    }
+
+    func testSelectPrevPaneUsesMinusTarget() {
+        XCTAssertEqual(TmuxCommand.selectPaneRelative(next: false), "select-pane -t -")
+    }
+
     func testZoomPaneUsesResizeZ() {
         XCTAssertEqual(TmuxCommand.zoomPane(target: PaneID(raw: 4)), "resize-pane -Z -t %4")
     }

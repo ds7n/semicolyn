@@ -16,25 +16,35 @@ public struct KeybarSettings: Equatable, Sendable, Codable {
     public var layout: KeybarLayout
     public var direction: KeybarLayoutDirection
     public var library: KeybarLibrary
+    /// 4e: hide the keybar entirely when a hardware keyboard is connected. The
+    /// predictor strip is governed independently and is unaffected by this.
+    public var hideKeybarWithHardwareKeyboard: Bool
 
     public init(layout: KeybarLayout, direction: KeybarLayoutDirection,
-                library: KeybarLibrary = .empty) {
+                library: KeybarLibrary = .empty,
+                hideKeybarWithHardwareKeyboard: Bool = false) {
         self.layout = layout
         self.direction = direction
         self.library = library
+        self.hideKeybarWithHardwareKeyboard = hideKeybarWithHardwareKeyboard
     }
 
-    /// The v1 default: stock layout, locked-left, empty library.
+    /// The v1 default: stock layout, locked-left, empty library, keybar shown.
     public static let `default` = KeybarSettings(layout: .default, direction: .lockedLeft)
 
-    private enum CodingKeys: String, CodingKey { case layout, direction, library }
+    private enum CodingKeys: String, CodingKey {
+        case layout, direction, library, hideKeybarWithHardwareKeyboard
+    }
 
-    /// Back-compatible decode: a pre-4d-2 blob has no `library` key, so it defaults
-    /// to `.empty` rather than failing the decode (which would reset the layout).
+    /// Back-compatible decode: keys added after a user's blob was written default
+    /// rather than failing the decode (which would reset the layout). `library`
+    /// (4d-2) → empty; `hideKeybarWithHardwareKeyboard` (4e) → false (shown).
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         layout = try c.decode(KeybarLayout.self, forKey: .layout)
         direction = try c.decode(KeybarLayoutDirection.self, forKey: .direction)
         library = try c.decodeIfPresent(KeybarLibrary.self, forKey: .library) ?? .empty
+        hideKeybarWithHardwareKeyboard =
+            try c.decodeIfPresent(Bool.self, forKey: .hideKeybarWithHardwareKeyboard) ?? false
     }
 }
