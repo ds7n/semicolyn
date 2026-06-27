@@ -224,10 +224,17 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) { send(Array(data)) }
 
-        // Tmux owns the visible geometry, but we still need to inform tmux of the
-        // client size so it can re-tile. Debounce rapid bursts (rotation / keyboard).
-        func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-            resizeDebounce.note(cols: newCols, rows: newRows, at: Date())
+        // tmux owns the visible geometry. The client size is driven by the full
+        // container grid (`ContainerView.layoutSubviews` → `noteClientSize`), not a
+        // per-pane size change — a single split pane's grid is not the client size.
+        func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
+
+        /// Debounced tmux client-size update. Called by `ContainerView.layoutSubviews`
+        /// with the full-container grid (bounds ÷ measured cell) — the single accurate
+        /// source, replacing the old coarse `sendApproxClientSize` estimate. Debounces
+        /// rapid bursts (rotation / keyboard show-hide).
+        func noteClientSize(cols: Int, rows: Int) {
+            resizeDebounce.note(cols: cols, rows: rows, at: Date())
             DispatchQueue.main.asyncAfter(deadline: .now() + ResizeDebounce.quiet) { [weak self] in
                 guard let self else { return }
                 if let size = self.resizeDebounce.tick(at: Date()) {
@@ -285,6 +292,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// layout pass. Called by the coordinator's `onInvalidateCachedCell` hook after
         /// a pinch-zoom font change, ensuring pane rects reflect the new font geometry.
         func invalidateCachedCell() { cachedCell = nil }
+
+        /// On every layout pass (rotation, keyboard show-hide, font change) report the
+        /// full-container cell grid to tmux as the client size. Uses the measured cell
+        /// metrics, so it's accurate for any font — the single source that supersedes
+        /// the old coarse `sendApproxClientSize` estimate. Debounced in the coordinator.
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            let cell = resolvedCell()
+            guard let grid = terminalGrid(width: Double(bounds.width), height: Double(bounds.height),
+                                          cellWidth: cell.w, cellHeight: cell.h) else { return }
+            coordinator?.noteClientSize(cols: grid.cols, rows: grid.rows)
+        }
 
         /// Cell metrics derived from a registered terminal's font (monospace → uniform cell).
         ///

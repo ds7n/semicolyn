@@ -47,11 +47,8 @@ struct SessionView: View {
                             osc52Allowed: vm.osc52Allowed,
                             onTitle: { [weak vm] t in vm?.terminalTitle = t },
                             onTmuxResize: { [weak vm] cols, rows in vm?.setTmuxClientSize(cols: cols, rows: rows) })
-                        .background(GeometryReader { geo in
-                            Color.clear
-                                .onAppear { vm.sendApproxClientSize(width: geo.size.width, height: geo.size.height) }
-                                .onChange(of: geo.size) { _, new in vm.sendApproxClientSize(width: new.width, height: new.height) }
-                        })
+                        // Client size is reported by the pane container's layout pass
+                        // (bounds ÷ measured cell) via onTmuxResize — no coarse estimate.
                     }
                     .ignoresSafeArea(.container, edges: .bottom)
                     .overlay(alignment: .top) {

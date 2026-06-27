@@ -228,14 +228,9 @@ final class ConnectionViewModel: ObservableObject {
         connect(savedHost: host, password: lastPassword ?? "")
     }
 
+    /// Push the tmux client size so it re-tiles. The grid is computed accurately by
+    /// `TmuxPaneContainer` (container bounds ÷ measured cell), debounced there.
     func setTmuxClientSize(cols: Int, rows: Int) { tmux?.setClientSize(cols: cols, rows: rows) }
-
-    /// Convert the container's pixel size to an approximate cell grid and push it
-    /// to tmux so it re-tiles. ~8×16pt per cell for the default monospace font.
-    func sendApproxClientSize(width: Double, height: Double) {
-        let cols = max(1, Int(width / 8.0)); let rows = max(1, Int(height / 16.0))
-        setTmuxClientSize(cols: cols, rows: rows)
-    }
 
     // MARK: - Teardown
 
