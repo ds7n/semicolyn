@@ -12,6 +12,10 @@ public enum KeybarSlot: Equatable, Hashable, Sendable {
     case tab
     case fn
     case symbol(String)
+    /// A user-created custom slot; resolves to a `CustomSlot` in the library.
+    case custom(CustomSlotID)
+    /// A macro pinned directly to the bar; resolves to a `Macro` in the library.
+    case pinnedMacro(MacroID)
 }
 
 extension KeybarSlot: Codable {
@@ -32,6 +36,12 @@ extension KeybarSlot: Codable {
         case .symbol(let s):
             try c.encode("symbol", forKey: .kind)
             try c.encode(s, forKey: .value)
+        case .custom(let id):
+            try c.encode("custom", forKey: .kind)
+            try c.encode(id.raw, forKey: .value)
+        case .pinnedMacro(let id):
+            try c.encode("pinnedMacro", forKey: .kind)
+            try c.encode(id.raw, forKey: .value)
         }
     }
 
@@ -45,6 +55,9 @@ extension KeybarSlot: Codable {
         case "tab":      self = .tab
         case "fn":       self = .fn
         case "symbol":   self = .symbol(try c.decode(String.self, forKey: .value))
+        case "custom":   self = .custom(CustomSlotID(try c.decode(String.self, forKey: .value)))
+        case "pinnedMacro":
+            self = .pinnedMacro(MacroID(try c.decode(String.self, forKey: .value)))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .kind, in: c, debugDescription: "unknown keybar slot kind '\(kind)'")

@@ -66,6 +66,18 @@ struct KeybarView: View {
         case .tab:            TabSlotView(vm: vm)
         case .fn:             FnSlotView(mode: vm.fnState.mode, vm: vm)
         case .symbol(let s):  SymbolSlotView(symbol: s, vm: vm)
+        case .pinnedMacro(let id):
+            if let macro = keybarSettings.settings.library.macro(id) {
+                PinnedMacroSlotView(macro: macro, vm: vm)
+            } else {
+                MissingSlotView()
+            }
+        case .custom(let id):
+            if let slot = keybarSettings.settings.library.customSlot(id) {
+                CustomSlotView(slot: slot, library: keybarSettings.settings.library, vm: vm)
+            } else {
+                MissingSlotView()
+            }
         }
     }
 }
