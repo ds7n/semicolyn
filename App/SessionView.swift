@@ -13,6 +13,7 @@ struct SessionView: View {
     let host: Host
 
     @StateObject private var vm = ConnectionViewModel()
+    @StateObject private var hardwareKeyboard = HardwareKeyboardMonitor()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) private var theme
 
@@ -77,7 +78,8 @@ struct SessionView: View {
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         VStack(spacing: 0) {
                             PredictorStripView(vm: vm)
-                            KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm)
+                            KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm,
+                                       hardwareKeyboardConnected: hardwareKeyboard.isConnected)
                         }
                     }
                 } else {
@@ -111,7 +113,8 @@ struct SessionView: View {
                         .safeAreaInset(edge: .bottom, spacing: 0) {
                             VStack(spacing: 0) {
                                 PredictorStripView(vm: vm)
-                                KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm)
+                                KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm,
+                                       hardwareKeyboardConnected: hardwareKeyboard.isConnected)
                             }
                         }
                 }
@@ -142,8 +145,30 @@ struct SessionView: View {
             }
             .interactiveDismissDisabled()
         }
+        // Hardware-keyboard Cmd-shortcuts — registered only while in the shell so
+        // they never shadow text editing on the connect/password screens (4e).
+        .background {
+            if case .shell = vm.state { KeyboardCommandsView(vm: vm) }
+        }
+        .sheet(item: $vm.presentedSheet) { sheet in
+            sessionSheet(sheet)
+        }
         .onAppear {
             resolveCredentials()
+        }
+    }
+
+    /// The modal a Cmd-shortcut asked for (Phase 4e).
+    @ViewBuilder private func sessionSheet(_ sheet: SessionSheet) -> some View {
+        switch sheet {
+        case .settings:
+            KeybarSettingsSheet(store: AppStores.shared.keybarSettings)
+        case .launcher:
+            NavigationStack { MacroLibraryView(store: AppStores.shared.keybarSettings) }
+        case .tips:
+            NavigationStack { TipsView() }
+        case .hostPicker:
+            HostListView()
         }
     }
 

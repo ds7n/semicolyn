@@ -57,9 +57,21 @@ public enum TmuxCommand {
         "select-pane -t \(target.targetToken)"
     }
 
+    /// Move to the next (`+`) or previous (`-`) pane in the active window — the
+    /// relative target tmux resolves without us tracking pane ids (Phase 4e
+    /// `⌘[` / `⌘]`).
+    public static func selectPaneRelative(next: Bool) -> String {
+        "select-pane -t \(next ? "+" : "-")"
+    }
+
     /// Kill `target`.
     public static func killPane(target: PaneID) -> String {
         "kill-pane -t \(target.targetToken)"
+    }
+
+    /// Kill `target` window (Phase 4e `⌘W`).
+    public static func killWindow(target: WindowID) -> String {
+        "kill-window -t \(target.targetToken)"
     }
 
     /// Send `bytes` as terminal input to `target`, hex-encoded via `send-keys -H`
