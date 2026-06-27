@@ -7,7 +7,7 @@ The canonical status + pending-work list. Architecture and the spec/plan map liv
 
 **Headline:** design complete; a connect-and-get-a-shell MVP builds for the iOS Simulator. The protocol + logic tiers are built and Linux-tested; the app shell is built and validated by macOS CI. Not yet device-installable (needs Apple Developer signing).
 
-**Tests green:** 17 Rust unit + 35 Rust integration (vs containerized `sshd`) + 706 Swift (NeotildeKit + SeedKit), all on the Linux fast loop.
+**Tests green:** 17 Rust unit + 35 Rust integration (vs containerized `sshd`) + 711 Swift (NeotildeKit + SeedKit), all on the Linux fast loop.
 
 ## Phase status
 
