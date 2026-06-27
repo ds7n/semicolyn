@@ -45,14 +45,23 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
 /// hand-off hops to main before touching UIKit/SwiftTerm. Decoupled from the
 /// terminal view via closures so this stays SwiftTerm-free.
 final class TerminalShellOutput: ShellOutput {
-    /// Set by the terminal view to receive output bytes (called on the main thread).
+    /// Set by the terminal view to render output bytes (called on the main thread).
     var onBytes: (([UInt8]) -> Void)?
+    /// Set by the view model to harvest output bytes for the predictor (main thread).
+    /// A separate slot from `onBytes` because `TerminalScreen.makeUIView` installs
+    /// its own render closure into `onBytes`; without this second slot the raw-shell
+    /// harvest closure was clobbered and degraded-mode output never trained the
+    /// predictor. Both fire from `onOutput`.
+    var onHarvestBytes: (([UInt8]) -> Void)?
     /// Set by the view model to learn the session ended (called on the main thread).
     var onExit: ((ShellExit) -> Void)?
 
     func onOutput(data: Data) {
         let bytes = [UInt8](data)   // UniFFI maps Rust Vec<u8> → Swift Data
-        DispatchQueue.main.async { [weak self] in self?.onBytes?(bytes) }
+        DispatchQueue.main.async { [weak self] in
+            self?.onBytes?(bytes)
+            self?.onHarvestBytes?(bytes)
+        }
     }
 
     func onClosed(exit: ShellExit) {

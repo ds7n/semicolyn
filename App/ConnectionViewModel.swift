@@ -250,7 +250,12 @@ final class ConnectionViewModel: ObservableObject {
         paneViews.removeAll()
         pendingPaneBytes.removeAll()
         renderablePanes.removeAll()
-        if let engine, let learnedStore { try? learnedStore.save(engine.state) }
+        flushPredictor()
+        // Drop the render + harvest closures so late bytes from the old session
+        // can't feed a torn-down terminal view or a cleared engine. Both are
+        // re-installed when the next shell opens.
+        output.onBytes = nil
+        output.onHarvestBytes = nil
         engine = nil
         tracker.reset()
         predictorSuggestions = []
@@ -334,11 +339,12 @@ final class ConnectionViewModel: ObservableObject {
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
         tmuxState = nil   // raw mode: single-terminal path
-        // Harvest raw-shell output for the predictor.
-        // NOTE: TerminalScreen.makeUIView subsequently overwrites output.onBytes with
-        // its render closure; raw-shell harvest is a v1 known limitation (deferred
-        // until TerminalShellOutput gains a second callback slot).
-        output.onBytes = { [weak self] bytes in
+        // Harvest raw-shell output for the predictor through the dedicated harvest
+        // slot. `TerminalScreen.makeUIView` installs its render closure into
+        // `output.onBytes`; using `onHarvestBytes` lets both fire from `onOutput`
+        // (previously the render closure clobbered this and degraded-mode output
+        // never trained the predictor).
+        output.onHarvestBytes = { [weak self] bytes in
             self?.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
         }
         state = .shell
@@ -374,9 +380,13 @@ final class ConnectionViewModel: ObservableObject {
                 view.feed(byteArray: bytes[...])
             } else if self.renderablePanes.contains(pane) {
                 self.pendingPaneBytes[pane, default: []].append(contentsOf: bytes)
+            } else {
+                // Pane not in the visible layout — drop to prevent unbounded
+                // buffering, and don't harvest output the user can't see.
+                return
             }
-            // else: pane not in visible layout — drop to prevent unbounded buffering
-            // Harvest pane output for the predictor (all visible panes; not filtered by active).
+            // Harvest pane output for the predictor — visible panes only (a live
+            // view or pending registration), not filtered by active pane.
             self.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
         }
         runtime.onStateChanged = { [weak self] state in
@@ -467,6 +477,16 @@ final class ConnectionViewModel: ObservableObject {
     func dismissCrashBanner() { crashBanner = nil }
 
     // MARK: - Predictor
+
+    /// Persist the session's learned predictor vocabulary to disk. Idempotent and
+    /// safe to call repeatedly; a no-op when the predictor is disabled (incognito)
+    /// or no learned store is attached. Called from `teardown()` and on
+    /// app-background (`scenePhase`) so learning survives a backgrounded or killed
+    /// app — previously only a clean teardown flushed.
+    func flushPredictor() {
+        guard let engine, let learnedStore else { return }
+        try? learnedStore.save(engine.state)
+    }
 
     /// Build the session predictor unless incognito is on for this host.
     private func startPredictor(host: Host, defaults: Defaults) {
