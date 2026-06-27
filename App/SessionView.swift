@@ -16,6 +16,7 @@ struct SessionView: View {
     @StateObject private var hardwareKeyboard = HardwareKeyboardMonitor()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) private var theme
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Password loaded from the Keychain-backed secret store, or entered by the
     /// user when no stored secret exists.
@@ -153,6 +154,12 @@ struct SessionView: View {
         }
         .onAppear {
             resolveCredentials()
+        }
+        // Flush learned predictor state when the app backgrounds, so a session
+        // that gets backgrounded and killed doesn't lose what it learned (only a
+        // clean teardown flushed before). No-op when the predictor is off.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { vm.flushPredictor() }
         }
     }
 
