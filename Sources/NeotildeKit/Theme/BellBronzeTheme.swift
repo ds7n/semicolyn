@@ -39,5 +39,5 @@ extension Theme {
 
     // Neon Midnight is the default (first); Bell-bronze retained as a switchable
     // alternate (candidate Pro cosmetic). Picker UI is Phase 4.
-    public static let all: [Theme] = [.neonMidnight, .bellBronze]
+    public static let all: [Theme] = catalog.map(\.theme)
 }

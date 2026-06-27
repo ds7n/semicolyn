@@ -14,6 +14,8 @@ struct HostListView: View {
     @State private var editorMode: HostEditorMode?
     /// Whether the Defaults editor sheet is presented.
     @State private var showingDefaults = false
+    /// Whether the top-level Settings sheet is presented.
+    @State private var showingSettings = false
     /// Non-nil when the user has tapped a saved host to connect (Task 8).
     @State private var connectingHost: IdentifiableHost?
 
@@ -28,7 +30,7 @@ struct HostListView: View {
             }
             .navigationTitle("Hosts")
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItemGroup(placement: .navigationBarLeading) {
                     // Defaults is always reachable, even when the host list is empty.
                     Button {
                         showingDefaults = true
@@ -36,6 +38,13 @@ struct HostListView: View {
                         Image(systemName: "slider.horizontal.3")
                     }
                     .accessibilityLabel("Defaults")
+
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Settings")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -51,6 +60,10 @@ struct HostListView: View {
             // Defaults editor sheet — Task 7.
             .sheet(isPresented: $showingDefaults) {
                 DefaultsEditorView()
+            }
+            // Settings sheet — Task 4.
+            .sheet(isPresented: $showingSettings) {
+                SettingsView()
             }
             // Session cover — Task 8: tap a saved host to connect.
             .fullScreenCover(item: $connectingHost) { wrapper in
