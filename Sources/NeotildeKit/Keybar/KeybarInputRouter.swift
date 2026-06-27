@@ -36,6 +36,16 @@ public final class KeybarInputRouter {
     /// Emit a function key F1–F12. Modifiers are not applied to F-keys in v1.
     public func tapFKey(_ n: Int) { fire(.function(n)) }
 
+    /// Emits a macro body as a single coalesced write. A macro is a self-contained
+    /// recorded sequence: it carries its own per-event modifiers, so firing it
+    /// neither applies nor consumes the globally-armed `ModifierState` — an armed
+    /// Ctrl stays armed for the user's next real keystroke.
+    public func fireMacro(_ body: [MacroEvent]) {
+        let bytes = encodeMacroBody(body, applicationCursorKeys: applicationCursorKeys())
+        guard !bytes.isEmpty else { return }
+        send(bytes)
+    }
+
     private func fire(_ key: KeyInput) {
         let bytes = encodeKey(key, modifiers: state.current(),
                               applicationCursorKeys: applicationCursorKeys())

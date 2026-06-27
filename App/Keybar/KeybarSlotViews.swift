@@ -94,6 +94,81 @@ struct EscPillView: View {
     }
 }
 
+/// A macro pinned directly to the bar (a `.pinnedMacro` slot): tap fires the
+/// recorded body via the input router. (keybar-customization spec "Macro library
+/// → pinning".)
+struct PinnedMacroSlotView: View {
+    let macro: Macro
+    let vm: ConnectionViewModel
+    @Environment(\.theme) private var theme
+    var body: some View {
+        SlotChrome(bg: Color(theme.keybar.slotBg)) {
+            Text(macro.name).font(.caption).lineLimit(1)
+                .foregroundStyle(Color(theme.text.primary))
+        }
+        .onTapGesture { vm.keybar.fireMacro(macro.body) }
+    }
+}
+
+/// A user-created custom slot (a `.custom` slot): up to four gesture bindings,
+/// each firing a macro from the library. The primary label resolves per spec; dim
+/// edge glyphs hint at bound swipe-up/down, and a corner `≡` hints at long-press
+/// (keybar-customization spec "Slot display content").
+struct CustomSlotView: View {
+    let slot: CustomSlot
+    let library: KeybarLibrary
+    let vm: ConnectionViewModel
+    @Environment(\.theme) private var theme
+
+    private var label: String {
+        slot.displayLabel(macroName: { library.macro($0)?.name }) ?? "·"
+    }
+
+    /// Fires the macro bound to `gesture`, if any (orphaned refs are no-ops).
+    private func fire(_ gesture: CustomSlotGesture) {
+        guard let binding = slot.binding(for: gesture),
+              let body = library.macro(binding.macro)?.body else { return }
+        vm.keybar.fireMacro(body)
+    }
+
+    var body: some View {
+        SlotChrome(bg: Color(theme.keybar.slotBg)) {
+            Text(label).font(.system(.body, design: .monospaced)).lineLimit(1)
+                .foregroundStyle(Color(theme.text.primary))
+        }
+        .overlay(alignment: .top) {
+            if slot.swipeUp != nil { hintGlyph("˄") }
+        }
+        .overlay(alignment: .bottom) {
+            if slot.swipeDown != nil { hintGlyph("˅") }
+        }
+        .overlay(alignment: .topTrailing) {
+            if slot.longPress != nil { hintGlyph("≡").offset(x: -2, y: 2) }
+        }
+        .onTapGesture { fire(.tap) }
+        .onLongPressGesture { fire(.longPress) }
+        .gesture(DragGesture(minimumDistance: 12).onEnded { g in
+            if g.translation.height < -12 { fire(.swipeUp) }
+            else if g.translation.height > 12 { fire(.swipeDown) }
+        })
+    }
+
+    private func hintGlyph(_ s: String) -> some View {
+        Text(s).font(.system(size: 7)).foregroundStyle(Color(theme.text.secondary))
+    }
+}
+
+/// A dim placeholder for a slot whose library entry is missing (orphaned id) —
+/// defensive only; the store prunes references on delete.
+struct MissingSlotView: View {
+    @Environment(\.theme) private var theme
+    var body: some View {
+        SlotChrome(bg: Color(theme.keybar.slotBg)) {
+            Text("?").foregroundStyle(Color(theme.text.secondary))
+        }
+    }
+}
+
 /// Pad: drag = arrow key (dominant axis), tap = zoom active pane.
 /// (Long-press pane-mode + splits = a later slice.)
 struct PadView: View {

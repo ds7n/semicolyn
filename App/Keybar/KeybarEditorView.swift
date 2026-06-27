@@ -18,11 +18,30 @@ struct KeybarSettingsSheet: View {
                 } label: {
                     Label("Keybar", systemImage: "keyboard")
                 }
+                NavigationLink {
+                    MacroLibraryView(store: store)
+                } label: {
+                    Label("Launcher", systemImage: "command")
+                }
             }
             .navigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
             }
+        }
+    }
+}
+
+/// The modal flows reachable from the Keybar editor's "+ Add" / row edit.
+private enum KeybarEditorSheet: Identifiable {
+    case launcher, createMacro, createSlot
+    case editSlot(CustomSlot)
+    var id: String {
+        switch self {
+        case .launcher:        return "launcher"
+        case .createMacro:     return "createMacro"
+        case .createSlot:      return "createSlot"
+        case .editSlot(let s): return "edit-\(s.id.raw)"
         }
     }
 }
@@ -41,6 +60,7 @@ struct KeybarEditorView: View {
     /// One-time warning before removing the Modifier (don't nag on repeat).
     @AppStorage("neotilde.keybar.modifierRemoveWarned") private var modifierRemoveWarned = false
     @State private var confirmingModifierRemove = false
+    @State private var editorSheet: KeybarEditorSheet?
 
     private var layout: KeybarLayout { store.settings.layout }
 
@@ -73,7 +93,7 @@ struct KeybarEditorView: View {
             }
 
             Section { addMenu } footer: {
-                Text("Macros and custom slots arrive in a later update.")
+                Text("Pin a saved macro, record or template a new one, or build a custom slot.")
             }
         }
         .environment(\.editMode, .constant(.active))   // always show reorder handles
@@ -81,6 +101,16 @@ struct KeybarEditorView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Reset") { store.resetToDefaults() }
+            }
+        }
+        .sheet(item: $editorSheet) { which in
+            NavigationStack {
+                switch which {
+                case .launcher:        MacroLibraryView(store: store)
+                case .createMacro:     MacroCreationView(store: store)
+                case .createSlot:      CustomSlotEditorView(store: store, slot: nil)
+                case .editSlot(let s): CustomSlotEditorView(store: store, slot: s)
+                }
             }
         }
         .alert("Remove Modifier?", isPresented: $confirmingModifierRemove) {
@@ -100,6 +130,13 @@ struct KeybarEditorView: View {
         HStack {
             Text(slotLabel(slot))
             Spacer()
+            if case .custom(let id) = slot, let customSlot = store.settings.library.customSlot(id) {
+                Button { editorSheet = .editSlot(customSlot) } label: {
+                    Image(systemName: "pencil").font(.footnote)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Edit custom slot")
+            }
             if KeybarLayout.canMoveAcrossDivider(slot) {
                 Menu {
                     Button(inScroll ? "Move to Locked region" : "Move to Scroll region") {
@@ -125,8 +162,9 @@ struct KeybarEditorView: View {
                 }
             }
             Divider()
-            Button("Pin a macro…") {}.disabled(true)
-            Button("Create new slot…") {}.disabled(true)
+            Button("Pin a macro…") { editorSheet = .launcher }
+            Button("Create new macro…") { editorSheet = .createMacro }
+            Button("Create new slot…") { editorSheet = .createSlot }
         } label: {
             Label("Add", systemImage: "plus")
         }
@@ -174,6 +212,12 @@ struct KeybarEditorView: View {
         case .tab:            return "Tab"
         case .fn:             return "Fn (function keys)"
         case .symbol(let s):  return "Symbol “\(s)”"
+        case .pinnedMacro(let id):
+            return store.settings.library.macro(id).map { "Macro “\($0.name)”" } ?? "Pinned macro (missing)"
+        case .custom(let id):
+            let lib = store.settings.library
+            let name = lib.customSlot(id)?.displayLabel(macroName: { lib.macro($0)?.name })
+            return name.map { "Slot “\($0)”" } ?? "Custom slot"
         }
     }
 }
