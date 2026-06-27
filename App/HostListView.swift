@@ -30,7 +30,7 @@ struct HostListView: View {
             }
             .navigationTitle("Hosts")
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItemGroup(placement: .navigationBarLeading) {
                     // Defaults is always reachable, even when the host list is empty.
                     Button {
                         showingDefaults = true
@@ -38,8 +38,7 @@ struct HostListView: View {
                         Image(systemName: "slider.horizontal.3")
                     }
                     .accessibilityLabel("Defaults")
-                }
-                ToolbarItem(placement: .navigationBarLeading) {
+
                     Button {
                         showingSettings = true
                     } label: {

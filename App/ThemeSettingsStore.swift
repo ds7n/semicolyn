@@ -10,6 +10,7 @@ import NeotildeKit
 @MainActor final class ThemeSettingsStore: ObservableObject {
     private static let defaultsKey = "neotilde.appearance.themeID"
 
+    /// Persisted id deliberately un-validated; `resolveDescriptor` is the single guard (unknown/Pro-lapsed id resolves to default at render time).
     @Published var selectedThemeID: ThemeID {
         didSet { persist() }
     }
@@ -22,7 +23,7 @@ import NeotildeKit
         }
     }
 
-    /// Restores the free default (Neon Midnight).
+    /// Restores the free default (Neon Midnight). Intentional forward seam for a future Settings "Reset" affordance (mirrors `KeybarSettingsStore.resetToDefaults`).
     func resetToDefault() {
         selectedThemeID = Theme.defaultDescriptor.id
     }
