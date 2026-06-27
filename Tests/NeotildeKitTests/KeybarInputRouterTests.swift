@@ -75,4 +75,29 @@ final class KeybarInputRouterTests: XCTestCase {
         r.tapFKey(5)
         XCTAssertEqual(spy.sent, [Array("\u{1b}[15~".utf8)])
     }
+
+    // MARK: - Macro firing (4d-2)
+
+    func testFireMacroSendsExpandedBodyAsOneWrite() {
+        let (r, spy) = make()
+        r.fireMacro([MacroEvent(key: .char("g")), MacroEvent(key: .char("s")),
+                     MacroEvent(key: .enter)])
+        XCTAssertEqual(spy.sent, [Array("gs".utf8) + [0x0d]])  // one coalesced write
+    }
+
+    func testFireMacroRespectsApplicationCursorKeys() {
+        let (r, spy) = make(app: true)
+        r.fireMacro([MacroEvent(key: .arrow(.down))])
+        XCTAssertEqual(spy.sent, [Array("\u{1b}OB".utf8)])
+    }
+
+    func testFireMacroIsSelfContainedAndPreservesArmedModifier() {
+        // A macro carries its own modifiers; firing it must neither apply nor
+        // consume the globally-armed modifier state.
+        let (r, spy) = make()
+        r.tapCtrl()                                   // arm Ctrl
+        r.fireMacro([MacroEvent(key: .char("a"))])
+        XCTAssertEqual(spy.sent, [[0x61]])            // plain 'a', NOT Ctrl-A (0x01)
+        XCTAssertEqual(r.modifiers.ctrl, .armed)      // still armed for the next real key
+    }
 }
