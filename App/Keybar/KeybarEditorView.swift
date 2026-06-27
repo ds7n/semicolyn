@@ -74,6 +74,12 @@ struct KeybarEditorView: View {
                 .pickerStyle(.segmented)
             }
 
+            Section {
+                Toggle("Hide when hardware keyboard connected", isOn: hideWithHardwareKeyboardBinding)
+            } footer: {
+                Text("Hides the keybar while a hardware keyboard is attached. The predictor strip stays.")
+            }
+
             Section("Locked region") {
                 ForEach(layout.locked, id: \.self) { slot in
                     row(slot, inScroll: false)
@@ -182,6 +188,11 @@ struct KeybarEditorView: View {
     private var directionBinding: Binding<KeybarLayoutDirection> {
         Binding(get: { store.settings.direction },
                 set: { store.settings.direction = $0 })
+    }
+
+    private var hideWithHardwareKeyboardBinding: Binding<Bool> {
+        Binding(get: { store.settings.hideKeybarWithHardwareKeyboard },
+                set: { store.settings.hideKeybarWithHardwareKeyboard = $0 })
     }
 
     /// Handles a swipe-to-delete on a region. Single-row deletes only; routes the

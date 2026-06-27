@@ -2,11 +2,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
 import SwiftTerm
+import UIKit
 import NeotildeKit
 import NeotildeSSHCoreFFI
 
 /// Crash-banner presentation state (degraded-mode spec). One case today.
 enum CrashBannerState: Equatable { case tmuxEnded }
+
+/// A modal the session presents in response to a hardware-keyboard Cmd-shortcut
+/// (Phase 4e). The VM publishes the intent; `SessionView` shows the sheet.
+enum SessionSheet: String, Identifiable {
+    case settings, launcher, tips, hostPicker
+    var id: String { rawValue }
+}
 
 /// Drives the one MVP flow: connect → password auth → probe tmux → attach
 /// control mode or degrade to a raw-PTY shell.
@@ -22,6 +30,8 @@ final class ConnectionViewModel: ObservableObject {
 
     @Published var state: State = .idle
     @Published var pendingPrompt: HostKeyPrompt?
+    /// Set by a Cmd-shortcut to ask `SessionView` to present a modal (Phase 4e).
+    @Published var presentedSheet: SessionSheet?
     /// Non-nil when we fell back from control mode; consumed by Task 6 to show
     /// an amber banner explaining why tmux wasn't used.
     @Published var degraded: DegradeReason?
@@ -72,6 +82,9 @@ final class ConnectionViewModel: ObservableObject {
     private var promptContinuation: CheckedContinuation<Bool, Never>?
 
     private var connection: Connection?
+    /// Last saved-host connect args, retained so `⇧⌘R` can reconnect (Phase 4e).
+    private var lastSavedHost: Host?
+    private var lastPassword: String?
     private(set) var session: ShellSession?
     /// Serializes raw-PTY keystroke writes (FIFO under channel back-pressure).
     /// Only used in raw mode; tmux mode writes through `TmuxRuntime`'s own writer.
@@ -167,6 +180,52 @@ final class ConnectionViewModel: ObservableObject {
               let idx = state.windows.firstIndex(where: { $0.id == active }) else { return }
         let next = state.windows[(idx + delta + state.windows.count) % state.windows.count]
         selectWindow(next.id)
+    }
+
+    // MARK: - Hardware-keyboard commands (Phase 4e)
+
+    /// Dispatches a resolved hardware-keyboard command to its action. Window/pane
+    /// commands no-op in raw-PTY mode (no `tmux`); presentation commands publish a
+    /// `presentedSheet` intent for `SessionView`.
+    func perform(_ command: KeyboardCommand) {
+        switch command {
+        case .newWindow:           tmux?.newWindow()
+        case .closeWindow:         tmux?.closeActiveWindow()
+        case .switchWindow(let n): switchToWindow(index: n)
+        case .prevWindow:          selectPrevWindow()
+        case .nextWindow:          selectNextWindow()
+        case .prevPane:            tmux?.selectPaneRelative(next: false)
+        case .nextPane:            tmux?.selectPaneRelative(next: true)
+        case .splitVertical:       tmux?.splitActivePane(direction: .sideBySide)
+        case .splitHorizontal:     tmux?.splitActivePane(direction: .stacked)
+        case .clearScreen:         sendTerminalInput([0x0c])              // Ctrl-L
+        case .paste:               pasteFromClipboard()
+        case .reconnect:           reconnect()
+        case .newConnection:       presentedSheet = .hostPicker
+        case .openLauncher:        presentedSheet = .launcher
+        case .settings:            presentedSheet = .settings
+        case .tips:                presentedSheet = .tips
+        case .find:                break   // deferred — needs a SwiftTerm scrollback-search slice
+        case .copy:                break   // SwiftTerm handles ⌘C natively on the hardware path
+        }
+    }
+
+    /// Switch to the 1-based Nth tmux window (`⌘1…⌘9`); out-of-range is a no-op.
+    private func switchToWindow(index: Int) {
+        guard let windows = tmuxState?.windows, index >= 1, index <= windows.count else { return }
+        selectWindow(windows[index - 1].id)
+    }
+
+    /// Paste the system clipboard's text into the terminal (`⌘V`, hardware path).
+    private func pasteFromClipboard() {
+        guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        sendTerminalInput(Array(text.utf8))
+    }
+
+    /// Re-run the last saved-host connect (`⇧⌘R`). No-op if nothing connected yet.
+    func reconnect() {
+        guard let host = lastSavedHost else { return }
+        connect(savedHost: host, password: lastPassword ?? "")
     }
 
     func setTmuxClientSize(cols: Int, rows: Int) { tmux?.setClientSize(cols: cols, rows: rows) }
@@ -459,6 +518,8 @@ final class ConnectionViewModel: ObservableObject {
     /// field cannot be resolved.
     func connect(savedHost: Host, password: String) {
         if state == .connecting || state == .shell { return }
+        lastSavedHost = savedHost
+        lastPassword = password
         teardown()
         state = .connecting
         degraded = nil
