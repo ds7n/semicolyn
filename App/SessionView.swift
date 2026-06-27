@@ -83,6 +83,7 @@ struct SessionView: View {
                     TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
                                    output: vm.output,
                                    session: vm.session,
+                                   theme: theme,
                                    osc52Allowed: vm.osc52Allowed,
                                    onTitle: { [weak vm] t in vm?.terminalTitle = t })
                         .ignoresSafeArea(.container, edges: .bottom)

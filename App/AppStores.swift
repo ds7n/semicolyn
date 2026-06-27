@@ -23,6 +23,11 @@ final class AppStores {
     let terminalSettings = TerminalSettingsStore()
     /// User keybar customization (slot layout + reverse-bar direction), persisted.
     let keybarSettings = KeybarSettingsStore()
+    /// User-selected theme id (Appearance), persisted. The root view resolves it
+    /// through the Pro-gate and injects the result into `\.theme`.
+    let appearance = ThemeSettingsStore()
+    /// Pro entitlement (stub seam; real StoreKit is a later slice).
+    let pro = ProStore()
     /// Base Application Support directory (`…/neotilde/`). Retained so store
     /// factory methods can build sub-paths without repeating the FileManager call.
     private let baseDirectory: URL
