@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-/// A directional arrow key.
-public enum ArrowDirection: Equatable, Sendable { case up, down, left, right }
+/// A directional arrow key. `String`-raw so it rides the macro Codable schema.
+public enum ArrowDirection: String, Equatable, Sendable, Codable { case up, down, left, right }
 
 /// A logical key the keybar can emit (before modifiers / terminal mode are applied).
 public enum KeyInput: Equatable, Sendable {
@@ -16,7 +16,7 @@ public enum KeyInput: Equatable, Sendable {
 }
 
 /// The modifier set armed against a keystroke.
-public struct KeyModifiers: Equatable, Sendable {
+public struct KeyModifiers: Equatable, Sendable, Codable {
     public var control: Bool
     public var option: Bool
     public var shift: Bool
