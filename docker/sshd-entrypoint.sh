@@ -6,7 +6,7 @@ ssh-keygen -A
 mkdir -p /home/tester/.ssh
 # Generate a throwaway test keypair into the shared volume on first boot.
 if [ ! -f /testkeys/id_ed25519 ]; then
-  ssh-keygen -t ed25519 -N '' -C 'neotilde-test' -f /testkeys/id_ed25519
+  ssh-keygen -t ed25519 -N '' -C 'semicolyn-test' -f /testkeys/id_ed25519
 fi
 # World-readable so the (non-root) dev container can read the private key.
 # This is a disposable CI fixture key, never a real credential.
@@ -18,7 +18,7 @@ chmod 600 /home/tester/.ssh/authorized_keys
 # --- Client-certificate auth fixture (Phase 1c-cert) ---
 # A disposable CA that signs the test user key. Never a real credential.
 if [ ! -f /testkeys/ca ]; then
-  ssh-keygen -t ed25519 -N '' -C 'neotilde-test-ca' -f /testkeys/ca
+  ssh-keygen -t ed25519 -N '' -C 'semicolyn-test-ca' -f /testkeys/ca
 fi
 chmod 644 /testkeys/ca.pub
 # Sign id_ed25519 into three certs for principal 'tester': valid-now, expired,
@@ -32,9 +32,9 @@ cp /testkeys/id_ed25519.pub /testkeys/notyet.pub
 # left it 644). Set immediately before signing, then relax after so the
 # non-root dev container can read it on the mounted volume.
 chmod 600 /testkeys/ca
-ssh-keygen -s /testkeys/ca -I neotilde-valid   -n tester -V -5m:+52w   /testkeys/valid.pub
-ssh-keygen -s /testkeys/ca -I neotilde-expired -n tester -V 20000101000000:20000102000000 /testkeys/expired.pub
-ssh-keygen -s /testkeys/ca -I neotilde-notyet  -n tester -V +52w:+104w /testkeys/notyet.pub
+ssh-keygen -s /testkeys/ca -I semicolyn-valid   -n tester -V -5m:+52w   /testkeys/valid.pub
+ssh-keygen -s /testkeys/ca -I semicolyn-expired -n tester -V 20000101000000:20000102000000 /testkeys/expired.pub
+ssh-keygen -s /testkeys/ca -I semicolyn-notyet  -n tester -V +52w:+104w /testkeys/notyet.pub
 chmod 644 /testkeys/ca
 chmod 644 /testkeys/valid-cert.pub /testkeys/expired-cert.pub /testkeys/notyet-cert.pub
 # Trust the CA for user authentication (idempotent across reboots).

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import NeotildeKit
+import SemicolynKit
 
 /// Errors thrown by `HostEditorViewModel.save()` that the view surfaces inline.
 enum EditorSaveError: Error {
@@ -61,7 +61,7 @@ final class HostEditorViewModel: ObservableObject {
     /// Whether the Save button should be enabled. Requires no hard-block issues
     /// AND both required text fields non-empty.
     var canSave: Bool {
-        NeotildeKit.canSave(issues)
+        SemicolynKit.canSave(issues)
             && !host.label.isEmpty
             && !host.hostName.isEmpty
     }

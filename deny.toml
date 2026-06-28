@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 True Positive LLC
 # SPDX-License-Identifier: GPL-3.0-only
 
-# Neotilde is GPL-3.0-only. Every dependency must resolve to a GPL-3-compatible
+# Semicolyn is GPL-3.0-only. Every dependency must resolve to a GPL-3-compatible
 # license. aws-lc-rs is GPL-3-compatible since AWS-LC relicensed its
 # OpenSSL-derived sources to Apache-2.0 (PR #3091). This gate fails if an
 # OpenSSL-licensed crate (e.g. an old aws-lc-sys) sneaks back in.

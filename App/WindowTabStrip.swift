@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// A horizontal strip of tmux window tabs (temporary, until the Phase-4 keybar
 /// window pill). Tap a tab to `select-window`; the active window is bronze-tinted.

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import NeotildeKit
+import SemicolynKit
 
 /// The app's composition root for the live storage stack: hosts via `HostStore`
 /// (encrypted records on disk), host keys via `HostKeyStore` (Keychain), and
@@ -28,7 +28,7 @@ final class AppStores {
     let appearance = ThemeSettingsStore()
     /// Pro entitlement (stub seam; real StoreKit is a later slice).
     let pro = ProStore()
-    /// Base Application Support directory (`…/neotilde/`). Retained so store
+    /// Base Application Support directory (`…/semicolyn/`). Retained so store
     /// factory methods can build sub-paths without repeating the FileManager call.
     private let baseDirectory: URL
 
@@ -38,13 +38,13 @@ final class AppStores {
     /// - Throws: `KeychainError` if Keychain operations fail, or `FileBlobStore`
     ///   errors if the Application Support directory cannot be created.
     init() throws {
-        // Application Support directory: ~/.../Library/Application Support/neotilde/
+        // Application Support directory: ~/.../Library/Application Support/semicolyn/
         let dir = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
-        ).appendingPathComponent("neotilde", isDirectory: true)
+        ).appendingPathComponent("semicolyn", isDirectory: true)
         self.baseDirectory = dir
 
         // Keychain-backed secrets (iCloud Keychain synced).
@@ -96,7 +96,7 @@ final class AppStores {
     ///
     /// - Returns: A UUID string that is stable for the lifetime of the app install.
     func deviceSeed() throws -> String {
-        let key = "neotilde.deviceSeed"
+        let key = "semicolyn.deviceSeed"
         if let existing = UserDefaults.standard.string(forKey: key) {
             return existing
         }

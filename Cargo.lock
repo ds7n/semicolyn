@@ -1158,20 +1158,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "neotilde-ssh-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "getrandom 0.4.3",
- "rand_core",
- "russh",
- "ssh-key",
- "thiserror",
- "tokio",
- "uniffi",
-]
-
-[[package]]
 name = "nix"
 version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1687,6 +1673,20 @@ dependencies = [
  "hybrid-array",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "semicolyn-ssh-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "getrandom 0.4.3",
+ "rand_core",
+ "russh",
+ "ssh-key",
+ "thiserror",
+ "tokio",
+ "uniffi",
 ]
 
 [[package]]

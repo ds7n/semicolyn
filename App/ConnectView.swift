@@ -61,7 +61,7 @@ struct ConnectView: View {
                     }
                 }
             }
-            .navigationTitle("Neotilde")
+            .navigationTitle("Semicolyn")
         }
         // The prompt sheet rides the connect form; `state` only becomes
         // `.shell` after `verify` has resolved, so the sheet is never orphaned.

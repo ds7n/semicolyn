@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// Presents a live SSH session for a saved `Host`. Resolves credentials from
 /// the host's stored `passwordRef` secret if available; otherwise prompts the

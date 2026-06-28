@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// Single-scrollable host editor — handles both create and edit.
 ///
@@ -48,8 +48,8 @@ struct HostEditorView: View {
     @State var moshExpanded = false
     /// Whether the Tailscale section is expanded.
     @State var tailscaleExpanded = false
-    /// Whether the Neotilde behavior section is expanded.
-    @State var neotildeExpanded = false
+    /// Whether the Semicolyn behavior section is expanded.
+    @State var semicolynExpanded = false
 
     // Task 6 — identity picker state
     /// Whether the inline identity picker half-sheet is presented.
@@ -106,7 +106,7 @@ struct HostEditorView: View {
                 portForwardingSection
                 moshSection
                 tailscaleSection
-                neotildeSection
+                semicolynSection
                 if !vm.isNew {
                     deleteSection
                 }
@@ -477,8 +477,8 @@ struct HostEditorView: View {
             // Tailscale: expand if tailscale is explicitly configured
             tailscaleExpanded = vm.host.tailscale != .inherit
 
-            // Neotilde: expand if neotilde is explicitly configured
-            neotildeExpanded = vm.host.neotilde != .inherit
+            // Semicolyn: expand if semicolyn is explicitly configured
+            semicolynExpanded = vm.host.semicolyn != .inherit
         }
         // Auto-expand on hard issues (also triggered live via onChange → revalidate)
         syncSectionAutoExpand()

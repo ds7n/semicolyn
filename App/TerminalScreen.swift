@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
 import SwiftTerm
-import NeotildeSSHCoreFFI
-import NeotildeKit
+import SemicolynSSHCoreFFI
+import SemicolynKit
 
 /// Wraps SwiftTerm's UIKit `TerminalView` for SwiftUI. Output bytes from the
 /// Rust PTY (via `TerminalShellOutput.onBytes`) are fed into the terminal;
@@ -222,9 +222,9 @@ struct TerminalScreen: UIViewRepresentable {
 /// This is the mechanism the Plan C spec calls for ("engine applies `\x1b[<n> q`
 /// overrides") and uses only SwiftTerm's `feed` — already exercised for PTY
 /// output — so it avoids any dependency on a native cursor-style property. The
-/// `style` parameter is qualified to `NeotildeKit.CursorStyle` to disambiguate
+/// `style` parameter is qualified to `SemicolynKit.CursorStyle` to disambiguate
 /// from SwiftTerm's own `CursorStyle`.
-private func applyCursor(to terminal: TerminalView, style: NeotildeKit.CursorStyle, blink: Bool) {
+private func applyCursor(to terminal: TerminalView, style: SemicolynKit.CursorStyle, blink: Bool) {
     let n: Int
     switch (style, blink) {
     case (.block, true):       n = 1

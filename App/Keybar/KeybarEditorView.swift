@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// The Settings tree surfaced from a long-press on the Esc pill. For 4d-1 its
 /// only leaf is the Keybar editor; the spec's full unified picker (windows /
@@ -58,7 +58,7 @@ private enum KeybarEditorSheet: Identifiable {
 struct KeybarEditorView: View {
     @ObservedObject var store: KeybarSettingsStore
     /// One-time warning before removing the Modifier (don't nag on repeat).
-    @AppStorage("neotilde.keybar.modifierRemoveWarned") private var modifierRemoveWarned = false
+    @AppStorage("semicolyn.keybar.modifierRemoveWarned") private var modifierRemoveWarned = false
     @State private var confirmingModifierRemove = false
     @State private var editorSheet: KeybarEditorSheet?
 
