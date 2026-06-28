@@ -99,11 +99,12 @@ final class KeyboardCommandTests: XCTestCase {
     }
 
     func testCatalogCoversEveryDistinctAction() {
-        // The 15 distinct actions from the spec must each appear at least once.
+        // Each distinct action from the spec must appear at least once.
+        // (⌘F/find is intentionally absent — deferred, see the external-keyboard spec.)
         let actions = Set(KeyboardCommandCatalog.all.map(\.command))
         let expected: Set<KeyboardCommand> = [
             .newWindow, .closeWindow, .switchWindow(1), .prevWindow, .nextWindow,
-            .prevPane, .nextPane, .splitVertical, .splitHorizontal, .find,
+            .prevPane, .nextPane, .splitVertical, .splitHorizontal,
             .clearScreen, .copy, .paste, .newConnection, .reconnect,
             .openLauncher, .settings, .tips,
         ]

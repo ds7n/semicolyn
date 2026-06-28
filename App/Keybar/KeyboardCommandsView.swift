@@ -29,7 +29,7 @@ struct KeyboardCommandsView: View {
     @ObservedObject var vm: ConnectionViewModel
 
     private var registered: [KeyboardCommandSpec] {
-        KeyboardCommandCatalog.all.filter { $0.command != .copy && $0.command != .find }
+        KeyboardCommandCatalog.all.filter { $0.command != .copy }
     }
 
     var body: some View {

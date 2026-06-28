@@ -58,7 +58,6 @@ iOS auto-renders the discoverability HUD when the user holds Cmd. Every shortcut
 | ⌘[ / ⌘] | Prev / next pane |
 | ⌘D **or** ⌘\| | Split pane vertical (side-by-side) |
 | ⇧⌘D **or** ⌘- | Split pane horizontal (top/bottom) |
-| ⌘F | Find in scrollback |
 | ⌘K | Clear screen |
 | ⌘C / ⌘V | Copy / paste (hardware-keyboard path; the touch long-press path is unchanged) |
 | ⇧⌘N | New connection (open host picker) |
@@ -67,7 +66,7 @@ iOS auto-renders the discoverability HUD when the user holds Cmd. Every shortcut
 | ⌘, | Settings |
 | ⌘? | Tips & Gestures |
 
-15 actions, 17 shortcuts counting the two split aliases.
+14 actions, 16 shortcuts counting the two split aliases. (⌘F/find deferred — see "Open questions / deferred".)
 
 **Mnemonic for the split aliases.** Vertical split puts a vertical divider between two side-by-side panes — `|` looks like that divider. Horizontal split puts a horizontal divider between top and bottom panes — `-` looks like that divider. Both aliases fire the same action as their `⌘D` form.
 
@@ -75,7 +74,7 @@ iOS auto-renders the discoverability HUD when the user holds Cmd. Every shortcut
 
 **Relationship to the "picker is the only top-level handle" rule.** The Esc-pill picker remains the only *on-screen* affordance for Settings, host picker, and macro launcher. Hardware Cmd-shortcuts (`⌘,`, `⇧⌘N`, `⇧⌘P`, `⌘?`) are invisible to a touch user and don't violate that rule — they're the off-screen power-user equivalent of the same routes.
 
-**Convention alignment.** The map matches Blink, iTerm2, and Apple Terminal where they converge (⌘T for new window/tab, ⌘W to close, ⌘F to find, ⌘K to clear, ⌘, for settings, ⌘D for vertical split). ⇧⌘P for the launcher follows the VS Code / Sublime command-palette convention. ⇧⌘N for new connection avoids the Prompt 3 ⇧⌘F-vs-⌘F collision.
+**Convention alignment.** The map matches Blink, iTerm2, and Apple Terminal where they converge (⌘T for new window/tab, ⌘W to close, ⌘K to clear, ⌘, for settings, ⌘D for vertical split). ⇧⌘P for the launcher follows the VS Code / Sublime command-palette convention. ⇧⌘N for new connection avoids the Prompt 3 ⇧⌘F-vs-⌘F collision.
 
 ## Predictor
 
@@ -94,6 +93,7 @@ When a user-bound macro on the keybar collides with a system Cmd-shortcut, **the
 - **In-app Esc rebind** — deferred to v1.5. Adds a Settings → App preferences row for "Hardware keyboard Esc key" with options (none / Cmd-. / grave / custom). Depends on a real complaint from a user whose layout makes the iOS system path inconvenient.
 - **Custom Cmd-shortcut remapping** — deferred to v1.5+. Not a v1 blocker; the default map covers the conventional set.
 - **Font-size shortcuts (⌘+ / ⌘−)** — deferred. Semicolyn has no font-size feature specced anywhere yet; adding the shortcut implies adding the feature. Revisit when font-size lands.
+- **Find in scrollback (⌘F)** — deferred. tmux copy-mode search (`Ctrl-b [` then `/`) already covers the primary persistent-session workflow, so a client-side SwiftTerm scrollback search only benefits raw-PTY sessions — not worth the SwiftTerm buffer/selection integration cost for v1 (SwiftTerm ships no find API). Removed from the active Cmd-map + `KeyboardCommandCatalog` so the ⌘-hold HUD and Tips don't advertise a dead shortcut. Revisit on real demand from raw-PTY users; the `KeyboardCommand.find` case + a pure `ScrollbackSearch` engine in `SemicolynKit` are the natural re-entry points.
 - **Scrollback navigation shortcuts (⌘Home / ⌘End)** — deferred. Useful but Magic Keyboard requires Fn+arrow for Home/End and many users won't discover it. Revisit when scrollback ergonomics get their own pass.
 - **Magic Keyboard function row (F1–F12)** — out of scope for v1. The keybar's Fn slot covers F-key entry per [[2026-06-14-function-keys-design]]; hardware F-keys can pass through later if demand emerges.
 
