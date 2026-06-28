@@ -26,10 +26,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
     var onTitle: ((String) -> Void)? = nil
     /// Called with debounced (cols, rows) when terminal grid size changes; routes to tmux client-size.
     var onTmuxResize: ((Int, Int) -> Void)? = nil
+    /// Called when the user taps an ssh:// link; routes to the confirm-connect sheet.
+    var onSSHLink: ((URL) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(send: send, theme: theme, settings: settings, osc52Allowed: osc52Allowed, onTitle: onTitle)
         c.onTmuxResize = onTmuxResize
+        c.onSSHLink = onSSHLink
         return c
     }
 

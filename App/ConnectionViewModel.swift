@@ -11,9 +11,19 @@ enum CrashBannerState: Equatable { case tmuxEnded }
 
 /// A modal the session presents in response to a hardware-keyboard Cmd-shortcut
 /// (Phase 4e). The VM publishes the intent; `SessionView` shows the sheet.
-enum SessionSheet: String, Identifiable {
+enum SessionSheet: Identifiable {
     case settings, launcher, tips, hostPicker
-    var id: String { rawValue }
+    /// Confirm-and-connect prompt for a tapped ssh:// link (Phase-3c seam).
+    case quickConnect(SSHConnectTarget)
+    var id: String {
+        switch self {
+        case .settings: return "settings"
+        case .launcher: return "launcher"
+        case .tips: return "tips"
+        case .hostPicker: return "hostPicker"
+        case let .quickConnect(t): return "quickConnect:\(t.user ?? "")@\(t.host):\(t.port ?? 22)"
+        }
+    }
 }
 
 /// Drives the one MVP flow: connect → password auth → probe tmux → attach
@@ -293,6 +303,28 @@ final class ConnectionViewModel: ObservableObject {
         if let existing { return existing }
         let host = Host(id: UUID(), label: hostName, hostName: hostName,
                         user: .explicit(user), port: .explicit(port))
+        try AppStores.shared.hosts.saveHost(host)
+        return host
+    }
+
+    /// Present the confirm-and-connect sheet for a tapped ssh:// link. Parses the
+    /// URL and silently ignores anything that isn't a usable ssh:// target — a tap
+    /// never connects on its own (Phase-3c ssh:// link seam).
+    func presentSSHLink(_ url: URL) {
+        guard let target = parseSSHURL(url.absoluteString) else { return }
+        presentedSheet = .quickConnect(target)
+    }
+
+    /// Find an existing saved host matching an ssh:// target, or create + persist one.
+    /// A target without a user inherits the default user (`.inherit`).
+    func hostForSSHTarget(_ target: SSHConnectTarget) throws -> Host {
+        let port = target.port ?? 22
+        let existing = try AppStores.shared.hosts.allHosts()
+            .first { $0.hostName == target.host && ($0.port.value ?? 22) == port && $0.user.value == target.user }
+        if let existing { return existing }
+        let host = Host(id: UUID(), label: target.host, hostName: target.host,
+                        user: target.user.map { Inherited.explicit($0) } ?? .inherit,
+                        port: .explicit(port))
         try AppStores.shared.hosts.saveHost(host)
         return host
     }
