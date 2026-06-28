@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- Mockup: "Neon Midnight + green-phosphor hint". NM untouched (blue-night ground,
+     coral neon, cool crisp readout) with one phosphor-GREEN tell (the classic CRT
+     green): a green cursor + a green glow-halo on the coral prompt sigil.
+     Maps to Sources/NeotildeKit/Theme/Theme.swift tokens. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neon Midnight + green-phosphor hint</title>
+<style>
+  :root {
+    /* ---- Neon Midnight (kept verbatim) ---- */
+    --coral500:   #FF6F5E;  /* accent.primary — neon */
+    --coral300:   #FFB7A6;  /* accent.highlight */
+    --night0:     #07090E;  /* surface.bg */
+    --nightPanel: #0E1118;  /* surface.panel */
+    --nightPanelHi:#161A24; /* surface.panelHigh */
+    --nightLine:  #232A3A;  /* surface.line */
+    --termBg:     #05070B;  /* terminal.bg */
+    --termFg:     #CFD6E4;  /* terminal.fg — cool, KEPT */
+    --textPri:    #E8EBF0;  /* text.primary */
+    --textMut:    #8A93A3;  /* text.muted */
+    --patina:     #5FB0A2;  /* state.success */
+    --amber500:   #F5A524;  /* state.degraded / warning */
+    --crimson:    #E5455E;  /* state.broken */
+    /* ---- the phosphor tell ---- */
+    --phos:       #4DF884;  /* phosphor green — cursor + glow-halo only */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px;
+    background: #0a0d14;
+    background-image: radial-gradient(1200px 600px at 50% -10%, #141a28 0%, #0a0e16 60%, #06080d 100%);
+    color: var(--textPri);
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    display: flex; flex-wrap: wrap; gap: 28px; justify-content: center; align-items: flex-start;
+  }
+  h1 { font-size: 15px; letter-spacing: .14em; text-transform: uppercase; color: var(--textMut); font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--textMut); font-size: 12px; margin-bottom: 18px; }
+  .coral { color: var(--coral500); }
+  .green { color: var(--phos); }
+
+  .phone { width: 360px; border-radius: 38px; padding: 10px; background: #04060a; box-shadow: 0 0 0 2px var(--nightLine), 0 24px 60px rgba(0,0,0,.6); }
+  .screen { border-radius: 30px; overflow: hidden; background: var(--night0); border: 1px solid var(--nightLine); }
+
+  .bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: var(--nightPanel); border-bottom: 1px solid var(--nightLine); }
+  .bar .title { font-size: 13px; color: var(--textPri); }
+  /* coral sigil, green phosphor halo — the tell */
+  .bar .title b { color: var(--coral500); text-shadow: 0 0 11px rgba(77,248,132,.8), 0 0 3px rgba(77,248,132,.55); }
+  .bar .dot { width: 9px; height: 9px; border-radius: 50%; }
+
+  .term {
+    background: var(--termBg); padding: 16px; min-height: 320px;
+    font-size: 12.5px; line-height: 1.7; color: var(--termFg);
+    /* Body text crisp + cool (NM). The phosphor tell is glow-only, below. */
+  }
+  /* coral prompt with a GREEN phosphor halo */
+  .term .prompt { color: var(--coral500); text-shadow: 0 0 10px rgba(77,248,132,.9), 0 0 3px rgba(77,248,132,.65); }
+  .term .path   { color: var(--coral300); }
+  .term .ok     { color: var(--patina); }
+  .term .warn   { color: var(--amber500); }
+  .term .err    { color: var(--crimson); }
+  .term .mut    { color: var(--textMut); }
+  /* phosphor-green cursor */
+  .cursor {
+    display: inline-block; width: 8px; height: 15px; vertical-align: -2px;
+    background: var(--phos); box-shadow: 0 0 11px rgba(77,248,132,.8);
+    animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .banner { padding: 7px 16px; font-size: 11.5px; }
+  .banner.amber { background: rgba(245,165,36,.15); color: var(--amber500); border-top: 1px solid rgba(245,165,36,.35); }
+
+  .predictor { display: flex; gap: 8px; padding: 9px 12px; background: var(--nightPanel); border-top: 1px solid var(--nightLine); }
+  .sug { background: var(--nightPanelHi); color: var(--textPri); padding: 4px 10px; border-radius: 7px; font-size: 11.5px; }
+  .sug.lead { color: var(--coral300); }
+
+  .keybar { display: flex; gap: 7px; padding: 11px 12px 14px; background: var(--nightPanel); }
+  .key { flex: 1; text-align: center; padding: 9px 0; border-radius: 9px; background: var(--nightPanelHi); color: var(--textPri); font-size: 12px; border: 1px solid transparent; }
+  .key.promoted { background: rgba(255,111,94,.12); }
+  .key.armed    { background: rgba(255,111,94,.20); border-color: rgba(255,111,94,.5); }
+  .key.locked   { background: rgba(255,111,94,.30); color: var(--coral300); }
+
+  .legend { width: 330px; }
+  .swatch { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--nightLine); }
+  .chip { width: 32px; height: 32px; border-radius: 8px; border: 1px solid rgba(255,255,255,.08); flex: none; }
+  .chip.glow { box-shadow: 0 0 12px rgba(77,248,132,.85); }
+  .swatch .meta { font-size: 12px; }
+  .swatch .tok { color: var(--textPri); }
+  .swatch .hex { color: var(--textMut); font-size: 11px; }
+  .grp { color: var(--textMut); font-size: 11px; letter-spacing:.1em; text-transform: uppercase; margin: 14px 0 4px; }
+</style>
+</head>
+<body>
+
+  <div>
+    <h1><span class="coral">neon midnight</span> + <span class="green">phosphor</span> hint</h1>
+    <div class="sub">Neon Midnight untouched — cool readout, coral neon. One phosphor-green tell (classic CRT green): the cursor, and a green halo on the prompt sigil.</div>
+
+    <div class="phone">
+      <div class="screen">
+        <div class="bar">
+          <span class="dot" style="background:var(--patina)"></span>
+          <span class="title"><b>~</b> fosfyre &nbsp;·&nbsp; <span style="color:var(--textMut)">ds7n@orchard</span></span>
+        </div>
+
+        <div class="term">
+          <div><span class="prompt">~</span> <span class="path">orchard:~/proj/fosfyre</span></div>
+          <div><span class="prompt">❯</span> ssh orchard.fosfyre.sh</div>
+          <div class="mut">Last login: Sat Jun 28 09:14 from 10.0.0.4</div>
+          <div><span class="prompt">❯</span> git status</div>
+          <div><span class="ok">✔</span> On branch <span class="path">main</span> — working tree clean</div>
+          <div><span class="prompt">❯</span> cargo test -p fosfyre-ssh-core</div>
+          <div><span class="ok">test result: ok.</span> 142 passed; 0 failed</div>
+          <div><span class="warn">⚠ mosh: network roamed — re-anchoring session…</span></div>
+          <div><span class="err">✘ fatal: host key mismatch (strict)</span></div>
+          <div><span class="prompt">❯</span> <span class="cursor"></span></div>
+        </div>
+
+        <div class="banner amber">⚠ Connection degraded — mosh keeping the session alive</div>
+
+        <div class="predictor">
+          <span class="sug lead">ssh orchard</span>
+          <span class="sug">git push</span>
+          <span class="sug">tmux attach</span>
+        </div>
+
+        <div class="keybar">
+          <div class="key">esc</div>
+          <div class="key promoted">tab</div>
+          <div class="key armed">ctrl</div>
+          <div class="key">~</div>
+          <div class="key locked">⌥</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <h1>tokens</h1>
+    <div class="grp">kept — Neon Midnight</div>
+    <div class="swatch"><div class="chip" style="background:#FF6F5E"></div><div class="meta"><div class="tok">accent.primary — neon</div><div class="hex">#FF6F5E</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#07090E"></div><div class="meta"><div class="tok">surface.bg — blue night</div><div class="hex">#07090E</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#05070B"></div><div class="meta"><div class="tok">terminal.bg — deepest night</div><div class="hex">#05070B</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#CFD6E4"></div><div class="meta"><div class="tok">terminal.fg — cool readout</div><div class="hex">#CFD6E4</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#5FB0A2"></div><div class="meta"><div class="tok">state.success — verdigris</div><div class="hex">#5FB0A2</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#E5455E"></div><div class="meta"><div class="tok">state.broken — crimson</div><div class="hex">#E5455E</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#F5A524"></div><div class="meta"><div class="tok">state.warning — amber (kept)</div><div class="hex">#F5A524</div></div></div>
+    <div class="grp">new — the phosphor tell (glow + cursor only)</div>
+    <div class="swatch"><div class="chip glow" style="background:#4DF884"></div><div class="meta"><div class="tok">cursor + prompt halo — phosphor green</div><div class="hex">#4DF884</div></div></div>
+  </div>
+
+</body>
+</html>
