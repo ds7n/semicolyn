@@ -25,8 +25,14 @@ struct TerminalScreen: UIViewRepresentable {
     var osc52Allowed: Bool = true
     /// Called with the sanitized OSC 0/2 title; routes to `vm.terminalTitle`.
     var onTitle: ((String) -> Void)? = nil
+    /// Called when the user taps an ssh:// link; routes to the confirm-connect sheet.
+    var onSSHLink: ((URL) -> Void)? = nil
 
-    func makeCoordinator() -> Coordinator { Coordinator(send: send, session: session, settings: settings, theme: theme, osc52Allowed: osc52Allowed, onTitle: onTitle) }
+    func makeCoordinator() -> Coordinator {
+        let c = Coordinator(send: send, session: session, settings: settings, theme: theme, osc52Allowed: osc52Allowed, onTitle: onTitle)
+        c.onSSHLink = onSSHLink
+        return c
+    }
 
     func makeUIView(context: Context) -> TerminalView {
         let terminal = TerminalView(frame: .zero)
