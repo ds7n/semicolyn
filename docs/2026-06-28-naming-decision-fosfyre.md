@@ -1,8 +1,16 @@
 # Naming decision — neotilde → fosfyre
 
+> ⚠️ **SUPERSEDED (2026-06-28, same day).** `fosfyre` was chosen and its rename was even
+> executed on the parked branch `refactor/rename-fosfyre` (not merged), but the name was
+> reconsidered further. **Current frontrunner: `semicolyn`** (a respell of *semicolon* — the
+> shell command separator; owns the full namespace, trademark-clear), with `lumenhir` as
+> backup. Neither is committed (pending a wife-test + manual TESS check). This doc is kept
+> as the historical record of the fosfyre exploration; the live naming status lives in the
+> agent memory `naming-and-trademark`.
+
 **Date:** 2026-06-28
-**Status:** **Decided + first-pass cleared.** Exact-spelling screen (domains + App Store + npm + GitHub + web trademark) returned **no conflict** for `fosfyre`; full domain namespace is free. Authoritative USPTO/TSDR pull + attorney knockout still recommended **before filing** our own mark (one sound-alike noted below).
-**Decision:** Rename the product from **neotilde** to **fosfyre**.
+**Status:** **Superseded** — see the banner above. (Originally: "Decided + first-pass cleared"; the rename branch exists but was never merged.)
+**Decision (at the time):** Rename the product from **neotilde** to **fosfyre**.
 
 ## Why we moved off "neotilde"
 
