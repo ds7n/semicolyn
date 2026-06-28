@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
-/// Tips & Gestures — documents the hardware-keyboard conventions Neotilde relies
+/// Tips & Gestures — documents the hardware-keyboard conventions Semicolyn relies
 /// on iOS for (Esc remap, Caps-as-Control) and lists the Cmd-shortcut map
 /// (external-keyboard spec "Esc handling" / "Caps-as-Ctrl" / "Cmd-shortcut map").
 /// Reached via `⌘?` or the Settings tree.

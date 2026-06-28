@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// Editor for a custom slot: a label/glyph override plus up to four gesture
 /// bindings (tap / swipe-up / swipe-down / long-press), each pointing at a macro.

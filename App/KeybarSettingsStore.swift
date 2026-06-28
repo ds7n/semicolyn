@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import NeotildeKit
+import SemicolynKit
 
 /// App-lifetime holder for the user's keybar customization (slot layout +
 /// reverse-bar direction). Persists as JSON in `UserDefaults`; the
@@ -10,7 +10,7 @@ import NeotildeKit
 /// Mirrors `TerminalSettingsStore` but adds persistence — keybar layout must
 /// survive relaunch, whereas terminal prefs are still ephemeral.
 @MainActor final class KeybarSettingsStore: ObservableObject {
-    private static let defaultsKey = "neotilde.keybarSettings"
+    private static let defaultsKey = "semicolyn.keybarSettings"
 
     @Published var settings: KeybarSettings {
         didSet { persist() }

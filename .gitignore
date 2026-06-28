@@ -13,11 +13,11 @@
 .swiftpm/
 
 # CI build artifacts (not source)
-/NeotildeSSHCore.xcframework/
+/SemicolynSSHCore.xcframework/
 # Generated UniFFI Swift wrapper (produced by scripts/build-xcframework.sh)
-/Sources/NeotildeSSHCoreFFI/
+/Sources/SemicolynSSHCoreFFI/
 # Generated Xcode project (produced by `xcodegen generate` from project.yml)
-/Neotilde.xcodeproj/
+/Semicolyn.xcodeproj/
 
 # Secrets / data
 .env

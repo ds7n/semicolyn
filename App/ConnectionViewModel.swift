@@ -3,8 +3,8 @@
 import SwiftUI
 import SwiftTerm
 import UIKit
-import NeotildeKit
-import NeotildeSSHCoreFFI
+import SemicolynKit
+import SemicolynSSHCoreFFI
 
 /// Crash-banner presentation state (degraded-mode spec). One case today.
 enum CrashBannerState: Equatable { case tmuxEnded }
@@ -367,7 +367,7 @@ final class ConnectionViewModel: ObservableObject {
     /// Attach tmux control mode: open the `-CC` exec, pump its bytes into a
     /// `TmuxRuntime`, and route the active pane's output into the terminal view.
     private func attachTmux(conn: Connection) async throws {
-        let seed = (try? AppStores.shared.deviceSeed()) ?? "neotilde-local"
+        let seed = (try? AppStores.shared.deviceSeed()) ?? "semicolyn-local"
         let runtime = TmuxRuntime(sessionName: tmuxSessionName(seed: seed))
         guard let startCmd = runtime.makeStartCommand() else {
             // Controller couldn't build a start command; fall through to raw PTY.
@@ -559,7 +559,7 @@ final class ConnectionViewModel: ObservableObject {
                 let verifier = TofuHostKeyVerifier(
                     hostID: savedHost.id, trust: AppStores.shared.trust,
                     present: { [weak self] prompt in await self?.present(prompt) ?? false })
-                let conn = try await NeotildeSSHCoreFFI.connect(
+                let conn = try await SemicolynSSHCoreFFI.connect(
                     addr: addr, allowLegacy: false, allowDeprecated: false, verifier: verifier)
                 let outcome = try await authenticate(conn: conn, user: user, host: savedHost, defaults: defaults, password: password)
                 switch outcome {
@@ -609,7 +609,7 @@ final class ConnectionViewModel: ObservableObject {
                 let verifier = TofuHostKeyVerifier(
                     hostID: hostRecord.id, trust: AppStores.shared.trust,
                     present: { [weak self] prompt in await self?.present(prompt) ?? false })
-                let conn = try await NeotildeSSHCoreFFI.connect(
+                let conn = try await SemicolynSSHCoreFFI.connect(
                     addr: addr, allowLegacy: false, allowDeprecated: false, verifier: verifier)
                 let outcome = try await authenticate(conn: conn, user: user, host: hostRecord, defaults: defaults, password: password)
                 switch outcome {

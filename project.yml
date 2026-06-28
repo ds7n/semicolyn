@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: 2026 True Positive LLC
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# XcodeGen manifest for the Neotilde iOS app target. SwiftPM can't produce an iOS
+# XcodeGen manifest for the Semicolyn iOS app target. SwiftPM can't produce an iOS
 # .app bundle, so the app lives here; `xcodegen generate` (macOS) emits the
 # .xcodeproj. The Rust SSH core is linked via the local SwiftPM package's
-# NeotildeSSHCoreFFI product (backed by NeotildeSSHCore.xcframework, built first by
+# SemicolynSSHCoreFFI product (backed by SemicolynSSHCore.xcframework, built first by
 # scripts/build-xcframework.sh). The terminal renderer is SwiftTerm.
-name: Neotilde
+name: Semicolyn
 
 options:
   bundleIdPrefix: com.truepositive
@@ -14,29 +14,29 @@ options:
     iOS: "17.0"
 
 packages:
-  # The repo-root SwiftPM package (NeotildeKit + the macOS/iOS-only NeotildeSSHCoreFFI).
-  NeotildePackage:
+  # The repo-root SwiftPM package (SemicolynKit + the macOS/iOS-only SemicolynSSHCoreFFI).
+  SemicolynPackage:
     path: .
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
     from: "1.0.0"
 
 targets:
-  Neotilde:
+  Semicolyn:
     type: application
     platform: iOS
     sources:
       - App
     dependencies:
-      - package: NeotildePackage
-        product: NeotildeSSHCoreFFI
-      - package: NeotildePackage
-        product: NeotildeKit
+      - package: SemicolynPackage
+        product: SemicolynSSHCoreFFI
+      - package: SemicolynPackage
+        product: SemicolynKit
       - package: SwiftTerm
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        PRODUCT_BUNDLE_IDENTIFIER: com.truepositive.neotilde
+        PRODUCT_BUNDLE_IDENTIFIER: com.truepositive.semicolyn
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "0.1.0"
         TARGETED_DEVICE_FAMILY: "1,2"

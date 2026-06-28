@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// The keyboard accessory bar. Locked region renders fixed at the leading edge;
 /// the scroll region pans horizontally. 4d drives the composition from the

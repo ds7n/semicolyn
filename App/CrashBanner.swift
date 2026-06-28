@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// The one banner that does NOT auto-dismiss (degraded-mode spec §"Mid-session
 /// tmux crash recovery"): tmux died mid-session, the SSH transport is alive, and

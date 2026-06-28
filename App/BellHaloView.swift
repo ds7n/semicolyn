@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import UIKit
-import NeotildeKit
+import SemicolynKit
 
 /// Renders a pulsed inset-glow overlay for the visual bell. Place as a
 /// full-frame subview over the terminal/pane view; it is transparent when idle.

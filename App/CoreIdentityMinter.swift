@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
-import NeotildeKit
-import NeotildeSSHCoreFFI
+import SemicolynKit
+import SemicolynSSHCoreFFI
 
-/// Thrown when the Rust core returns an algorithm string NeotildeKit's `KeyAlgorithm`
+/// Thrown when the Rust core returns an algorithm string SemicolynKit's `KeyAlgorithm`
 /// doesn't model. Unreachable in practice (Rust rejects unsupported algorithms first);
 /// kept as a guard for future algorithm additions.
 private struct UnmodeledAlgorithm: Error, CustomStringConvertible {
@@ -12,34 +12,34 @@ private struct UnmodeledAlgorithm: Error, CustomStringConvertible {
 }
 
 /// `IdentityMinter` backed by the Rust SSH core. Translates the UniFFI
-/// `KeyMaterial`/`KeyError` into NeotildeKit's pure value types. Errors propagate
+/// `KeyMaterial`/`KeyError` into SemicolynKit's pure value types. Errors propagate
 /// as-is; `IdentityService` wraps them in `IdentityServiceError.minting`.
 ///
 /// Generated Swift field names (confirmed from `uniffi-bindgen` output):
 ///   `fingerprintSha256`, `privateKeyOpenssh`, `publicKeyOpenssh` (lower-camel).
-/// NeotildeKit's `KeyMaterial` uses `fingerprintSHA256`, `privateKeyOpenSSH`,
+/// SemicolynKit's `KeyMaterial` uses `fingerprintSHA256`, `privateKeyOpenSSH`,
 /// `publicKeyOpenSSH` (acronyms uppercased per Swift API guidelines).
 struct CoreIdentityMinter: IdentityMinter {
-    func mintEd25519() throws -> NeotildeKit.KeyMaterial {
-        try map(NeotildeSSHCoreFFI.mintEd25519Identity())
+    func mintEd25519() throws -> SemicolynKit.KeyMaterial {
+        try map(SemicolynSSHCoreFFI.mintEd25519Identity())
     }
 
-    func importPrivateKey(_ openssh: String, passphrase: String?) throws -> NeotildeKit.KeyMaterial {
-        try map(NeotildeSSHCoreFFI.importPrivateKey(openssh: openssh, passphrase: passphrase))
+    func importPrivateKey(_ openssh: String, passphrase: String?) throws -> SemicolynKit.KeyMaterial {
+        try map(SemicolynSSHCoreFFI.importPrivateKey(openssh: openssh, passphrase: passphrase))
     }
 
-    /// Maps a UniFFI `KeyMaterial` record to a `NeotildeKit.KeyMaterial` value.
+    /// Maps a UniFFI `KeyMaterial` record to a `SemicolynKit.KeyMaterial` value.
     ///
     /// An unmodeled algorithm string is surfaced as `IdentityServiceError.minting`
     /// rather than a crash — Rust already rejects unsupported algorithms via
     /// `KeyError.UnsupportedAlgorithm`, so this branch is a belt-and-suspenders
     /// guard for future algorithm additions that Rust models but Swift hasn't
     /// added to `KeyAlgorithm` yet.
-    private func map(_ m: NeotildeSSHCoreFFI.KeyMaterial) throws -> NeotildeKit.KeyMaterial {
+    private func map(_ m: SemicolynSSHCoreFFI.KeyMaterial) throws -> SemicolynKit.KeyMaterial {
         guard let alg = KeyAlgorithm(rawValue: m.algorithm) else {
             throw UnmodeledAlgorithm(algorithm: m.algorithm)
         }
-        return NeotildeKit.KeyMaterial(
+        return SemicolynKit.KeyMaterial(
             privateKeyOpenSSH: m.privateKeyOpenssh,
             publicKeyOpenSSH: m.publicKeyOpenssh,
             fingerprintSHA256: m.fingerprintSha256,
