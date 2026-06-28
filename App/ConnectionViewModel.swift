@@ -205,7 +205,6 @@ final class ConnectionViewModel: ObservableObject {
         case .openLauncher:        presentedSheet = .launcher
         case .settings:            presentedSheet = .settings
         case .tips:                presentedSheet = .tips
-        case .find:                break   // deferred — needs a SwiftTerm scrollback-search slice
         case .copy:                break   // SwiftTerm handles ⌘C natively on the hardware path
         }
     }

@@ -14,7 +14,6 @@ public enum KeyboardCommand: Equatable, Hashable, Sendable {
     case nextPane
     case splitVertical
     case splitHorizontal
-    case find
     case clearScreen
     case copy
     case paste
@@ -74,7 +73,6 @@ public enum KeyboardCommandCatalog {
             cmd("|", .splitVertical, "Split Vertically"),
             chord(KeyboardChord(input: "d", command: true, shift: true), .splitHorizontal, "Split Horizontally"),
             cmd("-", .splitHorizontal, "Split Horizontally"),
-            cmd("f", .find, "Find"),
             cmd("k", .clearScreen, "Clear Screen"),
             cmd("c", .copy, "Copy"),
             cmd("v", .paste, "Paste"),
