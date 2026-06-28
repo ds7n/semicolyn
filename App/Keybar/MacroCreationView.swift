@@ -191,6 +191,9 @@ struct MacroCreationView: View {
         case .danglingModifier:        return "A modifier needs a key, e.g. {Ctrl+R}."
         case .unknownModifier(let m):  return "Unknown modifier “\(m)”."
         case .unknownKey(let k):       return "Unknown key “\(k)”."
+        case .unterminatedParameter:   return "Unclosed “${” — every parameter needs a “}”."
+        case .emptyParameter:          return "Empty “${}” parameter."
+        case .invalidParameterName(let n): return "Invalid parameter name “\(n)” — use letters, digits, or “_”."
         case nil:                      return "Invalid template."
         }
     }
