@@ -3,6 +3,15 @@
 import SwiftUI
 import SemicolynKit
 
+/// `Host` isn't `Identifiable`; this thin wrapper lets `.fullScreenCover(item:)`
+/// present a nested session for an ssh:// quick-connect target (mirrors the wrapper
+/// `HostListView` uses to open a saved host).
+private struct IdentifiableHost: Identifiable {
+    let id: UUID
+    let host: Host
+    init(_ host: Host) { self.id = host.id; self.host = host }
+}
+
 /// Presents a live SSH session for a saved `Host`. Resolves credentials from
 /// the host's stored `passwordRef` secret if available; otherwise prompts the
 /// user to enter a password before connecting.
@@ -30,6 +39,8 @@ struct SessionView: View {
     /// yet fired). Guards against showing a misleading "Connecting to …" spinner
     /// before we know whether a stored credential exists.
     @State private var resolving = true
+    /// Set when the user confirms an ssh:// link tap; drives a nested session cover.
+    @State private var quickConnectHost: IdentifiableHost?
 
     var body: some View {
         Group {
@@ -46,8 +57,9 @@ struct SessionView: View {
                             theme: theme,
                             settings: AppStores.shared.terminalSettings.settings,
                             osc52Allowed: vm.osc52Allowed,
-                            onTitle: { [weak vm] t in vm?.terminalTitle = t },
-                            onTmuxResize: { [weak vm] cols, rows in vm?.setTmuxClientSize(cols: cols, rows: rows) })
+                            onTitle: { [weak vm] view, t in vm?.setTmuxTitle(from: view, t) },
+                            onTmuxResize: { [weak vm] cols, rows in vm?.setTmuxClientSize(cols: cols, rows: rows) },
+                            onSSHLink: { [weak vm] url in vm?.presentSSHLink(url) })
                         // Client size is reported by the pane container's layout pass
                         // (bounds ÷ measured cell) via onTmuxResize — no coarse estimate.
                     }
@@ -86,7 +98,8 @@ struct SessionView: View {
                                    session: vm.session,
                                    theme: theme,
                                    osc52Allowed: vm.osc52Allowed,
-                                   onTitle: { [weak vm] t in vm?.terminalTitle = t })
+                                   onTitle: { [weak vm] t in vm?.terminalTitle = t },
+                                   onSSHLink: { [weak vm] url in vm?.presentSSHLink(url) })
                         .ignoresSafeArea(.container, edges: .bottom)
                         .overlay(alignment: .top) {
                             if let reason = vm.degraded {
@@ -152,6 +165,10 @@ struct SessionView: View {
         .sheet(item: $vm.presentedSheet) { sheet in
             sessionSheet(sheet)
         }
+        // Confirmed ssh:// link → open a nested session for the (found-or-created) host.
+        .fullScreenCover(item: $quickConnectHost) { wrapper in
+            SessionView(host: wrapper.host)
+        }
         .onAppear {
             resolveCredentials()
         }
@@ -174,6 +191,15 @@ struct SessionView: View {
             NavigationStack { TipsView() }
         case .hostPicker:
             HostListView()
+        case let .quickConnect(target):
+            QuickConnectSheet(
+                target: target,
+                onConnect: {
+                    let host = try? vm.hostForSSHTarget(target)
+                    vm.presentedSheet = nil
+                    if let host { quickConnectHost = IdentifiableHost(host) }
+                },
+                onCancel: { vm.presentedSheet = nil })
         }
     }
 

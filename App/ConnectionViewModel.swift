@@ -11,9 +11,19 @@ enum CrashBannerState: Equatable { case tmuxEnded }
 
 /// A modal the session presents in response to a hardware-keyboard Cmd-shortcut
 /// (Phase 4e). The VM publishes the intent; `SessionView` shows the sheet.
-enum SessionSheet: String, Identifiable {
+enum SessionSheet: Identifiable {
     case settings, launcher, tips, hostPicker
-    var id: String { rawValue }
+    /// Confirm-and-connect prompt for a tapped ssh:// link (Phase-3c seam).
+    case quickConnect(SSHConnectTarget)
+    var id: String {
+        switch self {
+        case .settings: return "settings"
+        case .launcher: return "launcher"
+        case .tips: return "tips"
+        case .hostPicker: return "hostPicker"
+        case let .quickConnect(t): return "quickConnect:\(t.user ?? "")@\(t.host):\(t.port ?? 22)"
+        }
+    }
 }
 
 /// Drives the one MVP flow: connect → password auth → probe tmux → attach
@@ -74,6 +84,9 @@ final class ConnectionViewModel: ObservableObject {
     @Published var crashBanner: CrashBannerState?
     /// PaneID → live SwiftTerm view, populated by TmuxPaneContainer as panes appear.
     private var paneViews: [PaneID: TerminalView] = [:]
+    /// PaneID → its last-seen OSC 0/2 title, so the window title can follow the active
+    /// pane across switches rather than being clobbered by whichever pane emits last.
+    private var paneLastTitles: [PaneID: String] = [:]
     private var pendingPaneBytes: [PaneID: [UInt8]] = [:]   // bytes that arrived before the view registered
     /// Panes that currently exist in the active window's visible layout.
     /// Bytes for panes NOT in this set are dropped rather than buffered (bounds memory).
@@ -162,7 +175,19 @@ final class ConnectionViewModel: ObservableObject {
         }
     }
 
-    func unregisterPane(_ pane: PaneID) { paneViews[pane] = nil; pendingPaneBytes[pane] = nil }
+    func unregisterPane(_ pane: PaneID) { paneViews[pane] = nil; pendingPaneBytes[pane] = nil; paneLastTitles[pane] = nil }
+
+    /// Publish an OSC 0/2 title from a tmux pane, keyed to the active pane: cache it
+    /// per-pane and only surface the *active* pane's title so a background pane can't
+    /// clobber what the user is looking at (`titleToPublish`).
+    func setTmuxTitle(from view: TerminalView, _ title: String) {
+        guard let pane = paneViews.first(where: { $0.value === view })?.key else { return }
+        paneLastTitles[pane] = title
+        let active = tmuxState?.activeWindow.flatMap { tmuxState?.window($0)?.activePane }
+        if let published = titleToPublish(source: pane, active: active, title: title) {
+            terminalTitle = published
+        }
+    }
 
     func selectWindow(_ id: WindowID) { tmux?.selectWindow(id) }
 
@@ -297,6 +322,28 @@ final class ConnectionViewModel: ObservableObject {
         return host
     }
 
+    /// Present the confirm-and-connect sheet for a tapped ssh:// link. Parses the
+    /// URL and silently ignores anything that isn't a usable ssh:// target — a tap
+    /// never connects on its own (Phase-3c ssh:// link seam).
+    func presentSSHLink(_ url: URL) {
+        guard let target = parseSSHURL(url.absoluteString) else { return }
+        presentedSheet = .quickConnect(target)
+    }
+
+    /// Find an existing saved host matching an ssh:// target, or create + persist one.
+    /// A target without a user inherits the default user (`.inherit`).
+    func hostForSSHTarget(_ target: SSHConnectTarget) throws -> Host {
+        let port = target.port ?? 22
+        let existing = try AppStores.shared.hosts.allHosts()
+            .first { $0.hostName == target.host && ($0.port.value ?? 22) == port && $0.user.value == target.user }
+        if let existing { return existing }
+        let host = Host(id: UUID(), label: target.host, hostName: target.host,
+                        user: target.user.map { Inherited.explicit($0) } ?? .inherit,
+                        port: .explicit(port))
+        try AppStores.shared.hosts.saveHost(host)
+        return host
+    }
+
     // MARK: - Shell paths
 
     /// Run `tmux -V` over a one-shot exec and return its stdout (nil if nothing
@@ -395,7 +442,14 @@ final class ConnectionViewModel: ObservableObject {
             )
             self.renderablePanes = live
             self.pendingPaneBytes = self.pendingPaneBytes.filter { live.contains($0.key) }
+            let oldActive = self.tmuxState?.activeWindow.flatMap { self.tmuxState?.window($0)?.activePane }
             self.tmuxState = state
+            let newActive = state.activeWindow.flatMap { state.window($0)?.activePane }
+            if oldActive != newActive {
+                // Active pane changed (e.g. ⌘]) — re-publish the new active pane's
+                // last-known title so the window title isn't left stale.
+                self.terminalTitle = titleOnActiveChange(active: newActive, lastTitles: self.paneLastTitles)
+            }
             self.refreshFnAutoEngage()
         }
         runtime.onContextsChanged = { [weak self, weak runtime] in
