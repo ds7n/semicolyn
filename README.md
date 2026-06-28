@@ -1,17 +1,18 @@
-# Neotilde
+# Semicolyn
 
-[![CI](https://github.com/ds7n/neotilde/actions/workflows/ci.yml/badge.svg)](https://github.com/ds7n/neotilde/actions/workflows/ci.yml)
+[![CI](https://github.com/ds7n/semicolyn/actions/workflows/ci.yml/badge.svg)](https://github.com/ds7n/semicolyn/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0--only-blue.svg)](LICENSE)
 ![Platform: iOS / iPadOS](https://img.shields.io/badge/platform-iOS%20%7C%20iPadOS-lightgrey.svg)
 
-**An iOS SSH / mosh terminal client built for touch.** Neotilde's wager is that
+**An iOS SSH / mosh terminal client built for touch.** Semicolyn's wager is that
 terminal work can feel native on a phone: a context-aware key bar, a smart
 snippet launcher, tmux control mode driving persistent native tabs and panes,
 an on-device predictor that learns your vocabulary, and security-first
 credential handling with end-to-end-encrypted sync.
 
-> The name **neotilde** is *neo* + *tilde* — the shell's home `~`, made new. It's
-> the symbol every terminal user types to go home, reimagined for touch.
+> The name **semicolyn** is a respell of *semicolon* — the `;` that chains one
+> shell command into the next. The everyday punctuation of the command line,
+> reimagined for touch.
 
 **Status:** design complete; a connect-and-get-a-shell MVP builds for the iOS
 Simulator (not yet device-installable — needs Apple Developer signing). The
@@ -40,9 +41,9 @@ validated by macOS CI.
 
 ## Architecture
 
-A Rust SSH core (`crates/neotilde-ssh-core`, russh) is exposed to Swift through a
+A Rust SSH core (`crates/semicolyn-ssh-core`, russh) is exposed to Swift through a
 UniFFI XCFramework. The Swift splits into a **platform-agnostic, Linux-tested**
-tier (`Sources/NeotildeKit/` — model, storage, tmux control-mode, predictor) and
+tier (`Sources/SemicolynKit/` — model, storage, tmux control-mode, predictor) and
 a **thin Apple-gated** tier (`App/` — SwiftUI, SwiftTerm, Keychain/SE, CloudKit),
 so the maximum surface stays testable off-Mac. Full diagram, rationale, repo
 layout, and the spec/plan map: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
@@ -54,9 +55,9 @@ Mac required:
 
 ```bash
 docker compose build dev
-docker compose run --rm dev swift test                 # NeotildeKit + SeedKit
+docker compose run --rm dev swift test                 # SemicolynKit + SeedKit
 docker compose up -d sshd sshd-legacy                   # SSH fixtures for integration tests
-docker compose run --rm dev cargo test -p neotilde-ssh-core
+docker compose run --rm dev cargo test -p semicolyn-ssh-core
 ```
 
 The Apple-gated tier (XCFramework + iOS app) needs macOS + Xcode and is also run
@@ -69,7 +70,7 @@ Early-stage solo project with a locked, spec-driven design. To get oriented:
 read this README, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 [docs/brainstorming-decisions.md](docs/brainstorming-decisions.md), then the
 relevant spec before any code. The platform-agnostic tier (`crates/`,
-`Sources/NeotildeKit/`) is fully buildable and testable on Linux via the
+`Sources/SemicolynKit/`) is fully buildable and testable on Linux via the
 quickstart above — start there. Build/test gotchas and conventions are in
 [CLAUDE.md](CLAUDE.md). Please open an issue before a large PR so it can be
 checked against the locked specs.

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 // MARK: - Connection section
 
@@ -557,24 +557,24 @@ extension HostEditorView {
     }
 }
 
-// MARK: - Neotilde behavior section
+// MARK: - Semicolyn behavior section
 
 extension HostEditorView {
 
-    /// Neotilde behavior section: predictor incognito and tmux control mode toggles.
-    /// Collapsed by default; auto-expands on edit when `neotilde` is explicitly configured.
-    var neotildeSection: some View {
-        DisclosureGroup(isExpanded: $neotildeExpanded) {
+    /// Semicolyn behavior section: predictor incognito and tmux control mode toggles.
+    /// Collapsed by default; auto-expands on edit when `semicolyn` is explicitly configured.
+    var semicolynSection: some View {
+        DisclosureGroup(isExpanded: $semicolynExpanded) {
 
             // Predictor incognito — default false per resolution
             Toggle(isOn: Binding(
-                get: { vm.host.neotilde.value?.predictor?.incognito ?? false },
+                get: { vm.host.semicolyn.value?.predictor?.incognito ?? false },
                 set: { newIncognito in
-                    var cfg = vm.host.neotilde.value ?? NeotildeConfig()
+                    var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
                     var predictor = cfg.predictor ?? PredictorConfig()
                     predictor.incognito = newIncognito
                     cfg.predictor = predictor
-                    vm.host.neotilde = .explicit(cfg)
+                    vm.host.semicolyn = .explicit(cfg)
                     vm.revalidate()
                 }
             )) {
@@ -586,17 +586,17 @@ extension HostEditorView {
                         .foregroundStyle(Color(theme.text.secondary))
                 }
             }
-            .onChange(of: vm.host.neotilde) { _, _ in vm.revalidate() }
+            .onChange(of: vm.host.semicolyn) { _, _ in vm.revalidate() }
 
             // Tmux control mode — default true per resolution
             Toggle(isOn: Binding(
-                get: { vm.host.neotilde.value?.tmux?.attemptControlMode ?? true },
+                get: { vm.host.semicolyn.value?.tmux?.attemptControlMode ?? true },
                 set: { newAttempt in
-                    var cfg = vm.host.neotilde.value ?? NeotildeConfig()
+                    var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
                     var tmux = cfg.tmux ?? TmuxConfig()
                     tmux.attemptControlMode = newAttempt
                     cfg.tmux = tmux
-                    vm.host.neotilde = .explicit(cfg)
+                    vm.host.semicolyn = .explicit(cfg)
                     vm.revalidate()
                 }
             )) {
@@ -611,13 +611,13 @@ extension HostEditorView {
 
             // OSC 52 clipboard — default true per resolution
             Toggle(isOn: Binding(
-                get: { vm.host.neotilde.value?.osc52?.allow ?? true },
+                get: { vm.host.semicolyn.value?.osc52?.allow ?? true },
                 set: { newAllow in
-                    var cfg = vm.host.neotilde.value ?? NeotildeConfig()
+                    var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
                     var osc52 = cfg.osc52 ?? Osc52Config()
                     osc52.allow = newAllow
                     cfg.osc52 = osc52
-                    vm.host.neotilde = .explicit(cfg)
+                    vm.host.semicolyn = .explicit(cfg)
                     vm.revalidate()
                 }
             )) {
@@ -629,7 +629,7 @@ extension HostEditorView {
             }
 
         } label: {
-            Text("Neotilde behavior")
+            Text("Semicolyn behavior")
                 .font(.headline)
                 .foregroundStyle(Color(theme.text.primary))
         }
@@ -732,7 +732,7 @@ private struct JumpHopRow: View {
     @ViewBuilder
     private var refModeContent: some View {
         // TODO(perf): allHosts() is re-fetched on every render; cache in the view model and observe store changes.
-        let savedHosts: [NeotildeKit.Host] = (try? AppStores.shared.hosts.allHosts())
+        let savedHosts: [SemicolynKit.Host] = (try? AppStores.shared.hosts.allHosts())
             ?? []
         let eligible = savedHosts.filter { $0.id != editingHostId }
 

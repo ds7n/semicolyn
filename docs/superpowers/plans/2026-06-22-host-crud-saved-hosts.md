@@ -4,15 +4,15 @@
 
 **Goal:** Turn the host records Plan 1 persists into a usable library: an empty-state onboarding screen, a saved-host list (connect / edit / delete), the single-scrollable host editor (create + edit), the Defaults editor, and an inline "pick an existing identity" sub-flow — all backed by the `HostStore`/`HostKeyStore` wired in Plan 1.
 
-**Architecture:** The spec's save-time validation rules become a pure, Linux-tested `HostFormValidation` over a `HostDraft` value type in `NeotildeKit` (cycle, duplicate-label, required fields, no-user, inline-jumphost, port-forward, stale passwordRef). The SwiftUI editor binds to that validator; the list and editor read/write through `AppStores` (Plan 1). Connect-from-saved resolves the host's effective config via the Phase-2a resolution table and reuses Plan 1's `TofuHostKeyVerifier`.
+**Architecture:** The spec's save-time validation rules become a pure, Linux-tested `HostFormValidation` over a `HostDraft` value type in `SemicolynKit` (cycle, duplicate-label, required fields, no-user, inline-jumphost, port-forward, stale passwordRef). The SwiftUI editor binds to that validator; the list and editor read/write through `AppStores` (Plan 1). Connect-from-saved resolves the host's effective config via the Phase-2a resolution table and reuses Plan 1's `TofuHostKeyVerifier`.
 
-**Tech Stack:** Swift 6 (`NeotildeKit`, the validation core — Linux-tested), Swift 5 app target (SwiftUI), XCTest, the Phase-2a storage core + Plan-1 trust wiring. Linux loop: `docker compose run --rm dev swift test`. App target compiles only in the macOS CI job.
+**Tech Stack:** Swift 6 (`SemicolynKit`, the validation core — Linux-tested), Swift 5 app target (SwiftUI), XCTest, the Phase-2a storage core + Plan-1 trust wiring. Linux loop: `docker compose run --rm dev swift test`. App target compiles only in the macOS CI job.
 
 ## Global Constraints
 
 - Every source/test file begins with `// SPDX-FileCopyrightText: 2026 True Positive LLC` then `// SPDX-License-Identifier: GPL-3.0-only`.
-- Placement: validation logic in `Sources/NeotildeKit/Model/`, Linux tests in `Tests/NeotildeKitTests/`; app UI in `App/`.
-- **NeotildeKit stays Linux-clean.** The validation core has no SwiftUI/Apple deps and is fully Linux-tested. SwiftUI (`App/`) compiles only in macOS CI; absence of XCTest for views is expected, not a defect.
+- Placement: validation logic in `Sources/SemicolynKit/Model/`, Linux tests in `Tests/SemicolynKitTests/`; app UI in `App/`.
+- **SemicolynKit stays Linux-clean.** The validation core has no SwiftUI/Apple deps and is fully Linux-tested. SwiftUI (`App/`) compiles only in macOS CI; absence of XCTest for views is expected, not a defect.
 - **Spec of record:** `docs/superpowers/specs/2026-06-15-host-crud-design.md` (form, validation, delete, identity sub-flow, Defaults editor) + `docs/superpowers/specs/2026-06-15-host-config-model-design.md` (schema, resolution, invariants) + `docs/superpowers/specs/2026-06-16-first-host-onboarding-design.md` (empty state). Mock-up: `mockups/specs/host-crud.html`.
 - Validation severities are **load-bearing** (host-crud-design §Validation): **hard-block** = cycle, inline-jumphost empty hostName, port-forward missing field, stale passwordRef; **soft-block** (warn, allow save) = duplicate label, no user set. Required (Save disabled) = `label`, `hostName` non-empty.
 - Reuse existing logic — do NOT reimplement: `hasCycle` (`Resolution.swift`), the `resolve*` table (`Resolution.swift`), `HostStore.saveHost/deleteHost/hostsUsing` invariants (`HostStore.swift`). The validator runs the spec's checks *before* `saveHost`; `HostStore` remains the backstop.
@@ -42,8 +42,8 @@
 The editable form state as a value type, plus the spec's save-time validation as a pure function. This is the Linux-testable heart; the SwiftUI form is a thin binding over it.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Model/HostFormValidation.swift`
-- Test: `Tests/NeotildeKitTests/HostFormValidationTests.swift`
+- Create: `Sources/SemicolynKit/Model/HostFormValidation.swift`
+- Test: `Tests/SemicolynKitTests/HostFormValidationTests.swift`
 
 **Interfaces:**
 - Consumes: `Host`, `Defaults`, `JumpHop`, `LocalForward`/`RemoteForward`/`DynamicForward`, `hasCycle` (`Resolution.swift`), `HostStore`-shaped inputs (passed as plain arrays — the validator is store-agnostic).
@@ -87,11 +87,11 @@ The editable form state as a value type, plus the spec's save-time validation as
 - [ ] **Step 1: Write the failing test** (EP + BVA + each rule, good AND bad)
 
 ```swift
-// Tests/NeotildeKitTests/HostFormValidationTests.swift
+// Tests/SemicolynKitTests/HostFormValidationTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class HostFormValidationTests: XCTestCase {
     private func h(_ label: String = "prod", _ id: UUID = UUID(),
@@ -177,7 +177,7 @@ Replace `ConnectView` as the app root with a host **library**: the first-host em
 
 **Files:**
 - Create: `App/HostListView.swift`, `App/HostListViewModel.swift`
-- Modify: `App/NeotildeApp.swift` (root → `HostListView`)
+- Modify: `App/SemicolynApp.swift` (root → `HostListView`)
 
 **Interfaces:**
 - Consumes: `AppStores.shared.hosts` (`allHosts`/`deleteHost`), `Host`, `StoreError.jumpHostInUse`, the connect flow (Task 8 wires connect-from-saved; until then the row's connect can reuse the existing `ConnectionViewModel`).
@@ -199,7 +199,7 @@ Replace `ConnectView` as the app root with a host **library**: the first-host em
 
 - [ ] **Step 1:** Write `HostListViewModel.swift` (reload, delete with `StoreError.jumpHostInUse` → `deleteError`).
 - [ ] **Step 2:** Write `HostListView.swift` (empty state + list + swipe actions + a `.sheet`/navigation to the editor from Task 3).
-- [ ] **Step 3:** Point `NeotildeApp` root at `HostListView`.
+- [ ] **Step 3:** Point `SemicolynApp` root at `HostListView`.
 - [ ] **Step 4:** macOS CI compile gate (push). Manual: empty state shows on first launch; after creating a host it lists; swipe-delete a referenced jumphost shows the refusal.
 - [ ] **Step 5:** Commit — `feat: host library — empty state + saved-host list`
 
@@ -211,7 +211,7 @@ The single scrollable editor (create + edit), starting with the always-expanded 
 
 **Files:**
 - Create: `App/HostEditorView.swift`, `App/HostEditorViewModel.swift`
-- Test: `Tests/NeotildeKitTests/HostEditorBindingTests.swift` (only if a Linux-testable binding helper is extracted; otherwise none)
+- Test: `Tests/SemicolynKitTests/HostEditorBindingTests.swift` (only if a Linux-testable binding helper is extracted; otherwise none)
 
 **Interfaces:**
 - Consumes: `HostFormValidation` (Task 1), `AppStores.shared.hosts`, `Host`, `Inherited<T>`, `Identity` (for the Auth pill row).
@@ -261,7 +261,7 @@ Add the three collapsed Tier-2/list sections, each auto-expanding on edit iff it
 
 ---
 
-### Task 5: Host editor — Mosh + Tailscale + Neotilde + Delete (App)
+### Task 5: Host editor — Mosh + Tailscale + Semicolyn + Delete (App)
 
 The remaining namespaced-extension sections, the conditional caveats, and the edit-mode Delete row.
 
@@ -269,13 +269,13 @@ The remaining namespaced-extension sections, the conditional caveats, and the ed
 
 - Section **Mosh**: `mosh.enabled` master toggle reveals `serverPath`, `udpPortRange`, `predictionMode`. When `enabled`, Connection's `serverAliveInterval`/`serverAliveCountMax` render disabled with the caveat *"Mosh has its own keepalive."* (host-crud-design §Conditional visibility).
 - Section **Tailscale**: `tailscale.required` toggle reveals `tailnet`; caveat banner when required.
-- Section **Neotilde behavior**: `neotilde.predictor.incognito`, `neotilde.tmux.attemptControlMode` toggles.
+- Section **Semicolyn behavior**: `semicolyn.predictor.incognito`, `semicolyn.tmux.attemptControlMode` toggles.
 - **Delete host** row (edit mode only): destructive; confirmation sheet *"Delete '<label>'?"*; routes through `HostStore.deleteHost` → on `StoreError.jumpHostInUse` shows the refused-if-referenced banner with tappable referrer labels (host-crud-design §Delete).
 
 - [ ] **Step 1:** Add the three sections + the conditional disabled/caveat behavior.
 - [ ] **Step 2:** Add the Delete row + confirmation sheet + refusal handling.
 - [ ] **Step 3:** macOS CI compile + manual: enabling Mosh greys the keepalive rows; deleting a referenced host is refused.
-- [ ] **Step 4:** Commit — `feat: host editor — Mosh, Tailscale, Neotilde sections + delete`
+- [ ] **Step 4:** Commit — `feat: host editor — Mosh, Tailscale, Semicolyn sections + delete`
 
 ---
 

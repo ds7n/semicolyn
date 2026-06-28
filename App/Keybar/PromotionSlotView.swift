@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// A context-promoted slot: bronze fill, primary char on tap, optional swipe
 /// secondaries (context-detection spec "Promoted slot visual").

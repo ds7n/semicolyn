@@ -4,25 +4,25 @@
 
 **Goal:** Make **Neon Midnight** (`#FF6F5E` coral accent on a `#07090E` blue-near-black night) the default theme, keeping Bell-bronze as a switchable alternate in the registry.
 
-**Architecture:** Add a new `Theme.neonMidnight` value (new file mirroring `BellBronzeTheme.swift`) in `NeotildeKit`, flip the registry order and the SwiftUI/App default to it, and keep `Theme.bellBronze`. No token *structure* changes — only values + a default switch. Glow stays confined to the existing `BellHaloView` (bell-only); no persistent bloom is added.
+**Architecture:** Add a new `Theme.neonMidnight` value (new file mirroring `BellBronzeTheme.swift`) in `SemicolynKit`, flip the registry order and the SwiftUI/App default to it, and keep `Theme.bellBronze`. No token *structure* changes — only values + a default switch. Glow stays confined to the existing `BellHaloView` (bell-only); no persistent bloom is added.
 
-**Tech Stack:** Swift 6 (`NeotildeKit`, Linux-tested via Docker) / Swift 5 (App target, macOS-CI only), XCTest, the existing `Theme` semantic-token system.
+**Tech Stack:** Swift 6 (`SemicolynKit`, Linux-tested via Docker) / Swift 5 (App target, macOS-CI only), XCTest, the existing `Theme` semantic-token system.
 
 ## Global Constraints
 
 - Spec: `docs/superpowers/specs/2026-06-25-neon-midnight-theme-design.md` (token table is authoritative).
-- **`NeotildeKit` is Swift-6 + Linux-clean**; theme value types are `Sendable`, no UIKit/SwiftUI in the palette file. Run tests via `docker compose run --rm dev swift test`.
-- **App / SwiftUI-gated code is macOS-CI-verified only.** `Sources/NeotildeKit/Theme/ThemeEnvironment.swift` is wrapped in `#if canImport(SwiftUI)` → NOT compiled on Linux; `App/` is macOS-only. So `ThemeKey.defaultValue` and `App/TerminalScreen.swift` changes are validated by the macOS CI job, not Linux `swift test`. The **Linux proxy** for "neon is the default" is the `Theme.all` ordering test (Task 1).
+- **`SemicolynKit` is Swift-6 + Linux-clean**; theme value types are `Sendable`, no UIKit/SwiftUI in the palette file. Run tests via `docker compose run --rm dev swift test`.
+- **App / SwiftUI-gated code is macOS-CI-verified only.** `Sources/SemicolynKit/Theme/ThemeEnvironment.swift` is wrapped in `#if canImport(SwiftUI)` → NOT compiled on Linux; `App/` is macOS-only. So `ThemeKey.defaultValue` and `App/TerminalScreen.swift` changes are validated by the macOS CI job, not Linux `swift test`. The **Linux proxy** for "neon is the default" is the `Theme.all` ordering test (Task 1).
 - **Exact token values** (verbatim from the spec): accent `#FF6F5E` / hi `#FFB7A6`; surface bg/panel/panelHigh/line `#07090E`/`#0E1118`/`#161A24`/`#232A3A`; text `#E8EBF0`/`#8A93A3`/`#8A93A3`/`#05070B`; success `#5FB0A2`; warning/degraded `#F5A524`; broken `#E5455E`; bell.edge `#FF6F5E`; focus `#FF6F5E`/`#232A3A`; keybar slotBg `#0E1118`, promoted/armed/locked = accent @ `0.12`/`0.20`/`0.30`; predictor `#0E1118`/`#161A24`/`#E8EBF0`; banner amberBg `#F5A524@0.15`, redBg `#E5455E@0.15`, neutralBg `#0E1118`; terminal bg/fg `#05070B`/`#CFD6E4`.
 - **error must not equal accent** (the coral-vs-red separation): `state.broken (#E5455E) ≠ accent.primary (#FF6F5E)`.
 - Conventional commits; commit after each green step. Do NOT add glow tokens or bloom to focus/cursor/keybar.
 
 ## File Structure
 
-- `Sources/NeotildeKit/Theme/NeonMidnightTheme.swift` *(create)* — file-private palette constants + `extension Theme { public static let neonMidnight }`. Mirrors `BellBronzeTheme.swift`.
-- `Sources/NeotildeKit/Theme/BellBronzeTheme.swift` *(modify)* — `Theme.all = [.neonMidnight, .bellBronze]` (line 41). Bell-bronze value kept unchanged.
-- `Tests/NeotildeKitTests/ThemeTests.swift` *(modify)* — replace the v1 registry test; add `neonMidnight` value assertions. Keep the bellBronze assertions.
-- `Sources/NeotildeKit/Theme/ThemeEnvironment.swift` *(modify, line 7)* — `ThemeKey.defaultValue = .neonMidnight` (SwiftUI-gated → macOS CI).
+- `Sources/SemicolynKit/Theme/NeonMidnightTheme.swift` *(create)* — file-private palette constants + `extension Theme { public static let neonMidnight }`. Mirrors `BellBronzeTheme.swift`.
+- `Sources/SemicolynKit/Theme/BellBronzeTheme.swift` *(modify)* — `Theme.all = [.neonMidnight, .bellBronze]` (line 41). Bell-bronze value kept unchanged.
+- `Tests/SemicolynKitTests/ThemeTests.swift` *(modify)* — replace the v1 registry test; add `neonMidnight` value assertions. Keep the bellBronze assertions.
+- `Sources/SemicolynKit/Theme/ThemeEnvironment.swift` *(modify, line 7)* — `ThemeKey.defaultValue = .neonMidnight` (SwiftUI-gated → macOS CI).
 - `App/TerminalScreen.swift` *(modify, line 23)* — `var theme: Theme = Theme.neonMidnight` (App → macOS CI). `TmuxPaneContainer.swift` needs **no change** (its `theme` is a required param fed by `SessionView`'s `@Environment(\.theme)`).
 - `mockups/specs/design-system.html` + `docs/brainstorming-decisions.md` *(modify)* — reflect Neon Midnight as default; note Bell-bronze retained.
 
@@ -31,17 +31,17 @@
 ### Task 1: `Theme.neonMidnight` value + registry + tests (Linux)
 
 **Files:**
-- Create: `Sources/NeotildeKit/Theme/NeonMidnightTheme.swift`
-- Modify: `Sources/NeotildeKit/Theme/BellBronzeTheme.swift:41`
-- Test: `Tests/NeotildeKitTests/ThemeTests.swift`
+- Create: `Sources/SemicolynKit/Theme/NeonMidnightTheme.swift`
+- Modify: `Sources/SemicolynKit/Theme/BellBronzeTheme.swift:41`
+- Test: `Tests/SemicolynKitTests/ThemeTests.swift`
 
 **Interfaces:**
-- Consumes: `Theme`, `ThemeColor` (existing, `Sources/NeotildeKit/Theme/Theme.swift`); `ThemeColor.alpha(_:)`.
+- Consumes: `Theme`, `ThemeColor` (existing, `Sources/SemicolynKit/Theme/Theme.swift`); `ThemeColor.alpha(_:)`.
 - Produces: `Theme.neonMidnight: Theme`; updated `Theme.all: [Theme] = [.neonMidnight, .bellBronze]`.
 
 - [ ] **Step 1: Write the failing tests**
 
-In `Tests/NeotildeKitTests/ThemeTests.swift`, **replace** `testRegistryContainsOnlyBellBronzeInV1` with the registry test below and **add** the `neonMidnight` tests. Keep every existing `bellBronze`/`rgba` test as-is.
+In `Tests/SemicolynKitTests/ThemeTests.swift`, **replace** `testRegistryContainsOnlyBellBronzeInV1` with the registry test below and **add** the `neonMidnight` tests. Keep every existing `bellBronze`/`rgba` test as-is.
 
 ```swift
 func testRegistryHasNeonMidnightDefaultThenBellBronze() {
@@ -88,7 +88,7 @@ Expected: FAIL — `type 'Theme' has no member 'neonMidnight'` (and the registry
 
 - [ ] **Step 3: Create the theme value**
 
-Create `Sources/NeotildeKit/Theme/NeonMidnightTheme.swift`:
+Create `Sources/SemicolynKit/Theme/NeonMidnightTheme.swift`:
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
@@ -139,7 +139,7 @@ extension Theme {
 
 - [ ] **Step 4: Flip the registry**
 
-In `Sources/NeotildeKit/Theme/BellBronzeTheme.swift`, change line 41 from:
+In `Sources/SemicolynKit/Theme/BellBronzeTheme.swift`, change line 41 from:
 
 ```swift
     public static let all: [Theme] = [.bellBronze]
@@ -159,12 +159,12 @@ Expected: PASS — all new `neonMidnight` tests + the registry test, and the ret
 - [ ] **Step 6: Run the full suite (no regressions)**
 
 Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test`
-Expected: PASS — full `NeotildeKit` suite green.
+Expected: PASS — full `SemicolynKit` suite green.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Theme/NeonMidnightTheme.swift Sources/NeotildeKit/Theme/BellBronzeTheme.swift Tests/NeotildeKitTests/ThemeTests.swift
+git add Sources/SemicolynKit/Theme/NeonMidnightTheme.swift Sources/SemicolynKit/Theme/BellBronzeTheme.swift Tests/SemicolynKitTests/ThemeTests.swift
 git commit -m "feat(theme): add Neon Midnight palette; make it the default registry entry"
 ```
 
@@ -173,7 +173,7 @@ git commit -m "feat(theme): add Neon Midnight palette; make it the default regis
 ### Task 2: Flip the live default + refresh docs (macOS CI + docs)
 
 **Files:**
-- Modify: `Sources/NeotildeKit/Theme/ThemeEnvironment.swift:7`
+- Modify: `Sources/SemicolynKit/Theme/ThemeEnvironment.swift:7`
 - Modify: `App/TerminalScreen.swift:23`
 - Modify: `mockups/specs/design-system.html`, `docs/brainstorming-decisions.md`
 
@@ -184,7 +184,7 @@ git commit -m "feat(theme): add Neon Midnight palette; make it the default regis
 
 - [ ] **Step 1: Flip the SwiftUI environment default**
 
-In `Sources/NeotildeKit/Theme/ThemeEnvironment.swift`, change line 7 from `static let defaultValue: Theme = .bellBronze` to:
+In `Sources/SemicolynKit/Theme/ThemeEnvironment.swift`, change line 7 from `static let defaultValue: Theme = .bellBronze` to:
 
 ```swift
     static let defaultValue: Theme = .neonMidnight
@@ -211,7 +211,7 @@ In `docs/brainstorming-decisions.md`, update the `Brand palette` row to: **"Neon
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Theme/ThemeEnvironment.swift App/TerminalScreen.swift mockups/specs/design-system.html docs/brainstorming-decisions.md
+git add Sources/SemicolynKit/Theme/ThemeEnvironment.swift App/TerminalScreen.swift mockups/specs/design-system.html docs/brainstorming-decisions.md
 git commit -m "feat(theme): make Neon Midnight the live default; refresh design-system + brand docs"
 ```
 
@@ -226,7 +226,7 @@ Open/refresh the PR; confirm the `macos` job is **success** — it's the only va
 
 ## Verification
 
-- **Linux (primary, free/local):** `docker compose run --rm dev swift test` — full `NeotildeKit` suite green, including the new `neonMidnight` value + registry-order tests and the retained bellBronze tests. The `state.broken ≠ accent.primary` assertion guards the coral-vs-error separation.
+- **Linux (primary, free/local):** `docker compose run --rm dev swift test` — full `SemicolynKit` suite green, including the new `neonMidnight` value + registry-order tests and the retained bellBronze tests. The `state.broken ≠ accent.primary` assertion guards the coral-vs-error separation.
 - **macOS / CI:** the `macos` job builds + renders the app with Neon Midnight as the live default (validates the SwiftUI/App default flips that Linux can't compile). Simulator spot-check: coral-on-deep-blue at rest, bell-only glow.
 - **Glow guardrail:** `git grep -n 'shadow' App/` shows glow/bloom only in `App/BellHaloView.swift` (the bell) — no bloom added to focus border, cursor, or keybar.
 - **Registry sanity:** `Theme.all.first == .neonMidnight` and `.bellBronze` still present.

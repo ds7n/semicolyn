@@ -7,7 +7,7 @@
 
 **Goal:** Stand up the keyboard accessory bar with its core input slots — Esc · Pad · Modifier · Tab + default symbol slots — so a user can send Esc, arrows, Ctrl/Alt/Shift chords, Tab, and the convenience symbols from the bar.
 
-**Architecture:** Push **all input logic into pure, Linux-tested NeotildeKit**: a keystroke→bytes codec (`KeyEncoding`), a modifier arming state machine (`ModifierState`, Ctrl double-tap-lock per the function-keys spec), a default-layout model (`KeybarLayout`), and a **`KeybarInputRouter`** that ties them together and emits bytes through an injected `send` closure. The App tier (`App/`) then renders slots from the layout, recognizes gestures, and forwards them to the router — a thin, compile-only-on-macOS wiring layer.
+**Architecture:** Push **all input logic into pure, Linux-tested SemicolynKit**: a keystroke→bytes codec (`KeyEncoding`), a modifier arming state machine (`ModifierState`, Ctrl double-tap-lock per the function-keys spec), a default-layout model (`KeybarLayout`), and a **`KeybarInputRouter`** that ties them together and emits bytes through an injected `send` closure. The App tier (`App/`) then renders slots from the layout, recognizes gestures, and forwards them to the router — a thin, compile-only-on-macOS wiring layer.
 
 **Tech Stack:** Swift 6 strict concurrency, XCTest on the Linux fast loop (the four pure cores); SwiftUI + SwiftTerm + the existing `vm.sendTerminalInput` byte path for the App tier (macOS-CI-build-validated only).
 
@@ -19,7 +19,7 @@
 
 ## Global Constraints
 
-- **Two tiers, two test surfaces.** Pure logic in `Sources/NeotildeKit/` (XCTest, no `import UIKit`/`SwiftUI`/`CryptoKit`, `Sendable` where it crosses actors). App code in `App/` validated only by macOS CI.
+- **Two tiers, two test surfaces.** Pure logic in `Sources/SemicolynKit/` (XCTest, no `import UIKit`/`SwiftUI`/`CryptoKit`, `Sendable` where it crosses actors). App code in `App/` validated only by macOS CI.
 - **Specs are locked:** `docs/superpowers/specs/2026-06-15-keybar-customization-design.md` (layout), `docs/superpowers/specs/2026-06-14-function-keys-design.md` (Ctrl double-tap-lock companion change).
 - **Default locked-left composition (verbatim):** `Esc pill · Pad · Modifier · Tab`. **Default scroll convenience symbols (verbatim):** `/` `|` `~` `-` `(` `)`.
 - **Modifier semantics (function-keys spec):** Tap = arm Ctrl (one-shot); **Double-tap = lock Ctrl**; tap while Ctrl locked = unlock; Swipe-up = arm Alt (one-shot, no lock); Swipe-down = arm Shift (one-shot, no lock). Armed one-shots clear after the next keystroke; a lock persists.
@@ -32,11 +32,11 @@
 
 ## File Structure
 
-**Created (NeotildeKit, Linux-tested):**
-- `Sources/NeotildeKit/Keybar/KeyEncoding.swift` — `KeyInput`, `ArrowDirection`, `KeyModifiers`, `encodeKey(_:modifiers:applicationCursorKeys:)`.
-- `Sources/NeotildeKit/Keybar/ModifierState.swift` — `CtrlState`, `ModifierState` arming SM.
-- `Sources/NeotildeKit/Keybar/KeybarLayout.swift` — `KeybarSlot`, `KeybarLayout` (+ `.default`).
-- `Sources/NeotildeKit/Keybar/KeybarInputRouter.swift` — ties the above to gesture events, emits bytes.
+**Created (SemicolynKit, Linux-tested):**
+- `Sources/SemicolynKit/Keybar/KeyEncoding.swift` — `KeyInput`, `ArrowDirection`, `KeyModifiers`, `encodeKey(_:modifiers:applicationCursorKeys:)`.
+- `Sources/SemicolynKit/Keybar/ModifierState.swift` — `CtrlState`, `ModifierState` arming SM.
+- `Sources/SemicolynKit/Keybar/KeybarLayout.swift` — `KeybarSlot`, `KeybarLayout` (+ `.default`).
+- `Sources/SemicolynKit/Keybar/KeybarInputRouter.swift` — ties the above to gesture events, emits bytes.
 
 **Created (App, macOS-CI-only):**
 - `App/Keybar/KeybarView.swift` — renders locked + scroll regions from `KeybarLayout`.
@@ -56,7 +56,7 @@
 - [ ] **Step 0: Branch**
 
 ```bash
-cd /home/djmyers/proj/truepositive/neotilde
+cd /home/djmyers/proj/truepositive/semicolyn
 git checkout -b feat/phase-4a-keybar-mvp
 ```
 
@@ -65,8 +65,8 @@ git checkout -b feat/phase-4a-keybar-mvp
 ### Task 1: KeyEncoding — keystroke → bytes codec
 
 **Files:**
-- Create: `Sources/NeotildeKit/Keybar/KeyEncoding.swift`
-- Test: `Tests/NeotildeKitTests/KeyEncodingTests.swift`
+- Create: `Sources/SemicolynKit/Keybar/KeyEncoding.swift`
+- Test: `Tests/SemicolynKitTests/KeyEncodingTests.swift`
 
 **Interfaces:**
 - Produces:
@@ -76,13 +76,13 @@ git checkout -b feat/phase-4a-keybar-mvp
   - `func encodeKey(_ key: KeyInput, modifiers: KeyModifiers, applicationCursorKeys: Bool) -> [UInt8]`
 - Encoding rules (xterm conventions): Esc→`1b`; Tab→`09` (Shift+Tab→`ESC [ Z`); Enter→`0d`; Backspace→`7f`; arrows→`ESC [ {A,B,C,D}` normal / `ESC O {A,B,C,D}` application (up=A, down=B, right=C, left=D); `.char` with Control→the control byte (`a`–`z`→1–26, `@A–Z[\]^_`→`&0x1f`, space/`@`→0, `?`→`7f`, else the plain char); Shift uppercases a letter; Option(meta) prepends `ESC` to a `.char` result. (MVP: Option/Shift/Control do not modify arrows; Option does not prefix Esc/arrows — documented.)
 
-- [ ] **Step 1: Write the failing tests** (`Tests/NeotildeKitTests/KeyEncodingTests.swift`)
+- [ ] **Step 1: Write the failing tests** (`Tests/SemicolynKitTests/KeyEncodingTests.swift`)
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class KeyEncodingTests: XCTestCase {
     private func enc(_ k: KeyInput, _ m: KeyModifiers = .init(), app: Bool = false) -> [UInt8] {
@@ -220,7 +220,7 @@ Expected: PASS (8 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Keybar/KeyEncoding.swift Tests/NeotildeKitTests/KeyEncodingTests.swift
+git add Sources/SemicolynKit/Keybar/KeyEncoding.swift Tests/SemicolynKitTests/KeyEncodingTests.swift
 git commit -m "feat(keybar): keystroke→bytes codec (control/meta/arrows/cursor-key mode)"
 ```
 
@@ -229,8 +229,8 @@ git commit -m "feat(keybar): keystroke→bytes codec (control/meta/arrows/cursor
 ### Task 2: ModifierState — arming state machine
 
 **Files:**
-- Create: `Sources/NeotildeKit/Keybar/ModifierState.swift`
-- Test: `Tests/NeotildeKitTests/ModifierStateTests.swift`
+- Create: `Sources/SemicolynKit/Keybar/ModifierState.swift`
+- Test: `Tests/SemicolynKitTests/ModifierStateTests.swift`
 
 **Interfaces:**
 - Consumes: `KeyModifiers` (Task 1).
@@ -238,13 +238,13 @@ git commit -m "feat(keybar): keystroke→bytes codec (control/meta/arrows/cursor
   - `enum CtrlState: Equatable, Sendable { case off, armed, locked }`
   - `struct ModifierState: Equatable, Sendable` with `private(set) var ctrl: CtrlState`, `private(set) var altArmed: Bool`, `private(set) var shiftArmed: Bool`, and mutating methods `tapCtrl()` (off→armed, armed→off, locked→off), `lockCtrl()` (→locked), `armAlt()` (one-shot), `armShift()` (one-shot), `func current() -> KeyModifiers`, `mutating func consumeAfterKeystroke()` (armed ctrl→off, alt/shift→off, locked ctrl persists).
 
-- [ ] **Step 1: Write the failing tests** (`Tests/NeotildeKitTests/ModifierStateTests.swift`)
+- [ ] **Step 1: Write the failing tests** (`Tests/SemicolynKitTests/ModifierStateTests.swift`)
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class ModifierStateTests: XCTestCase {
     func testTapArmsCtrlOneShotThenClearsOnConsume() {
@@ -367,7 +367,7 @@ Expected: PASS (6 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Keybar/ModifierState.swift Tests/NeotildeKitTests/ModifierStateTests.swift
+git add Sources/SemicolynKit/Keybar/ModifierState.swift Tests/SemicolynKitTests/ModifierStateTests.swift
 git commit -m "feat(keybar): modifier arming state machine with Ctrl double-tap-lock"
 ```
 
@@ -376,8 +376,8 @@ git commit -m "feat(keybar): modifier arming state machine with Ctrl double-tap-
 ### Task 3: KeybarLayout — default slot model
 
 **Files:**
-- Create: `Sources/NeotildeKit/Keybar/KeybarLayout.swift`
-- Test: `Tests/NeotildeKitTests/KeybarLayoutTests.swift`
+- Create: `Sources/SemicolynKit/Keybar/KeybarLayout.swift`
+- Test: `Tests/SemicolynKitTests/KeybarLayoutTests.swift`
 
 **Interfaces:**
 - Produces:
@@ -385,13 +385,13 @@ git commit -m "feat(keybar): modifier arming state machine with Ctrl double-tap-
   - `struct KeybarLayout: Equatable, Sendable { let locked: [KeybarSlot]; let scroll: [KeybarSlot]; init(locked:scroll:); static let `default`: KeybarLayout }`
   - `.default` = locked `[.escPill, .pad, .modifier, .tab]`, scroll `[.symbol("/"), .symbol("|"), .symbol("~"), .symbol("-"), .symbol("("), .symbol(")")]`.
 
-- [ ] **Step 1: Write the failing tests** (`Tests/NeotildeKitTests/KeybarLayoutTests.swift`)
+- [ ] **Step 1: Write the failing tests** (`Tests/SemicolynKitTests/KeybarLayoutTests.swift`)
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class KeybarLayoutTests: XCTestCase {
     func testDefaultLockedRegionIsEscPadModifierTab() {
@@ -458,7 +458,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Keybar/KeybarLayout.swift Tests/NeotildeKitTests/KeybarLayoutTests.swift
+git add Sources/SemicolynKit/Keybar/KeybarLayout.swift Tests/SemicolynKitTests/KeybarLayoutTests.swift
 git commit -m "feat(keybar): default keybar layout model (locked Esc·Pad·Modifier·Tab + symbols)"
 ```
 
@@ -467,8 +467,8 @@ git commit -m "feat(keybar): default keybar layout model (locked Esc·Pad·Modif
 ### Task 4: KeybarInputRouter — gesture events → bytes
 
 **Files:**
-- Create: `Sources/NeotildeKit/Keybar/KeybarInputRouter.swift`
-- Test: `Tests/NeotildeKitTests/KeybarInputRouterTests.swift`
+- Create: `Sources/SemicolynKit/Keybar/KeybarInputRouter.swift`
+- Test: `Tests/SemicolynKitTests/KeybarInputRouterTests.swift`
 
 **Interfaces:**
 - Consumes: `KeyInput`/`encodeKey` (Task 1), `ModifierState` (Task 2).
@@ -477,13 +477,13 @@ git commit -m "feat(keybar): default keybar layout model (locked Esc·Pad·Modif
   - Modifier-gesture methods mutate state only (no send). Key methods encode with the current modifiers + the live `applicationCursorKeys()`, call `send`, then `consumeAfterKeystroke()`.
 - Not `Sendable` — owned and called on the App main actor; tests drive it single-threaded.
 
-- [ ] **Step 1: Write the failing tests** (`Tests/NeotildeKitTests/KeybarInputRouterTests.swift`)
+- [ ] **Step 1: Write the failing tests** (`Tests/SemicolynKitTests/KeybarInputRouterTests.swift`)
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class KeybarInputRouterTests: XCTestCase {
     /// Captures bytes the router emits.
@@ -601,7 +601,7 @@ Expected: PASS (6 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Keybar/KeybarInputRouter.swift Tests/NeotildeKitTests/KeybarInputRouterTests.swift
+git add Sources/SemicolynKit/Keybar/KeybarInputRouter.swift Tests/SemicolynKitTests/KeybarInputRouterTests.swift
 git commit -m "feat(keybar): input router wiring modifier state + key codec to byte output"
 ```
 
@@ -692,7 +692,7 @@ git commit -m "feat(keybar): vm hooks — input router, pane zoom, window prev/n
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// Shared slot chrome: themed background + label, fixed min size.
 private struct SlotChrome<Label: View>: View {
@@ -798,7 +798,7 @@ struct PadView: View {
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// The keyboard accessory bar. Locked region renders fixed at the leading edge;
 /// the scroll region pans horizontally. 4a renders `KeybarLayout.default`;
@@ -862,7 +862,7 @@ Expected: `macos` job green (compiles the keybar views + vm hooks). `linux-rust`
 
 ## Wrap-up
 
-- [ ] **Full NeotildeKit suite green:** `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test` — all existing + the 4 new keybar suites pass.
+- [ ] **Full SemicolynKit suite green:** `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test` — all existing + the 4 new keybar suites pass.
 - [ ] **Update `TODO.md`** — Phase 4 row: note keybar MVP (mount + core input slots) landed; 4b–4e (promotions/Fn, predictor strip, customization, external keyboard) pending. Commit `docs: mark Phase 4a keybar MVP done`.
 - [ ] **Open PR** to `github` `main` (squash-merge). State plainly that interaction/visual verification is pending a Simulator/device run.
 

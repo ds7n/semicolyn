@@ -6,7 +6,7 @@
 
 ## Goal
 
-Lock the v1 SSH algorithm policy: which key-exchange, host-key, cipher, and MAC algorithms Neotilde will offer, how the user can broaden the set for legacy hosts, and what the maintenance cadence is.
+Lock the v1 SSH algorithm policy: which key-exchange, host-key, cipher, and MAC algorithms Semicolyn will offer, how the user can broaden the set for legacy hosts, and what the maintenance cadence is.
 
 ## Model — four tiers
 
@@ -67,7 +67,7 @@ The default modern set. Always offered. No user surface.
 
 ## Tier 2 — Legacy but allowed
 
-Deprecated but not catastrophically broken. Per-host toggle `neotilde.allowLegacyAlgorithms` (default `false`). When toggle is on, these are added to the negotiation list for that host. No per-connect warning.
+Deprecated but not catastrophically broken. Per-host toggle `semicolyn.allowLegacyAlgorithms` (default `false`). When toggle is on, these are added to the negotiation list for that host. No per-connect warning.
 
 - KEX: `diffie-hellman-group14-sha256`, `diffie-hellman-group-exchange-sha256`
 - Cipher: `aes256-cbc`, `aes192-cbc`, `aes128-cbc`
@@ -76,7 +76,7 @@ CBC has known padding-oracle attack history but stays workable when paired with 
 
 ## Tier 3 — Legacy & risky
 
-Cryptographically aged enough to warrant ongoing pressure to upgrade. Per-host toggle `neotilde.allowDeprecatedAlgorithms` (default `false`). When toggle is on, these are added to the negotiation list. **Every connection that negotiates a Tier 3 algorithm shows a warning** (UX below).
+Cryptographically aged enough to warrant ongoing pressure to upgrade. Per-host toggle `semicolyn.allowDeprecatedAlgorithms` (default `false`). When toggle is on, these are added to the negotiation list. **Every connection that negotiates a Tier 3 algorithm shows a warning** (UX below).
 
 - KEX: `diffie-hellman-group14-sha1`, `diffie-hellman-group-exchange-sha1`
 - Host key: `ssh-rsa` *(SHA-1 signature)*
@@ -93,11 +93,11 @@ Cryptographically dead. No toggle, no surface, no override path in v1.
 - Host key: `ssh-dss` *(DSA-1024)*
 - KEX: `diffie-hellman-group1-sha1` *(768-bit)*
 
-A user who genuinely needs to connect to a host that offers nothing else cannot do so from Neotilde. This is the floor.
+A user who genuinely needs to connect to a host that offers nothing else cannot do so from Semicolyn. This is the floor.
 
 ## User-facing toggles
 
-Two checkboxes in host CRUD under "Neotilde behavior":
+Two checkboxes in host CRUD under "Semicolyn behavior":
 
 ```
 [ ]  Allow legacy algorithms
@@ -109,7 +109,7 @@ Two checkboxes in host CRUD under "Neotilde behavior":
      connect. Only enable for hosts you cannot update.
 ```
 
-Both default off. Per-host. Surfaces in [[2026-06-15-host-crud-design]]'s "Neotilde behavior" section between the existing `neotilde.tmux.attemptControlMode` and the existing `neotilde.osc52.allow` toggles.
+Both default off. Per-host. Surfaces in [[2026-06-15-host-crud-design]]'s "Semicolyn behavior" section between the existing `semicolyn.tmux.attemptControlMode` and the existing `semicolyn.osc52.allow` toggles.
 
 ## Tier 3 warning UX
 
@@ -139,10 +139,10 @@ Negotiated algorithms:
 
 ## Schema additions
 
-In the `neotilde.*` extension namespace (per [[2026-06-15-host-config-model-design]]):
+In the `semicolyn.*` extension namespace (per [[2026-06-15-host-config-model-design]]):
 
 ```yaml
-neotilde:
+semicolyn:
   allowLegacyAlgorithms: false       # Tier 2
   allowDeprecatedAlgorithms: false   # Tier 3
 ```
@@ -162,8 +162,8 @@ The lists above are not write-once. Algorithm guidance evolves:
 
 **Review triggers** *(committed to here; no separate maintenance doc)*:
 
-1. **Every major OpenSSH release.** OpenSSH's default algorithm changes are a public signal — when they drop or add an algo from defaults, Neotilde's lists should be re-evaluated.
-2. **At every Neotilde major release** *(roughly: when the version's `.0` increments)*, a pass through this spec against current Mozilla SSH guidelines and the NIST SP 800-52 / SP 800-57 family.
+1. **Every major OpenSSH release.** OpenSSH's default algorithm changes are a public signal — when they drop or add an algo from defaults, Semicolyn's lists should be re-evaluated.
+2. **At every Semicolyn major release** *(roughly: when the version's `.0` increments)*, a pass through this spec against current Mozilla SSH guidelines and the NIST SP 800-52 / SP 800-57 family.
 3. **When a practical attack is published** against any currently-listed algorithm. Demote or remove on the next patch release.
 
 The reference sources:
@@ -179,7 +179,7 @@ The v1 SSH stack is **russh 0.61.2**. Three algorithms listed above are not yet
 implemented by russh and are **omitted from v1's offered set** (opportunistic
 omit, decided 2026-06-17). Each auto-enters its tier when russh gains support;
 no spec change is needed at that point — only adding the constant to
-`crates/neotilde-ssh-core/src/algorithms.rs`.
+`crates/semicolyn-ssh-core/src/algorithms.rs`.
 
 | Omitted algorithm | Tier | russh tracking |
 |---|---|---|
@@ -201,10 +201,10 @@ dh-group1) are not implemented by russh either, so excluding them is automatic.
 
 ## Cross-spec consequences
 
-- [[2026-06-15-host-config-model-design]] — schema gains `neotilde.allowLegacyAlgorithms` and `neotilde.allowDeprecatedAlgorithms`, both `bool`, default `false`, in the `neotilde.*` namespace.
-- [[2026-06-15-host-crud-design]] — "Neotilde behavior" section gains the two toggles with the caveat copy above.
+- [[2026-06-15-host-config-model-design]] — schema gains `semicolyn.allowLegacyAlgorithms` and `semicolyn.allowDeprecatedAlgorithms`, both `bool`, default `false`, in the `semicolyn.*` namespace.
+- [[2026-06-15-host-crud-design]] — "Semicolyn behavior" section gains the two toggles with the caveat copy above.
 - [[2026-06-16-banner-expanded-design]] — the amber template gets a third use case beyond reconnecting / high-latency: outdated-cryptography. Body content varies (algo list instead of latency stats) but visual shape unchanged.
-- [[2026-06-17-host-key-trust-design]] — the algorithm Neotilde accepts as a host key is now grounded by this spec's HostKey lists.
+- [[2026-06-17-host-key-trust-design]] — the algorithm Semicolyn accepts as a host key is now grounded by this spec's HostKey lists.
 
 ## Related
 

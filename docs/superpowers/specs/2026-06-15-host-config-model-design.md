@@ -1,6 +1,6 @@
 # Host config model — design
 
-> **Scope.** This spec defines the **data schema** for a Neotilde host record: fields, types, defaults inheritance, identity references, jump chains, port forwards, mosh/Tailscale extensions, `known_hosts` storage, and the storage backbone the schema lives on.
+> **Scope.** This spec defines the **data schema** for a Semicolyn host record: fields, types, defaults inheritance, identity references, jump chains, port forwards, mosh/Tailscale extensions, `known_hosts` storage, and the storage backbone the schema lives on.
 >
 > **Out of scope** (separate brainstorm sessions): the host **CRUD UI flow** (create/edit/delete screens, validation, import from `~/.ssh/config`, export, error states) and the **multi-connection switching semantics** (foreground/background lifecycle, mosh heartbeating in iOS background, SSH background grace, when "Live" picker rows demote to "Recent").
 >
@@ -8,12 +8,12 @@
 
 ## Design principles
 
-1. **`ssh_config(5)`-faithful naming and semantics.** Every field that has an OpenSSH analog uses the OpenSSH name and means what OpenSSH means by it. Neotilde extensions live under clearly namespaced fields (`mosh.*`, `tailscale.*`, `neotilde.*`) so they cannot be confused with SSH-derived options.
+1. **`ssh_config(5)`-faithful naming and semantics.** Every field that has an OpenSSH analog uses the OpenSSH name and means what OpenSSH means by it. Semicolyn extensions live under clearly namespaced fields (`mosh.*`, `tailscale.*`, `semicolyn.*`) so they cannot be confused with SSH-derived options.
 2. **Strict subset of OpenSSH's expressive power.** v1 ships Tier 1 (always visible) and Tier 2 ("Advanced") field sets, typed. No raw-option escape hatch in v1.
-3. **Lossless import/export between Neotilde schema and `~/.ssh/config`** is a design goal for the SSH-derived fields. An imported host round-trips through export → import without losing information for any field we model. Neotilde extensions are skipped or emitted as comments on export.
+3. **Lossless import/export between Semicolyn schema and `~/.ssh/config`** is a design goal for the SSH-derived fields. An imported host round-trips through export → import without losing information for any field we model. Semicolyn extensions are skipped or emitted as comments on export.
 4. **UUIDs internally, label for humans.** Stable internal references survive label edits; sync conflicts at the ID level are effectively impossible (UUID v4 collision: ~10⁻³⁷).
 5. **iCloud-portable by default; Secure Enclave as an opt-in upgrade.** Users get device portability for free; hardware-binding is available for users who explicitly want it and accept the single-device constraint.
-6. **End-to-end encryption everywhere, regardless of whether the user has Apple's "Advanced Data Protection" enabled.** Neotilde applies client-side AES-GCM to CloudKit records so Apple sees only ciphertext.
+6. **End-to-end encryption everywhere, regardless of whether the user has Apple's "Advanced Data Protection" enabled.** Semicolyn applies client-side AES-GCM to CloudKit records so Apple sees only ciphertext.
 
 ## Storage backbone
 
@@ -55,7 +55,7 @@ Host {
   forwardAgent?:             boolean         // default false (security-conservative)
   preferredAuthentications?: ("publickey" | "password" | "keyboard-interactive")[]
 
-  // Neotilde extensions — all optional, namespaced
+  // Semicolyn extensions — all optional, namespaced
   mosh?: {
     enabled:          boolean
     serverPath?:      string                  // path to mosh-server on the host, if non-default
@@ -66,7 +66,7 @@ Host {
     required:  boolean                        // if true: refuse connect & show "Tailscale required" banner when Tailscale is down
     tailnet?:  string                         // for the rare multi-tailnet case
   }
-  neotilde?: {
+  semicolyn?: {
     predictor?: { incognito?: boolean }       // when true, predictor does not learn from this host's keystrokes
     tmux?:      { attemptControlMode?: boolean } // when false, skip `tmux -V` probe; go straight to raw PTY
   }
@@ -202,8 +202,8 @@ Resolution order for any optional field on `Host`:
 | `preferredAuthentications` | `["publickey", "keyboard-interactive", "password"]` (this order also determines whether keys from `identities` or `passwordRef` are attempted first) |
 | `mosh.enabled` | `false` |
 | `tailscale.required` | `false` |
-| `neotilde.predictor.incognito` | `false` |
-| `neotilde.tmux.attemptControlMode` | `true` |
+| `semicolyn.predictor.incognito` | `false` |
+| `semicolyn.tmux.attemptControlMode` | `true` |
 | `identities` | `[]` (empty — passwordRef or interactive auth will be attempted) |
 | `passwordRef` | unset |
 | `proxyJump` | `[]` (direct connection) |
@@ -213,12 +213,12 @@ Resolution order for any optional field on `Host`:
 
 - Schema field names use Swift-style lowercase camelCase: `hostName`, `proxyJump`, `serverAliveInterval`.
 - Word stems match `ssh_config(5)` exactly: `HostName` → `hostName`, `ProxyJump` → `proxyJump`, `IdentityFile` → `identities` (renamed plural because we always model an ordered list; OpenSSH allows the option to repeat to the same effect).
-- Neotilde extensions are namespaced: `mosh.*`, `tailscale.*`, `neotilde.*` — never intermixed with OpenSSH-derived fields at the top level.
+- Semicolyn extensions are namespaced: `mosh.*`, `tailscale.*`, `semicolyn.*` — never intermixed with OpenSSH-derived fields at the top level.
 - `label` is **not** an OpenSSH concept; it's a human display name. On export to `~/.ssh/config`, `label` is sanitized to an OpenSSH-valid alias (collisions resolved with `-2`, `-3` suffixes at export time). Internal references always use the immutable UUID.
 
 ## Threat model summary
 
-- **At rest in iCloud:** Apple sees CloudKit record count, sizes, modification timestamps. Record contents are AES-GCM ciphertext (Neotilde's client-side encryption). The encryption key lives in iCloud Keychain (E2EE; Apple cannot read).
+- **At rest in iCloud:** Apple sees CloudKit record count, sizes, modification timestamps. Record contents are AES-GCM ciphertext (Semicolyn's client-side encryption). The encryption key lives in iCloud Keychain (E2EE; Apple cannot read).
 - **iCloud Keychain contents** (keys, passwords, known_hosts, the host-config encryption key): end-to-end encrypted by Apple. Apple cannot decrypt server-side.
 - **Secure Enclave private keys** (opt-in flavor): hardware-bound; never leave the device; even with full account compromise, an attacker cannot exfiltrate them.
 - **Compromise of Apple's CloudKit infrastructure alone:** yields ciphertext only.

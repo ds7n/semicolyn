@@ -8,14 +8,14 @@
 **Goal:** Build the per-pane foreground-process context state machine (engine + tmux signal + observable, no keybar UI yet) and the mid-session tmux-crash red banner with raw-shell recovery.
 
 **Architecture:** Two independent deliverables sharing the repo's two-tier split.
-- **Part A (context detection):** all decision logic is pure, `Sendable`, Linux-tested NeotildeKit (`PaneContextMachine` dwell SM, `PaneContextStore`, `PromotionRegistry`, the `list-panes` listing parser + encoder), mirroring the `tmuxLaunchDecision` pattern. A thin App-tier driver polls `pane_current_command` over the existing `tmux -CC` command channel (~1 Hz), feeds the store, and publishes a per-pane observable. **The keybar is the only future consumer; it is Phase 4 and out of scope here — Plan D commits the *wire*, not the visual** (mirrors "predictor engine done / UI pending").
+- **Part A (context detection):** all decision logic is pure, `Sendable`, Linux-tested SemicolynKit (`PaneContextMachine` dwell SM, `PaneContextStore`, `PromotionRegistry`, the `list-panes` listing parser + encoder), mirroring the `tmuxLaunchDecision` pattern. A thin App-tier driver polls `pane_current_command` over the existing `tmux -CC` command channel (~1 Hz), feeds the store, and publishes a per-pane observable. **The keybar is the only future consumer; it is Phase 4 and out of scope here — Plan D commits the *wire*, not the visual** (mirrors "predictor engine done / UI pending").
 - **Part B (crash banner):** a pure `classifyTmuxClosure` decision distinguishes a clean `%exit` from an unexpected `-CC` EOF; the App reuses the still-alive `Connection` to drop the user into a raw shell and shows the one non-auto-dismissing red banner in the app.
 
 **Tech Stack:** Swift 6 (strict concurrency, `Sendable`), XCTest on the Linux fast loop; SwiftUI + the UniFFI `Connection`/`ShellSession` bridge for App-tier wiring (macOS-CI-validated only).
 
 ## Global Constraints
 
-- **Two tiers, two test surfaces.** Pure logic lives in `Sources/NeotildeKit/` with XCTest and **no `import UIKit`/`SwiftUI`/`CryptoKit`**. App code (`App/`, anything `import SwiftUI`) does NOT compile on Linux and is validated only by the macOS CI job. Keep App tasks a thin wiring layer.
+- **Two tiers, two test surfaces.** Pure logic lives in `Sources/SemicolynKit/` with XCTest and **no `import UIKit`/`SwiftUI`/`CryptoKit`**. App code (`App/`, anything `import SwiftUI`) does NOT compile on Linux and is validated only by the macOS CI job. Keep App tasks a thin wiring layer.
 - **Specs are locked.** `docs/superpowers/specs/2026-06-14-context-detection-design.md` (context) and `docs/superpowers/specs/2026-06-14-degraded-mode-design.md` §"Mid-session tmux crash recovery" (banner). Do not re-decide locked points.
 - **Dwell thresholds (verbatim):** engage **250 ms**, disengage **1500 ms**. Entry is short (intentional), exit is long (absorbs `:!ls`/`:sh` excursions).
 - **Bundled v1 promotion list (verbatim, spec §11):** `vim`/`nvim` → `:` `*` `%`; `less`/`more`/`man` → `?` `<` `>`; `python`/`python3`/`ipython` → `:` `[` `]` `=`; `node` → same as python; `psql`/`mysql` → `\` `;`; `sqlite3` → `;` `.`; `redis-cli` → `:` `\`. (`htop`/`top`/`mc` are Fn-spec auto-engage, NOT symbol promotions — excluded here.)
@@ -23,26 +23,26 @@
 - **Crash banner is the documented exception to the transient-banner rule** — red, top of screen, persists until the user dismisses or acts. No auto-retry of `-CC`, no layout restoration, no "your work is safe" reassurance.
 - **Every new source file carries the SPDX header** (`GPL-3.0-only`, © True Positive LLC); REUSE-compliant.
 - **Conventional commits**, feature branch `feat/phase-3d-context-crash`, squash-merge to `main`.
-- **Build/test commands:** `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test --filter <Suite>` for NeotildeKit; App tasks compile only on the macOS CI job.
+- **Build/test commands:** `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test --filter <Suite>` for SemicolynKit; App tasks compile only on the macOS CI job.
 
 ---
 
 ## File Structure
 
-**Part A — created (NeotildeKit, Linux-tested):**
-- `Sources/NeotildeKit/Context/Promotion.swift` — `PromotionSlot`, `PromotionSet`, `PromotionRegistry` (+ `merge`, `bundledDefault`, Codable).
-- `Sources/NeotildeKit/Context/PromotionCatalog.swift` — `load(userOverrideJSON:)` → merged registry + optional warning.
-- `Sources/NeotildeKit/Context/PaneContextMachine.swift` — per-pane dwell state machine.
-- `Sources/NeotildeKit/Context/PaneContextStore.swift` — `PaneID → machine`, prune, `context(for:)`.
-- `Sources/NeotildeKit/Context/PaneCommandListing.swift` — pure parser for `list-panes` result lines.
+**Part A — created (SemicolynKit, Linux-tested):**
+- `Sources/SemicolynKit/Context/Promotion.swift` — `PromotionSlot`, `PromotionSet`, `PromotionRegistry` (+ `merge`, `bundledDefault`, Codable).
+- `Sources/SemicolynKit/Context/PromotionCatalog.swift` — `load(userOverrideJSON:)` → merged registry + optional warning.
+- `Sources/SemicolynKit/Context/PaneContextMachine.swift` — per-pane dwell state machine.
+- `Sources/SemicolynKit/Context/PaneContextStore.swift` — `PaneID → machine`, prune, `context(for:)`.
+- `Sources/SemicolynKit/Context/PaneCommandListing.swift` — pure parser for `list-panes` result lines.
 
 **Part A — modified:**
-- `Sources/NeotildeKit/Tmux/TmuxCommand.swift` — add `listPaneCommands()`.
+- `Sources/SemicolynKit/Tmux/TmuxCommand.swift` — add `listPaneCommands()`.
 - `App/TmuxRuntime.swift` — context store + ~1 Hz poll + observable callback (CI).
 - `App/ConnectionViewModel.swift` — `@Published var paneContexts` (CI).
 
 **Part B — created:**
-- `Sources/NeotildeKit/Tmux/TmuxClosure.swift` — `classifyTmuxClosure(lifecycle:)` (Linux-tested).
+- `Sources/SemicolynKit/Tmux/TmuxClosure.swift` — `classifyTmuxClosure(lifecycle:)` (Linux-tested).
 - `App/CrashBanner.swift` — red, persistent banner (CI).
 
 **Part B — modified:**
@@ -50,7 +50,7 @@
 - `App/ConnectionViewModel.swift` — `crashBanner` state + reattach/start-new/dismiss + refined `-CC` EOF handling (CI).
 - `App/SessionView.swift` — overlay `CrashBanner` (CI).
 
-**Tests created:** `PromotionTests`, `PromotionCatalogTests`, `PaneContextMachineTests`, `PaneContextStoreTests`, `PaneCommandListingTests`, `TmuxClosureTests` under `Tests/NeotildeKitTests/`; `TmuxCommandTests` extended.
+**Tests created:** `PromotionTests`, `PromotionCatalogTests`, `PaneContextMachineTests`, `PaneContextStoreTests`, `PaneCommandListingTests`, `TmuxClosureTests` under `Tests/SemicolynKitTests/`; `TmuxCommandTests` extended.
 
 ---
 
@@ -59,7 +59,7 @@
 - [ ] **Step 0: Branch**
 
 ```bash
-cd /home/djmyers/proj/truepositive/neotilde
+cd /home/djmyers/proj/truepositive/semicolyn
 git checkout -b feat/phase-3d-context-crash
 ```
 
@@ -70,9 +70,9 @@ git checkout -b feat/phase-3d-context-crash
 ### Task 1: Promotion model + catalog
 
 **Files:**
-- Create: `Sources/NeotildeKit/Context/Promotion.swift`
-- Create: `Sources/NeotildeKit/Context/PromotionCatalog.swift`
-- Test: `Tests/NeotildeKitTests/PromotionTests.swift`, `Tests/NeotildeKitTests/PromotionCatalogTests.swift`
+- Create: `Sources/SemicolynKit/Context/Promotion.swift`
+- Create: `Sources/SemicolynKit/Context/PromotionCatalog.swift`
+- Test: `Tests/SemicolynKitTests/PromotionTests.swift`, `Tests/SemicolynKitTests/PromotionCatalogTests.swift`
 
 **Interfaces:**
 - Produces:
@@ -83,13 +83,13 @@ git checkout -b feat/phase-3d-context-crash
 
 - [ ] **Step 1: Write the failing tests**
 
-`Tests/NeotildeKitTests/PromotionTests.swift`:
+`Tests/SemicolynKitTests/PromotionTests.swift`:
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class PromotionTests: XCTestCase {
     func testBundledDefaultCoversSpecProcesses() {
@@ -137,13 +137,13 @@ final class PromotionTests: XCTestCase {
 }
 ```
 
-`Tests/NeotildeKitTests/PromotionCatalogTests.swift`:
+`Tests/SemicolynKitTests/PromotionCatalogTests.swift`:
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class PromotionCatalogTests: XCTestCase {
     func testNilOverrideReturnsBundledNoWarning() {
@@ -273,7 +273,7 @@ Expected: PASS (all).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Context/Promotion.swift Sources/NeotildeKit/Context/PromotionCatalog.swift Tests/NeotildeKitTests/PromotionTests.swift Tests/NeotildeKitTests/PromotionCatalogTests.swift
+git add Sources/SemicolynKit/Context/Promotion.swift Sources/SemicolynKit/Context/PromotionCatalog.swift Tests/SemicolynKitTests/PromotionTests.swift Tests/SemicolynKitTests/PromotionCatalogTests.swift
 git commit -m "feat(context): promotion-set model + bundled catalog with user-override merge"
 ```
 
@@ -282,8 +282,8 @@ git commit -m "feat(context): promotion-set model + bundled catalog with user-ov
 ### Task 2: Per-pane context state machine
 
 **Files:**
-- Create: `Sources/NeotildeKit/Context/PaneContextMachine.swift`
-- Test: `Tests/NeotildeKitTests/PaneContextMachineTests.swift`
+- Create: `Sources/SemicolynKit/Context/PaneContextMachine.swift`
+- Test: `Tests/SemicolynKitTests/PaneContextMachineTests.swift`
 
 **Interfaces:**
 - Consumes: `PromotionRegistry.knownProcesses` (the `Set<String>` of gating names).
@@ -291,13 +291,13 @@ git commit -m "feat(context): promotion-set model + bundled catalog with user-ov
   - `struct PaneContextMachine: Equatable, Sendable { init(knownProcesses: Set<String>, engageDwell: TimeInterval = 0.25, disengageDwell: TimeInterval = 1.5); var engagedContext: String?; var currentProcess: String?; mutating func observe(_ process: String?, at now: TimeInterval) -> Bool }`
   - `observe` returns `true` iff `engagedContext` changed on that call. `process == nil` means the signal is unavailable. Time is injected (monotonic seconds); repeated `observe` with the same value advances the dwell — there is no separate timer.
 
-- [ ] **Step 1: Write the failing tests** (`Tests/NeotildeKitTests/PaneContextMachineTests.swift`)
+- [ ] **Step 1: Write the failing tests** (`Tests/SemicolynKitTests/PaneContextMachineTests.swift`)
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class PaneContextMachineTests: XCTestCase {
     private func machine() -> PaneContextMachine {
@@ -463,7 +463,7 @@ Expected: PASS (7 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Context/PaneContextMachine.swift Tests/NeotildeKitTests/PaneContextMachineTests.swift
+git add Sources/SemicolynKit/Context/PaneContextMachine.swift Tests/SemicolynKitTests/PaneContextMachineTests.swift
 git commit -m "feat(context): per-pane dwell state machine (250ms engage / 1500ms disengage)"
 ```
 
@@ -472,8 +472,8 @@ git commit -m "feat(context): per-pane dwell state machine (250ms engage / 1500m
 ### Task 3: Multi-pane context store
 
 **Files:**
-- Create: `Sources/NeotildeKit/Context/PaneContextStore.swift`
-- Test: `Tests/NeotildeKitTests/PaneContextStoreTests.swift`
+- Create: `Sources/SemicolynKit/Context/PaneContextStore.swift`
+- Test: `Tests/SemicolynKitTests/PaneContextStoreTests.swift`
 
 **Interfaces:**
 - Consumes: `PaneContextMachine`, `PaneID`.
@@ -481,13 +481,13 @@ git commit -m "feat(context): per-pane dwell state machine (250ms engage / 1500m
   - `struct PaneContextStore: Sendable { init(knownProcesses: Set<String>); mutating func observe(_ readings: [(PaneID, String)], at now: TimeInterval) -> Set<PaneID>; func context(for: PaneID) -> String? }`
   - `observe` applies one full `list-panes` snapshot: updates/creates a machine per reading, **prunes machines for panes absent from the snapshot** (closed panes), and returns the set of panes whose `engagedContext` changed. `context(for:)` reads a pane's engaged context immediately (focus changes need no re-debounce — the App reads the focused pane directly).
 
-- [ ] **Step 1: Write the failing tests** (`Tests/NeotildeKitTests/PaneContextStoreTests.swift`)
+- [ ] **Step 1: Write the failing tests** (`Tests/SemicolynKitTests/PaneContextStoreTests.swift`)
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class PaneContextStoreTests: XCTestCase {
     private let p0 = PaneID(raw: 0)
@@ -579,7 +579,7 @@ Expected: PASS (4 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Context/PaneContextStore.swift Tests/NeotildeKitTests/PaneContextStoreTests.swift
+git add Sources/SemicolynKit/Context/PaneContextStore.swift Tests/SemicolynKitTests/PaneContextStoreTests.swift
 git commit -m "feat(context): multi-pane context store with snapshot apply + prune"
 ```
 
@@ -588,9 +588,9 @@ git commit -m "feat(context): multi-pane context store with snapshot apply + pru
 ### Task 4: `list-panes` encoder + listing parser
 
 **Files:**
-- Modify: `Sources/NeotildeKit/Tmux/TmuxCommand.swift` (add `listPaneCommands()`)
-- Create: `Sources/NeotildeKit/Context/PaneCommandListing.swift`
-- Test: `Tests/NeotildeKitTests/TmuxCommandTests.swift` (extend), `Tests/NeotildeKitTests/PaneCommandListingTests.swift`
+- Modify: `Sources/SemicolynKit/Tmux/TmuxCommand.swift` (add `listPaneCommands()`)
+- Create: `Sources/SemicolynKit/Context/PaneCommandListing.swift`
+- Test: `Tests/SemicolynKitTests/TmuxCommandTests.swift` (extend), `Tests/SemicolynKitTests/PaneCommandListingTests.swift`
 
 **Interfaces:**
 - Produces:
@@ -599,7 +599,7 @@ git commit -m "feat(context): multi-pane context store with snapshot apply + pru
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `Tests/NeotildeKitTests/TmuxCommandTests.swift`:
+Append to `Tests/SemicolynKitTests/TmuxCommandTests.swift`:
 
 ```swift
     func testListPaneCommandsFormat() {
@@ -611,13 +611,13 @@ Append to `Tests/NeotildeKitTests/TmuxCommandTests.swift`:
     }
 ```
 
-`Tests/NeotildeKitTests/PaneCommandListingTests.swift`:
+`Tests/SemicolynKitTests/PaneCommandListingTests.swift`:
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class PaneCommandListingTests: XCTestCase {
     func testParsesPaneIDAndCommand() {
@@ -648,7 +648,7 @@ final class PaneCommandListingTests: XCTestCase {
 Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test --filter PaneCommandListingTests --filter TmuxCommandTests`
 Expected: FAIL — `type 'TmuxCommand' has no member 'listPaneCommands'` / `cannot find 'parsePaneCommandListing'`.
 
-- [ ] **Step 3: Add the encoder** — insert into `TmuxCommand` in `Sources/NeotildeKit/Tmux/TmuxCommand.swift`, after `refreshClientSize`:
+- [ ] **Step 3: Add the encoder** — insert into `TmuxCommand` in `Sources/SemicolynKit/Tmux/TmuxCommand.swift`, after `refreshClientSize`:
 
 ```swift
     /// List every pane across all windows as `<pane_id> <pane_current_command>`,
@@ -683,7 +683,7 @@ public func parsePaneCommandListing(_ lines: [String]) -> [(PaneID, String)] {
 }
 ```
 
-Note: `PaneID(token:)` is `init?(token: Substring)` in `TmuxIDs.swift` (file-internal `extension PaneID`). It is already `@testable`-visible to NeotildeKit; `parsePaneCommandListing` is in the same module so it can call it directly.
+Note: `PaneID(token:)` is `init?(token: Substring)` in `TmuxIDs.swift` (file-internal `extension PaneID`). It is already `@testable`-visible to SemicolynKit; `parsePaneCommandListing` is in the same module so it can call it directly.
 
 - [ ] **Step 5: Run to verify passing**
 
@@ -693,7 +693,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Tmux/TmuxCommand.swift Sources/NeotildeKit/Context/PaneCommandListing.swift Tests/NeotildeKitTests/PaneCommandListingTests.swift Tests/NeotildeKitTests/TmuxCommandTests.swift
+git add Sources/SemicolynKit/Tmux/TmuxCommand.swift Sources/SemicolynKit/Context/PaneCommandListing.swift Tests/SemicolynKitTests/PaneCommandListingTests.swift Tests/SemicolynKitTests/TmuxCommandTests.swift
 git commit -m "feat(context): list-panes command encoder + pane_current_command listing parser"
 ```
 
@@ -835,8 +835,8 @@ Expected: `macos` job green. (`linux-rust` flaking on "sshd fixtures not reachab
 ### Task 6: Closure classification (pure)
 
 **Files:**
-- Create: `Sources/NeotildeKit/Tmux/TmuxClosure.swift`
-- Test: `Tests/NeotildeKitTests/TmuxClosureTests.swift`
+- Create: `Sources/SemicolynKit/Tmux/TmuxClosure.swift`
+- Test: `Tests/SemicolynKitTests/TmuxClosureTests.swift`
 
 **Interfaces:**
 - Consumes: `TmuxLifecycle` (from `TmuxSessionController.swift`).
@@ -844,13 +844,13 @@ Expected: `macos` job green. (`linux-rust` flaking on "sshd fixtures not reachab
   - `enum TmuxClosureKind: Equatable, Sendable { case cleanExit(reason: String?); case crashed }`
   - `func classifyTmuxClosure(lifecycle: TmuxLifecycle) -> TmuxClosureKind` — `.exited` ⇒ `.cleanExit` (a `%exit` was seen: user/clean teardown); every other lifecycle ⇒ `.crashed` (the `-CC` channel hit EOF with no `%exit`).
 
-- [ ] **Step 1: Write the failing tests** (`Tests/NeotildeKitTests/TmuxClosureTests.swift`)
+- [ ] **Step 1: Write the failing tests** (`Tests/SemicolynKitTests/TmuxClosureTests.swift`)
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class TmuxClosureTests: XCTestCase {
     func testCleanExitCarriesReason() {
@@ -914,7 +914,7 @@ Expected: PASS (4 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Tmux/TmuxClosure.swift Tests/NeotildeKitTests/TmuxClosureTests.swift
+git add Sources/SemicolynKit/Tmux/TmuxClosure.swift Tests/SemicolynKitTests/TmuxClosureTests.swift
 git commit -m "feat(tmux): classify -CC channel closure as clean exit vs crash"
 ```
 
@@ -948,7 +948,7 @@ git commit -m "feat(tmux): classify -CC channel closure as clean exit vs crash"
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// The one banner that does NOT auto-dismiss (degraded-mode spec §"Mid-session
 /// tmux crash recovery"): tmux died mid-session, the SSH transport is alive, and
@@ -1094,7 +1094,7 @@ Expected: `macos` job green.
 
 ## Wrap-up
 
-- [ ] **Full NeotildeKit suite green**
+- [ ] **Full SemicolynKit suite green**
 
 Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test`
 Expected: all existing tests + the new context/closure suites pass.

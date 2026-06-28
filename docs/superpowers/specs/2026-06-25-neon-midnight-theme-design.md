@@ -6,7 +6,7 @@
 
 ## Context — why
 
-The product renamed **Glymr → neotilde** (2026-06-24). The shipped palette, **"Bell bronze,"** was grounded entirely in the *Glymr = "bell / glimmer"* etymology (struck-bell → bronze, glimmer → lit-on-dark). That story is now dead, leaving the bronze accent **unmoored** — it read as "the color that happened to be there," and in review the bronze accent itself read as yellow-gold rather than true bronze. Rather than tune an arbitrary hue, we re-derived the accent from **neotilde's own** semantics.
+The product renamed **Glymr → semicolyn** (2026-06-24). The shipped palette, **"Bell bronze,"** was grounded entirely in the *Glymr = "bell / glimmer"* etymology (struck-bell → bronze, glimmer → lit-on-dark). That story is now dead, leaving the bronze accent **unmoored** — it read as "the color that happened to be there," and in review the bronze accent itself read as yellow-gold rather than true bronze. Rather than tune an arbitrary hue, we re-derived the accent from **semicolyn's own** semantics.
 
 **The grounded story — "Neon on a midnight terminal":**
 - **neo → neon.** Neon gas (element 10) literally emits a warm **orange-red** glow when electrified — the iconic "neon" color. That physically grounds a warm coral/orange-red accent in the name.
@@ -28,7 +28,7 @@ The "neon" therefore lives in the **story + the warm hue + the bell pulse**, not
 
 ## The palette — `Theme.neonMidnight`
 
-Same semantic-token structure as today (`Sources/NeotildeKit/Theme/Theme.swift`); only values change. Opacities written as `@NN%`.
+Same semantic-token structure as today (`Sources/SemicolynKit/Theme/Theme.swift`); only values change. Opacities written as `@NN%`.
 
 | Group · token | Value |
 |---|---|
@@ -56,11 +56,11 @@ Notes:
 
 ## Implementation surface
 
-- **Create** `Sources/NeotildeKit/Theme/NeonMidnightTheme.swift` — file-private palette constants + `extension Theme { public static let neonMidnight = Theme(...) }`, mirroring the shape of `BellBronzeTheme.swift`.
+- **Create** `Sources/SemicolynKit/Theme/NeonMidnightTheme.swift` — file-private palette constants + `extension Theme { public static let neonMidnight = Theme(...) }`, mirroring the shape of `BellBronzeTheme.swift`.
 - **Modify** `BellBronzeTheme.swift` (or wherever `Theme.all` lives) — `Theme.all = [.neonMidnight, .bellBronze]`.
-- **Modify** `Sources/NeotildeKit/Theme/ThemeEnvironment.swift` — `ThemeKey.defaultValue = .neonMidnight`.
+- **Modify** `Sources/SemicolynKit/Theme/ThemeEnvironment.swift` — `ThemeKey.defaultValue = .neonMidnight`.
 - **Modify** `App/TerminalScreen.swift`, `App/TmuxPaneContainer.swift` — change the `var theme: Theme = .bellBronze` defaults (added in Phase 3c) to `.neonMidnight`.
-- **Tests** `Tests/NeotildeKitTests/ThemeTests.swift` — add `neonMidnight` value assertions (e.g. `accent.primary == ThemeColor("#FF6F5E")`, `bell.edge == accent.primary`, error/success values) and assert the default + `Theme.all` order. Keep the existing bellBronze assertions.
+- **Tests** `Tests/SemicolynKitTests/ThemeTests.swift` — add `neonMidnight` value assertions (e.g. `accent.primary == ThemeColor("#FF6F5E")`, `bell.edge == accent.primary`, error/success values) and assert the default + `Theme.all` order. Keep the existing bellBronze assertions.
 - **Docs** — update `mockups/specs/design-system.html` (palette section) and the brand-palette row in `docs/brainstorming-decisions.md` to Neon Midnight; note Bell-bronze is retained as an alternate. Reference mockup: `mockups/drafts/2026-06-25-theme-neon-midnight-final.html`.
 - **Glow:** no new persistent-glow tokens. Confirm the only glow in the app remains `App/BellHaloView.swift` (bell). Do **not** add bloom to the focus border, cursor, or keybar.
 
@@ -72,13 +72,13 @@ Notes:
 
 ## Verification
 
-- **Linux:** `docker compose run --rm dev swift test --filter ThemeTests` (and the full `NeotildeKit` suite) green — token values + default + registry order.
+- **Linux:** `docker compose run --rm dev swift test --filter ThemeTests` (and the full `SemicolynKit` suite) green — token values + default + registry order.
 - **macOS / CI:** the app builds and renders the new default; visual check on the Simulator that the accent is **solid at rest** and only the **bell** glows (fire `printf '\a'`), per the bell-only rule.
 - **Sanity:** `git grep` shows no stray persistent-glow added to focus/cursor/keybar; `Theme.all.first == .neonMidnight`.
 
 ## References
 
 - Final mockup: `mockups/drafts/2026-06-25-theme-neon-midnight-final.html` (+ exploration drafts `2026-06-25-theme-*.html`).
-- Token structure: `Sources/NeotildeKit/Theme/Theme.swift`; current palette `BellBronzeTheme.swift`.
-- Story/rename context: `docs/2026-06-24-naming-decision-neotilde.md`, memory [[naming-and-trademark]].
+- Token structure: `Sources/SemicolynKit/Theme/Theme.swift`; current palette `BellBronzeTheme.swift`.
+- Story/rename context: `docs/2026-06-28-naming-decision-semicolyn.md`, memory [[naming-and-trademark]].
 - Bell halo (the glow primitive): Phase 3c, `App/BellHaloView.swift`.

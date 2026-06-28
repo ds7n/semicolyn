@@ -26,25 +26,25 @@ Plan C is therefore overwhelmingly **implementing those callbacks** + adding a f
 
 Mirror the project's established pattern (`tmuxLaunchDecision` pure + thin App wiring; App-target FFI/UIKit code is **macOS-CI-verified only**, invisible to Linux `swift test`).
 
-- **Pure decision logic → `NeotildeKit` (Linux-tested, XCTest):** the settings model + clamps, OSC 52 write-gate, title sanitization, URL scheme classification + wrapped-URL join, the bell halo/haptic state machine (injected clock), resize debounce (injected clock), DECSCUSR→style mapping.
+- **Pure decision logic → `SemicolynKit` (Linux-tested, XCTest):** the settings model + clamps, OSC 52 write-gate, title sanitization, URL scheme classification + wrapped-URL join, the bell halo/haptic state machine (injected clock), resize debounce (injected clock), DECSCUSR→style mapping.
 - **Thin SwiftTerm/UIKit wiring → `App/` (macOS CI only):** delegate-callback bodies, the halo overlay, the mouse-active dot, the pinch gesture, pasteboard writes, URL routing into existing views.
 
 ## Unit breakdown
 
 | Unit | Home | Pure? | Role |
 |---|---|---|---|
-| `TerminalSettings` (defaults + clamps) | NeotildeKit | ✅ | font 13pt (clamp 9–24), cursor `.block`, blink off, raw-PTY scrollback 5000 (presets 1000/2000/5000/10000/∞) |
-| Bell state machine | NeotildeKit | ✅ | hold-at-peak until ~400ms quiet → 250ms fade; haptic ≤1 per ~500ms; drives the halo overlay + `UIImpactFeedbackGenerator(.soft)` |
-| OSC 52 write-gate | NeotildeKit | ✅ | given host `neotilde.osc52.allow` + payload → write-to-pasteboard or drop; **read sequence always no-op** |
-| Title sanitize | NeotildeKit | ✅ | reject empty/control-char titles; publish latest per window to the title seam |
-| URL classify + wrapped-join | NeotildeKit | ✅ | scheme ∈ {http,https,ssh}; join across a row break only when part1 ends mid-token & part2 starts col 0 |
-| Resize debounce (~10Hz) | NeotildeKit | ✅ | coalesce `sizeChanged` bursts (rotation/keyboard) before `session.resize` |
+| `TerminalSettings` (defaults + clamps) | SemicolynKit | ✅ | font 13pt (clamp 9–24), cursor `.block`, blink off, raw-PTY scrollback 5000 (presets 1000/2000/5000/10000/∞) |
+| Bell state machine | SemicolynKit | ✅ | hold-at-peak until ~400ms quiet → 250ms fade; haptic ≤1 per ~500ms; drives the halo overlay + `UIImpactFeedbackGenerator(.soft)` |
+| OSC 52 write-gate | SemicolynKit | ✅ | given host `semicolyn.osc52.allow` + payload → write-to-pasteboard or drop; **read sequence always no-op** |
+| Title sanitize | SemicolynKit | ✅ | reject empty/control-char titles; publish latest per window to the title seam |
+| URL classify + wrapped-join | SemicolynKit | ✅ | scheme ∈ {http,https,ssh}; join across a row break only when part1 ends mid-token & part2 starts col 0 |
+| Resize debounce (~10Hz) | SemicolynKit | ✅ | coalesce `sizeChanged` bursts (rotation/keyboard) before `session.resize` |
 | DECSCUSR map + cursor default | App (SwiftTerm) | partial (map is pure) | configure caret style/blink from settings; engine applies `\x1b[<n> q` overrides |
-| Mouse-active dot + gesture suspend | App | — | read SwiftTerm `mouseMode`; show 4pt bronze dot (`accent.primary` 40%); suspend Neotilde long-press selection |
+| Mouse-active dot + gesture suspend | App | — | read SwiftTerm `mouseMode`; show 4pt bronze dot (`accent.primary` 40%); suspend Semicolyn long-press selection |
 | Pinch-zoom font (per-window) | App | — | pinch → `TerminalView.font` resize w/ clamp; persists for window lifetime |
 | Scrollback config | App | — | set SwiftTerm buffer from settings in raw-PTY mode; tmux owns its own |
-| Title seam | App/NeotildeKit | — | observable per-window title (no UI) |
-| Port-forward status seam | NeotildeKit seam | — | observable establish/fail per declared forward (no UI; **runtime forward path must be verified at plan time**) |
+| Title seam | App/SemicolynKit | — | observable per-window title (no UI) |
+| Port-forward status seam | SemicolynKit seam | — | observable establish/fail per declared forward (no UI; **runtime forward path must be verified at plan time**) |
 
 ## State seams (no UI, per decision)
 
@@ -53,7 +53,7 @@ Mirror the project's established pattern (`tmuxLaunchDecision` pure + thin App w
 
 ## Dependency flags
 
-- **Cursor-placement halo isn't built.** The mouse-mode spec says a mouse-active pane suspends the cursor-placement halo — but that halo is a Neotilde gesture not yet implemented. Plan C wires the mouse-active *state + bronze dot* and the long-press-selection suspension, and leaves a **seam** for halo-suspension to hook when the halo lands. Not a no-op cop-out: the dot and selection-suspend are real and shippable.
+- **Cursor-placement halo isn't built.** The mouse-mode spec says a mouse-active pane suspends the cursor-placement halo — but that halo is a Semicolyn gesture not yet implemented. Plan C wires the mouse-active *state + bronze dot* and the long-press-selection suspension, and leaves a **seam** for halo-suspension to hook when the halo lands. Not a no-op cop-out: the dot and selection-suspend are real and shippable.
 - **Port-forward runtime path.** The Rust forwarding (Phase 1e) exists, but whether the establish/fail status is observable from the app connect path must be verified before committing the status-seam unit. If wiring the establishment is heavy, the status seam may narrow to "declared forwards, status unknown" until Phase 4.
 - **tmux signal surfacing.** Confirm per feature whether bell/title/OSC 52 arrive in `%output` (→ SwiftTerm parses) or as tmux control-mode `%`-notifications (→ handled in `ControlModeParser`/`TmuxRuntime`).
 
@@ -63,7 +63,7 @@ Thin, independently-testable slices:
 
 1. `TerminalSettings` model + cursor default + scrollback config.
 2. Bell — halo overlay + haptic (state machine first, Linux-tested).
-3. OSC 52 write-gate + title seam (+ host-model `neotilde.osc52.allow` field).
+3. OSC 52 write-gate + title seam (+ host-model `semicolyn.osc52.allow` field).
 4. URL tap — classify/join (Linux-tested) + routing.
 5. Mouse-active dot + resize debounce.
 6. Pinch-zoom font.
@@ -81,4 +81,4 @@ Port-forward status seam slots in after (1) if the runtime path checks out, else
 
 ## Model change
 
-- `Sources/NeotildeKit/Model/HostExtensions.swift` gains `neotilde.osc52.allow: Bool? = true` in the `neotilde.*` namespace (alongside `predictor.*` / `tmux.*`). The host-editor **"Neotilde behavior"** section (already exists) gains the OSC 52 checkbox — the one piece of Plan C UI that has a real home today.
+- `Sources/SemicolynKit/Model/HostExtensions.swift` gains `semicolyn.osc52.allow: Bool? = true` in the `semicolyn.*` namespace (alongside `predictor.*` / `tmux.*`). The host-editor **"Semicolyn behavior"** section (already exists) gains the OSC 52 checkbox — the one piece of Plan C UI that has a real home today.

@@ -6,7 +6,7 @@
 
 ## Scope & trigger
 
-This spec covers Neotilde's behavior when a hardware keyboard is connected — Bluetooth or USB-C on iPhone, Magic Keyboard / Smart Keyboard Folio on iPad. iOS suppresses the software keyboard automatically in this state; Neotilde adapts the keybar and accepts raw key events from the hardware.
+This spec covers Semicolyn's behavior when a hardware keyboard is connected — Bluetooth or USB-C on iPhone, Magic Keyboard / Smart Keyboard Folio on iPad. iOS suppresses the software keyboard automatically in this state; Semicolyn adapts the keybar and accepts raw key events from the hardware.
 
 In-scope for v1 regardless of device class. Decided alongside [[2026-06-17-ipad-scope-design]].
 
@@ -37,7 +37,7 @@ Most Magic Keyboards lack a physical Esc key. v1 ships **no in-app Esc rebind.**
 
 > Settings → General → Keyboard → Hardware Keyboard → Modifier Keys → Caps Lock → Escape
 
-This is the convention every iOS terminal client documents and the path users already know. Neotilde documents it in **Tips & Gestures** and in **About & Help → Keyboard tips**.
+This is the convention every iOS terminal client documents and the path users already know. Semicolyn documents it in **Tips & Gestures** and in **About & Help → Keyboard tips**.
 
 In-app Esc rebind deferred to v1.5.
 
@@ -93,7 +93,7 @@ When a user-bound macro on the keybar collides with a system Cmd-shortcut, **the
 
 - **In-app Esc rebind** — deferred to v1.5. Adds a Settings → App preferences row for "Hardware keyboard Esc key" with options (none / Cmd-. / grave / custom). Depends on a real complaint from a user whose layout makes the iOS system path inconvenient.
 - **Custom Cmd-shortcut remapping** — deferred to v1.5+. Not a v1 blocker; the default map covers the conventional set.
-- **Font-size shortcuts (⌘+ / ⌘−)** — deferred. Neotilde has no font-size feature specced anywhere yet; adding the shortcut implies adding the feature. Revisit when font-size lands.
+- **Font-size shortcuts (⌘+ / ⌘−)** — deferred. Semicolyn has no font-size feature specced anywhere yet; adding the shortcut implies adding the feature. Revisit when font-size lands.
 - **Scrollback navigation shortcuts (⌘Home / ⌘End)** — deferred. Useful but Magic Keyboard requires Fn+arrow for Home/End and many users won't discover it. Revisit when scrollback ergonomics get their own pass.
 - **Magic Keyboard function row (F1–F12)** — out of scope for v1. The keybar's Fn slot covers F-key entry per [[2026-06-14-function-keys-design]]; hardware F-keys can pass through later if demand emerges.
 

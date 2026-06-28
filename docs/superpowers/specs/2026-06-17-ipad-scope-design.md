@@ -6,7 +6,7 @@
 
 ## Decision
 
-Neotilde v1 ships as a **universal iPhone + iPad binary**. On iPad it runs the iPhone UX rendered in a single iPad window — layouts use size classes so nothing looks wrong at iPad size, but no iPad-specific affordances are added.
+Semicolyn v1 ships as a **universal iPhone + iPad binary**. On iPad it runs the iPhone UX rendered in a single iPad window — layouts use size classes so nothing looks wrong at iPad size, but no iPad-specific affordances are added.
 
 The framing is **iPad-compatible, not iPad-native, for v1.**
 
