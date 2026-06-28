@@ -39,7 +39,7 @@ Out of scope (deferred to v1.5+):
 
 > **Configuration syncs. Behavior / history doesn't** — except predictor sketches, which sync because they're structurally lossy and the cross-device value is too high to bury.
 
-The principle gives a clean default for future additions: when a new piece of user data is added to Neotilde, classify it as configuration (user-authored choices) or behavior/history (runtime artifacts) and apply this rule. Exceptions like the predictor sketches need explicit justification (and an updated spec).
+The principle gives a clean default for future additions: when a new piece of user data is added to Semicolyn, classify it as configuration (user-authored choices) or behavior/history (runtime artifacts) and apply this rule. Exceptions like the predictor sketches need explicit justification (and an updated spec).
 
 ## Sync table
 
@@ -73,7 +73,7 @@ The macro/snippet model gains a per-record boolean: **sync across devices? (✓ 
 
 When **unchecked**, the macro is stored locally only on the device it was authored on. It does **not** appear on other signed-in devices. The flag is editable after creation (the macro editor in the launcher carries the toggle).
 
-This is the macro-level equivalent of the per-host `neotilde.predictor.incognito` flag from the host-config-model. Same mental model, same opt-out shape, same purpose: let users keep sensitive entries local without forcing them to disable the whole sync category.
+This is the macro-level equivalent of the per-host `semicolyn.predictor.incognito` flag from the host-config-model. Same mental model, same opt-out shape, same purpose: let users keep sensitive entries local without forcing them to disable the whole sync category.
 
 The flag is **not** modifiable by viewing the macro on a non-authoring device. Cross-device editing of the flag is deferred — a v1.5 candidate if usage shows demand.
 
@@ -102,7 +102,7 @@ The **recent connections** list in the picker (last N hosts connected to) covers
 
 ### Why this matters for privacy posture
 
-The original host-config-model and multi-connection-switching specs both casually referenced an audit log. Those references are removed. Neotilde's "no telemetry, security-first" posture is stronger without a local behavioral log sitting on the device — that log would be a high-value target if the device were compromised.
+The original host-config-model and multi-connection-switching specs both casually referenced an audit log. Those references are removed. Semicolyn's "no telemetry, security-first" posture is stronger without a local behavioral log sitting on the device — that log would be a high-value target if the device were compromised.
 
 ### Code-level stub reservation
 
@@ -182,13 +182,13 @@ Conflict resolution defaults to **CloudKit's last-write-wins**. Acceptable for v
 
 There is no separate "restore from iCloud" UI. Restoration is implicit via sync:
 
-1. User installs Neotilde on a new device, signs into iCloud, opens the app.
+1. User installs Semicolyn on a new device, signs into iCloud, opens the app.
 2. CloudKit sync engages on first launch.
 3. Synced items (hosts, identities, snippets, keybar customizations, predictor sketches) populate from the user's iCloud account.
 4. Device-bound items (Secure Enclave identities, local-only data) do **not** restore — they're tied to the original device by design.
 5. The user lands in a populated app, ready to use.
 
-For the "I wiped local data on this device, please re-sync" case, the same flow applies — re-signing into iCloud / re-installing Neotilde / re-launching pulls the current synced state. No explicit restore button.
+For the "I wiped local data on this device, please re-sync" case, the same flow applies — re-signing into iCloud / re-installing Semicolyn / re-launching pulls the current synced state. No explicit restore button.
 
 **Snapshot time-travel** (roll back to last Tuesday's sketches) is **not** in v1. The sealed-daily structure could support it, but the UI design (which day? merge or replace? per-item or wholesale?) and the storage cost in iCloud make it a v1.5+ candidate at most.
 
@@ -221,9 +221,9 @@ This spec **supersedes** the following previously-locked items. The earlier spec
 
 The user experience this spec defines:
 
-- A user signing into Neotilde on a second Apple device finds their hosts, identities (non-Secure-Enclave), snippets, keybar customizations, and predictor vocabulary already there — no restore action needed.
+- A user signing into Semicolyn on a second Apple device finds their hosts, identities (non-Secure-Enclave), snippets, keybar customizations, and predictor vocabulary already there — no restore action needed.
 - A user worried about sensitive snippets can flag specific macros as "don't sync" without disabling the entire snippet sync.
 - A user worried about predictor vocabulary syncing can opt out in one toggle without losing local predictor learning.
 - A privacy-conscious user finds clear disclosures on the relevant settings screens explaining what syncs and what doesn't.
-- A user wiping the device or buying a new one experiences "open Neotilde → it's all there" rather than "open Neotilde → empty → import → resolve → painful."
+- A user wiping the device or buying a new one experiences "open Semicolyn → it's all there" rather than "open Semicolyn → empty → import → resolve → painful."
 - No audit log lives on the device. Behavioral history that doesn't earn its keep is simply not collected.

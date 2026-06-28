@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-import NeotildeKit
+import SemicolynKit
 @testable import SeedKit
 
 /// SeedBuilder — Core tier. Token sequences → unigram + bigram seed blobs that

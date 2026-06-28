@@ -6,7 +6,7 @@
 
 ## Scope
 
-Defines how Neotilde responds when the remote terminal emits a bell (`\x07`, BEL). Forward-looking: this spec is the home for other "terminal feedback" decisions (visual / haptic / audio) as they come up. Bell is the only entry in v1.
+Defines how Semicolyn responds when the remote terminal emits a bell (`\x07`, BEL). Forward-looking: this spec is the home for other "terminal feedback" decisions (visual / haptic / audio) as they come up. Bell is the only entry in v1.
 
 **Audio bell is explicitly rejected.** No sound option, ever. iOS users expect notifications to come from notifications, not the SSH connection; a remote `\x07` playing a "ding" reads as alien and conflicts with the iOS mute-switch convention. Visual + haptic only.
 

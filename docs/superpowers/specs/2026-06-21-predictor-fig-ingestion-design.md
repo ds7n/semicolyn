@@ -111,7 +111,7 @@ The command is the file stem, which is correct **only for the top-level
 `src/*.ts`** specs (`git.ts` → `git`). The Fig repo also keeps ~750 nested
 fragments (`src/aws/s3.ts`, `src/shopify/3.0.0.ts`) — full `Fig.Spec` objects
 mounted as *subcommands* of a parent, whose stems (`s3`, `3.0.0`) are not real
-commands. So `neotilde-seedbuild` walks the Fig source **non-recursively**: the
+commands. So `semicolyn-seedbuild` walks the Fig source **non-recursively**: the
 top-level `aws.ts` already lists `{ name: "s3" }` as a subcommand, giving the
 correct `(aws, s3)` pair, while the deeper `aws s3 ls` structure is left to tldr
 (consistent with this slice's top-level-only scope).
@@ -119,7 +119,7 @@ correct `(aws, s3)` pair, while the deeper `aws s3 ls` structure is left to tldr
 ## Wiring
 
 - ``SeedBuilder`` is unchanged — both parsers emit `[[String]]` and share `ingest`.
-- `neotilde-seedbuild` gains `--tldr <dir>` / `--fig <dir>` / `--out <dir>` (at least
+- `semicolyn-seedbuild` gains `--tldr <dir>` / `--fig <dir>` / `--out <dir>` (at least
   one source required); the Fig walk derives each file's command from its stem.
 - `scripts/build-seed.sh` also clones withfig/autocomplete (pinnable via
   `FIG_REF`) and passes `--fig`.

@@ -6,9 +6,9 @@
 
 ## Context
 
-Phase 0 locked the data model *schema primitives* (`Host`/`Identity`/`Defaults`/`Inherited<T>`, `RecordEnvelope` AES-256-GCM seal) but deliberately deferred the **remaining host fields** and the **storage/CRUD layer** to Phase 2 (see `docs/superpowers/plans/2026-06-17-phase-0-foundation.md:933`). The roadmap's Phase 2 (`...-neotilde-implementation-roadmap.md:85`) is *Storage & sync*: Keychain identity store, `known_hosts`, CloudKit records wrapped in the AES envelope, per-category sync toggles.
+Phase 0 locked the data model *schema primitives* (`Host`/`Identity`/`Defaults`/`Inherited<T>`, `RecordEnvelope` AES-256-GCM seal) but deliberately deferred the **remaining host fields** and the **storage/CRUD layer** to Phase 2 (see `docs/superpowers/plans/2026-06-17-phase-0-foundation.md:933`). The roadmap's Phase 2 (`...-semicolyn-implementation-roadmap.md:85`) is *Storage & sync*: Keychain identity store, `known_hosts`, CloudKit records wrapped in the AES envelope, per-category sync toggles.
 
-The dev environment is Linux/Docker (no Apple SDKs; `swift test` runs in `neotilde-dev`). The roadmap's cross-cutting constraint requires keeping the Apple-only layer thin and maximizing the Linux-testable surface. So this plan builds the **platform-agnostic storage core** — everything that compiles and is fully tested on Linux today — and defers the Apple concrete backends (Keychain/SE via `SecAccessControl`, CloudKit Private DB) to a later sub-phase (2b, macOS CI).
+The dev environment is Linux/Docker (no Apple SDKs; `swift test` runs in `semicolyn-dev`). The roadmap's cross-cutting constraint requires keeping the Apple-only layer thin and maximizing the Linux-testable surface. So this plan builds the **platform-agnostic storage core** — everything that compiles and is fully tested on Linux today — and defers the Apple concrete backends (Keychain/SE via `SecAccessControl`, CloudKit Private DB) to a later sub-phase (2b, macOS CI).
 
 **Outcome:** a complete host/identity schema, the full resolution/fallback table, and a layered storage stack (`BlobStore` → `EncryptedRecordStore`; `SecretStore` → `HostKeyStore`) with in-memory + file Linux backends and a repository facade enforcing the spec's invariants (cycle prevention, soft-unique label warning, refuse-delete-if-referenced). The Apple backends in 2b implement the same two protocols (`BlobStore`, `SecretStore`) — no core rewrite.
 
@@ -31,16 +31,16 @@ CloudKit-bound (metadata, AES-sealed)        Keychain-bound (secrets, E2EE by Ap
                    cycle / dup-label / refuse-delete invariants
 ```
 
-The two `protocol`s (`BlobStore`, `SecretStore`) are the only seams the Apple backends (2b) must fill. Everything above them is pure, value-type, Linux-tested Swift. Record sealing reuses the existing `RecordEnvelope` (`Sources/NeotildeKit/Crypto/RecordEnvelope.swift`); cycle detection reuses the existing `hasCycle` (`Sources/NeotildeKit/Model/Resolution.swift:18`).
+The two `protocol`s (`BlobStore`, `SecretStore`) are the only seams the Apple backends (2b) must fill. Everything above them is pure, value-type, Linux-tested Swift. Record sealing reuses the existing `RecordEnvelope` (`Sources/SemicolynKit/Crypto/RecordEnvelope.swift`); cycle detection reuses the existing `hasCycle` (`Sources/SemicolynKit/Model/Resolution.swift:18`).
 
 ## Tech Stack
 
-Swift 6 (`NeotildeKit`, platform-agnostic), XCTest. Crypto via `CryptoKit` on Apple / `Crypto` (swift-crypto) on Linux behind `#if canImport(CryptoKit)` (pattern already in `RecordEnvelope.swift`). Run on Linux: `docker compose run --rm dev swift test`.
+Swift 6 (`SemicolynKit`, platform-agnostic), XCTest. Crypto via `CryptoKit` on Apple / `Crypto` (swift-crypto) on Linux behind `#if canImport(CryptoKit)` (pattern already in `RecordEnvelope.swift`). Run on Linux: `docker compose run --rm dev swift test`.
 
 ## Global Constraints
 
 - Every source/test file begins with `// SPDX-FileCopyrightText: 2026 True Positive LLC` then `// SPDX-License-Identifier: GPL-3.0-only`.
-- Placement: Swift in `Sources/NeotildeKit/Model/` (schema, resolution) and a new `Sources/NeotildeKit/Storage/` (stores); tests in `Tests/NeotildeKitTests/`.
+- Placement: Swift in `Sources/SemicolynKit/Model/` (schema, resolution) and a new `Sources/SemicolynKit/Storage/` (stores); tests in `Tests/SemicolynKitTests/`.
 - **No Apple-only APIs** in this plan — every file compiles and tests on Linux. Keychain/SE/CloudKit are out of scope (Phase 2b).
 - Public model/store types are `Equatable, Sendable` where they hold value state; `Codable` for anything persisted.
 - `Inherited<T>` semantics are load-bearing: `.inherit` (absent → inherit), `.explicit(value)` (set), `.explicit(nil)` (explicitly "none"). Never collapse the three.
@@ -71,14 +71,14 @@ git commit -m "docs: Phase 2a storage-core plan"
 
 ---
 
-### Task 1: Complete the host schema (Tier 1 + Tier 2 + Neotilde extensions)
+### Task 1: Complete the host schema (Tier 1 + Tier 2 + Semicolyn extensions)
 
 Phase 0 modeled only `user/port/identities/proxyJump`. Add every remaining field from the spec's entity model (`host-config-model-design.md:33-73`), all as `Inherited<T>`, plus the nested config value types. `Defaults` must carry the *same* optional fields (it is `Partial<Host>`).
 
 **Files:**
-- Create: `Sources/NeotildeKit/Model/HostExtensions.swift` (nested config types + auth/mode enums)
-- Modify: `Sources/NeotildeKit/Model/Host.swift` (add fields to `Host` and `Defaults`)
-- Test: `Tests/NeotildeKitTests/HostSchemaTests.swift`
+- Create: `Sources/SemicolynKit/Model/HostExtensions.swift` (nested config types + auth/mode enums)
+- Modify: `Sources/SemicolynKit/Model/Host.swift` (add fields to `Host` and `Defaults`)
+- Test: `Tests/SemicolynKitTests/HostSchemaTests.swift`
 
 **Interfaces:**
 - Consumes: `Inherited<T>`, `IdentityRef`, `JumpHop`, `LocalForward`, `RemoteForward`, `DynamicForward`, `StrictHostKeyChecking` (all exist).
@@ -89,18 +89,18 @@ Phase 0 modeled only `user/port/identities/proxyJump`. Add every remaining field
   - `struct TailscaleConfig: Codable, Equatable, Sendable { var required: Bool; var tailnet: String? }`
   - `struct PredictorConfig: Codable, Equatable, Sendable { var incognito: Bool? }`
   - `struct TmuxConfig: Codable, Equatable, Sendable { var attemptControlMode: Bool? }`
-  - `struct NeotildeConfig: Codable, Equatable, Sendable { var predictor: PredictorConfig?; var tmux: TmuxConfig? }`
-- Produces (added to `Host`, each `Inherited<...>`, default `.inherit`, with matching `init` params): `passwordRef: Inherited<UUID>`, `localForwards: Inherited<[LocalForward]>`, `remoteForwards: Inherited<[RemoteForward]>`, `dynamicForwards: Inherited<[DynamicForward]>`, `serverAliveInterval: Inherited<Int>`, `serverAliveCountMax: Inherited<Int>`, `compression: Inherited<Bool>`, `strictHostKeyChecking: Inherited<StrictHostKeyChecking>`, `forwardAgent: Inherited<Bool>`, `preferredAuthentications: Inherited<[AuthMethod]>`, `mosh: Inherited<MoshConfig>`, `tailscale: Inherited<TailscaleConfig>`, `neotilde: Inherited<NeotildeConfig>`.
+  - `struct SemicolynConfig: Codable, Equatable, Sendable { var predictor: PredictorConfig?; var tmux: TmuxConfig? }`
+- Produces (added to `Host`, each `Inherited<...>`, default `.inherit`, with matching `init` params): `passwordRef: Inherited<UUID>`, `localForwards: Inherited<[LocalForward]>`, `remoteForwards: Inherited<[RemoteForward]>`, `dynamicForwards: Inherited<[DynamicForward]>`, `serverAliveInterval: Inherited<Int>`, `serverAliveCountMax: Inherited<Int>`, `compression: Inherited<Bool>`, `strictHostKeyChecking: Inherited<StrictHostKeyChecking>`, `forwardAgent: Inherited<Bool>`, `preferredAuthentications: Inherited<[AuthMethod]>`, `mosh: Inherited<MoshConfig>`, `tailscale: Inherited<TailscaleConfig>`, `semicolyn: Inherited<SemicolynConfig>`.
 - Produces (added to `Defaults`): the identical optional field set (every field above plus the existing `identities`/`proxyJump`), same names/types/`.inherit` defaults. `Defaults` keeps no required fields.
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/NeotildeKitTests/HostSchemaTests.swift
+// Tests/SemicolynKitTests/HostSchemaTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class HostSchemaTests: XCTestCase {
     func testFullyPopulatedHostRoundTripsThroughJSON() throws {
@@ -122,7 +122,7 @@ final class HostSchemaTests: XCTestCase {
             mosh: .explicit(MoshConfig(enabled: true, serverPath: "/usr/bin/mosh-server",
                                        udpPortRange: [60000, 61000], predictionMode: .adaptive)),
             tailscale: .explicit(TailscaleConfig(required: true, tailnet: "corp.ts.net")),
-            neotilde: .explicit(NeotildeConfig(predictor: PredictorConfig(incognito: true),
+            semicolyn: .explicit(SemicolynConfig(predictor: PredictorConfig(incognito: true),
                                          tmux: TmuxConfig(attemptControlMode: false))))
         let data = try JSONEncoder().encode(host)
         let back = try JSONDecoder().decode(Host.self, from: data)
@@ -155,7 +155,7 @@ final class HostSchemaTests: XCTestCase {
 
 - [ ] **Step 4: Run to verify it passes.**
 
-- [ ] **Step 5: Commit** — `feat: complete host schema (Tier 1/2 + neotilde extensions)`
+- [ ] **Step 5: Commit** — `feat: complete host schema (Tier 1/2 + semicolyn extensions)`
 
 ---
 
@@ -164,8 +164,8 @@ final class HostSchemaTests: XCTestCase {
 Phase 0 shipped only `resolvePort`. Implement the entire resolution table (`host-config-model-design.md:193-210`): per-host value → Defaults value → built-in fallback, including the `user` **no-fallback** typed error and the nested-config leaf resolutions.
 
 **Files:**
-- Modify: `Sources/NeotildeKit/Model/Resolution.swift` (keep `resolvePort`, `hasCycle`; add the rest)
-- Test: `Tests/NeotildeKitTests/ResolutionTests.swift`
+- Modify: `Sources/SemicolynKit/Model/Resolution.swift` (keep `resolvePort`, `hasCycle`; add the rest)
+- Test: `Tests/SemicolynKitTests/ResolutionTests.swift`
 
 **Interfaces:**
 - Consumes: `Host`, `Defaults`, `Inherited<T>`, and the Task 1 types.
@@ -179,11 +179,11 @@ Phase 0 shipped only `resolvePort`. Implement the entire resolution table (`host
 - [ ] **Step 1: Write the failing test** (one representative assertion per resolution layer + the `user` error path)
 
 ```swift
-// Tests/NeotildeKitTests/ResolutionTests.swift
+// Tests/SemicolynKitTests/ResolutionTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class ResolutionTests: XCTestCase {
     private func host(_ b: (inout Host) -> Void = { _ in }) -> Host {
@@ -238,8 +238,8 @@ final class ResolutionTests: XCTestCase {
 The swappable backend seam for CloudKit-bound records. Stores opaque `Data` blobs keyed by `(type, id)`. CloudKit implements this on Apple (2b); the in-memory impl backs tests and previews.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Storage/BlobStore.swift`
-- Test: `Tests/NeotildeKitTests/InMemoryBlobStoreTests.swift`
+- Create: `Sources/SemicolynKit/Storage/BlobStore.swift`
+- Test: `Tests/SemicolynKitTests/InMemoryBlobStoreTests.swift`
 
 **Interfaces:**
 - Produces:
@@ -259,11 +259,11 @@ The swappable backend seam for CloudKit-bound records. Stores opaque `Data` blob
 - [ ] **Step 1: Write the failing test** — put→get round-trip; overwrite replaces; `getBlob` for missing key → `nil`; `deleteBlob` removes and is idempotent; `listBlobs` returns all ids for a type and excludes other types.
 
 ```swift
-// Tests/NeotildeKitTests/InMemoryBlobStoreTests.swift
+// Tests/SemicolynKitTests/InMemoryBlobStoreTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class InMemoryBlobStoreTests: XCTestCase {
     func testPutGetOverwriteDeleteAndList() throws {
@@ -291,11 +291,11 @@ final class InMemoryBlobStoreTests: XCTestCase {
 
 ### Task 4: `FileBlobStore` (atomic, disk-backed)
 
-A file-backed `BlobStore` for local persistence and Linux integration tests, mirroring `LearnedStore`'s atomic-write idiom (`Sources/NeotildeKit/Predictor/LearnedStore.swift:45-58`). Layout: one file per record at `<dir>/<type>/<uuid>.rec`.
+A file-backed `BlobStore` for local persistence and Linux integration tests, mirroring `LearnedStore`'s atomic-write idiom (`Sources/SemicolynKit/Predictor/LearnedStore.swift:45-58`). Layout: one file per record at `<dir>/<type>/<uuid>.rec`.
 
 **Files:**
-- Modify: `Sources/NeotildeKit/Storage/BlobStore.swift` (append `FileBlobStore`)
-- Test: `Tests/NeotildeKitTests/FileBlobStoreTests.swift`
+- Modify: `Sources/SemicolynKit/Storage/BlobStore.swift` (append `FileBlobStore`)
+- Test: `Tests/SemicolynKitTests/FileBlobStoreTests.swift`
 
 **Interfaces:**
 - Produces: `public struct FileBlobStore: BlobStore { public init(directory: URL) }` — `putBlob` writes atomically (`.atomic`; add `.completeFileProtection` under `#if os(iOS)`), creating `<dir>/<type>/` as needed; `getBlob` returns `nil` for a missing file; `listBlobs` enumerates `*.rec` in `<dir>/<type>/` and parses UUIDs from filenames (skips unparseable); `deleteBlob` removes the file, idempotent.
@@ -303,11 +303,11 @@ A file-backed `BlobStore` for local persistence and Linux integration tests, mir
 - [ ] **Step 1: Write the failing test** — round-trip survives a *new* `FileBlobStore` instance over the same dir (proves real persistence); missing → `nil`; `listBlobs` returns written ids; delete removes. Use a unique temp dir per test; clean up in `tearDown`.
 
 ```swift
-// Tests/NeotildeKitTests/FileBlobStoreTests.swift
+// Tests/SemicolynKitTests/FileBlobStoreTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class FileBlobStoreTests: XCTestCase {
     private var dir: URL!
@@ -347,11 +347,11 @@ final class FileBlobStoreTests: XCTestCase {
 Seals Codable records with `RecordEnvelope` over any `BlobStore`, so the backend (and CloudKit in 2b) sees only AES-GCM ciphertext. `RecordType` enumerates the CloudKit-bound record kinds and seeds the sync taxonomy.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Storage/EncryptedRecordStore.swift`
-- Test: `Tests/NeotildeKitTests/EncryptedRecordStoreTests.swift`
+- Create: `Sources/SemicolynKit/Storage/EncryptedRecordStore.swift`
+- Test: `Tests/SemicolynKitTests/EncryptedRecordStoreTests.swift`
 
 **Interfaces:**
-- Consumes: `BlobStore`, `RecordEnvelope.seal/open` (`Sources/NeotildeKit/Crypto/RecordEnvelope.swift`), `SymmetricKey`.
+- Consumes: `BlobStore`, `RecordEnvelope.seal/open` (`Sources/SemicolynKit/Crypto/RecordEnvelope.swift`), `SymmetricKey`.
 - Produces:
   - `public enum RecordType: String, Codable, Sendable, CaseIterable { case host, defaults, identity }` (string = the `BlobStore` `type` namespace).
   - ```swift
@@ -368,7 +368,7 @@ Seals Codable records with `RecordEnvelope` over any `BlobStore`, so the backend
 - [ ] **Step 1: Write the failing test** (Critical: round-trip + confidentiality + tamper + wrong-key)
 
 ```swift
-// Tests/NeotildeKitTests/EncryptedRecordStoreTests.swift
+// Tests/SemicolynKitTests/EncryptedRecordStoreTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
@@ -378,7 +378,7 @@ import CryptoKit
 #else
 import Crypto
 #endif
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class EncryptedRecordStoreTests: XCTestCase {
     private let key = SymmetricKey(size: .bits256)
@@ -443,8 +443,8 @@ final class EncryptedRecordStoreTests: XCTestCase {
 The Keychain-bound seam: opaque secrets keyed by a typed `SecretRef`. On Apple (2b) this is iCloud Keychain / Secure Enclave via `SecAccessControl`; here, in-memory. Includes a get-or-generate helper for the 32-byte AES record key that `EncryptedRecordStore` consumes.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Storage/SecretStore.swift`
-- Test: `Tests/NeotildeKitTests/InMemorySecretStoreTests.swift`
+- Create: `Sources/SemicolynKit/Storage/SecretStore.swift`
+- Test: `Tests/SemicolynKitTests/InMemorySecretStoreTests.swift`
 
 **Interfaces:**
 - Produces:
@@ -473,7 +473,7 @@ The Keychain-bound seam: opaque secrets keyed by a typed `SecretRef`. On Apple (
 - [ ] **Step 1: Write the failing test** — set/get/delete round-trip per ref kind; missing → nil; delete idempotent; `recordKey` is stable across calls (same bytes) and persists into the store.
 
 ```swift
-// Tests/NeotildeKitTests/InMemorySecretStoreTests.swift
+// Tests/SemicolynKitTests/InMemorySecretStoreTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
@@ -483,7 +483,7 @@ import CryptoKit
 #else
 import Crypto
 #endif
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class InMemorySecretStoreTests: XCTestCase {
     func testSetGetDeleteByRef() throws {
@@ -521,8 +521,8 @@ final class InMemorySecretStoreTests: XCTestCase {
 `known_hosts` entries live in iCloud Keychain (synced, E2EE), queried by host UUID, **multiple entries per host** (rotation: old + new valid together) — `host-config-model-design.md:109-122`. Stored as JSON-encoded `[HostKey]` under `SecretRef.hostKeys(hostID:)`.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Storage/HostKeyStore.swift`
-- Test: `Tests/NeotildeKitTests/HostKeyStoreTests.swift`
+- Create: `Sources/SemicolynKit/Storage/HostKeyStore.swift`
+- Test: `Tests/SemicolynKitTests/HostKeyStoreTests.swift`
 
 **Interfaces:**
 - Consumes: `SecretStore`, `HostKey`, `HostKeySource` (exist in `Host.swift`).
@@ -539,11 +539,11 @@ final class InMemorySecretStoreTests: XCTestCase {
 - [ ] **Step 1: Write the failing test** — empty host → `[]`; `add` two distinct keys → both present (rotation); `add` preserves order/existing; `remove` by fingerprint drops only the match; removing the last entry leaves `entries` empty.
 
 ```swift
-// Tests/NeotildeKitTests/HostKeyStoreTests.swift
+// Tests/SemicolynKitTests/HostKeyStoreTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class HostKeyStoreTests: XCTestCase {
     private func key(_ fp: String) -> HostKey {
@@ -583,8 +583,8 @@ final class HostKeyStoreTests: XCTestCase {
 Ties the record store together and enforces the spec's save/delete invariants: cycle prevention at save (`host-config-model-design.md:93`), soft-unique label *warning* (not a block — `:36`), refuse-delete-of-referenced-jumphost (`:95`), and Identity refuse-delete-if-referenced + used-by scan (`identities-keys-management-design.md:166-180`). Defaults is a singleton.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Storage/HostStore.swift`
-- Test: `Tests/NeotildeKitTests/HostStoreTests.swift`
+- Create: `Sources/SemicolynKit/Storage/HostStore.swift`
+- Test: `Tests/SemicolynKitTests/HostStoreTests.swift`
 
 **Interfaces:**
 - Consumes: `EncryptedRecordStore`, `Host`, `Defaults`, `Identity`, `hasCycle` (`Resolution.swift:18`), `RecordType`.
@@ -629,7 +629,7 @@ Ties the record store together and enforces the spec's save/delete invariants: c
 - [ ] **Step 1: Write the failing test** (each invariant, good AND bad)
 
 ```swift
-// Tests/NeotildeKitTests/HostStoreTests.swift
+// Tests/SemicolynKitTests/HostStoreTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
@@ -639,7 +639,7 @@ import CryptoKit
 #else
 import Crypto
 #endif
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class HostStoreTests: XCTestCase {
     private func makeStore() -> HostStore {
@@ -724,8 +724,8 @@ final class HostStoreTests: XCTestCase {
 The icloud-sync-scope spec requires a code-level sync classification and a **no-op audit-log stub namespace** reserved for a future Pro feature (`icloud-sync-scope-design.md:108-116`, sync table `:50-68`). Encode the taxonomy as data (the per-item sync decision) and reserve the audit namespace as inert hooks.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Storage/SyncScope.swift`
-- Test: `Tests/NeotildeKitTests/SyncScopeTests.swift`
+- Create: `Sources/SemicolynKit/Storage/SyncScope.swift`
+- Test: `Tests/SemicolynKitTests/SyncScopeTests.swift`
 
 **Interfaces:**
 - Produces:
@@ -750,11 +750,11 @@ The icloud-sync-scope spec requires a code-level sync classification and a **no-
 - [ ] **Step 1: Write the failing test** — assert each representative item maps to the spec's backend and `syncs` value; assert the SE/local items don't sync; assert `AuditLog.record` is a no-op (call it, assert nothing observable changes — and that the reserved namespace string is stable).
 
 ```swift
-// Tests/NeotildeKitTests/SyncScopeTests.swift
+// Tests/SemicolynKitTests/SyncScopeTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class SyncScopeTests: XCTestCase {
     func testBackendsMatchSpec() {

@@ -19,7 +19,7 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Name | **neotilde** — *neo* + *tilde* (`~`, the shell's home directory and the key every terminal user reaches for). "The modern terminal." Lowercase `neotilde` in path / code contexts; capitalized `Neotilde` only as the proper noun at sentence start. (Renamed from "Glymr" 2026-06-24 — the old name collided with a LIVE registered GLYMR trademark; see `docs/2026-06-24-naming-decision-neotilde.md`.) |
+| Name | **semicolyn** — a respell of *semicolon* (`;`, the shell's command separator that chains one command into the next). Lowercase `semicolyn` in path / code contexts; capitalized `Semicolyn` only as the proper noun at sentence start. (Naming journey: Glymr → neotilde (2026-06-24, forced off the LIVE registered GLYMR trademark) → **semicolyn** (2026-06-28); see `docs/2026-06-28-naming-decision-semicolyn.md`.) |
 | Goal | Solve a personal annoyance (CLI / AI / security adjacent) |
 | Differentiator | Make the iOS keyboard pleasant for terminal work |
 | Security posture | Security-first: SE-default for new identities, per-host auth policy, no telemetry, public-key always copyable. (Audit log dropped from v1 entirely per `2026-06-16-icloud-sync-scope-design.md`; code-level stub reserved for a future Pro compliance feature.) |
@@ -39,7 +39,7 @@ Two complementary input mechanisms central to the differentiation:
 | Topic | Decision |
 |---|---|
 | Credential storage | **Native only** — iOS Keychain + Secure Enclave. **No 3rd-party password-manager integration.** Matches Blink / Termius / Prompt 3. |
-| Security posture framing | **Storage is the security story, not per-use friction.** Keys live in iCloud Keychain (E2EE-synced) or Secure Enclave (hardware-bound). The user-facing gate is the **device unlock**. App-level Face ID is an **opt-in extra layer**, off by default — revised in `2026-06-16-settings-sub-screens-design.md` (Notes / Mail / Messages don't gate themselves on an unlocked phone; Neotilde doesn't either by default). Per-use biometric (`anyUse`) remains the opt-in escape hatch for per-operation friction on specific high-value identities. (Original locked-decision in `2026-06-15-multi-connection-switching-design.md` said app-level Face ID was the default gate; that's superseded.) |
+| Security posture framing | **Storage is the security story, not per-use friction.** Keys live in iCloud Keychain (E2EE-synced) or Secure Enclave (hardware-bound). The user-facing gate is the **device unlock**. App-level Face ID is an **opt-in extra layer**, off by default — revised in `2026-06-16-settings-sub-screens-design.md` (Notes / Mail / Messages don't gate themselves on an unlocked phone; Semicolyn doesn't either by default). Per-use biometric (`anyUse`) remains the opt-in escape hatch for per-operation friction on specific high-value identities. (Original locked-decision in `2026-06-15-multi-connection-switching-design.md` said app-level Face ID was the default gate; that's superseded.) |
 
 ### Snippets / macros (unified)
 
@@ -55,8 +55,8 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| v1 scope | **In-app accessory bar only.** iOS owns the letter keys; the 123 layer remains the fallback for any symbol not promoted to the keybar. Neotilde owns the predictor strip + keybar pills + slots. |
-| v2 question (deferred) | Custom `inputView` (Neotilde-owned keyboard inside the app) — enables long-press alts on letter keys, held modifier chords, custom repeat rates, context-swap layouts. Not a system-wide keyboard extension. |
+| v1 scope | **In-app accessory bar only.** iOS owns the letter keys; the 123 layer remains the fallback for any symbol not promoted to the keybar. Semicolyn owns the predictor strip + keybar pills + slots. |
+| v2 question (deferred) | Custom `inputView` (Semicolyn-owned keyboard inside the app) — enables long-press alts on letter keys, held modifier chords, custom repeat rates, context-swap layouts. Not a system-wide keyboard extension. |
 | Slot interaction | Three actions per slot: tap = primary, swipe-up = secondary, swipe-down = tertiary. Long-press = edit the slot (rebind, replace, pin a new macro). Each key shows the two swipe chars as small dim glyphs on the same key (top and bottom edges). |
 | Modifier behavior | **Ctrl, Alt, Shift = sticky-for-one-keystroke.** Tap → armed for the next key, auto-disarms. **Ctrl additionally double-tap-to-lock** (Emacs chord case); tap again unlocks. Alt/Shift stay sticky-only (their swipe-based gestures don't support double-arming cleanly; iOS already provides caps-lock for Shift). Esc and Tab fire on tap (no sticky/toggle). |
 | Arrow input | **Single Blink-style arrow-pad slot.** Touch and drag from center in any direction (↑↓←→) to fire that arrow. Replaces four discrete arrow keys. |
@@ -180,13 +180,13 @@ Two complementary input mechanisms central to the differentiation:
 |---|---|
 | Minimum tmux | **3.0** (2019). Below = degraded mode. No partial-version support. |
 | "Raw passthrough" as a feature | **Non-goal.** No user-facing toggle, no power-user mode. Degraded mode is a fallback, not a taste preference. |
-| Bootstrap / auto-install | **Never.** Neotilde does not drop binaries, run package managers, or sudo on user hosts. |
+| Bootstrap / auto-install | **Never.** Semicolyn does not drop binaries, run package managers, or sudo on user hosts. |
 | Detection | Single `tmux -V` at connect; result decides `-CC` vs raw PTY. |
 | What works in degraded mode | Connection, single shell, predictor, snippets, keybar (modifiers/arrows/Esc/Tab/Fn manual), iOS copy/paste, cursor placement, status banner. |
 | What's off in degraded mode | Window pill, pane pill, context detection, function-key auto-engage. |
 | Keybar layout (degraded) | Locked-left collapses left after pills are removed; no badge, no accent shift — pill absence is the indicator. |
 | Connect-time banner | Reuses transient amber connection-status banner. Reoccurs every reconnect. No persistent chrome. |
-| Suppression | **Per-host only.** Auto-offered as a one-tap action after 2–3 dismissals; global toggle rejected as a footgun. Per-host "Don't attempt tmux on this host" ships in the v1 host-config schema as `neotilde.tmux.attemptControlMode` (see `2026-06-15-host-config-model-design.md`) and is exposed in the host-CRUD "Neotilde behavior" section. |
+| Suppression | **Per-host only.** Auto-offered as a one-tap action after 2–3 dismissals; global toggle rejected as a footgun. Per-host "Don't attempt tmux on this host" ships in the v1 host-config schema as `semicolyn.tmux.attemptControlMode` (see `2026-06-15-host-config-model-design.md`) and is exposed in the host-CRUD "Semicolyn behavior" section. |
 | Mid-session crash recovery | Drop to degraded immediately on same connection; show **persistent red banner** (the one documented exception to the transient-banner rule) with Reattach / Start new tmux / Dismiss. No auto-retry of `-CC`, no layout restoration, no false reassurance. |
 
 **Full design**: see `docs/superpowers/specs/2026-06-14-degraded-mode-design.md`.
@@ -218,7 +218,7 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Design posture | **`ssh_config(5)`-faithful in naming and semantics**, strict subset of OpenSSH's expressive power, lossless import/export with `~/.ssh/config` as a design goal. Neotilde extensions namespaced (`mosh.*`, `tailscale.*`, `neotilde.*`). |
+| Design posture | **`ssh_config(5)`-faithful in naming and semantics**, strict subset of OpenSSH's expressive power, lossless import/export with `~/.ssh/config` as a design goal. Semicolyn extensions namespaced (`mosh.*`, `tailscale.*`, `semicolyn.*`). |
 | Inheritance | **Single global Defaults record + per-host overrides.** Equivalent to OpenSSH's `Host *` block, no wildcards. `undefined = inherit`, `null/[]` = explicit override to "none" (distinction baked in so future groups/patterns are additive). |
 | Stable ID | **UUID v4** at create time; immutable; internal only. User-facing identifier is `label` (free-form, soft-unique — warn-on-duplicate, allow save). Export to `~/.ssh/config` sanitizes label → alias at write time. |
 | Required fields | `id` (UUID), `label`, `hostName`. Everything else optional → inherits from Defaults → built-in fallback. |
@@ -228,7 +228,7 @@ Two complementary input mechanisms central to the differentiation:
 | OpenSSH option scope | **Tier 1** (always visible): connection basics, identities, jump chain, port forwards. **Tier 2** ("Advanced" disclosure): `serverAliveInterval/CountMax`, `compression`, `strictHostKeyChecking`, `forwardAgent` (default false), `preferredAuthentications`. **Tier 3** (Ciphers/MACs/Kex/HostKey/GSSAPI/etc.) deferred — no escape hatch in v1. |
 | Mosh | **`mosh: { enabled, serverPath?, udpPortRange?, predictionMode? }`** — modeled as an SSH-bootstrap option, not a separate transport, because mosh actually is one. Defaults: `enabled=false`, `udpPortRange=[60000, 61000]`, `predictionMode="adaptive"`. |
 | Tailscale | **`tailscale: { required, tailnet? }`** — awareness flag only; OS handles routing. When `required=true` and Tailscale is down, connection-status banner says "Tailscale required" instead of generic unreachable. Tailscale SSH (auth via tailnet identity) deferred to v1.5+. |
-| Neotilde per-host extensions (v1) | **`neotilde.predictor.incognito`** (don't learn from this host) and **`neotilde.tmux.attemptControlMode`** (skip `-CC` probe per-host). Everything else stays global in v1. |
+| Semicolyn per-host extensions (v1) | **`semicolyn.predictor.incognito`** (don't learn from this host) and **`semicolyn.tmux.attemptControlMode`** (skip `-CC` probe per-host). Everything else stays global in v1. |
 | Identity model | **First-class entity, not embedded** (forced by iOS storage — SE keys can't be embedded, iCloud Keychain keys outlive any specific host). Two flavors at creation: **`iCloudKeychain`** (default — synced E2EE across devices, device-portable) or **`secureEnclave`** (opt-in "enhanced" — hardware-bound, single device). Host create flow can create inline so users never have to visit "Identities & Keys" for the basic path. |
 | Auth policy enforcement | Identity-level only in v1, via iOS `SecAccessControl`: `never` / `anyUse` (biometric every use) / `afterUnlock` (biometric once per unlock). |
 | Storage backbone | **iCloud Keychain (E2EE)** = keys, passwords, passphrases, `known_hosts` entries, host-config encryption key. **Secure Enclave** = opt-in device-bound identities. **CloudKit Private DB + client-side AES-256-GCM** = host records, Defaults record, identity metadata (32-byte key in iCloud Keychain → effective E2EE regardless of user's ADP setting). **Local only** = recent connections, live session state. |
@@ -241,7 +241,7 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Form shape | **Single scrollable form, same for create and edit.** No wizard, no tabs. Nine sections: Basics · Auth · Connection · Jump chain · Port forwarding · Mosh · Tailscale · Neotilde behavior · Delete host (edit-only). |
+| Form shape | **Single scrollable form, same for create and edit.** No wizard, no tabs. Nine sections: Basics · Auth · Connection · Jump chain · Port forwarding · Mosh · Tailscale · Semicolyn behavior · Delete host (edit-only). |
 | Default expansion | New host: Basics + Auth expanded; rest collapsed. Edit host: a section auto-expands iff it carries a non-default value. Save with errors: any flagged section auto-expands. Not persisted across opens. |
 | Conditional fields | **Show + explain, never hide.** `mosh.enabled = true` → `serverAlive*` rows grayed out with tooltip ("Mosh has its own keepalive"); port-forward, forwardAgent, and Tailscale sections show inline caveat banners under their headers. No field is ever fully hidden by conditional rules. |
 | Identity sub-flow | Half-sheet from bottom with **three tabs**: **Pick existing** (list of stored identities with flavor + biometric badges), **Create new** (algorithm / storage flavor / biometric policy / display name), **Import existing** (paste PEM/OpenSSH blob + optional passphrase + flavor + policy). Post-create/import shows public key with Copy/Share/AirDrop for manual install. |
@@ -324,7 +324,7 @@ Two complementary input mechanisms central to the differentiation:
 | Keybar customizations | Sync via CloudKit + AES — custom slots, slot order, divider position, reverse-bar toggle. |
 | Predictor sketches | **Sync via CloudKit + AES, default ON, opt-out per device.** Revises the predictor spec's "no cloud" promise. Sketch blobs are multi-MB so CloudKit (not Keychain). |
 | Audit log | **Dropped from v1 entirely.** No user-facing surface, no quiet collection. Code-level stub reserved for a future Pro compliance feature. |
-| New-device restore | Implicit via sync — no separate "restore from iCloud" button. Sign into iCloud → install Neotilde → synced state populates. |
+| New-device restore | Implicit via sync — no separate "restore from iCloud" button. Sign into iCloud → install Semicolyn → synced state populates. |
 | Snapshot time-travel | Deferred to v1.5+ (point-in-time rollback to a prior sealed daily). |
 | Sync status surface | None in v1 (CloudKit transparent). Add later if usage shows confusion. |
 
@@ -334,7 +334,7 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Posture | **No forced walkthrough, no JIT tooltips.** Coach marks, spotlight overlays, animated callouts all rejected. Neotilde-specific gesture vocabulary is documented in one voluntary reference screen, openable from two entry points. |
+| Posture | **No forced walkthrough, no JIT tooltips.** Coach marks, spotlight overlays, animated callouts all rejected. Semicolyn-specific gesture vocabulary is documented in one voluntary reference screen, openable from two entry points. |
 | Empty state (no hosts) | Centered **"Add your first host"** CTA (bell-bronze, large tap target) + one-line micro-copy *("You'll need a hostname, username, and either a password or key.")* + dim secondary row: **Settings · Tips & Gestures**. Keybar hidden (nothing to act on). Empty state disappears once any host exists; does not return on later "all hosts deleted." |
 | Esc-pill picker (post-connection) | Existing rows (Live → Recent → + Connect → ⚙ Settings) gain **? Tips & Gestures** as a new bottom row. Same destination as the empty-state link. Always present — no badge, no "unread" indicator. |
 | Screen format | Single scrollable page. Top-anchored close button. Six sections: **The keybar · The Esc pill · The Pad · Context-aware promotions · Modifiers · Fn keys.** Each section = short prose + one small static SVG diagram. Identical content from both entry points; no first-time-vs-returning branching. |
@@ -351,14 +351,14 @@ Two complementary input mechanisms central to the differentiation:
 | Topic | Decision |
 |---|---|
 | Scope | The three remaining sub-screens after Hosts and Identities & Keys. Each kept narrow; power-user knobs deferred. |
-| Security: App lock | **Opt-in, off by default** — revises the prior "Face ID once per session" framing. When enabled, sub-row exposes **Re-lock timeout** (Immediately / 1m / 5m / 15m; default 5m). Live sessions on re-lock are **hidden, not killed** (killing a mosh would defeat its purpose). Lock view = full-screen sheet with Neotilde mark + Unlock button. Falls through to device passcode on Face ID cancel (standard `LAContext`). |
+| Security: App lock | **Opt-in, off by default** — revises the prior "Face ID once per session" framing. When enabled, sub-row exposes **Re-lock timeout** (Immediately / 1m / 5m / 15m; default 5m). Live sessions on re-lock are **hidden, not killed** (killing a mosh would defeat its purpose). Lock view = full-screen sheet with Semicolyn mark + Unlock button. Falls through to device passcode on Face ID cancel (standard `LAContext`). |
 | Security: Predictor | **Two controls only.** Master toggle (default ON; off = pause, not delete — sketches persist on disk and in iCloud sync) + **Wipe all learning** (destructive, action-sheet confirm). Wipe clears today + rolling + sealed dailies; **the bundled seed survives**. Pattern-exclude, retention window, incognito hosts review all deferred to v1.5+. |
 | Security: Host fingerprints | Drill-down titled **"Host fingerprints"** (avoids `known_hosts` jargon). Flat alphabetical list, hostname + algorithm or key count, swipe-to-forget per entry. No global forget-all, no search, no sort toggle. |
 | App preferences: Keybar | Single drill-down row, passes through to the editable list specced in `2026-06-15-keybar-customization-design.md`. No new UI. |
 | App preferences: iCloud sync | Three category toggles (**Macros · Keybar customizations · Predictor sketches**), all default ON per the iCloud sync scope spec. Toggling off stops bidirectional sync for that category; existing local data untouched. Footer caption telegraphs the on-device encryption story. Per-macro "don't sync" flag lives on the macro itself, not here. |
 | App preferences: Haptics | Single global toggle, default ON. Off disables cursor engage/lift tick, window-switch wrap tick, long-press feedback, modifier-engage feedback. No per-event tuning in v1. |
 | App preferences cuts | No **Appearance** section (one palette in v1 — no light mode, no theme picker). No **Connection defaults** entry (Defaults editor lives under `Settings → Hosts`). No **Predictor display tuning** (confidence floor / row position — defaults from predictor spec carry v1). |
-| About & Help | Five rows: **Tips & Gestures** (secondary path to the same screen the Esc-pill picker opens) · **Privacy statement** (plain-English drill-down; storage-is-the-security framing, sync scope, no telemetry) · **Open source** (alphabetical OSS list with licenses, generated at archive time) · **Send feedback** (`MFMailComposeViewController` with version/build pre-filled; fall-back to copyable email if no Mail set up) · **Neotilde 1.0.0 (1234)** read-only row, tap to copy. |
+| About & Help | Five rows: **Tips & Gestures** (secondary path to the same screen the Esc-pill picker opens) · **Privacy statement** (plain-English drill-down; storage-is-the-security framing, sync scope, no telemetry) · **Open source** (alphabetical OSS list with licenses, generated at archive time) · **Send feedback** (`MFMailComposeViewController` with version/build pre-filled; fall-back to copyable email if no Mail set up) · **Semicolyn 1.0.0 (1234)** read-only row, tap to copy. |
 | About & Help cuts | No **Terms of Service** (no account, no service). No **Rate the app** (friction-y). No **Changelog** (defer until v1.5 has content). |
 | Cross-cutting | All destructive actions use the same action-sheet idiom as Identity delete (destructive row in top group, Cancel in bottom group). Footer captions used sparingly — only Predictor toggle, iCloud sync group, App lock when on. No badges, no "new" pips anywhere in Settings. |
 
@@ -368,12 +368,12 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Posture | Neotilde ships into an established category (Blink, Termius, Prompt 3, …). Monetization is **secondary to product quality**. The product is for users; payment is for users who *want* to support development. **No feature that defines the product sits behind a paywall.** |
+| Posture | Semicolyn ships into an established category (Blink, Termius, Prompt 3, …). Monetization is **secondary to product quality**. The product is for users; payment is for users who *want* to support development. **No feature that defines the product sits behind a paywall.** |
 | Qualification rule | **A feature qualifies as Pro only if it is cosmetic, optional, or a thank-you. The moment "I need Pro to do X" is a real sentence, the feature is wrong for Pro.** Test future feature ideas against this. |
 | Monetization model | **Free + one-time Pro purchase.** Single non-consumable in-app purchase via StoreKit, Family Sharing on. Price band $5–10 USD (exact decided pre-launch). **No subscription, no Pro+, no Ultimate tier, no trial mode, no time-limited free Pro.** Resolves the README's open `Monetization` thread. |
 | v1 Pro inventory | Three cosmetic / vanity perks: (1) **alternative app icons** via `setAlternateIconName`; (2) **alternative color themes** (light up the moment a second palette is actually designed — v1 ships bell-bronze only); (3) **Supporter badge** in About & Help, visible only to the user. That's the entire inventory. |
-| Entry point | **One row at the top of About & Help.** Reads "Neotilde Pro" when free, "Neotilde Pro — thanks!" when active. Tapping pushes to a plain settings-style upgrade screen (not a modal, not a full-screen takeover). |
-| Upgrade screen rules | Anchor sentence: *"Neotilde is, and will stay, free to use in full."* Included list is **exact** — no vague "and more!" Restore purchase + Family Sharing notice visible without being buried. No countdown, no urgency, no "limited time." |
+| Entry point | **One row at the top of About & Help.** Reads "Semicolyn Pro" when free, "Semicolyn Pro — thanks!" when active. Tapping pushes to a plain settings-style upgrade screen (not a modal, not a full-screen takeover). |
+| Upgrade screen rules | Anchor sentence: *"Semicolyn is, and will stay, free to use in full."* Included list is **exact** — no vague "and more!" Restore purchase + Family Sharing notice visible without being buried. No countdown, no urgency, no "limited time." |
 | Visibility | **No upsell prompts anywhere else in the app.** Not in onboarding, not after the Nth connection, not on any preference change. No "Pro" lock icons on any feature (there are no features to lock). The About row is the only entry point. |
 | Enterprise (deferred) | **Explicitly out of v1.** Candidate features captured but not designed: **audit log** (compliance — stub already at data layer), **team-shared host configs** (most natural subscription candidate if there ever is one — needs backend), **MDM-friendly configuration**, **centralized policy enforcement**, **SSO into the app**, **sealed org-curated snippet packs**, **concurrent-device licensing / seat management**, **premium support**. None designed; revisit when a real customer asks. Even in an enterprise tier, the qualification rule still applies — enterprise features must be things that *only make sense in an org context*, not solo features pay-walled. |
 
@@ -411,7 +411,7 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Trigger | Bluetooth / USB-C keyboard on iPhone, Magic Keyboard / Smart Keyboard Folio on iPad. iOS suppresses the software keyboard; Neotilde adapts. |
+| Trigger | Bluetooth / USB-C keyboard on iPhone, Magic Keyboard / Smart Keyboard Folio on iPad. iOS suppresses the software keyboard; Semicolyn adapts. |
 | Keybar | Stays visible as **compact floating bar** (Esc pill · Pad · Modifier · Tab) above the home indicator. Predictor strip governed independently. App preferences toggle to hide keybar entirely. |
 | Passthrough | Letters / numbers / symbols / arrows / Tab / Esc raw-byte to the terminal. **Ctrl / Option / Shift become real held modifiers** — no sticky dance. The headline win of HW keyboard support. |
 | Esc handling | Magic Keyboards mostly lack Esc — documented in Tips & Gestures: use iOS Settings → General → Keyboard → Hardware Keyboard → Caps Lock → Escape. In-app Esc rebind deferred to v1.5. |
@@ -453,10 +453,10 @@ Two complementary input mechanisms central to the differentiation:
 | Topic | Decision |
 |---|---|
 | Advertised TERM | `TERM=xterm-256color` + `COLORTERM=truecolor`. 256-color baseline, opportunistic 24-bit rendering when apps emit `\x1b[38;2;R;G;Bm` / `\x1b[48;2;R;G;Bm`. Same as Blink / Termius / Prompt 3 / iTerm2 / Alacritty. |
-| OSC 52 (clipboard) | **Allowed by default, per-host toggle to disable.** `neotilde.osc52.allow` in the schema, default `true`. Disabled means the write sequence is parsed and dropped silently. **Read sequences (`\x1b]52;c;?\x07`) never honored regardless of the toggle** — sending the user's clipboard to a remote is a separate boundary v1 doesn't cross. |
-| OSC 0/2 (title) | Captured per window, surfaced only in the **Esc-pill picker Live group as a dim suffix** (`build-01 — ~/src/neotilde`). Title truncates first, window name never. Nowhere else. |
+| OSC 52 (clipboard) | **Allowed by default, per-host toggle to disable.** `semicolyn.osc52.allow` in the schema, default `true`. Disabled means the write sequence is parsed and dropped silently. **Read sequences (`\x1b]52;c;?\x07`) never honored regardless of the toggle** — sending the user's clipboard to a remote is a separate boundary v1 doesn't cross. |
+| OSC 0/2 (title) | Captured per window, surfaced only in the **Esc-pill picker Live group as a dim suffix** (`build-01 — ~/src/semicolyn`). Title truncates first, window name never. Nowhere else. |
 | Mouse mode | **Hybrid.** Modes 1000 / 1002 / 1003 / 1006 / 1015 supported. In a mouse-active pane: taps forward as mouse events (SGR encoding), drag forwards as motion, two-finger scroll forwards as wheel events. **Cursor halo and iOS long-press selection auto-suspend in that pane only.** Bronze 4pt indicator at the pane's top-right interior corner. All other gestures (keybar, Esc pill, etc.) work. Mouse mode is per-pane. |
-| Closed-set policy | Neotilde's negotiation list contains only classified algorithms / sequences. New ones wait for an app update. |
+| Closed-set policy | Semicolyn's negotiation list contains only classified algorithms / sequences. New ones wait for an app update. |
 | Out of scope (v1) | Bracketed paste (likely-add), Sixel / iTerm2-inline-image / Kitty graphics, OSC 8 hyperlinks. |
 
 **Full spec**: see `docs/superpowers/specs/2026-06-17-terminal-emulator-scope-design.md`.
@@ -493,13 +493,13 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Model | **Four-tier closed-set.** Neotilde only negotiates classified algorithms; unclassified wait for an app update. |
+| Model | **Four-tier closed-set.** Semicolyn only negotiates classified algorithms; unclassified wait for an app update. |
 | Tier 1 — silent | Modern + post-quantum. KEX: `sntrup761x25519`, `mlkem768x25519`, `curve25519-sha256`, `ecdh-nistp{256,384,521}`, `dh-group{16,18}-sha512`. HostKey: `ed25519`, `rsa-sha2-{512,256}`, `ecdsa-nistp{256,384,521}` + their cert variants. Cipher: `chacha20-poly1305`, `aes-gcm`, `aes-ctr`. MAC: SHA-2 with ETM preferred. |
-| Tier 2 — per-host opt-in, no warning | `neotilde.allowLegacyAlgorithms`. Adds: `dh-group14-sha256`, `dh-gex-sha256`, `aes-cbc`. |
-| Tier 3 — per-host opt-in, **warns every connect** | `neotilde.allowDeprecatedAlgorithms`. Adds: `dh-group14-sha1`, `dh-gex-sha1`, `ssh-rsa` (SHA-1 + cert variant), `hmac-sha1`. First connect with Tier 3 = modal; subsequent = persistent amber banner reusing the expanded-template chrome. |
+| Tier 2 — per-host opt-in, no warning | `semicolyn.allowLegacyAlgorithms`. Adds: `dh-group14-sha256`, `dh-gex-sha256`, `aes-cbc`. |
+| Tier 3 — per-host opt-in, **warns every connect** | `semicolyn.allowDeprecatedAlgorithms`. Adds: `dh-group14-sha1`, `dh-gex-sha1`, `ssh-rsa` (SHA-1 + cert variant), `hmac-sha1`. First connect with Tier 3 = modal; subsequent = persistent amber banner reusing the expanded-template chrome. |
 | Tier 4 — never offered | `arcfour*`, `3des-cbc`, `blowfish-cbc`, `cast128-cbc`, `hmac-md5`, `ssh-dss`, `dh-group1-sha1`. No toggle, no override path in v1. |
 | Override granularity (v1) | Two per-host toggles. Fine-grained per-algorithm control (Tier 3 host-config schema option) stays deferred to v1.5+. |
-| Maintenance | Review triggers baked into the spec: every OpenSSH major release, every Neotilde major release, on any published practical attack. No separate process doc. References: Mozilla SSH guidelines, OpenSSH release notes, NIST SP 800-52 / 800-57. |
+| Maintenance | Review triggers baked into the spec: every OpenSSH major release, every Semicolyn major release, on any published practical attack. No separate process doc. References: Mozilla SSH guidelines, OpenSSH release notes, NIST SP 800-52 / 800-57. |
 
 **Full spec**: see `docs/superpowers/specs/2026-06-17-ssh-algorithms-design.md`.
 
@@ -507,14 +507,14 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Scope | Client-side cert presentation. Neotilde does **not** issue, sign, or generate certs — that's the user's CA's job. |
+| Scope | Client-side cert presentation. Semicolyn does **not** issue, sign, or generate certs — that's the user's CA's job. |
 | Schema | Identity gains optional `cert.{blob, cachedMetadata}`. Additive; existing records without `cert` unchanged. `cachedMetadata` regenerated on import. |
 | Import | The existing "Import existing" tab of the identity half-sheet gains an optional **Certificate (optional)** row below the private-key field. Validates that the cert's underlying pubkey matches the imported key; Save disabled on mismatch. |
 | Identity detail | New collapsible **Certificate** section: keyId, principals, validity window, CA fingerprint, critical options, extensions. `cert` chip on the identity list + amber `expires Nd` / red `expired` chip when within 14 days. |
 | Auth flow | Cert present + not expired → `<cert> + <key>` to the SSH stack. Cert present + expired → connect refused; **no silent fallback** to bare key (would surprise the user — their CA-signed identity suddenly auths as a different user). No cert → existing bare-key behavior. |
 | Algorithm allowlist intersection | Cert variants of currently-allowed signature algos are in Tier 1 (`ed25519-cert-v01`, `rsa-sha2-{512,256}-cert-v01`, `ecdsa-nistp{256,384,521}-cert-v01`). `ssh-rsa-cert-v01` is behind the Tier 3 toggle. |
-| `forwardAgent` removal | **`forwardAgent` removed entirely from the schema.** Neotilde does not support agent forwarding. Multi-hop via `ProxyJump` (already in Tier 1). Git-on-remote: deploy keys or session-scoped creds. In-app ephemeral agent deferred to v1.5+ if demand warrants. |
-| Out of scope (v1) | Rotation wizard (v1.5 alongside `ssh-copy-id`), auto-renewal from CA APIs, Neotilde-side cert generation, per-host cert overrides, PEM/DER format conversion. |
+| `forwardAgent` removal | **`forwardAgent` removed entirely from the schema.** Semicolyn does not support agent forwarding. Multi-hop via `ProxyJump` (already in Tier 1). Git-on-remote: deploy keys or session-scoped creds. In-app ephemeral agent deferred to v1.5+ if demand warrants. |
+| Out of scope (v1) | Rotation wizard (v1.5 alongside `ssh-copy-id`), auto-renewal from CA APIs, Semicolyn-side cert generation, per-host cert overrides, PEM/DER format conversion. |
 
 **Full spec**: see `docs/superpowers/specs/2026-06-17-ssh-cert-auth-design.md`.
 
@@ -525,7 +525,7 @@ Two complementary input mechanisms central to the differentiation:
 | Hard constraint | SE `anyUse` policy requires a fresh biometric per signing op. Cannot be coalesced. A chain with two `anyUse` hops will, by necessity, prompt twice. UX is framing around an unavoidable fact. |
 | 0 or 1 `anyUse` in chain | **Silent.** No summary modal. Single-prompt case is expected behavior. |
 | ≥2 `anyUse` in chain | **Pre-flight summary modal** before any socket opens. Lists target + each `anyUse` hop with its identity label. Continue / Cancel. After Continue, Face ID prompts fire serially as each hop authenticates. |
-| Mid-chain cancellation | User cancels iOS-native biometric → Neotilde closes the in-flight SSH socket and any earlier-hop sockets, marks the connection failed, fires the existing connect-failed banner with "Authentication cancelled at hop {n}." |
+| Mid-chain cancellation | User cancels iOS-native biometric → Semicolyn closes the in-flight SSH socket and any earlier-hop sockets, marks the connection failed, fires the existing connect-failed banner with "Authentication cancelled at hop {n}." |
 | Partial-success state | None. A chain either fully establishes or fully fails. |
 | Caching | None. No "don't ask again" affordance. The whole point of `anyUse` is no caching. |
 
@@ -535,9 +535,9 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Naming | `neotilde-<accountHash>` where `accountHash` = first 8 hex chars of SHA-256 over the iCloud-Keychain-backed CloudKit key already used by the storage backbone. Stable across reboots / reinstalls; identical across devices on the same Apple ID; different across different Apple IDs. |
+| Naming | `semicolyn-<accountHash>` where `accountHash` = first 8 hex chars of SHA-256 over the iCloud-Keychain-backed CloudKit key already used by the storage backbone. Stable across reboots / reinstalls; identical across devices on the same Apple ID; different across different Apple IDs. |
 | Default behavior | **Shared session per Apple ID.** Devices signed into the same Apple ID share the session — start vim on iPad, switch to iPhone, keep typing. Both clients attached via `tmux -CC`; tmux mirrors. |
-| New picker swipe actions | **Disconnect & end session** kills server-side tmux (action-sheet confirm) and boots other attached devices with a "Session ended from another device" banner. **Connect in new session** opens a one-off `neotilde-<accountHash>-<short-uuid>`; produces a separate picker entry labeled `<host> · alt N`. |
+| New picker swipe actions | **Disconnect & end session** kills server-side tmux (action-sheet confirm) and boots other attached devices with a "Session ended from another device" banner. **Connect in new session** opens a one-off `semicolyn-<accountHash>-<short-uuid>`; produces a separate picker entry labeled `<host> · alt N`. |
 | Per-host configurability | None. Naming convention is the same on every host. |
 | Raw-PTY mode | Opts out — no session abstraction; each device's connection is independent. |
 | Stale alt sessions | Persist on the host until manually ended (Disconnect & end session, or raw SSH + `tmux kill-session`). **No automatic GC in v1.** |
@@ -550,10 +550,10 @@ Two complementary input mechanisms central to the differentiation:
 | Topic | Decision |
 |---|---|
 | Posture | Calibrated for SSH-client norms, **not banking-app paranoia**. Terminal recording / mirroring is a common legitimate use case (screencasts, demos, pair programming). |
-| App-switcher overlay | **Always on, no toggle.** On background, swap to a Neotilde-branded view (bronze mark on `surface.bg`) before iOS captures the switcher thumbnail. Cheap, standard, no downside. Differentiator vs Blink / Prompt 3. |
+| App-switcher overlay | **Always on, no toggle.** On background, swap to a Semicolyn-branded view (bronze mark on `surface.bg`) before iOS captures the switcher thumbnail. Cheap, standard, no downside. Differentiator vs Blink / Prompt 3. |
 | Screen-recording blank | App preferences → Security toggle, **default OFF**. When on and `UIScreen.isCaptured` is true, terminal panes blank with a small caption; keybar / predictor strip / chrome stay visible. The user who *wants* to mirror to TV is the default; the user who *needs* the protection flips the toggle. |
 | Screenshot toast | **Skipped.** iOS provides detection but not blocking; a toast that says "you can't actually prevent screenshots" is performative. |
-| Privacy framing | About & Help → Privacy is honest about what Neotilde does and what iOS will not let any app do. |
+| Privacy framing | About & Help → Privacy is honest about what Semicolyn does and what iOS will not let any app do. |
 | Out of scope (v1) | Secure-text-field screenshot hacks (fragile, defeats user expectations). Per-pane sensitive flag (v1.5+ candidate; explicitly **not** a Pro perk — Pro is cosmetic, not security). |
 
 **Full spec**: see `docs/superpowers/specs/2026-06-17-screen-capture-protection-design.md`.
@@ -562,16 +562,16 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Placement | About & Help → Privacy statement (full-screen push, scrollable plain prose). Same content mirrored to the App Store privacy section and `neotilde.app/privacy`. In-app page is canonical. |
-| Headline | Neotilde collects **nothing**: no analytics, no telemetry, no crash reporting, no usage tracking, no advertising identifiers, no third-party SDKs that collect any of the above. No Neotilde account. |
+| Placement | About & Help → Privacy statement (full-screen push, scrollable plain prose). Same content mirrored to the App Store privacy section and `semicolyn.app/privacy`. In-app page is canonical. |
+| Headline | Semicolyn collects **nothing**: no analytics, no telemetry, no crash reporting, no usage tracking, no advertising identifiers, no third-party SDKs that collect any of the above. No Semicolyn account. |
 | Storage | Documents the backbone: iCloud Keychain / Secure Enclave for identities; CloudKit Private DB + client-side AES for host records / macros / keybar customizations / known-hosts metadata; local-only for recents and live state. |
 | iCloud sync | Per-category toggles (macros / keybar customizations / predictor sketches). E2EE-equivalent for all synced categories regardless of Advanced Data Protection setting. |
 | Third parties | None. Only network requests are SSH/mosh to user-configured hosts plus iOS-level iCloud sync. |
 | Screen capture | Matches the screen-capture-protection spec. Honest about iOS's lack of a screenshot-block API. |
 | Identity survival | iCloud Keychain identities survive reinstall via sync; SE identities are bound to this device and this install and are destroyed on uninstall. |
-| Rating | 17+ (App Store) because Neotilde connects to arbitrary remote servers we cannot moderate. |
+| Rating | 17+ (App Store) because Semicolyn connects to arbitrary remote servers we cannot moderate. |
 | Change notice | Material data-handling changes ship with a one-time in-app notice at next launch. |
-| Contact | `hello@neotilde.app`. |
+| Contact | `hello@semicolyn.app`. |
 | Out of scope (v1) | Localized translations (English only in v1), region-specific phrasing (GDPR-/CCPA-specific carve-outs — substance covered by the no-collection posture), cookie policy (no website state). |
 
 **Full spec**: see `docs/superpowers/specs/2026-06-17-privacy-statement-design.md`.
@@ -598,5 +598,5 @@ Two complementary input mechanisms central to the differentiation:
 
 ### Rejected from v1 (v1.5+ candidates pending demand)
 
-- **Importing from `~/.ssh/config`** — debated and dropped. The friction of getting the file onto iOS roughly equals manual entry, and Neotilde's host CRUD form is fast. Fallback plan if users grumble: a simple "paste comma/newline-separated hostnames" bulk-add tool. Full import (mapping rules, Match/Include, IdentityFile resolution, post-import review) revisitable if real demand surfaces.
-- **Exporting to `~/.ssh/config`** — dropped alongside import. Lossy roundtrip with Neotilde extensions; low priority. Revisit only after import is reconsidered.
+- **Importing from `~/.ssh/config`** — debated and dropped. The friction of getting the file onto iOS roughly equals manual entry, and Semicolyn's host CRUD form is fast. Fallback plan if users grumble: a simple "paste comma/newline-separated hostnames" bulk-add tool. Full import (mapping rules, Match/Include, IdentityFile resolution, post-import review) revisitable if real demand surfaces.
+- **Exporting to `~/.ssh/config`** — dropped alongside import. Lossy roundtrip with Semicolyn extensions; low priority. Revisit only after import is reconsidered.

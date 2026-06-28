@@ -2,15 +2,15 @@
 
 **Date:** 2026-06-13
 **Status:** Locked direction, ready for implementation plan
-**Scope:** On-device predictive input subsystem for Neotilde
+**Scope:** On-device predictive input subsystem for Semicolyn
 
 ---
 
 ## North star
 
-Make terminal input on iOS **fast, error-free, and adaptive to the individual user's vocabulary** — without ever silently mutating what the user typed. Every prediction is a suggestion the user explicitly accepts; no autocorrect-style rewrite is ever performed by Neotilde.
+Make terminal input on iOS **fast, error-free, and adaptive to the individual user's vocabulary** — without ever silently mutating what the user typed. Every prediction is a suggestion the user explicitly accepts; no autocorrect-style rewrite is ever performed by Semicolyn.
 
-The marquee user-visible behavior: when a user has typed `claude` ten times in Neotilde, the next time they type `clau` the suggestion strip shows `claude` instead of iOS's `crayon`. The system learns *the user's* vocabulary, not Apple's English dictionary.
+The marquee user-visible behavior: when a user has typed `claude` ten times in Semicolyn, the next time they type `clau` the suggestion strip shows `claude` instead of iOS's `crayon`. The system learns *the user's* vocabulary, not Apple's English dictionary.
 
 ---
 
@@ -52,7 +52,7 @@ Storage format: each sketch is a serialized binary blob.
 
 ### Storage
 
-- Path: `Library/Application Support/neotilde/predictor/`
+- Path: `Library/Application Support/semicolyn/predictor/`
 - File protection: `NSFileProtectionComplete` — encrypted at rest by iOS, decryptable only when device is unlocked, key derived from the Secure Enclave.
 - Sketches sync via CloudKit Private DB + client-side AES-256-GCM (default ON, opt-out per device in Settings → App preferences → Predictor). Justified by CMS/Bloom's structural lossiness: the synced data is a frequency fingerprint, not recoverable text. See `2026-06-16-icloud-sync-scope-design.md` for the full revision rationale.
 - Structure:
@@ -135,7 +135,7 @@ Pipeline:
 
 The seed is **pinned, not merged** into the user's learned sketches:
 
-- Preserves the privacy story — "my learned dictionary is mine; the seed is what Neotilde ships."
+- Preserves the privacy story — "my learned dictionary is mine; the seed is what Semicolyn ships."
 - Lets us update seeds across app versions without contaminating user data.
 - Queries simply add `today ⊕ rolling_<window> ⊕ seed_pinned`.
 
@@ -223,7 +223,7 @@ User-editable.
 
 ### Transparency surface
 
-- **"What Neotilde has learned" screen** — settings view showing top tokens, top n-grams, per-host counts. Delete individual entries.
+- **"What Semicolyn has learned" screen** — settings view showing top tokens, top n-grams, per-host counts. Delete individual entries.
 - **Wipe button** — one tap, all sketches zeroed, sealed days deleted. Reset to factory.
 - **Retention window** — default 90 days, adjustable from "session only" to "forever."
 
@@ -273,9 +273,9 @@ The predictor's substrate (CMS, Bloom, daily versioning) supports more than basi
 ## Deferred questions
 
 - ~~**iCloud sync of learned sketches**~~ — **Locked in `2026-06-16-icloud-sync-scope-design.md`**: sync via CloudKit + client-side AES, default ON, opt-out per device. Snapshot time-travel (rolling back to a prior sealed daily) remains deferred to v1.5+.
-- **Per-host vocabulary scoping** — currently Neotilde-wide. Per-host internal sharding (for time-of-day patterns above) lays groundwork. Promoting host-level scope to user-visible setting is a v1.5 question.
+- **Per-host vocabulary scoping** — currently Semicolyn-wide. Per-host internal sharding (for time-of-day patterns above) lays groundwork. Promoting host-level scope to user-visible setting is a v1.5 question.
 - **Community seed contribution pipeline** — open-source script, anonymization rigor, contribution moderation.
-- **Tuning of `seed_weight`, `confidence_floor`, `top_k`** — defaults are starting points. Need empirical tuning once Neotilde has real users.
+- **Tuning of `seed_weight`, `confidence_floor`, `top_k`** — defaults are starting points. Need empirical tuning once Semicolyn has real users.
 
 ---
 
@@ -283,5 +283,5 @@ The predictor's substrate (CMS, Bloom, daily versioning) supports more than basi
 
 - N-gram order: bigrams in v1, but trigrams (`kubectl get pods`) are tempting. Storage cost is real; need to estimate value.
 - Output-token harvesting lifespan: how long does a harvested pod name stay relevant? Hours? Until next `kubectl get pods`? Probably needs a separate short-decay sketch.
-- The "What Neotilde has learned" UI — how is it structured? List? Search? Per-host filter? Top-K view?
+- The "What Semicolyn has learned" UI — how is it structured? List? Search? Per-host filter? Top-K view?
 - Failure-mode UX: what does the suggestion row look like when the predictor disk is corrupted and the system has to rebuild from the event log? "Predictor is rebuilding…" toast?

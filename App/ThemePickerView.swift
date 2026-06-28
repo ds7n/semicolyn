@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// Settings → Appearance → Theme. Lists the theme catalog with a palette swatch +
 /// a checkmark on the currently *applied* theme. Pro themes show a ✦Pro badge when

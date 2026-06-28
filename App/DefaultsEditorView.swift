@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// Standalone Defaults editor — the singleton `Defaults` record.
 ///
@@ -27,7 +27,7 @@ struct DefaultsEditorView: View {
     @State private var portForwardingExpanded = false
     @State private var moshExpanded = false
     @State private var tailscaleExpanded = false
-    @State private var neotildeExpanded = false
+    @State private var semicolynExpanded = false
 
     /// Whether to show the save-error alert (unexpected store failure).
     @State private var saveError: String? = nil
@@ -41,7 +41,7 @@ struct DefaultsEditorView: View {
                 portForwardingSection
                 moshSection
                 tailscaleSection
-                neotildeSection
+                semicolynSection
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
@@ -565,20 +565,20 @@ struct DefaultsEditorView: View {
         }
     }
 
-    // MARK: - Neotilde behavior section
+    // MARK: - Semicolyn behavior section
 
-    private var neotildeSection: some View {
-        DisclosureGroup(isExpanded: $neotildeExpanded) {
+    private var semicolynSection: some View {
+        DisclosureGroup(isExpanded: $semicolynExpanded) {
 
             // Predictor incognito — built-in fallback: false
             Toggle(isOn: Binding(
-                get: { vm.defaults.neotilde.value?.predictor?.incognito ?? false },
+                get: { vm.defaults.semicolyn.value?.predictor?.incognito ?? false },
                 set: { newIncognito in
-                    var cfg = vm.defaults.neotilde.value ?? NeotildeConfig()
+                    var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
                     var predictor = cfg.predictor ?? PredictorConfig()
                     predictor.incognito = newIncognito
                     cfg.predictor = predictor
-                    vm.defaults.neotilde = .explicit(cfg)
+                    vm.defaults.semicolyn = .explicit(cfg)
                 }
             )) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -590,21 +590,21 @@ struct DefaultsEditorView: View {
                 }
             }
             .swipeActions {
-                if case .explicit = vm.defaults.neotilde {
-                    Button("Clear override") { vm.defaults.neotilde = .inherit }
+                if case .explicit = vm.defaults.semicolyn {
+                    Button("Clear override") { vm.defaults.semicolyn = .inherit }
                         .tint(Color(theme.accent.primary))
                 }
             }
 
             // Tmux control mode — built-in fallback: true (attempt)
             Toggle(isOn: Binding(
-                get: { vm.defaults.neotilde.value?.tmux?.attemptControlMode ?? true },
+                get: { vm.defaults.semicolyn.value?.tmux?.attemptControlMode ?? true },
                 set: { newAttempt in
-                    var cfg = vm.defaults.neotilde.value ?? NeotildeConfig()
+                    var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
                     var tmux = cfg.tmux ?? TmuxConfig()
                     tmux.attemptControlMode = newAttempt
                     cfg.tmux = tmux
-                    vm.defaults.neotilde = .explicit(cfg)
+                    vm.defaults.semicolyn = .explicit(cfg)
                 }
             )) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -616,20 +616,20 @@ struct DefaultsEditorView: View {
                 }
             }
             .swipeActions {
-                if case .explicit = vm.defaults.neotilde {
-                    Button("Clear override") { vm.defaults.neotilde = .inherit }
+                if case .explicit = vm.defaults.semicolyn {
+                    Button("Clear override") { vm.defaults.semicolyn = .inherit }
                         .tint(Color(theme.accent.primary))
                 }
             }
 
-            if case .inherit = vm.defaults.neotilde {
+            if case .inherit = vm.defaults.semicolyn {
                 Text("inherit · predictor on, tmux control mode on")
                     .font(.caption)
                     .foregroundStyle(Color(theme.text.secondary))
             }
 
         } label: {
-            Text("Neotilde behavior")
+            Text("Semicolyn behavior")
                 .font(.headline)
                 .foregroundStyle(Color(theme.text.primary))
         }

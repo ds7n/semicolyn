@@ -7,7 +7,7 @@
 
 **Goal:** Make the keybar's scroll region context-aware: render the engaged process's promotion set as bronze slots, and add an Fn slot that toggles an F1–F12 layer (manually, and auto-engaged in `htop`/`top`/`mc`).
 
-**Architecture:** Continue the 4a pattern — push logic into pure, Linux-tested NeotildeKit, keep the App tier a thin render/wire layer. New pure cores: F-key encoding (`KeyInput.function`), an `FnState` machine (caps-lock semantics + context auto-engage + per-episode user-override), an `AutoFnCatalog` (bundled `htop`/`top`/`mc`), and a `keybarScrollItems(...)` content model that resolves promotions-vs-F-keys-vs-defaults. The App consumes Plan-D's `paneContexts` observable + `PromotionRegistry` to drive promotions, wires context transitions to Fn auto-engage, and reads per-pane DECCKM to replace 4a's hard-coded `applicationCursorKeys: { false }`.
+**Architecture:** Continue the 4a pattern — push logic into pure, Linux-tested SemicolynKit, keep the App tier a thin render/wire layer. New pure cores: F-key encoding (`KeyInput.function`), an `FnState` machine (caps-lock semantics + context auto-engage + per-episode user-override), an `AutoFnCatalog` (bundled `htop`/`top`/`mc`), and a `keybarScrollItems(...)` content model that resolves promotions-vs-F-keys-vs-defaults. The App consumes Plan-D's `paneContexts` observable + `PromotionRegistry` to drive promotions, wires context transitions to Fn auto-engage, and reads per-pane DECCKM to replace 4a's hard-coded `applicationCursorKeys: { false }`.
 
 **Tech Stack:** Swift 6 strict concurrency, XCTest on the Linux fast loop (pure cores); SwiftUI + SwiftTerm + the existing `KeybarInputRouter`/`paneContexts` for the App tier (macOS-CI-build-validated only).
 
@@ -17,7 +17,7 @@ Pure cores (Tasks 1–3) are fully Linux-tested. App tasks (4–5) compile only 
 
 ## Global Constraints
 
-- **Two tiers:** pure logic in `Sources/NeotildeKit/` (no `import UIKit`/`SwiftUI`/`CryptoKit`, `Sendable`); App in `App/` (macOS-CI build only).
+- **Two tiers:** pure logic in `Sources/SemicolynKit/` (no `import UIKit`/`SwiftUI`/`CryptoKit`, `Sendable`); App in `App/` (macOS-CI build only).
 - **Specs locked:** `docs/superpowers/specs/2026-06-14-function-keys-design.md` (Fn) and `docs/superpowers/specs/2026-06-14-context-detection-design.md` §"Keybar integration" (promotions).
 - **Fn state machine (verbatim, caps-lock semantics):** Off → (single tap) Armed → (any F-key fires) Off; Off → (double-tap) Locked; Armed → (second tap) Locked; Locked → (single tap) Off; firing F-keys while Locked does NOT exit.
 - **Auto-engage (verbatim):** in `htop`/`top`/`mc`, the context machine auto-enters **Locked** on the 250 ms engage; returns to **Off** on the 1500 ms disengage. Per-pane, per-episode `fnUserOverride`: if the user single-taps Fn off while context has it locked, set the flag → stays Off for the rest of that episode (auto-engage will not re-lock). Resets when the context disengages-then-re-engages, the pane is switched away and back, or the user manually re-locks.
@@ -32,14 +32,14 @@ Pure cores (Tasks 1–3) are fully Linux-tested. App tasks (4–5) compile only 
 
 ## File Structure
 
-**Created (NeotildeKit, Linux-tested):**
-- `Sources/NeotildeKit/Keybar/FnState.swift` — `FnMode`, `FnState` machine.
-- `Sources/NeotildeKit/Keybar/AutoFnCatalog.swift` — bundled auto-Fn process set + override merge.
-- `Sources/NeotildeKit/Keybar/KeybarScrollContent.swift` — `KeybarScrollItem`, `keybarScrollItems(...)`.
+**Created (SemicolynKit, Linux-tested):**
+- `Sources/SemicolynKit/Keybar/FnState.swift` — `FnMode`, `FnState` machine.
+- `Sources/SemicolynKit/Keybar/AutoFnCatalog.swift` — bundled auto-Fn process set + override merge.
+- `Sources/SemicolynKit/Keybar/KeybarScrollContent.swift` — `KeybarScrollItem`, `keybarScrollItems(...)`.
 
-**Modified (NeotildeKit):**
-- `Sources/NeotildeKit/Keybar/KeyEncoding.swift` — add `KeyInput.function(Int)` + F1–F12 encoding.
-- `Sources/NeotildeKit/Keybar/KeybarInputRouter.swift` — add `tapFKey(_:)`.
+**Modified (SemicolynKit):**
+- `Sources/SemicolynKit/Keybar/KeyEncoding.swift` — add `KeyInput.function(Int)` + F1–F12 encoding.
+- `Sources/SemicolynKit/Keybar/KeybarInputRouter.swift` — add `tapFKey(_:)`.
 
 **Created (App, macOS-CI-only):**
 - `App/Keybar/PromotionSlotView.swift` — bronze promotion slot + Fn slot + F-key slot views.
@@ -57,7 +57,7 @@ Pure cores (Tasks 1–3) are fully Linux-tested. App tasks (4–5) compile only 
 - [ ] **Step 0: Branch**
 
 ```bash
-cd /home/user/proj/truepositive/neotilde
+cd <repo-root>
 git checkout -b feat/phase-4b-promotions-fn
 ```
 
@@ -66,16 +66,16 @@ git checkout -b feat/phase-4b-promotions-fn
 ### Task 1: F-key support (encoding + router)
 
 **Files:**
-- Modify: `Sources/NeotildeKit/Keybar/KeyEncoding.swift`
-- Modify: `Sources/NeotildeKit/Keybar/KeybarInputRouter.swift`
-- Test: `Tests/NeotildeKitTests/KeyEncodingTests.swift` (extend), `Tests/NeotildeKitTests/KeybarInputRouterTests.swift` (extend)
+- Modify: `Sources/SemicolynKit/Keybar/KeyEncoding.swift`
+- Modify: `Sources/SemicolynKit/Keybar/KeybarInputRouter.swift`
+- Test: `Tests/SemicolynKitTests/KeyEncodingTests.swift` (extend), `Tests/SemicolynKitTests/KeybarInputRouterTests.swift` (extend)
 
 **Interfaces:**
 - Produces: `KeyInput.function(Int)` case; `encodeKey` returns F1–F4 as SS3 (`ESC O P/Q/R/S`), F5–F12 as CSI (`ESC [ 15~/17~/18~/19~/20~/21~/23~/24~`), out-of-range → `[]`; `KeybarInputRouter.tapFKey(_ n: Int)` fires `.function(n)`. (MVP: modifiers do not alter F-keys.)
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `Tests/NeotildeKitTests/KeyEncodingTests.swift`:
+Append to `Tests/SemicolynKitTests/KeyEncodingTests.swift`:
 
 ```swift
     func testFunctionKeysSS3AndCSI() {
@@ -93,7 +93,7 @@ Append to `Tests/NeotildeKitTests/KeyEncodingTests.swift`:
     }
 ```
 
-Append to `Tests/NeotildeKitTests/KeybarInputRouterTests.swift`:
+Append to `Tests/SemicolynKitTests/KeybarInputRouterTests.swift`:
 
 ```swift
     func testTapFKeyEmitsSequence() {
@@ -108,7 +108,7 @@ Append to `Tests/NeotildeKitTests/KeybarInputRouterTests.swift`:
 Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test --filter KeyEncodingTests --filter KeybarInputRouterTests`
 Expected: FAIL — `type 'KeyInput' has no member 'function'` / `value of type 'KeybarInputRouter' has no member 'tapFKey'`.
 
-- [ ] **Step 3: Add the `.function` case + encoding** — in `Sources/NeotildeKit/Keybar/KeyEncoding.swift`, add to the `KeyInput` enum (after `.arrow`):
+- [ ] **Step 3: Add the `.function` case + encoding** — in `Sources/SemicolynKit/Keybar/KeyEncoding.swift`, add to the `KeyInput` enum (after `.arrow`):
 
 ```swift
     case function(Int)   // F1–F12
@@ -135,7 +135,7 @@ and add a `case` to the `switch key` in `encodeKey` (before `.char`):
         }
 ```
 
-- [ ] **Step 4: Add `tapFKey` to the router** — in `Sources/NeotildeKit/Keybar/KeybarInputRouter.swift`, add a key method (next to `arrow`):
+- [ ] **Step 4: Add `tapFKey` to the router** — in `Sources/SemicolynKit/Keybar/KeybarInputRouter.swift`, add a key method (next to `arrow`):
 
 ```swift
     /// Emit a function key F1–F12. Modifiers are not applied to F-keys in v1.
@@ -150,7 +150,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Keybar/KeyEncoding.swift Sources/NeotildeKit/Keybar/KeybarInputRouter.swift Tests/NeotildeKitTests/KeyEncodingTests.swift Tests/NeotildeKitTests/KeybarInputRouterTests.swift
+git add Sources/SemicolynKit/Keybar/KeyEncoding.swift Sources/SemicolynKit/Keybar/KeybarInputRouter.swift Tests/SemicolynKitTests/KeyEncodingTests.swift Tests/SemicolynKitTests/KeybarInputRouterTests.swift
 git commit -m "feat(keybar): F1–F12 key encoding + router tapFKey"
 ```
 
@@ -159,9 +159,9 @@ git commit -m "feat(keybar): F1–F12 key encoding + router tapFKey"
 ### Task 2: FnState machine + AutoFn catalog
 
 **Files:**
-- Create: `Sources/NeotildeKit/Keybar/FnState.swift`
-- Create: `Sources/NeotildeKit/Keybar/AutoFnCatalog.swift`
-- Test: `Tests/NeotildeKitTests/FnStateTests.swift`, `Tests/NeotildeKitTests/AutoFnCatalogTests.swift`
+- Create: `Sources/SemicolynKit/Keybar/FnState.swift`
+- Create: `Sources/SemicolynKit/Keybar/AutoFnCatalog.swift`
+- Test: `Tests/SemicolynKitTests/FnStateTests.swift`, `Tests/SemicolynKitTests/AutoFnCatalogTests.swift`
 
 **Interfaces:**
 - Produces:
@@ -170,13 +170,13 @@ git commit -m "feat(keybar): F1–F12 key encoding + router tapFKey"
   - `enum AutoFnCatalog { static let bundled: Set<String> /* htop, top, mc */; static func load(userOverrideJSON: Data?) -> (processes: Set<String>, warning: String?) }`
 - FnState semantics: `tap()` off→armed, armed→locked, locked→off (and if `locked→off` happens while `autoActive`, set the per-episode override); `doubleTap()` → locked + clears override; `fireFKey()` armed→off else unchanged; `autoEngage()` sets autoActive and locks unless override; `autoDisengage()` clears autoActive + override and returns to off; `reset()` clears everything (pane switch).
 
-- [ ] **Step 1: Write the failing tests** (`Tests/NeotildeKitTests/FnStateTests.swift`)
+- [ ] **Step 1: Write the failing tests** (`Tests/SemicolynKitTests/FnStateTests.swift`)
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class FnStateTests: XCTestCase {
     func testTapCyclesOffArmedLockedOff() {
@@ -238,13 +238,13 @@ final class FnStateTests: XCTestCase {
 }
 ```
 
-`Tests/NeotildeKitTests/AutoFnCatalogTests.swift`:
+`Tests/SemicolynKitTests/AutoFnCatalogTests.swift`:
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class AutoFnCatalogTests: XCTestCase {
     func testBundledIsExactlyHtopTopMc() {
@@ -384,7 +384,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Keybar/FnState.swift Sources/NeotildeKit/Keybar/AutoFnCatalog.swift Tests/NeotildeKitTests/FnStateTests.swift Tests/NeotildeKitTests/AutoFnCatalogTests.swift
+git add Sources/SemicolynKit/Keybar/FnState.swift Sources/SemicolynKit/Keybar/AutoFnCatalog.swift Tests/SemicolynKitTests/FnStateTests.swift Tests/SemicolynKitTests/AutoFnCatalogTests.swift
 git commit -m "feat(keybar): Fn state machine + bundled auto-Fn catalog"
 ```
 
@@ -393,23 +393,23 @@ git commit -m "feat(keybar): Fn state machine + bundled auto-Fn catalog"
 ### Task 3: Keybar scroll-content model
 
 **Files:**
-- Create: `Sources/NeotildeKit/Keybar/KeybarScrollContent.swift`
-- Test: `Tests/NeotildeKitTests/KeybarScrollContentTests.swift`
+- Create: `Sources/SemicolynKit/Keybar/KeybarScrollContent.swift`
+- Test: `Tests/SemicolynKitTests/KeybarScrollContentTests.swift`
 
 **Interfaces:**
-- Consumes: `PromotionSlot` (NeotildeKit/Context).
+- Consumes: `PromotionSlot` (SemicolynKit/Context).
 - Produces:
   - `enum KeybarScrollItem: Equatable, Sendable { case promotion(PromotionSlot); case symbol(String); case fn; case fkey(Int) }`
   - `func keybarScrollItems(promotions: [PromotionSlot], defaultSymbols: [String], fnEngaged: Bool) -> [KeybarScrollItem]`
   - Fn engaged → `[.fkey(1)…fkey(12), .fn]` (F-keys replace promotions+defaults; the Fn slot stays last so the user can toggle off). Not engaged → `promotions.map(.promotion) + defaultSymbols.map(.symbol) + [.fn]`.
 
-- [ ] **Step 1: Write the failing tests** (`Tests/NeotildeKitTests/KeybarScrollContentTests.swift`)
+- [ ] **Step 1: Write the failing tests** (`Tests/SemicolynKitTests/KeybarScrollContentTests.swift`)
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class KeybarScrollContentTests: XCTestCase {
     private let p = PromotionSlot(tap: ":", up: ";", down: nil)
@@ -476,7 +476,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Keybar/KeybarScrollContent.swift Tests/NeotildeKitTests/KeybarScrollContentTests.swift
+git add Sources/SemicolynKit/Keybar/KeybarScrollContent.swift Tests/SemicolynKitTests/KeybarScrollContentTests.swift
 git commit -m "feat(keybar): scroll-content model (promotions / F-keys / defaults + Fn)"
 ```
 
@@ -541,7 +541,7 @@ and add the helper:
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// A context-promoted slot: bronze fill, primary char on tap, optional swipe
 /// secondaries (context-detection spec "Promoted slot visual").
@@ -718,7 +718,7 @@ git push -u github feat/phase-4b-promotions-fn
 
 ## Wrap-up
 
-- [ ] **Full NeotildeKit suite green:** `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test` — all existing + the 3 new keybar suites pass.
+- [ ] **Full SemicolynKit suite green:** `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test` — all existing + the 3 new keybar suites pass.
 - [ ] **Update `TODO.md`** — Phase 4 row: 4a + 4b done; 4c–4e pending. Commit `docs: mark Phase 4b (promotions + Fn) done`.
 - [ ] **Open PR** to `github` `main` (squash-merge). State that promotion/Fn *interaction* is pending a Simulator pass.
 

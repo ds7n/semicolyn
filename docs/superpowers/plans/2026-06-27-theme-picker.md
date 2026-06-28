@@ -7,20 +7,20 @@
 
 **Goal:** Let the user switch between the Neon Midnight (free) and Bell Bronze (Pro-gated) themes from a new top-level Settings screen, with the choice persisted and applied live across the app.
 
-**Architecture:** A small pure catalog layer in `NeotildeKit` (`ThemeID`, `ThemeDescriptor`, `Theme.catalog`, and a pure `resolveTheme`/`resolveDescriptor` gate function) is the single source of truth for theme identity and Pro-gating. The App tier adds two `ObservableObject` stores (`ThemeSettingsStore` for the persisted selection, `ProStore` as a stub entitlement seam), a root view that resolves the active theme and injects it into `\.theme`, and the Settings → Appearance → Theme picker UI plus a placeholder upgrade screen.
+**Architecture:** A small pure catalog layer in `SemicolynKit` (`ThemeID`, `ThemeDescriptor`, `Theme.catalog`, and a pure `resolveTheme`/`resolveDescriptor` gate function) is the single source of truth for theme identity and Pro-gating. The App tier adds two `ObservableObject` stores (`ThemeSettingsStore` for the persisted selection, `ProStore` as a stub entitlement seam), a root view that resolves the active theme and injects it into `\.theme`, and the Settings → Appearance → Theme picker UI plus a placeholder upgrade screen.
 
-**Tech Stack:** Swift 6 (NeotildeKit, strict concurrency, Linux-tested) · SwiftUI (App tier, macOS-CI + Simulator-verified) · XCTest · UserDefaults persistence · XcodeGen.
+**Tech Stack:** Swift 6 (SemicolynKit, strict concurrency, Linux-tested) · SwiftUI (App tier, macOS-CI + Simulator-verified) · XCTest · UserDefaults persistence · XcodeGen.
 
 ## Global Constraints
 
-- **Two tiers, two test surfaces.** `Sources/NeotildeKit/` is pure, Linux-tested, no `import SwiftUI`/`UIKit`/`CryptoKit`. `App/` is Apple-only, validated by macOS CI + a manual Simulator pass — it does NOT compile on Linux and is invisible to `swift test`. Keep gate/identity logic in `NeotildeKit`; keep `App/` a thin wiring layer.
+- **Two tiers, two test surfaces.** `Sources/SemicolynKit/` is pure, Linux-tested, no `import SwiftUI`/`UIKit`/`CryptoKit`. `App/` is Apple-only, validated by macOS CI + a manual Simulator pass — it does NOT compile on Linux and is invisible to `swift test`. Keep gate/identity logic in `SemicolynKit`; keep `App/` a thin wiring layer.
 - **Every source file carries an SPDX header:** `// SPDX-FileCopyrightText: 2026 True Positive LLC` then `// SPDX-License-Identifier: GPL-3.0-only` (REUSE-compliant).
 - **Pro-gate is enforced in pure code.** `resolveTheme` must fall back to the free default when a Pro theme is selected while `isPro == false`, or the id is unknown. The UI must not be able to leak a locked theme.
 - **Free default = Neon Midnight** (`Theme.catalog[0]`, `isPro: false`). **Bell Bronze** is `isPro: true`. Stable `ThemeID` raw values: `"neonMidnight"`, `"bellBronze"`.
 - **No real StoreKit in this slice.** `ProStore` is a UserDefaults-backed stub (default not-Pro) with a `#if DEBUG` flip; the upgrade screen's purchase CTA is stubbed.
 - **Tests must be real** (`2026-06-18-testing-standards-design.md`): assert specific resolved values, not "non-nil"; the gate-fallback case is the security-relevant negative test.
 - **Conventional commits**, feature branch `feat/theme-picker` (already created), squash-merge to `main`.
-- **Build/test commands** (no host Swift toolchain): `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test --filter <Suite>` for NeotildeKit; App-tier changes verify on the macOS CI job + a Simulator pass.
+- **Build/test commands** (no host Swift toolchain): `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test --filter <Suite>` for SemicolynKit; App-tier changes verify on the macOS CI job + a Simulator pass.
 - **New files need no `project.yml` edit** — the App target globs `sources: - App` and the SwiftPM package globs `Sources/`; just `xcodegen generate` (CI does this).
 
 ---
@@ -28,9 +28,9 @@
 ### Task 1: Pure theme catalog + Pro-gate resolution
 
 **Files:**
-- Create: `Sources/NeotildeKit/Theme/ThemeCatalog.swift`
-- Modify: `Sources/NeotildeKit/Theme/BellBronzeTheme.swift:42` (re-derive `Theme.all` from the catalog)
-- Test: `Tests/NeotildeKitTests/ThemeCatalogTests.swift`
+- Create: `Sources/SemicolynKit/Theme/ThemeCatalog.swift`
+- Modify: `Sources/SemicolynKit/Theme/BellBronzeTheme.swift:42` (re-derive `Theme.all` from the catalog)
+- Test: `Tests/SemicolynKitTests/ThemeCatalogTests.swift`
 
 **Interfaces:**
 - Consumes: existing `Theme`, `Theme.neonMidnight`, `Theme.bellBronze`.
@@ -44,13 +44,13 @@
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `Tests/NeotildeKitTests/ThemeCatalogTests.swift`:
+Create `Tests/SemicolynKitTests/ThemeCatalogTests.swift`:
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class ThemeCatalogTests: XCTestCase {
     func testCatalogOrderAndFlags() {
@@ -120,7 +120,7 @@ Expected: FAIL — compile error, `ThemeID` / `ThemeDescriptor` / `Theme.catalog
 
 - [ ] **Step 3: Create the catalog source**
 
-Create `Sources/NeotildeKit/Theme/ThemeCatalog.swift`:
+Create `Sources/SemicolynKit/Theme/ThemeCatalog.swift`:
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
@@ -194,7 +194,7 @@ public func resolveTheme(
 
 - [ ] **Step 4: Re-derive `Theme.all` from the catalog**
 
-In `Sources/NeotildeKit/Theme/BellBronzeTheme.swift`, replace line 42:
+In `Sources/SemicolynKit/Theme/BellBronzeTheme.swift`, replace line 42:
 
 ```swift
     public static let all: [Theme] = [.neonMidnight, .bellBronze]
@@ -213,7 +213,7 @@ with:
 Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test --filter ThemeCatalogTests`
 Expected: PASS (all 10 tests).
 
-- [ ] **Step 6: Run the full NeotildeKit theme suite for regressions**
+- [ ] **Step 6: Run the full SemicolynKit theme suite for regressions**
 
 Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test --filter ThemeTests`
 Expected: PASS (the existing `ThemeTests`, incl. the registry-order test, still green).
@@ -221,7 +221,7 @@ Expected: PASS (the existing `ThemeTests`, incl. the registry-order test, still 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Theme/ThemeCatalog.swift Sources/NeotildeKit/Theme/BellBronzeTheme.swift Tests/NeotildeKitTests/ThemeCatalogTests.swift
+git add Sources/SemicolynKit/Theme/ThemeCatalog.swift Sources/SemicolynKit/Theme/BellBronzeTheme.swift Tests/SemicolynKitTests/ThemeCatalogTests.swift
 git commit -m "feat(theme): pure theme catalog + Pro-gate resolution"
 ```
 
@@ -258,7 +258,7 @@ import Foundation
 /// backing behind this same surface; consumers (`RootView`, the picker, the
 /// upgrade screen) do not change.
 @MainActor final class ProStore: ObservableObject {
-    private static let defaultsKey = "neotilde.pro.isActive"
+    private static let defaultsKey = "semicolyn.pro.isActive"
 
     @Published private(set) var isPro: Bool
 
@@ -285,14 +285,14 @@ Create `App/ThemeSettingsStore.swift`:
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import NeotildeKit
+import SemicolynKit
 
 /// App-lifetime holder for the user's selected theme id. Persists the raw id
 /// string in `UserDefaults` (mirrors `KeybarSettingsStore`); the root view
 /// resolves it through `resolveTheme(...)` against Pro state and injects the
 /// result into the environment. A missing key falls back to the free default.
 @MainActor final class ThemeSettingsStore: ObservableObject {
-    private static let defaultsKey = "neotilde.appearance.themeID"
+    private static let defaultsKey = "semicolyn.appearance.themeID"
 
     @Published var selectedThemeID: ThemeID {
         didSet { persist() }
@@ -346,7 +346,7 @@ git commit -m "feat(theme): app stores for theme selection + Pro entitlement sea
 ### Task 3: Root injection — make the theme live and app-wide
 
 **Files:**
-- Modify: `App/NeotildeApp.swift` (root view that resolves + injects `\.theme`)
+- Modify: `App/SemicolynApp.swift` (root view that resolves + injects `\.theme`)
 - Verify: `App/SessionView.swift:45,83` (terminal surface already reads env theme)
 
 **Interfaces:**
@@ -355,16 +355,16 @@ git commit -m "feat(theme): app stores for theme selection + Pro entitlement sea
 
 - [ ] **Step 1: Replace the app root with a resolving root view**
 
-Replace the entire contents of `App/NeotildeApp.swift`:
+Replace the entire contents of `App/SemicolynApp.swift`:
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 @main
-struct NeotildeApp: App {
+struct SemicolynApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -399,7 +399,7 @@ Expected: the `TerminalScreen(...)` call includes a `theme: theme` argument (add
 - [ ] **Step 3: Commit**
 
 ```bash
-git add App/NeotildeApp.swift App/SessionView.swift
+git add App/SemicolynApp.swift App/SessionView.swift
 git commit -m "feat(theme): inject resolved theme at app root for live switching"
 ```
 
@@ -510,7 +510,7 @@ Create `App/ProUpgradeView.swift`:
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
 
-/// Placeholder "Neotilde Pro" screen — the Pro-gate seam's destination. Shows the
+/// Placeholder "Semicolyn Pro" screen — the Pro-gate seam's destination. Shows the
 /// real perks copy from the pro-paid-scope spec; the purchase CTA is stubbed for
 /// v1. The full StoreKit flow (purchase / restore / Family Sharing / Supporter
 /// badge / alt icons) is a separate slice. A `#if DEBUG` unlock flips the stub
@@ -521,7 +521,7 @@ struct ProUpgradeView: View {
     var body: some View {
         List {
             Section {
-                Text("Neotilde is, and will stay, free to use in full. Pro is for people who want to support development. Buy it once; that's it.")
+                Text("Semicolyn is, and will stay, free to use in full. Pro is for people who want to support development. Buy it once; that's it.")
                     .font(.callout)
             }
             Section("What's included") {
@@ -533,7 +533,7 @@ struct ProUpgradeView: View {
                 Button {
                     // Stub: real StoreKit purchase lands in the Pro slice.
                 } label: {
-                    Text("Unlock Neotilde Pro — coming soon")
+                    Text("Unlock Semicolyn Pro — coming soon")
                         .frame(maxWidth: .infinity)
                 }
                 .disabled(true)
@@ -546,7 +546,7 @@ struct ProUpgradeView: View {
             }
             #endif
         }
-        .navigationTitle("Neotilde Pro")
+        .navigationTitle("Semicolyn Pro")
     }
 }
 ```
@@ -559,7 +559,7 @@ Create `App/ThemePickerView.swift`:
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
-import NeotildeKit
+import SemicolynKit
 
 /// Settings → Appearance → Theme. Lists the theme catalog with a palette swatch +
 /// a checkmark on the currently *applied* theme. Pro themes show a ✦Pro badge when
@@ -658,7 +658,7 @@ git commit -m "feat(theme): Appearance theme picker + placeholder Pro upgrade sc
 ```bash
 git push -u github feat/theme-picker
 ```
-Expected: the `macos` CI job compiles the App target (new files auto-globbed; CI runs `xcodegen generate`). `linux-swift` runs the NeotildeKit suite incl. `ThemeCatalogTests`. If `linux-rust` flakes on sshd readiness, rerun that job — it is unrelated.
+Expected: the `macos` CI job compiles the App target (new files auto-globbed; CI runs `xcodegen generate`). `linux-swift` runs the SemicolynKit suite incl. `ThemeCatalogTests`. If `linux-rust` flakes on sshd readiness, rerun that job — it is unrelated.
 
 - [ ] **Step 2: Simulator pass (manual, macOS)**
 

@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2026 True Positive LLC
 # SPDX-License-Identifier: GPL-3.0-only
 
-# Linux fast-loop for Neotilde's platform-agnostic tier.
+# Linux fast-loop for Semicolyn's platform-agnostic tier.
 #   docker compose build dev
-#   docker compose run --rm dev cargo test -p neotilde-ssh-core
+#   docker compose run --rm dev cargo test -p semicolyn-ssh-core
 #   docker compose run --rm dev swift test
 # Heavy build artifacts live in named volumes so the host bind-mount stays
 # source-only; the container runs as the host UID so any lockfiles it writes
@@ -13,7 +13,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    image: neotilde-dev
+    image: semicolyn-dev
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     working_dir: /work
     # Resolver hardening: glibc's getaddrinfo sends the A and AAAA queries in
@@ -29,8 +29,8 @@ services:
       - attempts:3
     environment:
       CARGO_TARGET_DIR: /work/target
-      NEOTILDE_TEST_SSHD: sshd:22
-      NEOTILDE_TEST_SSHD_LEGACY: sshd-legacy:22
+      SEMICOLYN_TEST_SSHD: sshd:22
+      SEMICOLYN_TEST_SSHD_LEGACY: sshd-legacy:22
     volumes:
       - .:/work
       - cargo-target:/work/target
@@ -43,13 +43,13 @@ services:
     build:
       context: docker
       dockerfile: Dockerfile.sshd
-    image: neotilde-sshd
+    image: semicolyn-sshd
     volumes:
       - testkeys:/testkeys
 
   # Legacy SSH server that offers only Tier-3 algorithms (Task 3).
   sshd-legacy:
-    image: neotilde-sshd
+    image: semicolyn-sshd
     command: ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_legacy.conf"]
     volumes:
       - ./docker/sshd-legacy.conf:/etc/ssh/sshd_legacy.conf:ro

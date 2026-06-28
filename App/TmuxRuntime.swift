@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import NeotildeKit
-import NeotildeSSHCoreFFI
+import SemicolynKit
+import SemicolynSSHCoreFFI
 
 /// Drives a tmux control-mode session in the app: feeds inbound channel bytes to
 /// the pure `TmuxSessionController`, fans every pane's output out by `PaneID`,

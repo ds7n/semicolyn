@@ -8,7 +8,7 @@ import Foundation
 /// backing behind this same surface; consumers (`RootView`, the picker, the
 /// upgrade screen) do not change.
 @MainActor final class ProStore: ObservableObject {
-    private static let defaultsKey = "neotilde.pro.isActive"
+    private static let defaultsKey = "semicolyn.pro.isActive"
 
     @Published private(set) var isPro: Bool
 

@@ -4,7 +4,7 @@ SPDX-License-Identifier: GPL-3.0-only
 -->
 # Running the MVP app (connect & get a shell)
 
-The MVP is the thinnest runnable Neotilde: a connect form (host / port / user /
+The MVP is the thinnest runnable Semicolyn: a connect form (host / port / user /
 password) → password auth → an interactive raw-PTY shell rendered in SwiftTerm.
 It builds for the iOS Simulator in CI (the `macos` job); to actually use it you
 need a Mac with Xcode.
@@ -19,13 +19,13 @@ bash scripts/build-xcframework.sh
 xcodegen generate
 
 # 3. Open and run in the iOS Simulator (pick an iPhone simulator, ⌘R).
-open Neotilde.xcodeproj
+open Semicolyn.xcodeproj
 ```
 
 Or headless, matching CI:
 
 ```bash
-xcodebuild -project Neotilde.xcodeproj -scheme Neotilde \
+xcodebuild -project Semicolyn.xcodeproj -scheme Semicolyn \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
 

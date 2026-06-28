@@ -32,7 +32,7 @@ Anything else (the top-level shell, `awk`, `ssh`, `git`, an unknown custom binar
 
 ## Signal source
 
-`pane_current_command` from tmux control mode (`tmux -CC`). This is already locked as Neotilde's session engine; the field is first-class tmux state, maintained by tmux itself via the pty's foreground-process-group tracking.
+`pane_current_command` from tmux control mode (`tmux -CC`). This is already locked as Semicolyn's session engine; the field is first-class tmux state, maintained by tmux itself via the pty's foreground-process-group tracking.
 
 **Properties:**
 
@@ -64,7 +64,7 @@ Each pane maintains its own context state. The machine has three pieces:
 
 Entering an app is intentional — you typed `vim file.txt`. A short engage threshold (250ms) is fine and gets the layout up fast. Leaving an app is often transient — `:!ls`, `:sh`, the app momentarily exec'd a subprocess. A long disengage threshold (1500ms) absorbs these excursions without flapping the layout back to shell defaults.
 
-These numbers are starting points. Once Neotilde ships with opt-in telemetry (predictor-style), tune from real session traces.
+These numbers are starting points. Once Semicolyn ships with opt-in telemetry (predictor-style), tune from real session traces.
 
 ### Pane focus changes
 

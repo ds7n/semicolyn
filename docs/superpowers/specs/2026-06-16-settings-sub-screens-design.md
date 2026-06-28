@@ -29,7 +29,7 @@ The locked Security framing in `docs/brainstorming-decisions.md` said:
 This spec **revises** that: the user-facing gate is the **device unlock**.
 App-level Face ID is an **opt-in extra layer**, off by default. Rationale:
 on an unlocked phone, Notes / Mail / Messages do not gate themselves; a
-second prompt for Neotilde by default would be inconsistent with iOS norms
+second prompt for Semicolyn by default would be inconsistent with iOS norms
 and friction-heavy for solo-device users. Users who share devices or want
 defense-in-depth can opt in.
 
@@ -59,8 +59,8 @@ App lock                            [○─●]   ← off by default
     Re-lock timeout       5 minutes   >    ← appears only when toggle is on
 ```
 
-- **Toggle, off by default.** When off, Neotilde opens directly after device
-  unlock. When on, Neotilde shows a Face ID prompt before revealing the
+- **Toggle, off by default.** When off, Semicolyn opens directly after device
+  unlock. When on, Semicolyn shows a Face ID prompt before revealing the
   picker, identities, or any session.
 - **Re-lock timeout** sub-row appears only when the toggle is on. Options:
   *Immediately*, *1 minute*, *5 minutes*, *15 minutes*. Default *5
@@ -70,11 +70,11 @@ App lock                            [○─●]   ← off by default
   mosh sessions persist behind the lock view; unlock returns the user to
   the same terminal state. Killing a mosh on re-lock would defeat the
   point of mosh.
-- The lock view itself is a full-screen sheet with the Neotilde mark, a
+- The lock view itself is a full-screen sheet with the Semicolyn mark, a
   *Unlock* button that re-invokes Face ID, and nothing else.
 - **No grace period for failed Face ID.** Fall through to the device
   passcode automatically (standard `LAContext` behaviour). A user who
-  cancels stays on the lock view — Neotilde does not back out of itself.
+  cancels stays on the lock view — Semicolyn does not back out of itself.
 
 ### Predictor
 
@@ -168,7 +168,7 @@ Haptics                             [●─○]
 
 ### Cut from App preferences
 
-- **Appearance** — Neotilde ships with one palette (cool-dark + bell-bronze).
+- **Appearance** — Semicolyn ships with one palette (cool-dark + bell-bronze).
   No light mode, no theme picker, no follow-system. An inert one-option
   section is filler; revisit when a second theme actually exists.
 - **Connection defaults** — covered by the Defaults editor reached from
@@ -181,7 +181,7 @@ Haptics                             [●─○]
 Six rows. Static-feeling reference content.
 
 ```
-✦  Neotilde Pro                            >       ← amended; see Pro spec
+✦  Semicolyn Pro                            >       ← amended; see Pro spec
 ─────────────────────────────────────
 ?  Tips & Gestures                      >
 ─────────────────────────────────────
@@ -190,15 +190,15 @@ Open source                             >
 ─────────────────────────────────────
 Send feedback                           ↗
 ─────────────────────────────────────
-Neotilde 1.0.0 (1234)                              ← tap to copy
+Semicolyn 1.0.0 (1234)                              ← tap to copy
                                   (Supporter ✦ when Pro is active)
 ```
 
-### Neotilde Pro
+### Semicolyn Pro
 
 Top row. Added in
 `docs/superpowers/specs/2026-06-16-pro-paid-scope-design.md`. Reads
-**"Neotilde Pro"** when the user is free, **"Neotilde Pro — thanks!"** when
+**"Semicolyn Pro"** when the user is free, **"Semicolyn Pro — thanks!"** when
 Pro is active. Pushes to the upgrade screen specced there.
 
 ### Tips & Gestures
@@ -219,7 +219,7 @@ Drill-down. Short page in plain English (no legal boilerplate). Covers:
   audit log).
 - No telemetry, no third-party analytics, no ads, no cross-device
   tracking beyond the user's own iCloud account.
-- Link to the public privacy page on neotilde's site (URL TBD before
+- Link to the public privacy page on semicolyn's site (URL TBD before
   shipping; placeholder string until then).
 
 ### Open source
@@ -245,7 +245,7 @@ Tappable row. Opens `MFMailComposeViewController` (or equivalent
 
 - **To:** the support address (TBD before shipping; placeholder until
   then).
-- **Subject:** `Neotilde feedback — 1.0.0 (1234)` (version pre-filled).
+- **Subject:** `Semicolyn feedback — 1.0.0 (1234)` (version pre-filled).
 - **Body:** a small pre-filled diagnostic header (app version, build,
   iOS version, device model) above a blank space for the user message.
   Nothing host-specific or user-data-specific is pre-filled.
@@ -255,13 +255,13 @@ support email shown + a Copy button — no third-party mail handoff.
 
 ### Version + build
 
-Read-only row at the bottom. Format `Neotilde <semver> (<build>)`. **Tap to
+Read-only row at the bottom. Format `Semicolyn <semver> (<build>)`. **Tap to
 copy** the full string to the clipboard (handy for bug reports). Light
 haptic on copy, no visible toast.
 
 ### Cut from About & Help
 
-- **Terms of service** — Neotilde has no user account, no service contract.
+- **Terms of service** — Semicolyn has no user account, no service contract.
   Apple's App Store terms cover what is needed.
 - **Rate the app** — friction-y; the kind of prompt users click past.
   Revisit only if App Store reviews demand stars.

@@ -6,7 +6,7 @@
 
 ## Summary
 
-Neotilde supports multiple simultaneous live connections. This spec defines the runtime semantics: what happens to background connections, how iOS backgrounding affects them, when the client gives up and demotes a connection, how resume works for each protocol, and what the user sees in the picker and the connection-status banner across hosts.
+Semicolyn supports multiple simultaneous live connections. This spec defines the runtime semantics: what happens to background connections, how iOS backgrounding affects them, when the client gives up and demotes a connection, how resume works for each protocol, and what the user sees in the picker and the connection-status banner across hosts.
 
 The host management UI (long-press Esc picker, swipe actions, Live / Recent grouping) is already locked in the `host management & settings access` decisions. This spec defines the *under-the-hood behavior* that those UI states reflect.
 
@@ -35,7 +35,7 @@ The strong security story is **storage**, not per-use friction. Identities live 
 
 ## State model
 
-Every connection Neotilde is aware of lives in exactly one of four states.
+Every connection Semicolyn is aware of lives in exactly one of four states.
 
 | State | Picker placement | Client resources held | User action to use it |
 |---|---|---|---|
@@ -62,14 +62,14 @@ The defining distinction is: **Awake = "client still has resources for it"** (so
 
 ### Foreground → background
 
-When the app moves to background, Neotilde calls `UIApplication.beginBackgroundTask` to receive iOS's standard background-execution window (~30s, OS-dependent). We do **not** attempt to use that window for special heroics; this is the same facility every iOS app gets, used here just so the app's own bookkeeping (state save, pending sync writes) completes cleanly.
+When the app moves to background, Semicolyn calls `UIApplication.beginBackgroundTask` to receive iOS's standard background-execution window (~30s, OS-dependent). We do **not** attempt to use that window for special heroics; this is the same facility every iOS app gets, used here just so the app's own bookkeeping (state save, pending sync writes) completes cleanly.
 
 During the background-task window:
 - All sockets remain technically open. The user could foreground within a few seconds and find everything as they left it.
 - No proactive demotion. We don't pre-emptively close anything.
 
 When the background-task window expires (iOS suspends the app):
-- SSH connections: TCP sockets are torn down by iOS suspension. Server-side tmux sessions remain alive (tmux persists across SSH disconnects by design). Neotilde remembers the tmux session id for later reattach.
+- SSH connections: TCP sockets are torn down by iOS suspension. Server-side tmux sessions remain alive (tmux persists across SSH disconnects by design). Semicolyn remembers the tmux session id for later reattach.
 - Mosh connections: the iOS-side mosh client is suspended. The mosh server on the host continues running; the session remains valid until the server's own inactivity timeout (`MOSH_SERVER_NETWORK_TMOUT`, often unbounded by default).
 
 ### Background → foreground
@@ -102,7 +102,7 @@ This behavior is *not* exposed as a tunable setting in v1. The cap is a design c
 
 ### Memory-pressure handling
 
-On iOS memory-warning (`didReceiveMemoryWarning` or equivalent), Neotilde demotes Live·Awake connections to Live·Sleeping in LRU order (least-recently-foregrounded first) until system pressure is relieved. Active and any connection foregrounded in the last ~10 seconds are protected from this sweep. No user-visible chrome appears during the sweep beyond the affected rows showing the `zZ` glyph next time the picker is opened.
+On iOS memory-warning (`didReceiveMemoryWarning` or equivalent), Semicolyn demotes Live·Awake connections to Live·Sleeping in LRU order (least-recently-foregrounded first) until system pressure is relieved. Active and any connection foregrounded in the last ~10 seconds are protected from this sweep. No user-visible chrome appears during the sweep beyond the affected rows showing the `zZ` glyph next time the picker is opened.
 
 ## Resume mechanics
 
@@ -196,6 +196,6 @@ The user experience this spec defines:
 - Up to ~8 simultaneous live connections, transparently managed.
 - Switching between connections is instant for the awake set; sleeping connections wake on tap with a brief loading state.
 - Foreground experience is unchanged across multi-connection: the banner still reflects only what the user is looking at.
-- Mosh genuinely roams across iOS backgrounding and even cold app launch — the user can quit Neotilde, come back hours later, and find their mosh session right where it was.
+- Mosh genuinely roams across iOS backgrounding and even cold app launch — the user can quit Semicolyn, come back hours later, and find their mosh session right where it was.
 - SSH is honest about its limitations: it degrades on background past iOS's budget, reconnects on foreground for the active session, and offers fast tmux-session reattach for the rest.
 - The picker is the cross-host awareness surface; the banner is the active-session surface; the two never collide.

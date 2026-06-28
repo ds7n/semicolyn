@@ -16,11 +16,11 @@ spec: *"On first launch (and on app version upgrade), copy the bundled seed into
 `seed_pinned.sketch`."* The seed is **pinned, not merged** — a read-only source
 the ranker consults only when the user lacks signal, never mixed into learned
 sketches. This slice is the install-and-load mechanism; it is the first component
-in `NeotildeKit` that touches the filesystem.
+in `SemicolynKit` that touches the filesystem.
 
 ## Keep the platform glue at the edges
 
-The pinned-seed *location* (`Library/Application Support/neotilde/predictor/`,
+The pinned-seed *location* (`Library/Application Support/semicolyn/predictor/`,
 `NSFileProtectionComplete`) and the *bundled* seed (an app `Bundle` resource) are
 iOS specifics. The install/load *logic* — version comparison, copy, deserialize,
 fail-soft — is pure and Linux-testable. So ``SeedStore`` is parameterized:

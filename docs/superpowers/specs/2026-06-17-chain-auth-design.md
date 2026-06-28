@@ -10,13 +10,13 @@ Define what the user sees when connecting through a `proxyJump` chain whose hops
 
 ## Constraint from iOS
 
-Secure Enclave keys with `anyUse` policy require a *fresh* biometric for *each* signing operation. Neotilde cannot bank one Face ID for multiple `anyUse` operations — the SE enforces this at the hardware level. Any chain with two `anyUse` hops will, by necessity, prompt twice. The question is purely about UX framing around an unavoidable fact.
+Secure Enclave keys with `anyUse` policy require a *fresh* biometric for *each* signing operation. Semicolyn cannot bank one Face ID for multiple `anyUse` operations — the SE enforces this at the hardware level. Any chain with two `anyUse` hops will, by necessity, prompt twice. The question is purely about UX framing around an unavoidable fact.
 
 ## Behavior
 
 ### Chain enumeration
 
-Before initiating the connection, Neotilde enumerates the auth chain: the final host and every `proxyJump` hop, each with its negotiated identity. It counts identities with `authPolicy: anyUse`.
+Before initiating the connection, Semicolyn enumerates the auth chain: the final host and every `proxyJump` hop, each with its negotiated identity. It counts identities with `authPolicy: anyUse`.
 
 ### Single-prompt case (0 or 1 anyUse in chain)
 
@@ -61,7 +61,7 @@ After Continue (or in the 0/1 prompt case where the modal didn't fire), connecti
 The user can interrupt the chain in two places:
 
 1. **Cancel the summary modal** — no sockets opened, nothing to clean up. Trivial.
-2. **Cancel a mid-chain Face ID prompt** (iOS-native cancel on the biometric sheet) — Neotilde aborts the in-flight connection: closes the SSH socket to the current hop, closes any sockets to earlier hops, marks the connection as failed in the picker, fires the existing connect-failed banner from [[2026-06-16-banner-expanded-design]] with the message *"Authentication cancelled at hop {n}."*
+2. **Cancel a mid-chain Face ID prompt** (iOS-native cancel on the biometric sheet) — Semicolyn aborts the in-flight connection: closes the SSH socket to the current hop, closes any sockets to earlier hops, marks the connection as failed in the picker, fires the existing connect-failed banner from [[2026-06-16-banner-expanded-design]] with the message *"Authentication cancelled at hop {n}."*
 
 No partial-success state. A chain either fully establishes or fully fails.
 

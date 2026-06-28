@@ -17,7 +17,7 @@ The pure tracker + filter (Task 1) are fully Linux-tested. App tasks (2–3) com
 
 ## Global Constraints
 
-- **Two tiers:** pure logic in `Sources/NeotildeKit/` (no `import UIKit`/`SwiftUI`/`CryptoKit`, `Sendable`); App in `App/` (macOS-CI build only).
+- **Two tiers:** pure logic in `Sources/SemicolynKit/` (no `import UIKit`/`SwiftUI`/`CryptoKit`, `Sendable`); App in `App/` (macOS-CI build only).
 - **Spec locked:** `docs/superpowers/specs/2026-06-13-predictor-design.md` §"Suggestion surface".
 - **Strip surface (verbatim):** thin auto-hiding row **above** the keybar, ~24pt; **auto-hides when there is no suggestion** at/above the confidence floor; ~150ms slide; **cannot reflow the keybar**; pill-shaped accent-colored chips visually distinct from keys; capacity top-K (K=3 default, from `SuggestionConfig.topK`).
 - **Never silent:** tapping a chip commits that token; ignoring it changes nothing. The predictor never rewrites typed input.
@@ -31,8 +31,8 @@ The pure tracker + filter (Task 1) are fully Linux-tested. App tasks (2–3) com
 
 ## File Structure
 
-**Created (NeotildeKit, Linux-tested):**
-- `Sources/NeotildeKit/Predictor/InputTokenTracker.swift` — `CommittedToken`, `InputTokenTracker`, `predictorChips(...)`.
+**Created (SemicolynKit, Linux-tested):**
+- `Sources/SemicolynKit/Predictor/InputTokenTracker.swift` — `CommittedToken`, `InputTokenTracker`, `predictorChips(...)`.
 
 **Created (App, macOS-CI-only):**
 - `App/Keybar/PredictorStripView.swift` — the auto-hiding chip row.
@@ -51,7 +51,7 @@ The pure tracker + filter (Task 1) are fully Linux-tested. App tasks (2–3) com
 - [ ] **Step 0: Branch**
 
 ```bash
-cd /home/user/proj/truepositive/neotilde
+cd <repo-root>
 git checkout -b feat/phase-4c-predictor-strip
 ```
 
@@ -60,8 +60,8 @@ git checkout -b feat/phase-4c-predictor-strip
 ### Task 1: InputTokenTracker + chip filter (pure)
 
 **Files:**
-- Create: `Sources/NeotildeKit/Predictor/InputTokenTracker.swift`
-- Test: `Tests/NeotildeKitTests/InputTokenTrackerTests.swift`
+- Create: `Sources/SemicolynKit/Predictor/InputTokenTracker.swift`
+- Test: `Tests/SemicolynKitTests/InputTokenTrackerTests.swift`
 
 **Interfaces:**
 - Produces:
@@ -70,13 +70,13 @@ git checkout -b feat/phase-4c-predictor-strip
   - `func predictorChips(current: String, suggestions: [String]) -> [String]`
 - `observe` folds raw outgoing bytes: printable `0x21…0x7e` append to `current`; space `0x20` commits `current` (emits `CommittedToken(current, previous)`, shifts `previous = current`, clears `current`); enter `0x0d`/`0x0a` commits then resets the line (`previous = nil`); backspace `0x7f`/`0x08` pops one char; tab `0x09` clears `current` (remote completion incoming — no commit); any other byte (ESC/control) resets the line context (`current = ""`, `previous = nil`). `predictorChips` drops the exact `current` and empty strings.
 
-- [ ] **Step 1: Write the failing tests** (`Tests/NeotildeKitTests/InputTokenTrackerTests.swift`)
+- [ ] **Step 1: Write the failing tests** (`Tests/SemicolynKitTests/InputTokenTrackerTests.swift`)
 
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class InputTokenTrackerTests: XCTestCase {
     private func bytes(_ s: String) -> [UInt8] { Array(s.utf8) }
@@ -241,7 +241,7 @@ Expected: PASS (9 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Predictor/InputTokenTracker.swift Tests/NeotildeKitTests/InputTokenTrackerTests.swift
+git add Sources/SemicolynKit/Predictor/InputTokenTracker.swift Tests/SemicolynKitTests/InputTokenTrackerTests.swift
 git commit -m "feat(predictor): input token tracker + strip chip filter"
 ```
 
@@ -257,7 +257,7 @@ git commit -m "feat(predictor): input token tracker + strip chip filter"
 
 **Interfaces:**
 - Consumes: `PredictorEngine`, `LearnedStore`, `SeedStore`, `InputTokenTracker`, `predictorChips`, the existing `sendTerminalInput`, `output: TerminalShellOutput`, the predictor-incognito resolution.
-- Produces on `AppStores`: `func predictorLearnedStore() -> LearnedStore` (directory `Application Support/neotilde/predictor`) and `func predictorSeed() -> PredictorSeed?` (`SeedStore(...).loadSeed()`). On `ConnectionViewModel`: `@Published private(set) var predictorSuggestions: [String]`, `func acceptSuggestion(_ s: String)`, plus private predictor state (`engine`, `tracker`, `learnedStore`) and observation hooks.
+- Produces on `AppStores`: `func predictorLearnedStore() -> LearnedStore` (directory `Application Support/semicolyn/predictor`) and `func predictorSeed() -> PredictorSeed?` (`SeedStore(...).loadSeed()`). On `ConnectionViewModel`: `@Published private(set) var predictorSuggestions: [String]`, `func acceptSuggestion(_ s: String)`, plus private predictor state (`engine`, `tracker`, `learnedStore`) and observation hooks.
 
 - [ ] **Step 1: Add the predictor stores to `AppStores`** — mirror the existing store accessors (read the file for the Application-Support base + conventions):
 
@@ -302,7 +302,7 @@ Add a builder called once per connect (call it from `connect(...)` after resolvi
     }
 ```
 
-(If a `resolvePredictorIncognito` helper does not already exist in `NeotildeKit/Model/Resolution.swift`, add one mirroring `resolveTmuxAttemptControlMode` — `resolveOptional(host.neotilde, defaults.neotilde)?.predictor?.incognito ?? false`.)
+(If a `resolvePredictorIncognito` helper does not already exist in `SemicolynKit/Model/Resolution.swift`, add one mirroring `resolveTmuxAttemptControlMode` — `resolveOptional(host.semicolyn, defaults.semicolyn)?.predictor?.incognito ?? false`.)
 
 Hook input observation into `sendTerminalInput` — at the **top** of the existing method, before routing the bytes:
 
@@ -451,7 +451,7 @@ git push -u github feat/phase-4c-predictor-strip
 
 ## Wrap-up
 
-- [ ] **Full NeotildeKit suite green:** `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test` — all existing + `InputTokenTrackerTests` pass.
+- [ ] **Full SemicolynKit suite green:** `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test` — all existing + `InputTokenTrackerTests` pass.
 - [ ] **Update `TODO.md`** — Phase 4 row: 4a/4b/4c done; 4d/4e pending. Commit `docs: mark Phase 4c (predictor strip) done`.
 - [ ] **Open PR** to `github` `main` (squash-merge). Note that strip interaction is pending a Simulator pass.
 

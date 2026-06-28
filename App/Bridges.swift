@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import NeotildeKit
-import NeotildeSSHCoreFFI
+import SemicolynKit
+import SemicolynSSHCoreFFI
 
 /// Bridges the Rust host-key trust callback to the TOFU evaluator + the SwiftUI
 /// first-trust / mismatch modals. `present` shows the modal on the main actor and

@@ -6,13 +6,13 @@
 
 **Architecture:** The trust *decision* (trusted / first-trust / mismatch) is a pure, Linux-tested `HostKeyTrustEvaluator` over the already-built `HostKeyStore`. The app supplies a real `SecretStore` backed by the iOS Keychain (`KeychainSecretStore`), composes the storage stack in one `AppStores` root, and bridges the Rust `HostKeyVerifier` callback to SwiftUI first-trust/mismatch modals via `TofuHostKeyVerifier`. The existing connect form persists the typed host as a `Host` record so its UUID keys the known-hosts store and reconnects are remembered.
 
-**Tech Stack:** Swift 6 (`NeotildeKit`, platform-agnostic logic + the Keychain backend behind `#if canImport(Security)`), Swift 5 app target (SwiftUI + UniFFI bridge), XCTest, the Rust `neotilde-ssh-core` UniFFI `HostKeyVerifier`/`HostKeyInfo` contract (already shipped). Linux test loop: `docker compose run --rm dev swift test`.
+**Tech Stack:** Swift 6 (`SemicolynKit`, platform-agnostic logic + the Keychain backend behind `#if canImport(Security)`), Swift 5 app target (SwiftUI + UniFFI bridge), XCTest, the Rust `semicolyn-ssh-core` UniFFI `HostKeyVerifier`/`HostKeyInfo` contract (already shipped). Linux test loop: `docker compose run --rm dev swift test`.
 
 ## Global Constraints
 
 - Every source/test file begins with `// SPDX-FileCopyrightText: 2026 True Positive LLC` then `// SPDX-License-Identifier: GPL-3.0-only`.
-- Placement: platform-agnostic logic + the Keychain backend in `Sources/NeotildeKit/Storage/`; Linux-runnable tests in `Tests/NeotildeKitTests/`; app code in `App/`.
-- **NeotildeKit must keep compiling and testing on Linux.** Anything Apple-only (`Security`, `Keychain`) is guarded by `#if canImport(Security)`; the parts that gate trust (decision logic, the `SecretRef`→account mapping) stay platform-agnostic and Linux-tested. App SwiftUI code (`App/`) compiles only in the macOS CI job (the `Neotilde` iOS-simulator build).
+- Placement: platform-agnostic logic + the Keychain backend in `Sources/SemicolynKit/Storage/`; Linux-runnable tests in `Tests/SemicolynKitTests/`; app code in `App/`.
+- **SemicolynKit must keep compiling and testing on Linux.** Anything Apple-only (`Security`, `Keychain`) is guarded by `#if canImport(Security)`; the parts that gate trust (decision logic, the `SecretRef`→account mapping) stay platform-agnostic and Linux-tested. App SwiftUI code (`App/`) compiles only in the macOS CI job (the `Semicolyn` iOS-simulator build).
 - Default policy is `strictHostKeyChecking = ask` (explicit confirm on first trust AND on key change) — `2026-06-17-host-key-trust-design.md` §"Default policy".
 - Each `(host, key type)` is trusted independently; a key change on one algorithm never invalidates another — same spec §"When the modal fires".
 - `HostKey.source` for a TOFU-accepted key is `.trustOnFirstUse`; `algorithm` is stored verbatim as the wire name from `HostKeyInfo.keyType` (e.g. `"ssh-ed25519"`).
@@ -47,8 +47,8 @@ git commit -m "docs: host-key trust foundation plan"
 A pure value type that normalizes and truncates SHA256 fingerprints for the modals, with the exact format the spec mandates. No SwiftUI.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Storage/Fingerprint.swift`
-- Test: `Tests/NeotildeKitTests/FingerprintTests.swift`
+- Create: `Sources/SemicolynKit/Storage/Fingerprint.swift`
+- Test: `Tests/SemicolynKitTests/FingerprintTests.swift`
 
 **Interfaces:**
 - Produces:
@@ -64,11 +64,11 @@ A pure value type that normalizes and truncates SHA256 fingerprints for the moda
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/NeotildeKitTests/FingerprintTests.swift
+// Tests/SemicolynKitTests/FingerprintTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class FingerprintTests: XCTestCase {
     func testTruncationMatchesSpecFormat() {
@@ -103,8 +103,8 @@ final class FingerprintTests: XCTestCase {
 The trust-decision core over `HostKeyStore`. Decides — without mutating — whether an offered key is already trusted, brand-new (first-trust), or a mismatch; and provides the persist-on-accept (`trust`) and replace-on-mismatch (`replace`) mutations. Each `(host, algorithm)` is evaluated independently.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Storage/HostKeyTrustEvaluator.swift`
-- Test: `Tests/NeotildeKitTests/HostKeyTrustEvaluatorTests.swift`
+- Create: `Sources/SemicolynKit/Storage/HostKeyTrustEvaluator.swift`
+- Test: `Tests/SemicolynKitTests/HostKeyTrustEvaluatorTests.swift`
 
 **Interfaces:**
 - Consumes: `HostKeyStore` (`entries(forHost:)`, `add(_:forHost:)`, `remove(fingerprint:forHost:)`), `HostKey`, `HostKeySource.trustOnFirstUse`.
@@ -134,11 +134,11 @@ The trust-decision core over `HostKeyStore`. Decides — without mutating — wh
 - [ ] **Step 1: Write the failing test** (Critical: EP, BVA-by-algorithm, adversarial wrong-key, rotation, persistence)
 
 ```swift
-// Tests/NeotildeKitTests/HostKeyTrustEvaluatorTests.swift
+// Tests/SemicolynKitTests/HostKeyTrustEvaluatorTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class HostKeyTrustEvaluatorTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 0)
@@ -220,8 +220,8 @@ final class HostKeyTrustEvaluatorTests: XCTestCase {
 A `SecretStore` backed by the iOS/macOS Keychain (`Security`), with `kSecAttrSynchronizable` so secrets ride iCloud Keychain (synced, E2EE) per the storage backbone. The `SecretRef`→account mapping is a **pure, Linux-tested** function (injectivity is security-relevant: two distinct refs must never collide onto one Keychain item); the Keychain calls themselves are `#if canImport(Security)` and verified on the simulator.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Storage/KeychainSecretStore.swift`
-- Test: `Tests/NeotildeKitTests/KeychainAccountTests.swift` (Linux — the mapping only)
+- Create: `Sources/SemicolynKit/Storage/KeychainSecretStore.swift`
+- Test: `Tests/SemicolynKitTests/KeychainAccountTests.swift` (Linux — the mapping only)
 
 **Interfaces:**
 - Consumes: `SecretRef`, `SecretStore`.
@@ -232,7 +232,7 @@ A `SecretStore` backed by the iOS/macOS Keychain (`Security`), with `kSecAttrSyn
 
   #if canImport(Security)
   public final class KeychainSecretStore: SecretStore {
-      public init(service: String = "com.truepositive.neotilde.secrets", synchronizable: Bool = true)
+      public init(service: String = "com.truepositive.semicolyn.secrets", synchronizable: Bool = true)
       public func setSecret(_ data: Data, for ref: SecretRef) throws
       public func getSecret(_ ref: SecretRef) throws -> Data?
       public func deleteSecret(_ ref: SecretRef) throws
@@ -255,11 +255,11 @@ A `SecretStore` backed by the iOS/macOS Keychain (`Security`), with `kSecAttrSyn
 - [ ] **Step 1: Write the failing test** (Linux — mapping injectivity + format)
 
 ```swift
-// Tests/NeotildeKitTests/KeychainAccountTests.swift
+// Tests/SemicolynKitTests/KeychainAccountTests.swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class KeychainAccountTests: XCTestCase {
     func testRecordKeyAccountIsStable() {
@@ -297,10 +297,10 @@ final class KeychainAccountTests: XCTestCase {
 
 ### Task 4: `AppStores` composition root (App, iOS)
 
-One place that builds the live storage stack the app uses: `FileBlobStore` (host records on disk) → `EncryptedRecordStore` (AES-sealed via the Keychain-held record key) → `HostStore`, plus `HostKeyStore` over `KeychainSecretStore`. Adds the `NeotildeKit` product as an app dependency.
+One place that builds the live storage stack the app uses: `FileBlobStore` (host records on disk) → `EncryptedRecordStore` (AES-sealed via the Keychain-held record key) → `HostStore`, plus `HostKeyStore` over `KeychainSecretStore`. Adds the `SemicolynKit` product as an app dependency.
 
 **Files:**
-- Modify: `project.yml` (add `NeotildeKit` to the `Neotilde` target's `dependencies`)
+- Modify: `project.yml` (add `SemicolynKit` to the `Semicolyn` target's `dependencies`)
 - Create: `App/AppStores.swift`
 
 **Interfaces:**
@@ -316,14 +316,14 @@ One place that builds the live storage stack the app uses: `FileBlobStore` (host
       init() throws
   }
   ```
-  `init`: `dir = FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("neotilde", isDirectory: true)`; `secrets = KeychainSecretStore()`; `let key = try recordKey(in: secrets)`; `let blobs = FileBlobStore(directory: dir.appendingPathComponent("records"))`; `hosts = HostStore(records: EncryptedRecordStore(backend: blobs, key: key))`; `hostKeys = HostKeyStore(secrets: secrets)`; `trust = HostKeyTrustEvaluator(store: hostKeys)`.
+  `init`: `dir = FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("semicolyn", isDirectory: true)`; `secrets = KeychainSecretStore()`; `let key = try recordKey(in: secrets)`; `let blobs = FileBlobStore(directory: dir.appendingPathComponent("records"))`; `hosts = HostStore(records: EncryptedRecordStore(backend: blobs, key: key))`; `hostKeys = HostKeyStore(secrets: secrets)`; `trust = HostKeyTrustEvaluator(store: hostKeys)`.
 
-- [ ] **Step 1: Add the dependency** — in `project.yml`, under `targets.Neotilde.dependencies`, add:
+- [ ] **Step 1: Add the dependency** — in `project.yml`, under `targets.Semicolyn.dependencies`, add:
   ```yaml
-      - package: NeotildePackage
-        product: NeotildeKit
+      - package: SemicolynPackage
+        product: SemicolynKit
   ```
-- [ ] **Step 2: Write `App/AppStores.swift`** per the interface above (`import Foundation`, `import NeotildeKit`).
+- [ ] **Step 2: Write `App/AppStores.swift`** per the interface above (`import Foundation`, `import SemicolynKit`).
 - [ ] **Step 3: Commit** — `feat: AppStores composition root (Keychain + FileBlob storage stack)`
 
 > No unit test here — it's wiring of already-tested units, and it depends on Apple-only `KeychainSecretStore`. The macOS CI `xcodegen generate && xcodebuild` simulator build is the compile gate; the behavioral gate is Task 6's manual run.
@@ -338,7 +338,7 @@ The two SwiftUI surfaces from the spec, driven by a single `HostKeyPrompt` value
 - Create: `App/HostKeyPrompt.swift` (the prompt model + the modal views)
 
 **Interfaces:**
-- Consumes: `Fingerprint`, `HostKey`, `NeotildeKit.Theme` tokens (`accent.primary`, `state.broken`, `text.secondary`).
+- Consumes: `Fingerprint`, `HostKey`, `SemicolynKit.Theme` tokens (`accent.primary`, `state.broken`, `text.secondary`).
 - Produces:
   ```swift
   enum HostKeyPrompt: Identifiable, Equatable {
@@ -375,7 +375,7 @@ Bridge the Rust `HostKeyVerifier` callback to the evaluator and the modals; pers
 - Modify: `App/ConnectView.swift` (present the modal sheet bound to the VM's pending prompt)
 
 **Interfaces:**
-- Consumes: `HostKeyVerifier`, `HostKeyInfo` (FFI), `HostKeyTrustEvaluator`, `HostKeyPrompt`, `AppStores`, `NeotildeKit.Host`.
+- Consumes: `HostKeyVerifier`, `HostKeyInfo` (FFI), `HostKeyTrustEvaluator`, `HostKeyPrompt`, `AppStores`, `SemicolynKit.Host`.
 - Produces:
   ```swift
   final class TofuHostKeyVerifier: HostKeyVerifier {
@@ -391,7 +391,7 @@ Bridge the Rust `HostKeyVerifier` callback to the evaluator and the modals; pers
   - Add `@Published var pendingPrompt: HostKeyPrompt?` and a `private var promptContinuation: CheckedContinuation<Bool, Never>?`.
   - `present(_:)` (a `@MainActor` method): store the continuation, set `pendingPrompt`; returns when the view calls `resolvePrompt(_:)`.
   - `resolvePrompt(_ trusted: Bool)`: clear `pendingPrompt`, resume the continuation with `trusted`.
-  - In `connect(...)`: before connecting, `let host = try findOrCreateHost(hostName: host, port: port, user: user)` against `AppStores.shared.hosts` — match an existing host by (`hostName`, resolved `port`, resolved `user`); if none, `saveHost(Host(id: UUID(), label: host, hostName: host, user: .explicit(user), port: .explicit(Int(port) ?? 22)))`. Build `TofuHostKeyVerifier(hostID: host.id, trust: AppStores.shared.trust, present: { [weak self] p in await self?.present(p) ?? false })` and pass it to `NeotildeSSHCoreFFI.connect`.
+  - In `connect(...)`: before connecting, `let host = try findOrCreateHost(hostName: host, port: port, user: user)` against `AppStores.shared.hosts` — match an existing host by (`hostName`, resolved `port`, resolved `user`); if none, `saveHost(Host(id: UUID(), label: host, hostName: host, user: .explicit(user), port: .explicit(Int(port) ?? 22)))`. Build `TofuHostKeyVerifier(hostID: host.id, trust: AppStores.shared.trust, present: { [weak self] p in await self?.present(p) ?? false })` and pass it to `SemicolynSSHCoreFFI.connect`.
   - On `ConnectError.hostKeyRejected`, set `state = .failed("Host key not trusted")`.
 
   `ConnectView` change: add `.sheet(item: $vm.pendingPrompt) { prompt in ... }` rendering `FirstTrustModal`/`MismatchModal`, each `onDecision: { vm.resolvePrompt($0) }`.
@@ -419,7 +419,7 @@ Bridge the Rust `HostKeyVerifier` callback to the evaluator and the modals; pers
 
 ## Deferred to Plan 2 (Host CRUD + saved-host library) — explicitly out of scope here
 
-- The full single-scrollable host editor (Basics / Auth / Connection / Jump chain / Port forwarding / Mosh / Tailscale / Neotilde / Delete) per `2026-06-15-host-crud-design.md`, with conditional disabling, validation banners, and quick-edit vs deep-edit presentation.
+- The full single-scrollable host editor (Basics / Auth / Connection / Jump chain / Port forwarding / Mosh / Tailscale / Semicolyn / Delete) per `2026-06-15-host-crud-design.md`, with conditional disabling, validation banners, and quick-edit vs deep-edit presentation.
 - The mismatch modal's **"Edit host"** action (spec §"Mismatch modal" Actions table): omitted in Plan 1's two-button modal because it opens the CRUD form built in Plan 2. Add it to `MismatchModal` when the editor exists.
 - **Friendly host label in the trust modals.** The Rust FFI sets `HostKeyInfo.host_label` to `"<host>:<port>"` (`connection.rs`), so the modals show the address, not the saved `Host.label`. When saved hosts have distinct labels (Plan 2), thread the real label through `connect`/`connect_jump` (a small FFI-contract change) so the modal title matches the spec mock-ups.
 - The saved-host **list UI** (picker, swipe-to-edit/delete, refused-delete-if-referenced message), the **Defaults editor**, and the **inline identity sub-flow** (pick/create/import). Note: identity **create/import** additionally needs the Apple key-minting layer that Phase 2a deferred to 2b (`SecKeyCreateRandomKey` / Secure Enclave) — a prerequisite for that sub-tab.

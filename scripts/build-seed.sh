@@ -5,7 +5,7 @@
 # Build the bundled predictor seed from live CLI corpora.
 #
 # Fetches tldr-pages (example invocations) and the Fig autocomplete spec corpus
-# (structured subcommands/flags), then runs the neotilde-seedbuild Swift tool over
+# (structured subcommands/flags), then runs the semicolyn-seedbuild Swift tool over
 # both, emitting seed_unigram_v1.sketch and seed_bigram_v1.sketch. The fetch lives
 # here, not in the Swift tool, so the tool stays pure file-I/O and unit-testable
 # against fixture directories.
@@ -42,7 +42,7 @@ clone_pinned "$FIG_REPO" "$WORK/fig" "FIG_REF" "${FIG_REF:-}"
 # tldr: English pages only (pages.<lang>/ hold other languages).
 # fig:  spec sources live under src/.
 # Release build: ingesting ~15k pages + ~600 specs in debug is needlessly slow.
-swift run -c release neotilde-seedbuild \
+swift run -c release semicolyn-seedbuild \
   --out "$OUT_DIR" \
   --tldr "$WORK/tldr/pages" \
   --fig "$WORK/fig/src"
