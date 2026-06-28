@@ -29,11 +29,40 @@ public struct MacroEvent: Equatable, Sendable, Codable {
 public struct Macro: Equatable, Sendable, Codable, Identifiable {
     public let id: MacroID
     public var name: String
+    /// The plain (placeholder-free) keystrokes. Authoritative for plain macros and the
+    /// static skeleton for parameterized ones; what existing display/encode paths read.
     public var body: [MacroEvent]
+    /// Optional `${…}`-parameterized template, resolved at fire-time via
+    /// `resolveMacroBody`. `nil` for plain recorded/parsed macros. Persisted as an
+    /// optional key, so older macro records (no key) decode as plain. (4d-2)
+    public var parameterizedBody: [MacroBodyElement]?
+
     public init(id: MacroID, name: String, body: [MacroEvent]) {
         self.id = id
         self.name = name
         self.body = body
+        self.parameterizedBody = nil
+    }
+
+    /// A parameterized macro: `parameterizedBody` is authoritative at fire-time; `body`
+    /// is derived as its static (placeholder-free) keystrokes for display/back-compat.
+    public init(id: MacroID, name: String, parameterizedBody: [MacroBodyElement]) {
+        self.id = id
+        self.name = name
+        self.body = parameterizedBody.compactMap { element in
+            if case .event(let e) = element { return e }
+            return nil
+        }
+        self.parameterizedBody = parameterizedBody
+    }
+
+    /// Whether this macro carries `${…}` placeholders to resolve at fire-time.
+    public var isParameterized: Bool { parameterizedBody != nil }
+
+    /// The body to hand to `resolveMacroBody` at fire-time: the parameterized template
+    /// if present, else the plain events wrapped as elements (which resolve trivially).
+    public var resolvableBody: [MacroBodyElement] {
+        parameterizedBody ?? body.map(MacroBodyElement.event)
     }
 }
 
