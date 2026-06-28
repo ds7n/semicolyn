@@ -12,13 +12,13 @@ command-encoder / session controller are **separate later slices**.
 
 Turn the raw byte stream tmux emits in control mode (`tmux -CC`) into a sequence
 of typed, validated events that the native pane/window model and the SwiftTerm
-feed consume. The parser is the beating heart of Neotilde's session engine; getting
+feed consume. The parser is the beating heart of Semicolyn's session engine; getting
 it correct and well-tested on the Linux fast loop de-risks the whole terminal
 phase before any macOS-gated UI work.
 
 ## Placement
 
-**Swift, in `NeotildeKit`** (`Sources/NeotildeKit/Tmux/`). When connected via
+**Swift, in `SemicolynKit`** (`Sources/SemicolynKit/Tmux/`). When connected via
 `tmux -CC`, the control-mode stream *is* the shell channel's byte stream, which
 already crosses the UniFFI bridge as `ShellOutput.on_output([UInt8])` into Swift.
 The `%output` payloads feed SwiftTerm (Swift) and the pane/window model is Swift,
@@ -26,7 +26,7 @@ so parsing in Swift keeps the entire data flow on one side of the bridge with no
 new marshalled event vocabulary. Pure string/byte parsing, no Apple-only APIs →
 fully testable via `swift test` in the dev container.
 
-The alternative (Rust in `neotilde-ssh-core`) was rejected: it would require a
+The alternative (Rust in `semicolyn-ssh-core`) was rejected: it would require a
 UniFFI record/enum for every parsed event, a large bridge surface for data whose
 only consumer is Swift.
 

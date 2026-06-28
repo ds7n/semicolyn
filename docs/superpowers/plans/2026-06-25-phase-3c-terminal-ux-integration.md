@@ -4,36 +4,36 @@
 
 **Goal:** Wire SwiftTerm's already-parsed terminal events (bell, OSC 52 clipboard, OSC 0/2 titles, URL taps, DECSCUSR cursor, mouse mode) into real touch-native behaviors, backed by a `TerminalSettings` model — implementing the delegate callbacks that are stubbed no-ops today.
 
-**Architecture:** Pure decision logic (settings/clamps, bell halo state machine, OSC 52 write-gate, title sanitize, URL classify/join, resize debounce, DECSCUSR map) lives in `NeotildeKit` and is XCTest-covered on the Linux fast loop. Thin SwiftTerm/UIKit wiring (delegate bodies, halo overlay, mouse dot, pinch gesture, pasteboard, URL routing) lives in `App/` and is verified only by the macOS CI job. This mirrors the established `tmuxLaunchDecision`-pure / thin-App-wiring split.
+**Architecture:** Pure decision logic (settings/clamps, bell halo state machine, OSC 52 write-gate, title sanitize, URL classify/join, resize debounce, DECSCUSR map) lives in `SemicolynKit` and is XCTest-covered on the Linux fast loop. Thin SwiftTerm/UIKit wiring (delegate bodies, halo overlay, mouse dot, pinch gesture, pasteboard, URL routing) lives in `App/` and is verified only by the macOS CI job. This mirrors the established `tmuxLaunchDecision`-pure / thin-App-wiring split.
 
-**Tech Stack:** Swift 6 (NeotildeKit) / Swift 5 (App target), SwiftTerm, XCTest, swift-crypto (Linux) / CryptoKit (Apple), the existing `Inherited<T>` host-config model and `Theme` tokens.
+**Tech Stack:** Swift 6 (SemicolynKit) / Swift 5 (App target), SwiftTerm, XCTest, swift-crypto (Linux) / CryptoKit (Apple), the existing `Inherited<T>` host-config model and `Theme` tokens.
 
 ## Global Constraints
 
-- **NeotildeKit is Swift 6 strict-concurrency + Linux-clean.** Pure units must be `Sendable`, must NOT `import UIKit`/`SwiftTerm`/`CryptoKit`, and must run under `docker compose run --rm dev swift test`.
+- **SemicolynKit is Swift 6 strict-concurrency + Linux-clean.** Pure units must be `Sendable`, must NOT `import UIKit`/`SwiftTerm`/`CryptoKit`, and must run under `docker compose run --rm dev swift test`.
 - **App-target code is macOS-CI-verified only** — invisible to Linux `swift test`; the `#if os(macOS)`-gated FFI/UIKit layer compiles in Swift 5 language mode.
 - **No audio bell, ever.** Bell = visual halo + haptic only.
 - **OSC 52 read sequence is always a no-op** (SwiftTerm only calls `clipboardCopy` for writes; never echo clipboard back to the remote).
-- **Naming:** lowercase `neotilde` in code/paths; `Neotilde…` only for PascalCase type/module names.
-- **Settings have no UI in Plan C** except the one OSC 52 checkbox in the existing host-editor "Neotilde behavior" section. `TerminalSettings` defaults are baked in; a future Settings screen binds later. Title + port-forward status are observable seams with no rendered surface.
-- **macOS-minute budget (private repo, 10× macOS billing):** do all NeotildeKit/pure work locally in Docker; push to trigger macOS CI only at **PR-slice boundaries**, not every commit.
-- **Defaults (from spec):** font 13pt (clamp 9–24), cursor `.block`, blink off, raw-PTY scrollback 5000 (presets 1000/2000/5000/10000/∞). Bell: hold-at-peak until ~400ms quiet → 250ms fade; haptic ≤1 per ~500ms. Mouse dot: 4pt `accent.primary` @ 40%. Resize debounce ~10Hz (100ms quiet). URL schemes ∈ {http, https, ssh}. `neotilde.osc52.allow` default **true**.
+- **Naming:** lowercase `semicolyn` in code/paths; `Semicolyn…` only for PascalCase type/module names.
+- **Settings have no UI in Plan C** except the one OSC 52 checkbox in the existing host-editor "Semicolyn behavior" section. `TerminalSettings` defaults are baked in; a future Settings screen binds later. Title + port-forward status are observable seams with no rendered surface.
+- **macOS-minute budget (private repo, 10× macOS billing):** do all SemicolynKit/pure work locally in Docker; push to trigger macOS CI only at **PR-slice boundaries**, not every commit.
+- **Defaults (from spec):** font 13pt (clamp 9–24), cursor `.block`, blink off, raw-PTY scrollback 5000 (presets 1000/2000/5000/10000/∞). Bell: hold-at-peak until ~400ms quiet → 250ms fade; haptic ≤1 per ~500ms. Mouse dot: 4pt `accent.primary` @ 40%. Resize debounce ~10Hz (100ms quiet). URL schemes ∈ {http, https, ssh}. `semicolyn.osc52.allow` default **true**.
 - Conventional commits; commit after each green step.
 
 ## File Structure
 
-New pure units live in a new `Sources/NeotildeKit/Terminal/` group (mirrors `Tmux/`, `Predictor/`):
+New pure units live in a new `Sources/SemicolynKit/Terminal/` group (mirrors `Tmux/`, `Predictor/`):
 
-- `Sources/NeotildeKit/Terminal/TerminalSettings.swift` — settings value type + font clamp + DECSCUSR→style map + scrollback presets.
-- `Sources/NeotildeKit/Terminal/BellStateMachine.swift` — halo intensity + haptic throttle (timestamp-injected).
-- `Sources/NeotildeKit/Terminal/Osc52.swift` — write-gate decision.
-- `Sources/NeotildeKit/Terminal/TitleSanitize.swift` — title validation.
-- `Sources/NeotildeKit/Terminal/UrlClassify.swift` — scheme classify + wrapped-row join.
-- `Sources/NeotildeKit/Terminal/ResizeDebounce.swift` — coalesce resize bursts (timestamp-injected).
-- `Sources/NeotildeKit/Model/HostExtensions.swift` *(modify)* — add `Osc52Config` + `NeotildeConfig.osc52`.
-- `Sources/NeotildeKit/Model/Resolution.swift` *(modify)* — add `resolveOsc52Allow`.
+- `Sources/SemicolynKit/Terminal/TerminalSettings.swift` — settings value type + font clamp + DECSCUSR→style map + scrollback presets.
+- `Sources/SemicolynKit/Terminal/BellStateMachine.swift` — halo intensity + haptic throttle (timestamp-injected).
+- `Sources/SemicolynKit/Terminal/Osc52.swift` — write-gate decision.
+- `Sources/SemicolynKit/Terminal/TitleSanitize.swift` — title validation.
+- `Sources/SemicolynKit/Terminal/UrlClassify.swift` — scheme classify + wrapped-row join.
+- `Sources/SemicolynKit/Terminal/ResizeDebounce.swift` — coalesce resize bursts (timestamp-injected).
+- `Sources/SemicolynKit/Model/HostExtensions.swift` *(modify)* — add `Osc52Config` + `SemicolynConfig.osc52`.
+- `Sources/SemicolynKit/Model/Resolution.swift` *(modify)* — add `resolveOsc52Allow`.
 
-Tests mirror under `Tests/NeotildeKitTests/Terminal*Tests.swift`.
+Tests mirror under `Tests/SemicolynKitTests/Terminal*Tests.swift`.
 
 App wiring (macOS-CI only):
 - `App/TerminalSettingsStore.swift` *(create)* — `ObservableObject` holding `TerminalSettings`, lives in `AppStores`.
@@ -46,7 +46,7 @@ App wiring (macOS-CI only):
 
 **Timestamp-injection idiom (used by Bell + ResizeDebounce):** mirror `HostKeyTrustEvaluator.trust(…, at now: Date)` — pass `Date` into each method; tests pass a fixed base date + offsets, App passes `Date()`. No closure/clock object.
 
-**Reference verbatim patterns:** pure decision `Sources/NeotildeKit/Tmux/TmuxLaunch.swift:55`; host-config leaf `Sources/NeotildeKit/Model/HostExtensions.swift:54` (`TmuxConfig`); resolution `Sources/NeotildeKit/Model/Resolution.swift:104` (`resolveTmuxAttemptControlMode`); editor toggle `App/HostEditorSections.swift:592`; theme tokens `theme.accent.primary` / `theme.bell.edge` / `.alpha(0.40)`; NeotildeKit test fakes/assertions `Tests/NeotildeKitTests/SerialByteWriterTests.swift`.
+**Reference verbatim patterns:** pure decision `Sources/SemicolynKit/Tmux/TmuxLaunch.swift:55`; host-config leaf `Sources/SemicolynKit/Model/HostExtensions.swift:54` (`TmuxConfig`); resolution `Sources/SemicolynKit/Model/Resolution.swift:104` (`resolveTmuxAttemptControlMode`); editor toggle `App/HostEditorSections.swift:592`; theme tokens `theme.accent.primary` / `theme.bell.edge` / `.alpha(0.40)`; SemicolynKit test fakes/assertions `Tests/SemicolynKitTests/SerialByteWriterTests.swift`.
 
 ## Deferred (verified-out at plan time)
 
@@ -58,8 +58,8 @@ App wiring (macOS-CI only):
 ### Task 1: `TerminalSettings` model + cursor default + scrollback config
 
 **Files:**
-- Create: `Sources/NeotildeKit/Terminal/TerminalSettings.swift`
-- Test: `Tests/NeotildeKitTests/TerminalSettingsTests.swift`
+- Create: `Sources/SemicolynKit/Terminal/TerminalSettings.swift`
+- Test: `Tests/SemicolynKitTests/TerminalSettingsTests.swift`
 - Create: `App/TerminalSettingsStore.swift`
 - Modify: `App/AppStores.swift`, `App/TerminalScreen.swift`
 
@@ -69,9 +69,9 @@ App wiring (macOS-CI only):
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/NeotildeKitTests/TerminalSettingsTests.swift
+// Tests/SemicolynKitTests/TerminalSettingsTests.swift
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class TerminalSettingsTests: XCTestCase {
     func testDefaultsMatchSpec() {
@@ -119,7 +119,7 @@ Expected: FAIL — `cannot find 'TerminalSettings' in scope`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```swift
-// Sources/NeotildeKit/Terminal/TerminalSettings.swift
+// Sources/SemicolynKit/Terminal/TerminalSettings.swift
 import Foundation
 
 /// Caret rendering style, independent of blink (mirrors DECSCUSR families).
@@ -176,7 +176,7 @@ Expected: PASS (5 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Terminal/TerminalSettings.swift Tests/NeotildeKitTests/TerminalSettingsTests.swift
+git add Sources/SemicolynKit/Terminal/TerminalSettings.swift Tests/SemicolynKitTests/TerminalSettingsTests.swift
 git commit -m "feat(terminal): TerminalSettings model with font clamp + DECSCUSR map"
 ```
 
@@ -186,7 +186,7 @@ Create `App/TerminalSettingsStore.swift`:
 
 ```swift
 import Foundation
-import NeotildeKit
+import SemicolynKit
 
 /// App-lifetime holder for terminal preferences. Plan C exposes defaults only;
 /// a future Settings screen mutates `settings` and views react.
@@ -219,15 +219,15 @@ git add App/TerminalSettingsStore.swift App/AppStores.swift App/TerminalScreen.s
 git commit -m "feat(app): apply TerminalSettings (font/cursor/scrollback) to raw-PTY view"
 git push github main
 ```
-Run: `gh run watch --repo ds7n/neotilde` (or `gh run list`). Expected: `macos` job **success** (only Apple-side validation of the App wiring).
+Run: `gh run watch --repo ds7n/semicolyn` (or `gh run list`). Expected: `macos` job **success** (only Apple-side validation of the App wiring).
 
 ---
 
 ### Task 2: Bell — halo state machine (pure) + overlay + haptic
 
 **Files:**
-- Create: `Sources/NeotildeKit/Terminal/BellStateMachine.swift`
-- Test: `Tests/NeotildeKitTests/BellStateMachineTests.swift`
+- Create: `Sources/SemicolynKit/Terminal/BellStateMachine.swift`
+- Test: `Tests/SemicolynKitTests/BellStateMachineTests.swift`
 - Create: `App/BellHaloView.swift`
 - Modify: `App/TerminalScreen.swift`, `App/TmuxPaneContainer.swift`
 
@@ -238,9 +238,9 @@ Run: `gh run watch --repo ds7n/neotilde` (or `gh run list`). Expected: `macos` j
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/NeotildeKitTests/BellStateMachineTests.swift
+// Tests/SemicolynKitTests/BellStateMachineTests.swift
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class BellStateMachineTests: XCTestCase {
     private let t0 = Date(timeIntervalSinceReferenceDate: 1_000_000)
@@ -287,7 +287,7 @@ Expected: FAIL — `cannot find 'BellStateMachine' in scope`.
 - [ ] **Step 3: Write minimal implementation**
 
 ```swift
-// Sources/NeotildeKit/Terminal/BellStateMachine.swift
+// Sources/SemicolynKit/Terminal/BellStateMachine.swift
 import Foundation
 
 /// Drives the visual bell halo + haptic. Timestamp-injected (no internal clock)
@@ -333,7 +333,7 @@ Expected: PASS (5 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Terminal/BellStateMachine.swift Tests/NeotildeKitTests/BellStateMachineTests.swift
+git add Sources/SemicolynKit/Terminal/BellStateMachine.swift Tests/SemicolynKitTests/BellStateMachineTests.swift
 git commit -m "feat(terminal): bell halo/haptic state machine (timestamp-injected)"
 ```
 
@@ -369,21 +369,21 @@ Expected: `macos` job success. (No audio path exists — constraint upheld.)
 ### Task 3: OSC 52 write-gate + title seam + host model field
 
 **Files:**
-- Create: `Sources/NeotildeKit/Terminal/Osc52.swift`, `Sources/NeotildeKit/Terminal/TitleSanitize.swift`
-- Modify: `Sources/NeotildeKit/Model/HostExtensions.swift`, `Sources/NeotildeKit/Model/Resolution.swift`
-- Test: `Tests/NeotildeKitTests/Osc52Tests.swift`, `Tests/NeotildeKitTests/TitleSanitizeTests.swift`, `Tests/NeotildeKitTests/ResolutionTests.swift` (extend)
+- Create: `Sources/SemicolynKit/Terminal/Osc52.swift`, `Sources/SemicolynKit/Terminal/TitleSanitize.swift`
+- Modify: `Sources/SemicolynKit/Model/HostExtensions.swift`, `Sources/SemicolynKit/Model/Resolution.swift`
+- Test: `Tests/SemicolynKitTests/Osc52Tests.swift`, `Tests/SemicolynKitTests/TitleSanitizeTests.swift`, `Tests/SemicolynKitTests/ResolutionTests.swift` (extend)
 - Modify: `App/HostEditorSections.swift`, `App/TerminalScreen.swift`, `App/TmuxPaneContainer.swift`, `App/ConnectionViewModel.swift`
 
 **Interfaces:**
-- Consumes: `Inherited<NeotildeConfig>` (existing), `resolveOptional` (existing).
-- Produces: `enum Osc52Action { case write([UInt8]); case drop }`; `func osc52Action(allow: Bool, content: [UInt8]) -> Osc52Action`; `func sanitizeTerminalTitle(_:) -> String?`; `struct Osc52Config { var allow: Bool? }`; `NeotildeConfig.osc52: Osc52Config?`; `func resolveOsc52Allow(host: Host, defaults: Defaults) -> Bool`.
+- Consumes: `Inherited<SemicolynConfig>` (existing), `resolveOptional` (existing).
+- Produces: `enum Osc52Action { case write([UInt8]); case drop }`; `func osc52Action(allow: Bool, content: [UInt8]) -> Osc52Action`; `func sanitizeTerminalTitle(_:) -> String?`; `struct Osc52Config { var allow: Bool? }`; `SemicolynConfig.osc52: Osc52Config?`; `func resolveOsc52Allow(host: Host, defaults: Defaults) -> Bool`.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```swift
-// Tests/NeotildeKitTests/Osc52Tests.swift
+// Tests/SemicolynKitTests/Osc52Tests.swift
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class Osc52Tests: XCTestCase {
     func testAllowedNonEmptyWrites() {
@@ -399,9 +399,9 @@ final class Osc52Tests: XCTestCase {
 ```
 
 ```swift
-// Tests/NeotildeKitTests/TitleSanitizeTests.swift
+// Tests/SemicolynKitTests/TitleSanitizeTests.swift
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class TitleSanitizeTests: XCTestCase {
     func testNormalTitlePassesTrimmed() {
@@ -419,17 +419,17 @@ final class TitleSanitizeTests: XCTestCase {
 }
 ```
 
-Extend `Tests/NeotildeKitTests/ResolutionTests.swift` with:
+Extend `Tests/SemicolynKitTests/ResolutionTests.swift` with:
 
 ```swift
 func testOsc52AllowResolves() {
     XCTAssertTrue(resolveOsc52Allow(host: host(), defaults: Defaults()))   // builtin true
     XCTAssertFalse(resolveOsc52Allow(
-        host: host { $0.neotilde = .explicit(NeotildeConfig(osc52: Osc52Config(allow: false))) },
+        host: host { $0.semicolyn = .explicit(SemicolynConfig(osc52: Osc52Config(allow: false))) },
         defaults: Defaults()))
     XCTAssertTrue(resolveOsc52Allow(                                       // host inherits, defaults set true
         host: host(),
-        defaults: Defaults(neotilde: .explicit(NeotildeConfig(osc52: Osc52Config(allow: true))))))
+        defaults: Defaults(semicolyn: .explicit(SemicolynConfig(osc52: Osc52Config(allow: true))))))
 }
 ```
 
@@ -441,7 +441,7 @@ Expected: FAIL — `osc52Action`, `sanitizeTerminalTitle`, `Osc52Config`, `resol
 - [ ] **Step 3: Write the implementations**
 
 ```swift
-// Sources/NeotildeKit/Terminal/Osc52.swift
+// Sources/SemicolynKit/Terminal/Osc52.swift
 import Foundation
 
 /// Result of gating an OSC 52 clipboard-write request.
@@ -460,7 +460,7 @@ public func osc52Action(allow: Bool, content: [UInt8]) -> Osc52Action {
 ```
 
 ```swift
-// Sources/NeotildeKit/Terminal/TitleSanitize.swift
+// Sources/SemicolynKit/Terminal/TitleSanitize.swift
 import Foundation
 
 /// Validate/normalize an OSC 0/2 window title. Returns the trimmed title, or
@@ -475,23 +475,23 @@ public func sanitizeTerminalTitle(_ raw: String) -> String? {
 }
 ```
 
-In `Sources/NeotildeKit/Model/HostExtensions.swift`, add the leaf struct (mirror `TmuxConfig` at line 54) and extend `NeotildeConfig`:
+In `Sources/SemicolynKit/Model/HostExtensions.swift`, add the leaf struct (mirror `TmuxConfig` at line 54) and extend `SemicolynConfig`:
 
 ```swift
-// neotilde.osc52.* — per-host clipboard policy
+// semicolyn.osc52.* — per-host clipboard policy
 public struct Osc52Config: Codable, Equatable, Sendable {
     public var allow: Bool?
     public init(allow: Bool? = nil) { self.allow = allow }
 }
 ```
-Then add `public var osc52: Osc52Config?` to `NeotildeConfig` and to its `init` (default `nil`), exactly mirroring the existing `predictor`/`tmux` members.
+Then add `public var osc52: Osc52Config?` to `SemicolynConfig` and to its `init` (default `nil`), exactly mirroring the existing `predictor`/`tmux` members.
 
-In `Sources/NeotildeKit/Model/Resolution.swift`, after `resolveTmuxAttemptControlMode` (line 104):
+In `Sources/SemicolynKit/Model/Resolution.swift`, after `resolveTmuxAttemptControlMode` (line 104):
 
 ```swift
 /// Resolve whether OSC 52 clipboard writes are permitted (builtin default: true).
 public func resolveOsc52Allow(host: Host, defaults: Defaults) -> Bool {
-    resolveOptional(host.neotilde, defaults.neotilde)?.osc52?.allow ?? true
+    resolveOptional(host.semicolyn, defaults.semicolyn)?.osc52?.allow ?? true
 }
 ```
 
@@ -503,28 +503,28 @@ Expected: PASS. Also run the model schema suite to catch Codable drift: `docker 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Terminal/Osc52.swift Sources/NeotildeKit/Terminal/TitleSanitize.swift \
-        Sources/NeotildeKit/Model/HostExtensions.swift Sources/NeotildeKit/Model/Resolution.swift \
-        Tests/NeotildeKitTests/Osc52Tests.swift Tests/NeotildeKitTests/TitleSanitizeTests.swift \
-        Tests/NeotildeKitTests/ResolutionTests.swift
-git commit -m "feat(terminal): OSC 52 write-gate, title sanitize, neotilde.osc52.allow host field"
+git add Sources/SemicolynKit/Terminal/Osc52.swift Sources/SemicolynKit/Terminal/TitleSanitize.swift \
+        Sources/SemicolynKit/Model/HostExtensions.swift Sources/SemicolynKit/Model/Resolution.swift \
+        Tests/SemicolynKitTests/Osc52Tests.swift Tests/SemicolynKitTests/TitleSanitizeTests.swift \
+        Tests/SemicolynKitTests/ResolutionTests.swift
+git commit -m "feat(terminal): OSC 52 write-gate, title sanitize, semicolyn.osc52.allow host field"
 ```
 
 - [ ] **Step 6: Wire delegates + editor checkbox + title seam (macOS-CI verified)**
 
 Add an observable title seam — in `App/ConnectionViewModel.swift` add `@Published var terminalTitle: String?` (the Phase-4 Esc-pill Live row reads it).
 
-In `App/HostEditorSections.swift` `neotildeSection`, insert an OSC 52 toggle mirroring the tmux toggle at line 592:
+In `App/HostEditorSections.swift` `semicolynSection`, insert an OSC 52 toggle mirroring the tmux toggle at line 592:
 
 ```swift
 Toggle(isOn: Binding(
-    get: { vm.host.neotilde.value?.osc52?.allow ?? true },
+    get: { vm.host.semicolyn.value?.osc52?.allow ?? true },
     set: { newAllow in
-        var cfg = vm.host.neotilde.value ?? NeotildeConfig()
+        var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
         var osc52 = cfg.osc52 ?? Osc52Config()
         osc52.allow = newAllow
         cfg.osc52 = osc52
-        vm.host.neotilde = .explicit(cfg)
+        vm.host.semicolyn = .explicit(cfg)
         vm.revalidate()
     }
 )) {
@@ -565,8 +565,8 @@ Expected: `macos` job success.
 ### Task 4: URL tap — classify + wrapped-join + routing
 
 **Files:**
-- Create: `Sources/NeotildeKit/Terminal/UrlClassify.swift`
-- Test: `Tests/NeotildeKitTests/UrlClassifyTests.swift`
+- Create: `Sources/SemicolynKit/Terminal/UrlClassify.swift`
+- Test: `Tests/SemicolynKitTests/UrlClassifyTests.swift`
 - Modify: `App/TerminalScreen.swift`, `App/TmuxPaneContainer.swift`
 
 **Interfaces:**
@@ -575,9 +575,9 @@ Expected: `macos` job success.
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/NeotildeKitTests/UrlClassifyTests.swift
+// Tests/SemicolynKitTests/UrlClassifyTests.swift
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class UrlClassifyTests: XCTestCase {
     func testClassifiesAllowedSchemes() {
@@ -610,7 +610,7 @@ Expected: FAIL — symbols not found.
 - [ ] **Step 3: Write minimal implementation**
 
 ```swift
-// Sources/NeotildeKit/Terminal/UrlClassify.swift
+// Sources/SemicolynKit/Terminal/UrlClassify.swift
 import Foundation
 
 /// Tappable-URL schemes recognized by Plan C.
@@ -642,7 +642,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Terminal/UrlClassify.swift Tests/NeotildeKitTests/UrlClassifyTests.swift
+git add Sources/SemicolynKit/Terminal/UrlClassify.swift Tests/SemicolynKitTests/UrlClassifyTests.swift
 git commit -m "feat(terminal): URL scheme classify + wrapped-row join"
 ```
 
@@ -678,8 +678,8 @@ Expected: `macos` job success.
 ### Task 5: Mouse-active dot + resize debounce
 
 **Files:**
-- Create: `Sources/NeotildeKit/Terminal/ResizeDebounce.swift`
-- Test: `Tests/NeotildeKitTests/ResizeDebounceTests.swift`
+- Create: `Sources/SemicolynKit/Terminal/ResizeDebounce.swift`
+- Test: `Tests/SemicolynKitTests/ResizeDebounceTests.swift`
 - Modify: `App/TerminalScreen.swift`, `App/TmuxPaneContainer.swift`, `App/ConnectionViewModel.swift`
 
 **Interfaces:**
@@ -688,9 +688,9 @@ Expected: `macos` job success.
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-// Tests/NeotildeKitTests/ResizeDebounceTests.swift
+// Tests/SemicolynKitTests/ResizeDebounceTests.swift
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class ResizeDebounceTests: XCTestCase {
     private let t0 = Date(timeIntervalSinceReferenceDate: 2_000_000)
@@ -731,7 +731,7 @@ Expected: FAIL — `ResizeDebounce` not found.
 - [ ] **Step 3: Write minimal implementation**
 
 ```swift
-// Sources/NeotildeKit/Terminal/ResizeDebounce.swift
+// Sources/SemicolynKit/Terminal/ResizeDebounce.swift
 import Foundation
 
 /// Coalesce a burst of size changes (rotation / keyboard show-hide) into a single
@@ -768,7 +768,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Terminal/ResizeDebounce.swift Tests/NeotildeKitTests/ResizeDebounceTests.swift
+git add Sources/SemicolynKit/Terminal/ResizeDebounce.swift Tests/SemicolynKitTests/ResizeDebounceTests.swift
 git commit -m "feat(terminal): resize-debounce coalescer (timestamp-injected)"
 ```
 
@@ -776,7 +776,7 @@ git commit -m "feat(terminal): resize-debounce coalescer (timestamp-injected)"
 
 Raw-PTY path (`App/TerminalScreen.swift` `sizeChanged`): instead of resizing immediately, `note(cols:rows:at: Date())` into a `ResizeDebounce` and schedule a `tick` ~100ms later on the main queue; on a non-nil `tick`, call `session.resize`. Tmux path: same, feeding `ConnectionViewModel.setTmuxClientSize`.
 
-Mouse dot: add a 4pt dot subview to each `TerminalView` host, colored `theme.accent.primary.alpha(0.40)`, shown when the terminal's `mouseMode != .off` (read `terminalView.getTerminal().mouseMode` after feeds / on a lightweight poll). While mouse mode is active, suspend the Neotilde long-press selection gesture (disable the recognizer). Leave a `// TODO(phase4): also suspend cursor-placement halo here` seam comment at that exact point.
+Mouse dot: add a 4pt dot subview to each `TerminalView` host, colored `theme.accent.primary.alpha(0.40)`, shown when the terminal's `mouseMode != .off` (read `terminalView.getTerminal().mouseMode` after feeds / on a lightweight poll). While mouse mode is active, suspend the Semicolyn long-press selection gesture (disable the recognizer). Leave a `// TODO(phase4): also suspend cursor-placement halo here` seam comment at that exact point.
 
 - [ ] **Step 7: Push the slice and confirm macOS CI is green**
 
@@ -820,12 +820,12 @@ Per `docs/mvp-app-testing.md`, connect to a host, pinch to resize, fire a bell (
 
 ## Verification
 
-- **Pure units (every task, Linux):** `docker compose run --rm dev swift test` — the full `NeotildeKit` suite stays green; new `Terminal*Tests` + extended `ResolutionTests`/`HostSchemaTests` pass. This is the primary correctness gate and runs free/local.
-- **App wiring (per slice, macOS):** push at the slice boundary → `gh run watch --repo ds7n/neotilde` → `macos` job **success**. This is the only validation of UIKit/SwiftTerm wiring (App code is invisible to Linux `swift test`).
+- **Pure units (every task, Linux):** `docker compose run --rm dev swift test` — the full `SemicolynKit` suite stays green; new `Terminal*Tests` + extended `ResolutionTests`/`HostSchemaTests` pass. This is the primary correctness gate and runs free/local.
+- **App wiring (per slice, macOS):** push at the slice boundary → `gh run watch --repo ds7n/semicolyn` → `macos` job **success**. This is the only validation of UIKit/SwiftTerm wiring (App code is invisible to Linux `swift test`).
 - **Model integrity:** `HostSchemaTests` must pass after the `Osc52Config` addition (Codable round-trip), and `HostFormValidationTests` stays green (no new constraints).
 - **End-to-end:** the Task 6 Simulator pass exercises bell, OSC 52 copy, title capture, URL tap, mouse dot, pinch-zoom, and debounced resize against a real `sshd`/`tmux`.
 - **Budget discipline:** 6 macOS pushes for the 6 slices (+ reruns for the known `linux-rust` DNS flake, which doesn't gate macOS). Comfortably within the private-repo free quota; flip the repo public only if iteration on a slice needs many macOS round-trips.
 
 ## Self-review notes (spec coverage)
 
-Spec units → tasks: `TerminalSettings`/cursor/scrollback → T1; bell state machine + halo + haptic → T2; OSC 52 write-gate + title sanitize + title seam + `neotilde.osc52.allow` + editor checkbox → T3; URL classify/join + routing → T4; resize debounce + mouse-active dot + selection-suspend (with halo-suspend seam) → T5; pinch-zoom font → T6. DECSCUSR map folded into T1 (pure) + applied in T1 App step. **Deferred with rationale:** port-forward status seam (runtime path not observable today — Phase 4); cursor-placement halo suspension (gesture is Phase 4 — seam left in T5). Out-of-scope items (audio bell, bracketed paste, OSC 8, sixel, cursor color, per-host font persistence, ad-hoc forwards) are not tasked, per spec §"Out of scope".
+Spec units → tasks: `TerminalSettings`/cursor/scrollback → T1; bell state machine + halo + haptic → T2; OSC 52 write-gate + title sanitize + title seam + `semicolyn.osc52.allow` + editor checkbox → T3; URL classify/join + routing → T4; resize debounce + mouse-active dot + selection-suspend (with halo-suspend seam) → T5; pinch-zoom font → T6. DECSCUSR map folded into T1 (pure) + applied in T1 App step. **Deferred with rationale:** port-forward status seam (runtime path not observable today — Phase 4); cursor-placement halo suspension (gesture is Phase 4 — seam left in T5). Out-of-scope items (audio bell, bracketed paste, OSC 8, sixel, cursor color, per-host font persistence, ad-hoc forwards) are not tasked, per spec §"Out of scope".

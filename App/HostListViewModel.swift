@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-import NeotildeKit
+import SemicolynKit
 
 /// Drives `HostListView`: owns the loaded host list and surfaces delete
 /// failures as a user-facing error string.

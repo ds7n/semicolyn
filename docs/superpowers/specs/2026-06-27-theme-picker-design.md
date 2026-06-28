@@ -46,7 +46,7 @@ Two gaps make the feature impossible today:
 
 ## Architecture
 
-### Pure tier — `Sources/NeotildeKit/Theme/` (Linux-tested)
+### Pure tier — `Sources/SemicolynKit/Theme/` (Linux-tested)
 
 Keep `Theme` as pure color tokens. Add a thin catalog layer beside it (plain
 value types + one pure function — the "plain registry, no magic" idiom):
@@ -82,19 +82,19 @@ theme even if a stale Pro id is persisted.
 
 - **`ProStore: ObservableObject`** (`@MainActor`) — the entitlement seam.
   `@Published private(set) var isPro: Bool`, backed by a UserDefaults key
-  (`neotilde.pro.isActive`), **default `false`**. Exposes a debug
+  (`semicolyn.pro.isActive`), **default `false`**. Exposes a debug
   `setProForDebug(_:)` (or a `#if DEBUG` toggle) so the Simulator pass and the
   upgrade-screen placeholder can flip it without StoreKit. The real Pro slice
   replaces the backing (StoreKit transaction listener) behind this same surface;
-  consumers (`NeotildeApp`, `ThemePickerView`) are unchanged.
+  consumers (`SemicolynApp`, `ThemePickerView`) are unchanged.
 - **`ThemeSettingsStore: ObservableObject`** (`@MainActor`) — mirrors
   `KeybarSettingsStore`. `@Published var selectedThemeID: ThemeID { didSet { persist() } }`,
-  persisted as the raw string under `neotilde.appearance.themeID`. Loads with a
+  persisted as the raw string under `semicolyn.appearance.themeID`. Loads with a
   decode-failure fallback to `Theme.defaultDescriptor.id` (a bad/old blob never
   bricks theming). `resetToDefault()` restores Neon Midnight.
 - **`AppStores.shared`** gains `let pro = ProStore()` and
   `let appearance = ThemeSettingsStore()`.
-- **Root injection — `NeotildeApp`.** Replace the bare `HostListView()` with a
+- **Root injection — `SemicolynApp`.** Replace the bare `HostListView()` with a
   small root view that observes `appearance` + `pro`, computes
   `resolveTheme(selectedID: appearance.selectedThemeID, isPro: pro.isPro)`, and
   applies `.environment(\.theme, resolved)`. This is the wire that makes every
@@ -119,10 +119,10 @@ theme even if a stale Pro id is persisted.
     live.
   - Tapping a **locked** row does **not** change selection; it pushes
     `ProUpgradeView`.
-- **`ProUpgradeView`** (placeholder) — the "Neotilde Pro" screen shape from the
+- **`ProUpgradeView`** (placeholder) — the "Semicolyn Pro" screen shape from the
   Pro spec: the "free stays free" framing line, the exact perks list
   (Alternative app icons / Alternative color themes / Supporter badge), and a
-  **stubbed** CTA (disabled "Unlock Neotilde Pro — coming soon"). Under `#if
+  **stubbed** CTA (disabled "Unlock Semicolyn Pro — coming soon"). Under `#if
   DEBUG`, an "Unlock (debug)" button flips `ProStore` so the gate path is
   testable end-to-end on the Simulator. The real StoreKit CTA, Restore, Family
   Sharing note, and Supporter badge land in the Pro slice.
@@ -202,22 +202,22 @@ not a blocker on the picker itself.
 
 ## Implementation surface (summary)
 
-- **Create** `Sources/NeotildeKit/Theme/ThemeCatalog.swift` — `ThemeID`,
+- **Create** `Sources/SemicolynKit/Theme/ThemeCatalog.swift` — `ThemeID`,
   `ThemeDescriptor`, `Theme.catalog`, `Theme.defaultDescriptor`, `resolveTheme` /
   `resolveDescriptor`. Re-derive `Theme.all` from `catalog`.
 - **Create** `App/ProStore.swift`, `App/ThemeSettingsStore.swift`.
 - **Create** `App/SettingsView.swift`, `App/ThemePickerView.swift`,
   `App/ProUpgradeView.swift`.
 - **Modify** `App/AppStores.swift` (add `pro`, `appearance`),
-  `App/NeotildeApp.swift` (root view + environment injection),
+  `App/SemicolynApp.swift` (root view + environment injection),
   `App/HostListView.swift` (gear toolbar item), `App/SessionView.swift` (pass
   resolved theme to `TerminalScreen`/`TmuxPaneContainer`).
-- **Tests** `Tests/NeotildeKitTests/` — catalog + `resolveTheme` + `ThemeID`
+- **Tests** `Tests/SemicolynKitTests/` — catalog + `resolveTheme` + `ThemeID`
   round-trip (extend `ThemeTests` or add `ThemePickerTests`).
 
 ## References
 
-- `Sources/NeotildeKit/Theme/Theme.swift`, `ThemeEnvironment.swift`,
+- `Sources/SemicolynKit/Theme/Theme.swift`, `ThemeEnvironment.swift`,
   `NeonMidnightTheme.swift`, `BellBronzeTheme.swift`.
 - `docs/superpowers/specs/2026-06-25-neon-midnight-theme-design.md`
 - `docs/superpowers/specs/2026-06-16-settings-sub-screens-design.md`

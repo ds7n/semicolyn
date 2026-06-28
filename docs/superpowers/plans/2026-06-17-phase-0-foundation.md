@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Stand up the Neotilde workspace, prove the Rust→Swift toolchain end-to-end, and build the three foundations every later phase depends on: the design-token layer, the core data model, and the at-rest encryption envelope.
+**Goal:** Stand up the Semicolyn workspace, prove the Rust→Swift toolchain end-to-end, and build the three foundations every later phase depends on: the design-token layer, the core data model, and the at-rest encryption envelope.
 
-**Architecture:** A Cargo workspace holds the Rust SSH core crate (`neotilde-ssh-core`), exported to Swift through a UniFFI-generated XCFramework. A SwiftPM package (`NeotildeKit`) holds the pure-Swift foundations (tokens, model, crypto). The work is split into a **platform-agnostic tier** (Rust core logic, data model, crypto envelope via Apple's `swift-crypto`, token *values*) that builds and tests on **Linux** for a fast TDD loop, and an **Apple-only tier** (the UniFFI XCFramework bridge, SwiftUI `Color`/environment) verified on **macOS CI** (GitHub Actions). `Package.swift` is host-conditional so the Linux loop never sees the iOS-only XCFramework.
+**Architecture:** A Cargo workspace holds the Rust SSH core crate (`semicolyn-ssh-core`), exported to Swift through a UniFFI-generated XCFramework. A SwiftPM package (`SemicolynKit`) holds the pure-Swift foundations (tokens, model, crypto). The work is split into a **platform-agnostic tier** (Rust core logic, data model, crypto envelope via Apple's `swift-crypto`, token *values*) that builds and tests on **Linux** for a fast TDD loop, and an **Apple-only tier** (the UniFFI XCFramework bridge, SwiftUI `Color`/environment) verified on **macOS CI** (GitHub Actions). `Package.swift` is host-conditional so the Linux loop never sees the iOS-only XCFramework.
 
 **Tech Stack:** Rust (stable, `uniffi` 0.31+), Swift 6 / SwiftPM, CryptoKit on Apple / `swift-crypto` (`Crypto`) on Linux behind a `#if canImport(CryptoKit)` shim, `xcodebuild -create-xcframework`.
 
@@ -42,20 +42,20 @@ Implication for the controller: on Linux you run `cargo test` and `swift test` (
 | File | Responsibility | Tier |
 |---|---|---|
 | `Cargo.toml` | Workspace root | agnostic |
-| `crates/neotilde-ssh-core/Cargo.toml` | Rust core crate manifest (staticlib + UniFFI) | agnostic |
-| `crates/neotilde-ssh-core/src/lib.rs` | Rust exports + unit test (Phase 0: `core_version()`) | agnostic |
+| `crates/semicolyn-ssh-core/Cargo.toml` | Rust core crate manifest (staticlib + UniFFI) | agnostic |
+| `crates/semicolyn-ssh-core/src/lib.rs` | Rust exports + unit test (Phase 0: `core_version()`) | agnostic |
 | `scripts/build-xcframework.sh` | Build Rust for 3 iOS triples, gen Swift bindings, package XCFramework | Apple-only |
-| `Package.swift` | SwiftPM root — `NeotildeKit` always; FFI + binary + BridgeTests appended only `#if os(macOS)` | both |
-| `Sources/NeotildeKit/Theme/Theme.swift` | `ThemeColor` (+ pure `rgba()`) + semantic token types — **no `import SwiftUI`** | agnostic |
-| `Sources/NeotildeKit/Theme/BellBronzeTheme.swift` | The `bellBronze` theme (palette + token mapping) | agnostic |
-| `Sources/NeotildeKit/Theme/ThemeEnvironment.swift` | SwiftUI `Color(ThemeColor)` + `EnvironmentValues.theme` — whole file `#if canImport(SwiftUI)` | Apple-only |
-| `Sources/NeotildeKit/Model/Inherited.swift` | `Inherited<T>` (absent vs explicit-none vs value) | agnostic |
-| `Sources/NeotildeKit/Model/Host.swift` | `Host`, `Defaults`, `JumpHop`, forwards, `HostKey` | agnostic |
-| `Sources/NeotildeKit/Model/Identity.swift` | `Identity`, `IdentityRef`, flavor/policy enums | agnostic |
-| `Sources/NeotildeKit/Model/Resolution.swift` | Field resolution (host → Defaults → fallback) + cycle check | agnostic |
-| `Sources/NeotildeKit/Crypto/RecordEnvelope.swift` | AES-256-GCM seal/open (CryptoKit/swift-crypto shim) | agnostic |
-| `Sources/NeotildeSSHCoreFFI/*` | Generated UniFFI Swift wrapper (created by the build script) | Apple-only |
-| `Tests/NeotildeKitTests/*` | Theme / Model / RecordEnvelope tests | agnostic |
+| `Package.swift` | SwiftPM root — `SemicolynKit` always; FFI + binary + BridgeTests appended only `#if os(macOS)` | both |
+| `Sources/SemicolynKit/Theme/Theme.swift` | `ThemeColor` (+ pure `rgba()`) + semantic token types — **no `import SwiftUI`** | agnostic |
+| `Sources/SemicolynKit/Theme/BellBronzeTheme.swift` | The `bellBronze` theme (palette + token mapping) | agnostic |
+| `Sources/SemicolynKit/Theme/ThemeEnvironment.swift` | SwiftUI `Color(ThemeColor)` + `EnvironmentValues.theme` — whole file `#if canImport(SwiftUI)` | Apple-only |
+| `Sources/SemicolynKit/Model/Inherited.swift` | `Inherited<T>` (absent vs explicit-none vs value) | agnostic |
+| `Sources/SemicolynKit/Model/Host.swift` | `Host`, `Defaults`, `JumpHop`, forwards, `HostKey` | agnostic |
+| `Sources/SemicolynKit/Model/Identity.swift` | `Identity`, `IdentityRef`, flavor/policy enums | agnostic |
+| `Sources/SemicolynKit/Model/Resolution.swift` | Field resolution (host → Defaults → fallback) + cycle check | agnostic |
+| `Sources/SemicolynKit/Crypto/RecordEnvelope.swift` | AES-256-GCM seal/open (CryptoKit/swift-crypto shim) | agnostic |
+| `Sources/SemicolynSSHCoreFFI/*` | Generated UniFFI Swift wrapper (created by the build script) | Apple-only |
+| `Tests/SemicolynKitTests/*` | Theme / Model / RecordEnvelope tests | agnostic |
 | `Tests/BridgeTests/*` | `coreVersion()` bridge round-trip | Apple-only |
 
 ---
@@ -65,33 +65,33 @@ Implication for the controller: on Linux you run `cargo test` and `swift test` (
 The Rust logic is proven on Linux with `cargo test`; the Swift↔Rust bridge (XCFramework + `BridgeTests`) is the macOS-CI gate.
 
 **Files:**
-- Create: `Cargo.toml`, `crates/neotilde-ssh-core/Cargo.toml`, `crates/neotilde-ssh-core/src/lib.rs`, `crates/neotilde-ssh-core/src/bin/uniffi-bindgen.rs`
+- Create: `Cargo.toml`, `crates/semicolyn-ssh-core/Cargo.toml`, `crates/semicolyn-ssh-core/src/lib.rs`, `crates/semicolyn-ssh-core/src/bin/uniffi-bindgen.rs`
 - Create: `scripts/build-xcframework.sh`
 - Create: `Package.swift`
 - Test: `Tests/BridgeTests/BridgeTests.swift`
 
 **Interfaces:**
 - Produces (Rust): `pub fn core_version() -> String` (returns `"0.1.0"`, the crate version)
-- Produces (Swift, generated, Apple-only): `coreVersion() -> String` in module `NeotildeSSHCoreFFI`
+- Produces (Swift, generated, Apple-only): `coreVersion() -> String` in module `SemicolynSSHCoreFFI`
 
 - [ ] **Step 1: Scaffold the Cargo workspace + core crate**
 
 `Cargo.toml`:
 ```toml
 [workspace]
-members = ["crates/neotilde-ssh-core"]
+members = ["crates/semicolyn-ssh-core"]
 resolver = "2"
 ```
 
-`crates/neotilde-ssh-core/Cargo.toml`:
+`crates/semicolyn-ssh-core/Cargo.toml`:
 ```toml
 [package]
-name = "neotilde-ssh-core"
+name = "semicolyn-ssh-core"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "neotilde_ssh_core"
+name = "semicolyn_ssh_core"
 crate-type = ["staticlib", "lib"]
 
 [dependencies]
@@ -102,7 +102,7 @@ name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 ```
 
-`crates/neotilde-ssh-core/src/bin/uniffi-bindgen.rs`:
+`crates/semicolyn-ssh-core/src/bin/uniffi-bindgen.rs`:
 ```rust
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -113,7 +113,7 @@ fn main() {
 
 - [ ] **Step 2: Write the failing Rust unit test (Linux fast loop)**
 
-In `crates/neotilde-ssh-core/src/lib.rs` (header + scaffolding + the test, no impl yet):
+In `crates/semicolyn-ssh-core/src/lib.rs` (header + scaffolding + the test, no impl yet):
 ```rust
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -130,14 +130,14 @@ mod tests {
 }
 ```
 
-Run: `cargo test -p neotilde-ssh-core`
+Run: `cargo test -p semicolyn-ssh-core`
 Expected: FAIL — `cannot find function 'core_version'`.
 
 - [ ] **Step 3: Implement `core_version` and watch the Rust test pass (Linux)**
 
 Add above the `#[cfg(test)]` module in `lib.rs`:
 ```rust
-/// Returns the version string of the Neotilde SSH core crate.
+/// Returns the version string of the Semicolyn SSH core crate.
 ///
 /// Phase 0 uses this purely to prove the Rust→UniFFI→Swift toolchain end to end.
 #[uniffi::export]
@@ -146,41 +146,41 @@ pub fn core_version() -> String {
 }
 ```
 
-Run: `cargo test -p neotilde-ssh-core`
+Run: `cargo test -p semicolyn-ssh-core`
 Expected: PASS. **This is the Linux-verifiable proof of the Rust logic.**
 
 - [ ] **Step 4: Write the host-conditional SwiftPM manifest**
 
-`Package.swift` — `NeotildeKit` (agnostic) always builds; the XCFramework bridge + `BridgeTests` are appended only when the host is macOS, so `swift test` resolves cleanly on Linux:
+`Package.swift` — `SemicolynKit` (agnostic) always builds; the XCFramework bridge + `BridgeTests` are appended only when the host is macOS, so `swift test` resolves cleanly on Linux:
 ```swift
 // swift-tools-version: 6.0
 import PackageDescription
 
 var targets: [Target] = [
     .target(
-        name: "NeotildeKit",
+        name: "SemicolynKit",
         dependencies: [
             // Linux uses swift-crypto's `Crypto`; Apple uses system CryptoKit (no dep).
             .product(name: "Crypto", package: "swift-crypto",
                      condition: .when(platforms: [.linux])),
         ]
     ),
-    .testTarget(name: "NeotildeKitTests", dependencies: ["NeotildeKit"]),
+    .testTarget(name: "SemicolynKitTests", dependencies: ["SemicolynKit"]),
 ]
 
 // The UniFFI XCFramework exists only on Apple platforms; never reference it on Linux.
 #if os(macOS)
 targets += [
-    .target(name: "NeotildeSSHCoreFFI", dependencies: ["NeotildeSSHCore"]),
-    .binaryTarget(name: "NeotildeSSHCore", path: "NeotildeSSHCore.xcframework"),
-    .testTarget(name: "BridgeTests", dependencies: ["NeotildeSSHCoreFFI"]),
+    .target(name: "SemicolynSSHCoreFFI", dependencies: ["SemicolynSSHCore"]),
+    .binaryTarget(name: "SemicolynSSHCore", path: "SemicolynSSHCore.xcframework"),
+    .testTarget(name: "BridgeTests", dependencies: ["SemicolynSSHCoreFFI"]),
 ]
 #endif
 
 let package = Package(
-    name: "Neotilde",
+    name: "Semicolyn",
     platforms: [.iOS(.v17), .macOS(.v14)],
-    products: [.library(name: "NeotildeKit", targets: ["NeotildeKit"])],
+    products: [.library(name: "SemicolynKit", targets: ["SemicolynKit"])],
     dependencies: [
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
     ],
@@ -195,9 +195,9 @@ let package = Package(
 #!/usr/bin/env bash
 set -euo pipefail
 
-LIB_NAME="libneotilde_ssh_core.a"
+LIB_NAME="libsemicolyn_ssh_core.a"
 BUILD_DIR="target/xcframework"
-OUT="NeotildeSSHCore.xcframework"
+OUT="SemicolynSSHCore.xcframework"
 
 DEVICE="aarch64-apple-ios"
 SIM_ARM="aarch64-apple-ios-sim"
@@ -205,7 +205,7 @@ SIM_X86="x86_64-apple-ios"
 
 # 1. Compile the staticlib for each iOS triple.
 for triple in "$DEVICE" "$SIM_ARM" "$SIM_X86"; do
-  cargo build --release -p neotilde-ssh-core --target "$triple"
+  cargo build --release -p semicolyn-ssh-core --target "$triple"
 done
 
 # 2. Lipo the two simulator slices into one fat archive.
@@ -218,7 +218,7 @@ lipo -create \
 
 # 3. Generate the Swift bindings + module map from the built library.
 mkdir -p "$BUILD_DIR/Headers"
-cargo run --release -p neotilde-ssh-core --bin uniffi-bindgen -- generate \
+cargo run --release -p semicolyn-ssh-core --bin uniffi-bindgen -- generate \
   --library "target/$DEVICE/release/$LIB_NAME" \
   --language swift \
   --out-dir "$BUILD_DIR/Generated"
@@ -235,9 +235,9 @@ xcodebuild -create-xcframework \
   -output "$OUT"
 
 # 5. Place the generated Swift wrapper where the SwiftPM target expects it.
-mkdir -p Sources/NeotildeSSHCoreFFI
-cp "$BUILD_DIR"/Generated/*.swift Sources/NeotildeSSHCoreFFI/
-echo "Built $OUT and copied Swift bindings to Sources/NeotildeSSHCoreFFI/"
+mkdir -p Sources/SemicolynSSHCoreFFI
+cp "$BUILD_DIR"/Generated/*.swift Sources/SemicolynSSHCoreFFI/
+echo "Built $OUT and copied Swift bindings to Sources/SemicolynSSHCoreFFI/"
 ```
 
 Make it executable: `chmod +x scripts/build-xcframework.sh`
@@ -249,7 +249,7 @@ Make it executable: `chmod +x scripts/build-xcframework.sh`
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-import NeotildeSSHCoreFFI
+import SemicolynSSHCoreFFI
 
 final class BridgeTests: XCTestCase {
     func testCoreVersionRoundTripsFromRust() {
@@ -276,7 +276,7 @@ Expected: PASS — `coreVersion()` returns `"0.1.0"`. (On Linux this target does
 git add Cargo.toml crates scripts Package.swift Tests/BridgeTests .gitignore
 git commit -m "feat: scaffold Rust core + host-conditional UniFFI bridge with toolchain proof"
 ```
-(Add `target/`, `.build/`, and `NeotildeSSHCore.xcframework` to `.gitignore` — the XCFramework is a CI build artifact, not source.)
+(Add `target/`, `.build/`, and `SemicolynSSHCore.xcframework` to `.gitignore` — the XCFramework is a CI build artifact, not source.)
 
 ---
 
@@ -285,10 +285,10 @@ git commit -m "feat: scaffold Rust core + host-conditional UniFFI bridge with to
 Token *values* (`ThemeColor`, `Theme`, `bellBronze`) and the hex→RGBA math are agnostic (Linux-tested). Only the SwiftUI `Color`/environment bridge is Apple-only.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Theme/Theme.swift`
-- Create: `Sources/NeotildeKit/Theme/BellBronzeTheme.swift`
-- Create: `Sources/NeotildeKit/Theme/ThemeEnvironment.swift`
-- Test: `Tests/NeotildeKitTests/ThemeTests.swift`
+- Create: `Sources/SemicolynKit/Theme/Theme.swift`
+- Create: `Sources/SemicolynKit/Theme/BellBronzeTheme.swift`
+- Create: `Sources/SemicolynKit/Theme/ThemeEnvironment.swift`
+- Test: `Tests/SemicolynKitTests/ThemeTests.swift`
 
 **Interfaces:**
 - Produces: `struct ThemeColor: Equatable { let hex: String; let opacity: Double; func alpha(_:) -> ThemeColor; func rgba() -> (red: Double, green: Double, blue: Double, opacity: Double) }`
@@ -298,12 +298,12 @@ Token *values* (`ThemeColor`, `Theme`, `bellBronze`) and the hex→RGBA math are
 
 - [ ] **Step 1: Write the failing tests (Linux)**
 
-`Tests/NeotildeKitTests/ThemeTests.swift`:
+`Tests/SemicolynKitTests/ThemeTests.swift`:
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class ThemeTests: XCTestCase {
     func testBellBronzeAccentIsBronze500() {
@@ -342,7 +342,7 @@ Expected: FAIL — `cannot find 'Theme' in scope`.
 
 - [ ] **Step 3: Implement the token types (no SwiftUI import — agnostic)**
 
-`Sources/NeotildeKit/Theme/Theme.swift`:
+`Sources/SemicolynKit/Theme/Theme.swift`:
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -425,7 +425,7 @@ public struct Theme: Equatable, Sendable {
 
 - [ ] **Step 4: Implement the Bell Bronze theme**
 
-`Sources/NeotildeKit/Theme/BellBronzeTheme.swift`:
+`Sources/SemicolynKit/Theme/BellBronzeTheme.swift`:
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -478,7 +478,7 @@ Expected: PASS (all five cases). The token layer is fully Linux-verified.
 
 - [ ] **Step 6: Implement the SwiftUI bridge (Apple-only; compiled on macOS CI)**
 
-`Sources/NeotildeKit/Theme/ThemeEnvironment.swift` — the whole file is guarded so Linux skips it:
+`Sources/SemicolynKit/Theme/ThemeEnvironment.swift` — the whole file is guarded so Linux skips it:
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -512,7 +512,7 @@ extension Color {
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Theme Tests/NeotildeKitTests/ThemeTests.swift
+git add Sources/SemicolynKit/Theme Tests/SemicolynKitTests/ThemeTests.swift
 git commit -m "feat: add semantic design-token layer with Bell Bronze theme"
 ```
 
@@ -523,11 +523,11 @@ git commit -m "feat: add semantic design-token layer with Bell Bronze theme"
 Fully agnostic — pure Foundation `Codable`. Linux-tested.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Model/Inherited.swift`
-- Create: `Sources/NeotildeKit/Model/Identity.swift`
-- Create: `Sources/NeotildeKit/Model/Host.swift`
-- Create: `Sources/NeotildeKit/Model/Resolution.swift`
-- Test: `Tests/NeotildeKitTests/ModelTests.swift`
+- Create: `Sources/SemicolynKit/Model/Inherited.swift`
+- Create: `Sources/SemicolynKit/Model/Identity.swift`
+- Create: `Sources/SemicolynKit/Model/Host.swift`
+- Create: `Sources/SemicolynKit/Model/Resolution.swift`
+- Test: `Tests/SemicolynKitTests/ModelTests.swift`
 
 **Interfaces:**
 - Produces: `enum Inherited<T: Equatable & Codable>: Equatable, Codable { case inherit; case explicit(T?) }`
@@ -539,12 +539,12 @@ Fully agnostic — pure Foundation `Codable`. Linux-tested.
 
 - [ ] **Step 1: Write the failing tests (Linux)**
 
-`Tests/NeotildeKitTests/ModelTests.swift`:
+`Tests/SemicolynKitTests/ModelTests.swift`:
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class ModelTests: XCTestCase {
     func testHostRoundTripsThroughCodable() throws {
@@ -591,7 +591,7 @@ Expected: FAIL — `cannot find 'Host' in scope`.
 
 - [ ] **Step 3: Implement `Inherited<T>`**
 
-`Sources/NeotildeKit/Model/Inherited.swift`:
+`Sources/SemicolynKit/Model/Inherited.swift`:
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -614,7 +614,7 @@ public enum Inherited<T: Equatable & Codable>: Equatable, Codable {
 
 - [ ] **Step 4: Implement identities + supporting types**
 
-`Sources/NeotildeKit/Model/Identity.swift`:
+`Sources/SemicolynKit/Model/Identity.swift`:
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -658,7 +658,7 @@ public struct Identity: Codable, Equatable, Sendable {
 
 - [ ] **Step 5: Implement the host model + supporting records**
 
-`Sources/NeotildeKit/Model/Host.swift`:
+`Sources/SemicolynKit/Model/Host.swift`:
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -693,7 +693,7 @@ public enum StrictHostKeyChecking: String, Codable, Equatable, Sendable {
     case yes, acceptNew = "accept-new", ask, no
 }
 
-/// A Neotilde host record. Required fields are non-optional; every OpenSSH-derived
+/// A Semicolyn host record. Required fields are non-optional; every OpenSSH-derived
 /// optional uses `Inherited<T>` so "inherit" vs "explicitly none" never collide.
 public struct Host: Codable, Equatable, Sendable {
     // Required
@@ -735,7 +735,7 @@ public struct Defaults: Codable, Equatable, Sendable {
 
 - [ ] **Step 6: Implement resolution + cycle detection**
 
-`Sources/NeotildeKit/Model/Resolution.swift`:
+`Sources/SemicolynKit/Model/Resolution.swift`:
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -776,7 +776,7 @@ Expected: PASS (all five cases).
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Model Tests/NeotildeKitTests/ModelTests.swift
+git add Sources/SemicolynKit/Model Tests/SemicolynKitTests/ModelTests.swift
 git commit -m "feat: add core host/identity data model with inheritance resolution"
 ```
 
@@ -787,8 +787,8 @@ git commit -m "feat: add core host/identity data model with inheritance resoluti
 Agnostic via the swift-crypto shim — Linux-tested. `AES.GCM`/`SymmetricKey` are API-identical between CryptoKit and swift-crypto, so the same code runs both places.
 
 **Files:**
-- Create: `Sources/NeotildeKit/Crypto/RecordEnvelope.swift`
-- Test: `Tests/NeotildeKitTests/RecordEnvelopeTests.swift`
+- Create: `Sources/SemicolynKit/Crypto/RecordEnvelope.swift`
+- Test: `Tests/SemicolynKitTests/RecordEnvelopeTests.swift`
 
 **Interfaces:**
 - Consumes: `Host`/`Defaults` (any `Codable & Equatable`) from Task 3
@@ -797,7 +797,7 @@ Agnostic via the swift-crypto shim — Linux-tested. `AES.GCM`/`SymmetricKey` ar
 
 - [ ] **Step 1: Write the failing tests (Linux)**
 
-`Tests/NeotildeKitTests/RecordEnvelopeTests.swift`:
+`Tests/SemicolynKitTests/RecordEnvelopeTests.swift`:
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -807,7 +807,7 @@ import CryptoKit
 #else
 import Crypto
 #endif
-@testable import NeotildeKit
+@testable import SemicolynKit
 
 final class RecordEnvelopeTests: XCTestCase {
     private let key = SymmetricKey(size: .bits256)
@@ -854,7 +854,7 @@ Expected: FAIL — `cannot find 'RecordEnvelope' in scope`.
 
 - [ ] **Step 3: Implement the envelope (CryptoKit/swift-crypto shim)**
 
-`Sources/NeotildeKit/Crypto/RecordEnvelope.swift`:
+`Sources/SemicolynKit/Crypto/RecordEnvelope.swift`:
 ```swift
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
@@ -905,7 +905,7 @@ Expected: PASS (all four cases) — using swift-crypto on Linux.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/NeotildeKit/Crypto Tests/NeotildeKitTests/RecordEnvelopeTests.swift
+git add Sources/SemicolynKit/Crypto Tests/SemicolynKitTests/RecordEnvelopeTests.swift
 git commit -m "feat: add AES-256-GCM record envelope for at-rest CloudKit records"
 ```
 
@@ -918,9 +918,9 @@ git commit -m "feat: add AES-256-GCM record envelope for at-rest CloudKit record
 - [ ] `swift test` green across `ThemeTests`, `ModelTests`, `RecordEnvelopeTests` (using swift-crypto).
 
 **macOS CI gate (Apple-only surface):**
-- [ ] `./scripts/build-xcframework.sh` produces `NeotildeSSHCore.xcframework`.
+- [ ] `./scripts/build-xcframework.sh` produces `SemicolynSSHCore.xcframework`.
 - [ ] `swift test` green including `BridgeTests` (`coreVersion()` round-trips Rust→Swift).
-- [ ] `NeotildeKit` compiles for iOS (the `#if canImport(SwiftUI)` `ThemeEnvironment` bridge builds).
+- [ ] `SemicolynKit` compiles for iOS (the `#if canImport(SwiftUI)` `ThemeEnvironment` bridge builds).
 
 **Both:**
 - [ ] Four conventional commits, one per task.
@@ -929,7 +929,7 @@ git commit -m "feat: add AES-256-GCM record envelope for at-rest CloudKit record
 
 ## Self-review notes
 
-- **Platform split rationale:** Neotilde ships only via macOS-built iOS binaries, but most of Phase 0 is platform-agnostic logic. Putting it behind `#if canImport` shims (crypto) and keeping SwiftUI out of the value types lets the Linux dev box run a real red→green TDD loop for Tasks 1 (Rust), 3, 4, and the token values of 2 — only the XCFramework bridge and the SwiftUI `Color`/environment wait for macOS CI. The host-conditional `Package.swift` is what lets `swift test` resolve on Linux without the iOS-only XCFramework.
-- **Spec coverage:** `design-tokens` (Task 2 — full token registry + theme + the `Color` bridge); `host-config-model` schema (Task 3 — entities, `Inherited<T>` semantics, resolution table for `port`, cycle prevention) and its AES storage primitive (Task 4). Remaining host fields (Tier 2, mosh/tailscale/neotilde extensions, full fallback table) are deferred to Phase 2, where the storage/CRUD layer consumes them — they follow the identical `Inherited<T>` pattern established here.
+- **Platform split rationale:** Semicolyn ships only via macOS-built iOS binaries, but most of Phase 0 is platform-agnostic logic. Putting it behind `#if canImport` shims (crypto) and keeping SwiftUI out of the value types lets the Linux dev box run a real red→green TDD loop for Tasks 1 (Rust), 3, 4, and the token values of 2 — only the XCFramework bridge and the SwiftUI `Color`/environment wait for macOS CI. The host-conditional `Package.swift` is what lets `swift test` resolve on Linux without the iOS-only XCFramework.
+- **Spec coverage:** `design-tokens` (Task 2 — full token registry + theme + the `Color` bridge); `host-config-model` schema (Task 3 — entities, `Inherited<T>` semantics, resolution table for `port`, cycle prevention) and its AES storage primitive (Task 4). Remaining host fields (Tier 2, mosh/tailscale/semicolyn extensions, full fallback table) are deferred to Phase 2, where the storage/CRUD layer consumes them — they follow the identical `Inherited<T>` pattern established here.
 - **Bridge scope:** Phase 0 proves only `coreVersion()`. All SSH surface (connect/auth/channels/forwards) is Phase 1, by design — Task 1 exists to de-risk the toolchain, not the protocol.
 </content>

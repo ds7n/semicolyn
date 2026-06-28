@@ -4,9 +4,9 @@
 
 **Goal:** Build the four-tier SSH algorithm allowlist as a pure Rust function that turns the two per-host toggles into a `russh::Preferred` negotiation list, plus a Tier-3 classifier the later handshake phase uses to raise the outdated-cryptography warning. Fully unit-tested on the Linux fast loop — no network.
 
-**Architecture:** A new private module `algorithms` inside the `neotilde-ssh-core` crate. It depends only on `russh`'s type surface (`Preferred` + the `kex`/`cipher`/`mac`/`compression` name constants + `ssh_key::Algorithm`), not on any async runtime — so it compiles and tests in the Docker dev container with zero network. The function is `pub(crate)`: Phase 1b's connection code consumes it; nothing is exported over UniFFI in this sub-plan.
+**Architecture:** A new private module `algorithms` inside the `semicolyn-ssh-core` crate. It depends only on `russh`'s type surface (`Preferred` + the `kex`/`cipher`/`mac`/`compression` name constants + `ssh_key::Algorithm`), not on any async runtime — so it compiles and tests in the Docker dev container with zero network. The function is `pub(crate)`: Phase 1b's connection code consumes it; nothing is exported over UniFFI in this sub-plan.
 
-**Tech Stack:** Rust (stable), `russh` 0.61.2 (pin `russh = "0.61"`), the Neotilde dev container (`docker compose run --rm dev cargo test`).
+**Tech Stack:** Rust (stable), `russh` 0.61.2 (pin `russh = "0.61"`), the Semicolyn dev container (`docker compose run --rm dev cargo test`).
 
 ## Global Constraints
 
@@ -56,9 +56,9 @@ These are confirmed by compiling against the pinned crate in the dev container:
 
 | File | Responsibility |
 |---|---|
-| `crates/neotilde-ssh-core/Cargo.toml` | Add `russh = "0.61"` dependency |
-| `crates/neotilde-ssh-core/src/algorithms.rs` | `build_preferred()`, `TIER3_WIRE_NAMES`, `is_tier3()`, unit tests |
-| `crates/neotilde-ssh-core/src/lib.rs` | Add `mod algorithms;` |
+| `crates/semicolyn-ssh-core/Cargo.toml` | Add `russh = "0.61"` dependency |
+| `crates/semicolyn-ssh-core/src/algorithms.rs` | `build_preferred()`, `TIER3_WIRE_NAMES`, `is_tier3()`, unit tests |
+| `crates/semicolyn-ssh-core/src/lib.rs` | Add `mod algorithms;` |
 | `docs/superpowers/specs/2026-06-17-ssh-algorithms-design.md` | Append the stack-availability caveat (Task 3) |
 
 ---
@@ -66,35 +66,35 @@ These are confirmed by compiling against the pinned crate in the dev container:
 ### Task 1: russh dependency + Tier-1 baseline
 
 **Files:**
-- Modify: `crates/neotilde-ssh-core/Cargo.toml`
-- Create: `crates/neotilde-ssh-core/src/algorithms.rs`
-- Modify: `crates/neotilde-ssh-core/src/lib.rs`
+- Modify: `crates/semicolyn-ssh-core/Cargo.toml`
+- Create: `crates/semicolyn-ssh-core/src/algorithms.rs`
+- Modify: `crates/semicolyn-ssh-core/src/lib.rs`
 
 **Interfaces:**
 - Produces: `pub(crate) fn build_preferred(allow_legacy: bool, allow_deprecated: bool) -> russh::Preferred`
 
 - [ ] **Step 1: Add the russh dependency**
 
-In `crates/neotilde-ssh-core/Cargo.toml`, under `[dependencies]` (below the existing `uniffi` line):
+In `crates/semicolyn-ssh-core/Cargo.toml`, under `[dependencies]` (below the existing `uniffi` line):
 ```toml
 russh = "0.61"
 ```
 
 - [ ] **Step 2: Register the module**
 
-In `crates/neotilde-ssh-core/src/lib.rs`, add after the `uniffi::setup_scaffolding!();` line:
+In `crates/semicolyn-ssh-core/src/lib.rs`, add after the `uniffi::setup_scaffolding!();` line:
 ```rust
 mod algorithms;
 ```
 
 - [ ] **Step 3: Write the Tier-1 module skeleton with failing tests**
 
-Create `crates/neotilde-ssh-core/src/algorithms.rs` with the header, the test helpers, and the three Tier-1 tests — **but no `build_preferred` yet** (so the tests fail to compile, the Rust equivalent of red):
+Create `crates/semicolyn-ssh-core/src/algorithms.rs` with the header, the test helpers, and the three Tier-1 tests — **but no `build_preferred` yet** (so the tests fail to compile, the Rust equivalent of red):
 ```rust
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! SSH algorithm allowlist — the closed set of algorithms Neotilde offers during
+//! SSH algorithm allowlist — the closed set of algorithms Semicolyn offers during
 //! negotiation, per docs/superpowers/specs/2026-06-17-ssh-algorithms-design.md.
 //!
 //! Three spec'd algorithms are absent from russh 0.61.2 and omitted from v1
@@ -155,12 +155,12 @@ mod tests {
 
 - [ ] **Step 4: Run the tests to verify they fail**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p semicolyn-ssh-core`
 Expected: FAIL — `cannot find function 'build_preferred' in this scope`.
 
 - [ ] **Step 5: Implement `build_preferred` (Tier 1 only)**
 
-Add to `crates/neotilde-ssh-core/src/algorithms.rs`, above the `#[cfg(test)]` module:
+Add to `crates/semicolyn-ssh-core/src/algorithms.rs`, above the `#[cfg(test)]` module:
 ```rust
 use std::borrow::Cow;
 use russh::keys::ssh_key::{Algorithm, EcdsaCurve, HashAlg};
@@ -221,13 +221,13 @@ pub(crate) fn build_preferred(allow_legacy: bool, allow_deprecated: bool) -> Pre
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p semicolyn-ssh-core`
 Expected: PASS — `tier1_defaults_offer_modern_set`, `tier1_excludes_legacy_and_deprecated`, `tier4_never_offered_even_with_both_toggles`, plus the existing `core_version` test.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/neotilde-ssh-core/Cargo.toml Cargo.lock crates/neotilde-ssh-core/src/lib.rs crates/neotilde-ssh-core/src/algorithms.rs
+git add crates/semicolyn-ssh-core/Cargo.toml Cargo.lock crates/semicolyn-ssh-core/src/lib.rs crates/semicolyn-ssh-core/src/algorithms.rs
 git commit -m "feat: add Tier-1 SSH algorithm allowlist via russh Preferred"
 ```
 
@@ -236,7 +236,7 @@ git commit -m "feat: add Tier-1 SSH algorithm allowlist via russh Preferred"
 ### Task 2: Tier 2 — legacy algorithms
 
 **Files:**
-- Modify: `crates/neotilde-ssh-core/src/algorithms.rs`
+- Modify: `crates/semicolyn-ssh-core/src/algorithms.rs`
 
 **Interfaces:**
 - Consumes: `build_preferred` from Task 1.
@@ -261,7 +261,7 @@ Add inside the `tests` module in `algorithms.rs`:
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core legacy_toggle_adds_tier2_only`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p semicolyn-ssh-core legacy_toggle_adds_tier2_only`
 Expected: FAIL — assertion fails on `diffie-hellman-group14-sha256` (not yet appended).
 
 - [ ] **Step 3: Implement the Tier-2 branch**
@@ -273,7 +273,7 @@ In `algorithms.rs`, replace the placeholder line:
 ```
 with:
 ```rust
-    // Tier 2 — legacy but allowed (per-host `neotilde.allowLegacyAlgorithms`).
+    // Tier 2 — legacy but allowed (per-host `semicolyn.allowLegacyAlgorithms`).
     if allow_legacy {
         kex_algs.push(kex::DH_G14_SHA256);
         kex_algs.push(kex::DH_GEX_SHA256);
@@ -288,13 +288,13 @@ with:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p semicolyn-ssh-core`
 Expected: PASS — all Task 1 + Task 2 tests green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/neotilde-ssh-core/src/algorithms.rs
+git add crates/semicolyn-ssh-core/src/algorithms.rs
 git commit -m "feat: add Tier-2 legacy algorithm gating to allowlist"
 ```
 
@@ -303,7 +303,7 @@ git commit -m "feat: add Tier-2 legacy algorithm gating to allowlist"
 ### Task 3: Tier 3 — deprecated algorithms + classifier + spec note
 
 **Files:**
-- Modify: `crates/neotilde-ssh-core/src/algorithms.rs`
+- Modify: `crates/semicolyn-ssh-core/src/algorithms.rs`
 - Modify: `docs/superpowers/specs/2026-06-17-ssh-algorithms-design.md`
 
 **Interfaces:**
@@ -338,7 +338,7 @@ Add inside the `tests` module in `algorithms.rs`:
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p semicolyn-ssh-core`
 Expected: FAIL — `cannot find function 'is_tier3'` and the deprecated-toggle assertion fails.
 
 - [ ] **Step 3: Implement the Tier-3 branch**
@@ -350,7 +350,7 @@ In `algorithms.rs`, replace:
 ```
 with:
 ```rust
-    // Tier 3 — legacy & risky (per-host `neotilde.allowDeprecatedAlgorithms`).
+    // Tier 3 — legacy & risky (per-host `semicolyn.allowDeprecatedAlgorithms`).
     // Every connection that negotiates one of these shows a warning (Phase 1b
     // uses `is_tier3` to detect it). hmac-sha1-96 is spec'd here but absent from
     // russh 0.61 (omitted).
@@ -366,7 +366,7 @@ with:
 
 In `algorithms.rs`, add below the `build_preferred` function (above `#[cfg(test)]`):
 ```rust
-/// Wire names of the Tier-3 algorithms Neotilde can offer. After a handshake,
+/// Wire names of the Tier-3 algorithms Semicolyn can offer. After a handshake,
 /// Phase 1b matches each negotiated algorithm name against this set to decide
 /// whether to raise the outdated-cryptography warning (ssh-algorithms-design
 /// §"Tier 3 warning UX"). hmac-sha1-96 is spec'd Tier 3 but absent from russh
@@ -386,7 +386,7 @@ pub(crate) fn is_tier3(name: &str) -> bool {
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p neotilde-ssh-core`
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p semicolyn-ssh-core`
 Expected: PASS — all allowlist tests + `core_version` green.
 
 - [ ] **Step 6: Append the stack-availability caveat to the spec**
@@ -399,7 +399,7 @@ The v1 SSH stack is **russh 0.61.2**. Three algorithms listed above are not yet
 implemented by russh and are **omitted from v1's offered set** (opportunistic
 omit, decided 2026-06-17). Each auto-enters its tier when russh gains support;
 no spec change is needed at that point — only adding the constant to
-`crates/neotilde-ssh-core/src/algorithms.rs`.
+`crates/semicolyn-ssh-core/src/algorithms.rs`.
 
 | Omitted algorithm | Tier | russh tracking |
 |---|---|---|
@@ -416,7 +416,7 @@ dh-group1) are not implemented by russh either, so excluding them is automatic.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/neotilde-ssh-core/src/algorithms.rs docs/superpowers/specs/2026-06-17-ssh-algorithms-design.md
+git add crates/semicolyn-ssh-core/src/algorithms.rs docs/superpowers/specs/2026-06-17-ssh-algorithms-design.md
 git commit -m "feat: add Tier-3 deprecated gating + classifier; document russh stack gaps"
 ```
 
@@ -424,7 +424,7 @@ git commit -m "feat: add Tier-3 deprecated gating + classifier; document russh s
 
 ## Phase 1a exit criteria
 
-- [ ] `cargo test -p neotilde-ssh-core` green in the dev container (all allowlist tests + `core_version`).
+- [ ] `cargo test -p semicolyn-ssh-core` green in the dev container (all allowlist tests + `core_version`).
 - [ ] `build_preferred(false, false)` offers only Tier 1; `(true, false)` adds Tier 2; `(false, true)` adds Tier 3; `(true, true)` adds both — and Tier 4 is never present.
 - [ ] `is_tier3` correctly classifies the four available Tier-3 wire names and rejects Tier-1 names.
 - [ ] The three omitted algorithms are documented in `algorithms.rs` module docs **and** the spec caveat section.

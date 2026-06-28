@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 True Positive LLC
 # SPDX-License-Identifier: GPL-3.0-only
 
-# Neotilde Linux fast-loop dev image: Swift 6 + Rust on one Ubuntu base.
+# Semicolyn Linux fast-loop dev image: Swift 6 + Rust on one Ubuntu base.
 # Runs the platform-agnostic tier (cargo test + swift test via swift-crypto).
 # The Apple-only tier (XCFramework bridge, SwiftUI) is a macOS-CI gate, not here.
 FROM swift:6.1

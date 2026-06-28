@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
 import SwiftTerm
-import NeotildeKit
+import SemicolynKit
 
 /// Renders the active tmux window's panes as a grid of SwiftTerm `TerminalView`s,
 /// positioned from `paneRects(in:visibleLayout)`. The active pane gets a bronze

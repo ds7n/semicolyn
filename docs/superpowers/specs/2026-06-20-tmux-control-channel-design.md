@@ -93,8 +93,8 @@ shared between the controller and `kill-session`.)
   `on_closed` reports the real status (good and bad). These prove the transport
   independent of tmux.
 - **Real `tmux -CC` smoke** (requires tmux in the fixture): exec `tmux -CC
-  new-session -A -s neotilde-test` → `on_output` contains the control-mode handshake
-  notifications (`%begin`, `%session-changed $0 neotilde-test`, `%window-add`).
+  new-session -A -s semicolyn-test` → `on_output` contains the control-mode handshake
+  notifications (`%begin`, `%session-changed $0 semicolyn-test`, `%window-add`).
   Verified real-tmux output for reference:
 
   ```
@@ -102,7 +102,7 @@ shared between the controller and `kill-session`.)
   %end <ts> <n> 0
   %window-add @0
   %sessions-changed
-  %session-changed $0 neotilde-test
+  %session-changed $0 semicolyn-test
   %output %0 …
   <ESC>\
   ```

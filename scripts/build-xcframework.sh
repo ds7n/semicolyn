@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LIB_NAME="libneotilde_ssh_core.a"
+LIB_NAME="libsemicolyn_ssh_core.a"
 BUILD_DIR="target/xcframework"
-OUT="NeotildeSSHCore.xcframework"
+OUT="SemicolynSSHCore.xcframework"
 
 DEVICE="aarch64-apple-ios"
 SIM_ARM="aarch64-apple-ios-sim"
@@ -11,7 +11,7 @@ SIM_X86="x86_64-apple-ios"
 
 # 1. Compile the staticlib for each iOS triple.
 for triple in "$DEVICE" "$SIM_ARM" "$SIM_X86"; do
-  cargo build --release -p neotilde-ssh-core --target "$triple"
+  cargo build --release -p semicolyn-ssh-core --target "$triple"
 done
 
 # 2. Lipo the two simulator slices into one fat archive.
@@ -24,7 +24,7 @@ lipo -create \
 
 # 3. Generate the Swift bindings + module map from the built library.
 mkdir -p "$BUILD_DIR/Headers"
-cargo run --release -p neotilde-ssh-core --bin uniffi-bindgen -- generate \
+cargo run --release -p semicolyn-ssh-core --bin uniffi-bindgen -- generate \
   --library "target/$DEVICE/release/$LIB_NAME" \
   --language swift \
   --out-dir "$BUILD_DIR/Generated"
@@ -41,6 +41,6 @@ xcodebuild -create-xcframework \
   -output "$OUT"
 
 # 5. Place the generated Swift wrapper where the SwiftPM target expects it.
-mkdir -p Sources/NeotildeSSHCoreFFI
-cp "$BUILD_DIR"/Generated/*.swift Sources/NeotildeSSHCoreFFI/
-echo "Built $OUT and copied Swift bindings to Sources/NeotildeSSHCoreFFI/"
+mkdir -p Sources/SemicolynSSHCoreFFI
+cp "$BUILD_DIR"/Generated/*.swift Sources/SemicolynSSHCoreFFI/
+echo "Built $OUT and copied Swift bindings to Sources/SemicolynSSHCoreFFI/"

@@ -5,16 +5,16 @@
 
 ## Summary
 
-Neotilde's headline features (window/pane pills, context detection, function-key auto-engage) ride on tmux control mode (`tmux -CC`). When tmux is missing, too old, or crashes mid-session, the app must keep working — as a competent plain SSH client — without pretending the lost features are still there. This spec defines the minimum tmux version, the degraded-mode behavior matrix, the connect-time UX, and the mid-session crash recovery flow.
+Semicolyn's headline features (window/pane pills, context detection, function-key auto-engage) ride on tmux control mode (`tmux -CC`). When tmux is missing, too old, or crashes mid-session, the app must keep working — as a competent plain SSH client — without pretending the lost features are still there. This spec defines the minimum tmux version, the degraded-mode behavior matrix, the connect-time UX, and the mid-session crash recovery flow.
 
 This is **not** a "raw passthrough" feature for power users. There is no setting labeled "raw mode," no toggle to opt into a stripped-down experience for taste. Degraded mode is a fallback the app enters automatically when tmux isn't available, and the user can choose to make that fallback quieter on a per-host basis.
 
 ## Non-goals
 
-- **No auto-install / bootstrap of tmux.** Neotilde never drops binaries on a user's host, never runs package managers, never sudoes. If tmux isn't there, we degrade.
+- **No auto-install / bootstrap of tmux.** Semicolyn never drops binaries on a user's host, never runs package managers, never sudoes. If tmux isn't there, we degrade.
 - **No partial-tmux support.** Either the host has tmux ≥ 3.0 and we use control mode, or we use raw PTY. We do not maintain a feature-by-version matrix below 3.0.
 - **No state restoration after tmux crashes.** We do not try to recreate window/pane layouts from memory after a crash. The shells and their state are gone; pretending otherwise is worse than honest loss.
-- **No power-user "raw" toggle.** Users who want raw SSH access have other clients (Blink, Termius, Prompt 3). Neotilde's product story is tmux-native.
+- **No power-user "raw" toggle.** Users who want raw SSH access have other clients (Blink, Termius, Prompt 3). Semicolyn's product story is tmux-native.
 
 ## Minimum tmux version: 3.0
 
@@ -80,7 +80,7 @@ When degraded mode is entered at connect:
 A user with a fixed set of hosts they know don't run tmux should not be nagged forever. Two affordances:
 
 - **Auto-offer suppression:** after the banner has fired and been dismissed 2–3 times for the same host, the next banner adds a one-tap **"Suppress for this host"** action. No upfront settings menu needed.
-- **Manual override in host config:** a per-host **"Don't attempt tmux on this host"** option that skips the version-check round trip entirely and goes straight to raw PTY. For users who know the answer ahead of time. Shipped in v1 as `neotilde.tmux.attemptControlMode` per [[2026-06-15-host-config-model-design]]; exposed in the host-CRUD "Neotilde behavior" section per [[2026-06-15-host-crud-design]].
+- **Manual override in host config:** a per-host **"Don't attempt tmux on this host"** option that skips the version-check round trip entirely and goes straight to raw PTY. For users who know the answer ahead of time. Shipped in v1 as `semicolyn.tmux.attemptControlMode` per [[2026-06-15-host-config-model-design]]; exposed in the host-CRUD "Semicolyn behavior" section per [[2026-06-15-host-crud-design]].
 
 Suppression is always **per-host**. A global "never warn me about tmux" toggle is a footgun — disable it once, six months later you're confused why a new host doesn't show pills. Per-host matches the actual mental model: "I know *this box* doesn't have tmux."
 
@@ -111,7 +111,7 @@ The control-mode channel closes unexpectedly (EOF on `-CC` stream) while the und
 
 - [[2026-06-14-context-detection-design]] — context promotions depend on `pane_current_command` via `-CC` notifications; off in degraded mode.
 - [[2026-06-14-function-keys-design]] — auto-engage in `htop`/`top`/`mc` uses context detection and is therefore off in degraded mode; manual Fn-slot toggle is input-layer and still works.
-- Host config model — owns the per-host `neotilde.tmux.attemptControlMode` field and the suppression state for the connect-time banner.
+- Host config model — owns the per-host `semicolyn.tmux.attemptControlMode` field and the suppression state for the connect-time banner.
 
 ## Open questions deferred to other specs
 

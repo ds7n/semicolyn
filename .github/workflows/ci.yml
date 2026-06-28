@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: 2026 True Positive LLC
 # SPDX-License-Identifier: GPL-3.0-only
 
-# Neotilde CI.
+# Semicolyn CI.
 #
-#   linux-swift : NeotildeKit + SeedKit pure-logic tests (swift-crypto)        — the fast loop
+#   linux-swift : SemicolynKit + SeedKit pure-logic tests (swift-crypto)        — the fast loop
 #   linux-rust  : Rust SSH core, unit + integration vs containerized sshd   — the fast loop
 #   lint        : cargo fmt --check + clippy
-#   macos       : the Apple-gated path Linux can't reach — builds NeotildeKit under CryptoKit
+#   macos       : the Apple-gated path Linux can't reach — builds SemicolynKit under CryptoKit
 #                 and the UniFFI XCFramework (compiles the Rust core for all three iOS
 #                 triples, validating aws-lc-rs on iOS = roadmap risk D4).
 #
@@ -29,14 +29,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ---- Linux fast loop: platform-agnostic Swift (NeotildeKit + SeedKit) ----
+  # ---- Linux fast loop: platform-agnostic Swift (SemicolynKit + SeedKit) ----
   linux-swift:
     runs-on: ubuntu-latest
     container: swift:6.1   # same toolchain as Dockerfile.dev
     steps:
       - uses: actions/checkout@v4
       - name: swift test
-        run: swift test   # NeotildeKit/SeedKit only; the macOS FFI targets are #if os(macOS)
+        run: swift test   # SemicolynKit/SeedKit only; the macOS FFI targets are #if os(macOS)
 
   # ---- Linux fast loop: Rust SSH core (unit + sshd integration) ----
   linux-rust:
@@ -52,7 +52,7 @@ jobs:
         run: docker compose build dev sshd
 
       - name: Start sshd fixtures
-        # sshd-legacy reuses the neotilde-sshd image; bring both up on the compose network.
+        # sshd-legacy reuses the semicolyn-sshd image; bring both up on the compose network.
         run: docker compose up -d sshd sshd-legacy
 
       - name: cargo test (waits for sshd, then runs unit + integration)
@@ -74,7 +74,7 @@ jobs:
               echo "::error::sshd fixtures not reachable after 30s" >&2
               exit 1
             fi
-            cargo test -p neotilde-ssh-core'
+            cargo test -p semicolyn-ssh-core'
 
       - name: Tear down
         if: always()
@@ -88,7 +88,7 @@ jobs:
       - name: Install Rust components
         run: rustup component add rustfmt clippy
       - run: cargo fmt --all --check
-      - run: cargo clippy -p neotilde-ssh-core --all-targets
+      - run: cargo clippy -p semicolyn-ssh-core --all-targets
 
   # ---- Apple-gated build (the reason for macOS CI) ----
   macos:
@@ -109,9 +109,9 @@ jobs:
         # xcframework (binaryTarget), so resolution fails until it exists.
         run: bash scripts/build-xcframework.sh
 
-      - name: Build NeotildeKit under CryptoKit
-        # On macOS NeotildeKit uses system CryptoKit (no swift-crypto); confirm it compiles.
-        run: swift build --target NeotildeKit
+      - name: Build SemicolynKit under CryptoKit
+        # On macOS SemicolynKit uses system CryptoKit (no swift-crypto); confirm it compiles.
+        run: swift build --target SemicolynKit
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -119,8 +119,8 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Build Neotilde app for iOS Simulator
+      - name: Build Semicolyn app for iOS Simulator
         run: |
-          xcodebuild -project Neotilde.xcodeproj -scheme Neotilde \
+          xcodebuild -project Semicolyn.xcodeproj -scheme Semicolyn \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO build

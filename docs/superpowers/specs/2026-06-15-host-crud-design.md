@@ -29,7 +29,7 @@
 | 5 | **Port forwarding** | Collapsed | `localForwards[]`, `remoteForwards[]`, `dynamicForwards[]` — three sub-lists with `+` per list |
 | 6 | **Mosh** | Collapsed | `mosh.enabled` master toggle; reveals `serverPath`, `udpPortRange`, `predictionMode` when on |
 | 7 | **Tailscale** | Collapsed | `tailscale.required` toggle; `tailnet` row appears when required is on (rare multi-tailnet case) |
-| 8 | **Neotilde behavior** | Collapsed | `neotilde.predictor.incognito` toggle; `neotilde.tmux.attemptControlMode` toggle |
+| 8 | **Semicolyn behavior** | Collapsed | `semicolyn.predictor.incognito` toggle; `semicolyn.tmux.attemptControlMode` toggle |
 | 9 | **Delete host** | (edit mode only) | Red destructive row; opens the delete confirmation sheet |
 
 ### Expansion rules
@@ -100,7 +100,7 @@ Fields:
 - **Biometric policy** (segmented, same as Create)
 
 On **Import**:
-1. Neotilde parses the blob; if parsing fails, inline error: *"Unrecognized key format. Supported: OpenSSH, PEM, RFC 4716."*
+1. Semicolyn parses the blob; if parsing fails, inline error: *"Unrecognized key format. Supported: OpenSSH, PEM, RFC 4716."*
 2. If encrypted, the passphrase field unlocks; on wrong passphrase, inline error.
 3. On success, the key material is written to the chosen flavor with the chosen policy; the sheet transitions to the same post-create view (public key + Copy/Share). User installs it on the host manually.
 
@@ -202,7 +202,7 @@ Entry points:
 ### Deferred to separate brainstorm sessions
 
 - **Import from `~/.ssh/config`** — file picker / paste / share extension; mapping rules; conflict resolution with existing hosts; what to do with `Match` blocks, Tier-3 options, and `Include` directives; the post-import review screen.
-- **Export to `~/.ssh/config`** — slug generation, label-to-alias resolution, what to emit for Neotilde extensions (mosh, Tailscale, neotilde.*), fingerprint comments, identity export (public-key only).
+- **Export to `~/.ssh/config`** — slug generation, label-to-alias resolution, what to emit for Semicolyn extensions (mosh, Tailscale, semicolyn.*), fingerprint comments, identity export (public-key only).
 - **Identities & Keys management surface** outside the inline sub-flow — the standalone list, the per-identity detail screen ("which hosts use this key"), rotation flows, deletion flows, "regenerate" semantics.
 - **Multi-connection switching semantics** — what happens to live sessions when the user opens a different host's edit screen from the picker.
 
