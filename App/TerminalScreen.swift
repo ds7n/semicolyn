@@ -61,9 +61,17 @@ struct TerminalScreen: UIViewRepresentable {
         )
         terminal.addGestureRecognizer(pinch)
 
+        // Install cursor-placement drag (faint halo + halo-gated pan synthesizing arrow keys).
+        let cursorDrag = CursorDragController(view: terminal, send: send)
+        cursorDrag.configure(color: UIColor(Color(theme.accent.primary)))
+        cursorDrag.install()
+        context.coordinator.cursorDrag = cursorDrag
+
         // Render PTY output as it arrives (already hopped to main in the bridge).
-        output.onBytes = { [weak terminal] bytes in
+        let coord = context.coordinator
+        output.onBytes = { [weak terminal, weak coord] bytes in
             terminal?.feed(byteArray: bytes[...])
+            coord?.cursorDrag?.refresh()   // keep the halo on the cursor as output moves it
         }
         return terminal
     }
@@ -71,6 +79,9 @@ struct TerminalScreen: UIViewRepresentable {
     func updateUIView(_ uiView: TerminalView, context: Context) {
         // Refresh halo color when theme changes.
         context.coordinator.halo.configure(color: UIColor(Color(theme.bell.edge)))
+        // Keep the cursor-placement halo recolored + positioned on the live cursor.
+        context.coordinator.cursorDrag?.configure(color: UIColor(Color(theme.accent.primary)))
+        context.coordinator.cursorDrag?.refresh()
         // Update mouse-active dot visibility and selection gesture state.
         context.coordinator.updateMouseDot(from: uiView)
     }
@@ -103,6 +114,8 @@ struct TerminalScreen: UIViewRepresentable {
         /// Baseline font size for pinch-zoom; updated when a pinch gesture ends.
         /// Persists for the window's lifetime only (not stored to the host — v1.5+).
         var baseSize: Double
+        /// Cursor-placement drag (halo + pan → synthesized arrow keys); installed in makeUIView.
+        var cursorDrag: CursorDragController?
 
         init(send: @escaping ([UInt8]) -> Void, session: ShellSession?, settings: TerminalSettings, theme: Theme,
              osc52Allowed: Bool = true, onTitle: ((String) -> Void)? = nil) {
@@ -182,7 +195,9 @@ struct TerminalScreen: UIViewRepresentable {
             if let gr = selectionLongPress {
                 if mouseActive {
                     gr.isEnabled = false
-                    // TODO(phase4): also suspend cursor-placement halo here
+                    // Cursor placement is deliberately NOT suspended under mouse-mode — it
+                    // synthesizes arrow keys, not mouse events (locked design). Selection-handle
+                    // suppression is wired on the Simulator pass (no public SwiftTerm signal yet).
                 } else {
                     gr.isEnabled = true
                 }
