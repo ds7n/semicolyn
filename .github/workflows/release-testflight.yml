@@ -1,0 +1,116 @@
+# SPDX-FileCopyrightText: 2026 True Positive LLC
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Build, sign, and upload Semicolyn to TestFlight entirely on the GitHub macOS runner —
+# NO personal Mac required. Dormant until you opt in: the job only runs when the repo
+# variable TESTFLIGHT_ENABLED == 'true' AND it is triggered manually. Setup (paid Apple
+# Developer Program + App Store Connect API key + the four secrets + the variable) is in
+# docs/testflight-setup.md.
+#
+# Signing uses an App Store Connect API key (.p8) with -allowProvisioningUpdates, so Xcode
+# manages the certificate + provisioning profile in the cloud — nothing to generate locally.
+name: Release to TestFlight
+
+on:
+  workflow_dispatch:   # manual only — never runs on push / PR
+
+permissions:
+  contents: read
+
+jobs:
+  testflight:
+    # Stays inert until you set the repo variable TESTFLIGHT_ENABLED=true (Settings →
+    # Secrets and variables → Actions → Variables). Until then this job is skipped.
+    if: vars.TESTFLIGHT_ENABLED == 'true'
+    runs-on: macos-14   # Apple Silicon + Xcode
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest-stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Add iOS Rust targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+
+      - name: Build UniFFI XCFramework (device + simulator slices)
+        run: bash scripts/build-xcframework.sh
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Install App Store Connect API key
+        env:
+          KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "$KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_"$KEY_ID".p8
+
+      - name: Archive (device, signed via the API key)
+        env:
+          KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild archive \
+            -project Semicolyn.xcodeproj -scheme Semicolyn \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/Semicolyn.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER" \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_"$KEY_ID".p8 \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$TEAM" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }}
+
+      - name: Export signed .ipa
+        env:
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          cat > build/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>teamID</key><string>${TEAM}</string>
+            <key>signingStyle</key><string>automatic</string>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath build/Semicolyn.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath build/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER" \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_"$KEY_ID".p8
+
+      # Keep the signed build downloadable even if the upload step needs a tweak —
+      # you can hand it to Transporter as a fallback.
+      - name: Upload .ipa artifact (fallback)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Semicolyn-ipa
+          path: build/export/*.ipa
+          if-no-files-found: error
+
+      - name: Upload to TestFlight
+        env:
+          KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          IPA="$(ls build/export/*.ipa | head -1)"
+          xcrun altool --upload-app -f "$IPA" -t ios \
+            --apiKey "$KEY_ID" --apiIssuer "$ISSUER"
