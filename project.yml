@@ -40,6 +40,11 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "0.1.0"
         TARGETED_DEVICE_FAMILY: "1,2"
+        # App icon lives in App/Assets.xcassets/AppIcon.appiconset (single 1024²
+        # universal slot). Art is owed before the first TestFlight upload; until
+        # then the slot is empty and the asset compiler emits a missing-icon
+        # warning on the macOS CI job (non-fatal — simulator builds don't require it).
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # MVP: Swift 5 language mode for the app target. The UniFFI callback
         # bridges + SwiftTerm aren't Swift-6 strict-concurrency clean; tighten later.
         SWIFT_VERSION: "5.0"

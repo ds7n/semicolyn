@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semicolyn — final mark + color lab</title>
+<style>
+  :root { --r: 22.37%; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:48px 44px 100px;
+    font:15px/1.5 -apple-system,"SF Pro Text",Segoe UI,Roboto,sans-serif;
+    color:#E8EBF0; background:#07090E; }
+  h1 { font-weight:600; margin:0 0 4px; font-size:26px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:1.4px;
+       color:#8A93A3; margin:54px 0 20px; border-bottom:1px solid #1c2230; padding-bottom:10px; }
+  .sub { color:#8A93A3; margin:0 0 8px; max-width:760px; }
+  .hero { display:flex; gap:44px; align-items:flex-end; flex-wrap:wrap; margin-top:26px; }
+  .hero img.big { width:340px; border-radius:24px; display:block; }
+  .stack { display:flex; gap:26px; align-items:flex-end; }
+  .stack figure { margin:0; text-align:center; color:#8A93A3; font-size:12px; }
+  .stack img { border-radius:var(--r); display:block; }
+  .stack figcaption { margin-top:8px; }
+  .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:30px; max-width:1080px; }
+  .cell { margin:0; }
+  .cell img { width:100%; border-radius:18px; display:block; }
+  .cap { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:13px; color:#cdd3df;}
+  .dot { width:12px; height:12px; border-radius:4px; display:inline-block; }
+  .hex { color:#8A93A3; font-size:12px; }
+  .badge { font-size:11px; color:#12151F; background:#5FB0A2; border-radius:6px; padding:1px 7px; }
+</style>
+</head>
+<body>
+  <h1>semicolyn — the mark</h1>
+  <p class="sub">Locked geometry: shell-prompt chevron fused with a comma, comma left-edge
+     aligned to the chevron. Background <b>#12151F</b> and comma <b>#FF6F5E</b> are fixed;
+     below we vary the chevron color and try glow.</p>
+
+  <h2>Current — highlight chevron (tonal), flat</h2>
+  <div class="hero">
+    <img class="big" src="logo-renders/lab_highlight_flat-1024.png" alt="">
+    <div class="stack">
+      <figure><img src="logo-renders/lab_highlight_flat-120.png" width="120"><figcaption>120</figcaption></figure>
+      <figure><img src="semicolon-mark-noexist.png" onerror="this.style.display='none'" hidden></figure>
+      <figure><img src="logo-renders/lab_highlight_flat-120.png" width="60" style="border-radius:22.37%"><figcaption>60</figcaption></figure>
+    </div>
+  </div>
+
+  <h2>Chevron color — flat &nbsp;(comma + bg fixed)</h2>
+  <div class="grid">
+    <figure class="cell"><img src="logo-renders/lab_highlight_flat-1024.png"><div class="cap"><span class="dot" style="background:#FFB7A6"></span>highlight <span class="hex">#FFB7A6</span> <span class="badge">current</span></div></figure>
+    <figure class="cell"><img src="logo-renders/lab_mono_flat-1024.png"><div class="cap"><span class="dot" style="background:#FF6F5E"></span>mono coral <span class="hex">#FF6F5E</span></div></figure>
+    <figure class="cell"><img src="logo-renders/lab_verdigris_flat-1024.png"><div class="cap"><span class="dot" style="background:#5FB0A2"></span>verdigris <span class="hex">#5FB0A2</span></div></figure>
+    <figure class="cell"><img src="logo-renders/lab_amber_flat-1024.png"><div class="cap"><span class="dot" style="background:#F5A524"></span>amber <span class="hex">#F5A524</span></div></figure>
+    <figure class="cell"><img src="logo-renders/lab_crimson_flat-1024.png"><div class="cap"><span class="dot" style="background:#E5455E"></span>crimson <span class="hex">#E5455E</span></div></figure>
+    <figure class="cell"><img src="logo-renders/lab_ice_flat-1024.png"><div class="cap"><span class="dot" style="background:#CFD6E4"></span>ice <span class="hex">#CFD6E4</span></div></figure>
+  </div>
+
+  <h2>Chevron color — with glow &nbsp;(per-shape neon)</h2>
+  <div class="grid">
+    <figure class="cell"><img src="logo-renders/lab_highlight_glow-1024.png"><div class="cap"><span class="dot" style="background:#FFB7A6"></span>highlight</div></figure>
+    <figure class="cell"><img src="logo-renders/lab_mono_glow-1024.png"><div class="cap"><span class="dot" style="background:#FF6F5E"></span>mono coral</div></figure>
+    <figure class="cell"><img src="logo-renders/lab_verdigris_glow-1024.png"><div class="cap"><span class="dot" style="background:#5FB0A2"></span>verdigris</div></figure>
+    <figure class="cell"><img src="logo-renders/lab_amber_glow-1024.png"><div class="cap"><span class="dot" style="background:#F5A524"></span>amber</div></figure>
+    <figure class="cell"><img src="logo-renders/lab_crimson_glow-1024.png"><div class="cap"><span class="dot" style="background:#E5455E"></span>crimson</div></figure>
+    <figure class="cell"><img src="logo-renders/lab_ice_glow-1024.png"><div class="cap"><span class="dot" style="background:#CFD6E4"></span>ice</div></figure>
+  </div>
+
+  <h2>Pick</h2>
+  <p class="sub">Tell me a chevron color + flat or glow (e.g. “verdigris, glow” or “stay highlight, flat”).
+     I’ll lock it, render the icon set, and wire it into the app icon.</p>
+</body>
+</html>

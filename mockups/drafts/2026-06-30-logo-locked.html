@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semicolyn — locked icon</title>
+<style>
+  :root { --r: 22.37%; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:48px 44px 90px;
+    font:15px/1.5 -apple-system,"SF Pro Text",Segoe UI,Roboto,sans-serif;
+    color:#E8EBF0; background:#07090E; }
+  h1 { font-weight:600; margin:0 0 4px; }
+  .sub { color:#8A93A3; margin:0 0 30px; max-width:720px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:1.2px; color:#8A93A3;
+       margin:46px 0 18px; border-bottom:1px solid #1c2230; padding-bottom:10px; }
+  .hero { display:flex; gap:46px; align-items:flex-end; flex-wrap:wrap; }
+  .hero img { width:300px; border-radius:24px; box-shadow:0 14px 44px rgba(0,0,0,.5); }
+  .panel { display:inline-flex; gap:30px; align-items:flex-end; padding:34px; border-radius:22px; }
+  .on-light { background:#c9ccd2; } .on-dark { background:#1c1f27; }
+  .panel img { border-radius:var(--r); display:block; }
+  .sizes { display:flex; gap:28px; align-items:flex-end; }
+  .cell { text-align:center; color:#8A93A3; font-size:12px; }
+  .cell img { border-radius:var(--r); display:block; }
+  .cell span { display:block; margin-top:8px; }
+  .spec { color:#aab; font-size:13px; max-width:680px; }
+  .spec code { color:#FFB7A6; background:#161A22; padding:1px 6px; border-radius:5px; }
+  .dot { display:inline-block; width:11px; height:11px; border-radius:3px; vertical-align:-1px; margin-right:6px; }
+</style>
+</head>
+<body>
+  <h1>semicolyn — the icon (locked)</h1>
+  <p class="sub">A shell-prompt chevron fused with a comma: coral prompt, off-white “text,”
+     on midnight — reads like a real terminal line.</p>
+
+  <h2>On a home screen (rounded as iOS masks it)</h2>
+  <div class="hero">
+    <div class="panel on-light">
+      <img src="logo-renders/semicolyn-mark-FF6F5E-flat-180.png" width="180" height="180" alt="">
+      <img src="logo-renders/semicolyn-mark-FF6F5E-flat-120.png" width="120" height="120" alt="">
+    </div>
+    <div class="panel on-dark">
+      <img src="logo-renders/semicolyn-mark-FF6F5E-flat-180.png" width="180" height="180" alt="">
+      <img src="logo-renders/semicolyn-mark-FF6F5E-flat-120.png" width="120" height="120" alt="">
+    </div>
+  </div>
+
+  <h2>Real icon sizes</h2>
+  <div class="sizes">
+    <div class="cell"><img src="logo-renders/semicolyn-mark-FF6F5E-flat-180.png" width="180"><span>180</span></div>
+    <div class="cell"><img src="logo-renders/semicolyn-mark-FF6F5E-flat-120.png" width="120"><span>120</span></div>
+    <div class="cell"><img src="logo-renders/semicolyn-mark-FF6F5E-flat-60.png" width="60"><span>60</span></div>
+  </div>
+
+  <h2>Full 1024 (App Store marketing icon)</h2>
+  <img src="logo-renders/semicolyn-mark-FF6F5E-flat-1024.png" width="360" style="border-radius:18px" alt="">
+
+  <h2>Spec</h2>
+  <p class="spec">
+    <span class="dot" style="background:#FF6F5E"></span><b>Chevron (prompt)</b> <code>#FF6F5E</code> coral<br>
+    <span class="dot" style="background:#CFD6E4"></span><b>Comma (text)</b> <code>#CFD6E4</code> off-white<br>
+    <span class="dot" style="background:#12151F"></span><b>Background</b> <code>#12151F</code> midnight · flat (no glow)<br>
+    Master: <code>assets/semicolon-mark.svg</code> · icon: <code>App/Assets.xcassets/AppIcon.appiconset/icon.png</code> ·
+    regenerate any theme/size via <code>scripts/logo_render.py</code>.
+  </p>
+</body>
+</html>
