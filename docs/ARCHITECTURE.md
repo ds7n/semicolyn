@@ -54,7 +54,7 @@ Every v1 subsystem has a locked spec under [`docs/superpowers/specs/`](superpowe
 
 **Data, host model & sync** — `host-config-model` (schema, resolution, storage backbone) · `identities-keys-management` · `icloud-sync-scope` (what syncs vs stays local).
 
-**UI, product & ship** — `host-crud` · `multi-connection-switching` · `banner-expanded` · `first-host-onboarding` · `settings-sub-screens` · `pro-paid-scope` · `ipad-scope` · `design-tokens` (theming) · `neon-midnight-theme` (the default theme).
+**UI, product & ship** — `host-crud` · `multi-connection-switching` · `banner-expanded` · `first-host-onboarding` · `settings-sub-screens` · `pro-paid-scope` · `ipad-scope` · `design-tokens` (theming) · `neon-midnight-theme` (the default theme) · `themed-ansi-palette-infra` (terminal ANSI-16 palette + strict derivation).
 
 **Security, privacy & cross-cutting** — `screen-capture-protection` · `privacy-statement` · `testing-standards`.
 
