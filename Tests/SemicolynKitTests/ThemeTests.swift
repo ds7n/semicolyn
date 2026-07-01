@@ -84,4 +84,28 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(c.blue, 0, accuracy: 0.0001)
         XCTAssertEqual(c.opacity, 0.8, accuracy: 0.0001)
     }
+
+    func testNeonMidnightAnsiCoralAndCrimsonSlots() {
+        // accent(coral) lives in brightRed; error(crimson) in red — kept distinct.
+        XCTAssertEqual(Theme.neonMidnight.ansi[.brightRed], ThemeColor("#FF6F5E"))
+        XCTAssertEqual(Theme.neonMidnight.ansi[.red], ThemeColor("#E5455E"))
+    }
+
+    func testNeonMidnightAnsiHasSixteen() {
+        XCTAssertEqual(Theme.neonMidnight.ansi.ordered().count, 16)
+    }
+
+    func testNeonMidnightTerminalCursorIsAccent() {
+        XCTAssertEqual(Theme.neonMidnight.terminal.cursor, ThemeColor("#FF6F5E"))
+    }
+
+    func testBellBronzeAnsiYellowIsBronze() {
+        // Bronze is the theme's warm hue → occupies the yellow slot; accent refs it.
+        XCTAssertEqual(Theme.bellBronze.ansi[.yellow], ThemeColor("#D49A5C"))
+        XCTAssertEqual(Theme.bellBronze.accent.primary, ThemeColor("#D49A5C"))
+    }
+
+    func testBellBronzeAnsiHasSixteen() {
+        XCTAssertEqual(Theme.bellBronze.ansi.ordered().count, 16)
+    }
 }

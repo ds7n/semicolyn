@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — semicolyn "Neon Cobalt" FINAL candidate (Theme A).
+     Blue leads: periwinkle-cobalt #6E80FF accent (5.9:1 on the terminal),
+     #9FADFF hot-core highlight, on a hair-bluer Neon-Midnight night (#06080F
+     ground / #04060D terminal). Supporting neons: green #2CE59B, coral #FF5C6C,
+     amber #FFB020. Rest is SOLID — glow is bell-only. Shown rest vs bell-moment,
+     plus the state colors where they actually surface (banners). Plain flow. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semicolyn — Neon Cobalt (final)</title>
+<style>
+  :root{ color-scheme:dark;
+    --bg:#06080F; --panel:#0D1120; --panelHi:#151A2B; --line:#232B42;
+    --term:#04060D; --fg:#E8ECF5; --termfg:#CFD6E6; --muted:#8A93A8;
+    --acc:#6E80FF; --hi:#9FADFF; --ok:#2CE59B; --err:#FF5C6C; --warn:#FFB020; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:#04050B; color:var(--fg);
+        font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap{ max-width:1180px; margin:0 auto; padding:32px 22px 70px; }
+  h1{ font-size:23px; margin:0 0 6px; } h1 em{ font-style:normal; color:var(--acc); }
+  .lede{ color:var(--muted); font-size:13.5px; max-width:860px; line-height:1.6; margin:0 0 8px; }
+  .lede b{ color:var(--termfg); }
+  .recipe{ color:var(--muted); font-size:12px; margin:0 0 24px; }
+  .recipe code{ color:var(--termfg); font-family:ui-monospace; }
+
+  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(400px,1fr)); gap:20px; }
+
+  .card{ border:1px solid var(--line); border-radius:15px; overflow:hidden; background:var(--bg); }
+  .label{ display:flex; align-items:center; gap:9px; padding:12px 15px; background:var(--panel); border-bottom:1px solid var(--line); }
+  .label h3{ margin:0; font-size:15px; } .label em{ font-style:normal; color:var(--acc); }
+  .label .t{ margin-left:auto; font:700 10px ui-sans-serif; letter-spacing:.4px; padding:3px 9px; border-radius:20px; background:var(--panelHi); color:var(--muted); }
+  .label .t.live{ background:rgba(110,128,255,.18); color:var(--acc); }
+
+  .chrome{ display:flex; align-items:center; gap:7px; padding:11px 15px; background:var(--panel); border-bottom:1px solid var(--line); }
+  .dot{ width:10px; height:10px; border-radius:50%; }
+  .wt{ margin-left:8px; color:var(--muted); font-size:11px; font-weight:600; }
+
+  .term{ background:var(--term); padding:16px; font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+         font-size:12.5px; line-height:1.95; }
+  .p{ color:var(--acc); font-weight:700; } .path{ color:var(--hi); }
+  .dim{ color:var(--muted); } .fg{ color:var(--termfg); }
+  .ok{ color:var(--ok); } .warn{ color:var(--warn); } .err{ color:var(--err); }
+  .link{ color:var(--acc); text-decoration:underline; text-underline-offset:2px; }
+  .cur{ background:var(--acc); color:var(--term); padding:0 3px; border-radius:2px; }
+  .cur.blink{ background:var(--hi); }
+
+  .surf{ padding:14px 15px; display:flex; flex-direction:column; gap:11px; background:var(--bg); border-top:1px solid var(--line); }
+  .row{ display:flex; gap:9px; }
+  .pane{ flex:1; border:1.5px solid var(--acc); border-radius:8px; padding:9px 11px; font:600 11px ui-sans-serif;
+         color:var(--termfg); background:var(--term); position:relative; }
+  .pane.off{ border:1px solid var(--line); color:var(--muted); }
+  .pane.ringing{ box-shadow:inset 0 0 20px rgba(110,128,255,.6), 0 0 16px rgba(110,128,255,.4); }
+  .belltag{ position:absolute; top:-9px; right:9px; font:700 9px ui-sans-serif; background:var(--acc); color:var(--term);
+            padding:2px 7px; border-radius:10px; box-shadow:0 0 12px rgba(110,128,255,.8); }
+  .keybar{ display:flex; gap:7px; }
+  .slot{ font:600 11.5px ui-sans-serif; padding:7px 11px; border-radius:7px; background:var(--panelHi); border:1px solid var(--line); color:var(--fg); }
+  .slot.prom{ background:rgba(110,128,255,.15); border-color:transparent; color:var(--hi); }
+  .slot.armed{ background:var(--acc); border-color:var(--acc); color:var(--term); }
+  .slot.armed.ring{ box-shadow:0 0 14px rgba(110,128,255,.7); }
+
+  /* state colors where they actually live: banners */
+  .banners{ display:flex; flex-direction:column; gap:8px; margin-top:26px; }
+  .banner{ display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:10px; font:600 12.5px ui-sans-serif; }
+  .banner .bd{ width:9px; height:9px; border-radius:50%; }
+  .banner.amber{ background:rgba(255,176,32,.15); color:#FFD48A; } .banner.amber .bd{ background:var(--warn); }
+  .banner.red{ background:rgba(255,92,108,.15); color:#FFB3BB; } .banner.red .bd{ background:var(--err); }
+  .banner.ok{ background:rgba(44,229,155,.14); color:#9DF0CE; } .banner.ok .bd{ background:var(--ok); }
+
+  .legend{ display:flex; flex-wrap:wrap; gap:7px; margin-top:26px; }
+  .sw{ display:flex; align-items:center; gap:7px; font:600 11px ui-sans-serif; color:var(--muted); background:var(--bg); border:1px solid var(--line); border-radius:22px; padding:5px 12px 5px 5px; }
+  .sw .chip{ width:17px; height:17px; border-radius:50%; }
+  .sw code{ color:var(--termfg); font-family:ui-monospace; font-size:10.5px; }
+
+  /* full-palette swatch strip — the header for every theme page */
+  .palette{ display:grid; grid-template-columns:repeat(auto-fit,minmax(94px,1fr)); gap:8px; margin:6px 0 30px; }
+  .pal{ border:1px solid var(--line); border-radius:11px; overflow:hidden; background:var(--bg); }
+  .pal .fill{ height:54px; }
+  .pal .meta{ padding:7px 9px 8px; }
+  .pal .role{ font:700 10.5px ui-sans-serif; color:var(--fg); letter-spacing:.2px; }
+  .pal .hex{ font:600 10px ui-monospace; color:var(--muted); margin-top:1px; }
+  .palette .grp{ grid-column:1/-1; font:700 10px ui-sans-serif; letter-spacing:.6px; text-transform:uppercase; color:var(--muted); margin:8px 0 -2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>semicolyn — <em>Neon Cobalt</em></h1>
+  <p class="lede">Blue leads. A readable <b>periwinkle-cobalt</b> <code style="color:var(--termfg)">#6E80FF</code> (5.9:1) carries the prompt, focus, bell and armed keys; a <b>#9FADFF</b> hot core lifts highlights. Supporting neons — green, coral, amber — stay in the semantic slots. Same blue-near-black night as Neon Midnight, nudged a hair bluer.</p>
+  <p class="recipe">Rest is <b style="color:var(--termfg)">solid</b> — no persistent bloom. The single glow is the <code>bell</code> moment (right card).</p>
+
+  <!-- full-palette swatch strip: the whole theme, side by side, at a glance -->
+  <div class="palette">
+    <div class="grp">Accents</div>
+    <div class="pal"><div class="fill" style="background:var(--acc)"></div><div class="meta"><div class="role">accent</div><div class="hex">#6E80FF</div></div></div>
+    <div class="pal"><div class="fill" style="background:var(--hi)"></div><div class="meta"><div class="role">highlight</div><div class="hex">#9FADFF</div></div></div>
+    <div class="grp">States</div>
+    <div class="pal"><div class="fill" style="background:var(--ok)"></div><div class="meta"><div class="role">success</div><div class="hex">#2CE59B</div></div></div>
+    <div class="pal"><div class="fill" style="background:var(--warn)"></div><div class="meta"><div class="role">warning</div><div class="hex">#FFB020</div></div></div>
+    <div class="pal"><div class="fill" style="background:var(--err)"></div><div class="meta"><div class="role">broken</div><div class="hex">#FF5C6C</div></div></div>
+    <div class="grp">Surfaces &amp; text</div>
+    <div class="pal"><div class="fill" style="background:var(--bg)"></div><div class="meta"><div class="role">ground</div><div class="hex">#06080F</div></div></div>
+    <div class="pal"><div class="fill" style="background:var(--panel)"></div><div class="meta"><div class="role">panel</div><div class="hex">#0D1120</div></div></div>
+    <div class="pal"><div class="fill" style="background:var(--panelHi)"></div><div class="meta"><div class="role">panelHigh</div><div class="hex">#151A2B</div></div></div>
+    <div class="pal"><div class="fill" style="background:var(--line)"></div><div class="meta"><div class="role">line</div><div class="hex">#232B42</div></div></div>
+    <div class="pal"><div class="fill" style="background:var(--term)"></div><div class="meta"><div class="role">terminal</div><div class="hex">#04060D</div></div></div>
+    <div class="pal"><div class="fill" style="background:var(--fg)"></div><div class="meta"><div class="role">text</div><div class="hex">#E8ECF5</div></div></div>
+    <div class="pal"><div class="fill" style="background:var(--termfg)"></div><div class="meta"><div class="role">term-fg</div><div class="hex">#CFD6E6</div></div></div>
+    <div class="pal"><div class="fill" style="background:var(--muted)"></div><div class="meta"><div class="role">muted</div><div class="hex">#8A93A8</div></div></div>
+  </div>
+
+  <div class="grid">
+    <!-- AT REST -->
+    <div class="card">
+      <div class="label"><h3><em>Neon Cobalt</em> — at rest</h3><span class="t">solid</span></div>
+      <div class="chrome"><span class="dot" style="background:var(--err)"></span><span class="dot" style="background:var(--warn)"></span><span class="dot" style="background:var(--ok)"></span><span class="wt">ssh · web-01 · zsh</span></div>
+      <div class="term">
+        <div><span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="dim">git:(</span><span class="ok">main</span><span class="dim">)</span> <span class="fg">swift test</span></div>
+        <div><span class="ok">✓</span> <span class="fg">SemicolynKit</span> <span class="dim">— 142 passed in 3.1s</span></div>
+        <div><span class="warn">⚠</span> <span class="fg">3 skipped</span> <span class="dim">(needs sshd fixture)</span></div>
+        <div><span class="err">✗</span> <span class="fg">ThemeTests.neonCobalt</span> <span class="dim">— expected #6E80FF</span></div>
+        <div class="dim">log at <span class="link">https://ci.log/9f2</span></div>
+        <div><span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="cur">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="row">
+          <div class="pane">pane · active</div>
+          <div class="pane off">pane · idle</div>
+        </div>
+        <div class="keybar">
+          <span class="slot prom">⇥ tab</span>
+          <span class="slot armed">esc</span>
+          <span class="slot">ctrl</span><span class="slot">/</span><span class="slot">⌘</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- BELL MOMENT -->
+    <div class="card">
+      <div class="label"><h3><em>Neon Cobalt</em> — bell moment</h3><span class="t live">▲ bell</span></div>
+      <div class="chrome"><span class="dot" style="background:var(--err)"></span><span class="dot" style="background:var(--warn)"></span><span class="dot" style="background:var(--ok)"></span><span class="wt">ssh · web-01 · zsh</span></div>
+      <div class="term">
+        <div><span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="dim">git:(</span><span class="ok">main</span><span class="dim">)</span> <span class="fg">make deploy</span></div>
+        <div class="ok">✓ build ok</div>
+        <div class="fg">deploying… <span class="dim">done</span> <span style="color:var(--hi)">\a</span> <span class="dim">(bell)</span></div>
+        <div><span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="cur blink">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="row">
+          <div class="pane ringing">pane · active<span class="belltag">▲ bell</span></div>
+          <div class="pane off">pane · idle</div>
+        </div>
+        <div class="keybar">
+          <span class="slot prom">⇥ tab</span>
+          <span class="slot armed ring">esc</span>
+          <span class="slot">ctrl</span><span class="slot">/</span><span class="slot">⌘</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATE COLORS IN CONTEXT -->
+  <div class="banners">
+    <div class="banner ok"><span class="bd"></span>Connected · web-01 · publickey · 12ms</div>
+    <div class="banner amber"><span class="bd"></span>Degraded — mosh roaming, reconnecting… (attempt 2)</div>
+    <div class="banner red"><span class="bd"></span>Connection lost — host unreachable</div>
+  </div>
+
+</div>
+</body>
+</html>

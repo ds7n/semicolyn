@@ -42,6 +42,8 @@ struct TerminalScreen: UIViewRepresentable {
         let s = context.coordinator.settings
         terminal.font = UIFont.monospacedSystemFont(ofSize: CGFloat(s.fontSize), weight: .regular)
         terminal.getTerminal().options.scrollback = s.scrollbackLines
+        // Apply the theme's terminal palette (bg/fg/cursor/selection + 16 ANSI).
+        applyPalette(theme.terminalPalette(), to: terminal)
         applyCursor(to: terminal, style: s.cursorStyle, blink: s.cursorBlink)
 
         // Install bell halo overlay (full-frame, non-interactive).
@@ -79,6 +81,8 @@ struct TerminalScreen: UIViewRepresentable {
     func updateUIView(_ uiView: TerminalView, context: Context) {
         // Refresh halo color when theme changes.
         context.coordinator.halo.configure(color: UIColor(Color(theme.bell.edge)))
+        // Recolor the live terminal when the theme changes.
+        applyPalette(theme.terminalPalette(), to: uiView)
         // Keep the cursor-placement halo recolored + positioned on the live cursor.
         context.coordinator.cursorDrag?.configure(color: UIColor(Color(theme.accent.primary)))
         context.coordinator.cursorDrag?.refresh()

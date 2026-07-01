@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — semicolyn BLUE-oriented theme candidates.
+     Two concepts on the Neon-Midnight blue-near-black night:
+       A) Hand-picked blue-neon — blue is the lead accent, supported by a
+          saturated neon palette (coral/green/amber/purple). 3 blue variants.
+       B) Even-spaced (blue-anchored) — a 5-point 72° hue ring anchored on blue;
+          slots land violet / red / amber / green, gently snapped so meaning wins.
+     Rest state is solid (no persistent bloom); glow is bell-only. Plain flow. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semicolyn — Blue-neon theme candidates</title>
+<style>
+  :root{ color-scheme:dark;
+    --bg:#06080F; --panel:#0D1120; --panelHi:#151A2B; --line:#232B42;
+    --term:#04060D; --fg:#E8ECF5; --termfg:#CFD6E6; --muted:#8A93A8;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:#04050B; color:var(--fg);
+        font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap{ max-width:1240px; margin:0 auto; padding:32px 22px 80px; }
+  h1{ font-size:23px; margin:0 0 6px; }
+  h1 em{ font-style:normal; color:#3D8BFF; }
+  .lede{ color:var(--muted); font-size:13.5px; max-width:900px; line-height:1.6; margin:0 0 4px; }
+  .lede b{ color:var(--termfg); }
+  h2{ font-size:16px; margin:34px 0 4px; padding-top:20px; border-top:1px solid var(--line); }
+  h2 .sub{ color:var(--muted); font-weight:400; font-size:13px; }
+  .note{ color:var(--muted); font-size:12px; margin:0 0 18px; max-width:900px; line-height:1.55; }
+  .note code{ color:var(--termfg); font-family:ui-monospace; }
+
+  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:20px; }
+
+  .card{ border:1px solid var(--line); border-radius:15px; overflow:hidden; background:var(--bg); }
+  .label{ display:flex; align-items:center; gap:9px; padding:12px 15px; background:var(--panel); border-bottom:1px solid var(--line); }
+  .label h3{ margin:0; font-size:14.5px; }
+  .label .hex{ margin-left:auto; font:600 11px ui-monospace; color:var(--muted); }
+
+  .chrome{ display:flex; align-items:center; gap:7px; padding:11px 15px; background:var(--panel); border-bottom:1px solid var(--line); }
+  .dot{ width:10px; height:10px; border-radius:50%; }
+  .wt{ margin-left:8px; color:var(--muted); font-size:11px; font-weight:600; }
+
+  .term{ background:var(--term); padding:16px; font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+         font-size:12.5px; line-height:1.95; }
+  .dim{ color:var(--muted); } .fg{ color:var(--termfg); }
+  .cur{ padding:0 3px; border-radius:2px; }
+
+  .surf{ padding:14px 15px; display:flex; flex-direction:column; gap:11px; background:var(--bg); border-top:1px solid var(--line); }
+  .row{ display:flex; gap:9px; }
+  .pane{ flex:1; border-radius:8px; padding:9px 11px; font:600 11px ui-sans-serif; color:var(--termfg); background:var(--term); position:relative; }
+  .pane.off{ border:1px solid var(--line); color:var(--muted); }
+  .belltag{ position:absolute; top:-9px; right:9px; font:700 9px ui-sans-serif; padding:2px 7px; border-radius:10px; color:var(--term); }
+  .keybar{ display:flex; gap:7px; flex-wrap:wrap; }
+  .slot{ font:600 11.5px ui-sans-serif; padding:7px 11px; border-radius:7px; background:var(--panelHi); border:1px solid var(--line); color:var(--fg); }
+
+  .legend{ display:flex; flex-wrap:wrap; gap:6px; padding:12px 15px; background:var(--panel); border-top:1px solid var(--line); }
+  .sw{ display:flex; align-items:center; gap:6px; font:600 10.5px ui-sans-serif; color:var(--muted); background:var(--bg); border:1px solid var(--line); border-radius:20px; padding:3px 9px 3px 4px; }
+  .chip{ width:15px; height:15px; border-radius:50%; }
+
+  .ring{ display:flex; align-items:center; gap:14px; margin:0 0 18px; flex-wrap:wrap; }
+  .ring .deg{ font:600 11px ui-monospace; color:var(--muted); display:flex; align-items:center; gap:7px; }
+  .ring .deg b{ width:22px; height:22px; border-radius:50%; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>semicolyn — <em>Blue-oriented</em> theme candidates</h1>
+  <p class="lede">Both concepts keep Neon Midnight's <b>blue-near-black night</b> (<code style="color:var(--termfg)">#06080F</code> ground, <code style="color:var(--termfg)">#04060D</code> terminal) and push saturation. Rest is solid — <b>glow is bell-only</b>.</p>
+  <p class="lede">Same shell session in every card so each palette shows in context: prompt, path, git branch, an <b>ok</b>, an <b>error</b>, a <b>warning</b>, a link, and the cursor block.</p>
+
+  <!-- ============ CONCEPT A: HAND-PICKED BLUE-NEON ============ -->
+  <h2>A · Hand-picked blue-neon <span class="sub">— blue leads; coral / green / amber / purple support</span></h2>
+  <p class="note">Blue is the <b style="color:var(--termfg)">primary accent</b> (prompt, focus border, bell, armed keys). Three blue leads to compare — same supporting neons underneath: success <code>#2CE59B</code>, error <code>#FF5C6C</code>, warning <code>#FFB020</code>, purple <code>#B98CFF</code>.</p>
+  <div class="grid">
+
+    <!-- A1 Electric Azure -->
+    <div class="card">
+      <div class="label"><h3>A1 · Electric Azure</h3><span class="hex">#3D8BFF</span></div>
+      <div class="chrome"><span class="dot" style="background:#FF5C6C"></span><span class="dot" style="background:#FFB020"></span><span class="dot" style="background:#2CE59B"></span><span class="wt">ssh · web-01</span></div>
+      <div class="term">
+        <div><span style="color:#3D8BFF;font-weight:700">➜</span> <span style="color:#86B7FF">~/src/semicolyn</span> <span style="color:#B98CFF">git:(</span><span style="color:#2CE59B">main</span><span style="color:#B98CFF">)</span> <span class="fg">swift test</span></div>
+        <div><span style="color:#2CE59B">✓</span> <span class="fg">SemicolynKit</span> <span class="dim">— 142 passed</span></div>
+        <div><span style="color:#FFB020">⚠</span> <span class="fg">3 skipped</span> <span class="dim">(needs sshd fixture)</span></div>
+        <div><span style="color:#FF5C6C">✗</span> <span class="fg">ThemeTests.evenSpacing</span> <span class="dim">— assertion failed</span></div>
+        <div class="dim">see <span style="color:#3D8BFF;text-decoration:underline;text-underline-offset:2px">https://ci.log/9f2</span></div>
+        <div><span style="color:#3D8BFF;font-weight:700">➜</span> <span style="color:#86B7FF">~/src/semicolyn</span> <span class="cur" style="background:#3D8BFF;color:#04060D">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="row">
+          <div class="pane" style="border:1.5px solid #3D8BFF">pane · active</div>
+          <div class="pane off">pane · idle</div>
+        </div>
+        <div class="keybar">
+          <span class="slot" style="background:rgba(61,139,255,.15);border-color:transparent;color:#86B7FF">⇥ promoted</span>
+          <span class="slot" style="background:#3D8BFF;border-color:#3D8BFF;color:#04060D">esc · armed</span>
+          <span class="slot">ctrl</span><span class="slot">/</span>
+        </div>
+      </div>
+      <div class="legend">
+        <span class="sw"><span class="chip" style="background:#3D8BFF"></span>accent</span>
+        <span class="sw"><span class="chip" style="background:#86B7FF"></span>highlight</span>
+        <span class="sw"><span class="chip" style="background:#2CE59B"></span>success</span>
+        <span class="sw"><span class="chip" style="background:#FF5C6C"></span>error</span>
+        <span class="sw"><span class="chip" style="background:#FFB020"></span>warning</span>
+        <span class="sw"><span class="chip" style="background:#B98CFF"></span>purple</span>
+      </div>
+    </div>
+
+    <!-- A2 Cobalt -->
+    <div class="card">
+      <div class="label"><h3>A2 · Cobalt / Ultramarine</h3><span class="hex">#4F63FF</span></div>
+      <div class="chrome"><span class="dot" style="background:#FF5C6C"></span><span class="dot" style="background:#FFB020"></span><span class="dot" style="background:#2CE59B"></span><span class="wt">ssh · web-01</span></div>
+      <div class="term">
+        <div><span style="color:#4F63FF;font-weight:700">➜</span> <span style="color:#93A2FF">~/src/semicolyn</span> <span style="color:#B98CFF">git:(</span><span style="color:#2CE59B">main</span><span style="color:#B98CFF">)</span> <span class="fg">swift test</span></div>
+        <div><span style="color:#2CE59B">✓</span> <span class="fg">SemicolynKit</span> <span class="dim">— 142 passed</span></div>
+        <div><span style="color:#FFB020">⚠</span> <span class="fg">3 skipped</span> <span class="dim">(needs sshd fixture)</span></div>
+        <div><span style="color:#FF5C6C">✗</span> <span class="fg">ThemeTests.evenSpacing</span> <span class="dim">— assertion failed</span></div>
+        <div class="dim">see <span style="color:#4F63FF;text-decoration:underline;text-underline-offset:2px">https://ci.log/9f2</span></div>
+        <div><span style="color:#4F63FF;font-weight:700">➜</span> <span style="color:#93A2FF">~/src/semicolyn</span> <span class="cur" style="background:#4F63FF;color:#04060D">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="row">
+          <div class="pane" style="border:1.5px solid #4F63FF">pane · active</div>
+          <div class="pane off">pane · idle</div>
+        </div>
+        <div class="keybar">
+          <span class="slot" style="background:rgba(79,99,255,.16);border-color:transparent;color:#93A2FF">⇥ promoted</span>
+          <span class="slot" style="background:#4F63FF;border-color:#4F63FF;color:#04060D">esc · armed</span>
+          <span class="slot">ctrl</span><span class="slot">/</span>
+        </div>
+      </div>
+      <div class="legend">
+        <span class="sw"><span class="chip" style="background:#4F63FF"></span>accent</span>
+        <span class="sw"><span class="chip" style="background:#93A2FF"></span>highlight</span>
+        <span class="sw"><span class="chip" style="background:#2CE59B"></span>success</span>
+        <span class="sw"><span class="chip" style="background:#FF5C6C"></span>error</span>
+        <span class="sw"><span class="chip" style="background:#FFB020"></span>warning</span>
+        <span class="sw"><span class="chip" style="background:#B98CFF"></span>purple</span>
+      </div>
+    </div>
+
+    <!-- A3 Cyan-Azure -->
+    <div class="card">
+      <div class="label"><h3>A3 · Cyan-Azure</h3><span class="hex">#22B5FF</span></div>
+      <div class="chrome"><span class="dot" style="background:#FF5C6C"></span><span class="dot" style="background:#FFB020"></span><span class="dot" style="background:#2CE59B"></span><span class="wt">ssh · web-01</span></div>
+      <div class="term">
+        <div><span style="color:#22B5FF;font-weight:700">➜</span> <span style="color:#7FDBFF">~/src/semicolyn</span> <span style="color:#B98CFF">git:(</span><span style="color:#2CE59B">main</span><span style="color:#B98CFF">)</span> <span class="fg">swift test</span></div>
+        <div><span style="color:#2CE59B">✓</span> <span class="fg">SemicolynKit</span> <span class="dim">— 142 passed</span></div>
+        <div><span style="color:#FFB020">⚠</span> <span class="fg">3 skipped</span> <span class="dim">(needs sshd fixture)</span></div>
+        <div><span style="color:#FF5C6C">✗</span> <span class="fg">ThemeTests.evenSpacing</span> <span class="dim">— assertion failed</span></div>
+        <div class="dim">see <span style="color:#22B5FF;text-decoration:underline;text-underline-offset:2px">https://ci.log/9f2</span></div>
+        <div><span style="color:#22B5FF;font-weight:700">➜</span> <span style="color:#7FDBFF">~/src/semicolyn</span> <span class="cur" style="background:#22B5FF;color:#04060D">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="row">
+          <div class="pane" style="border:1.5px solid #22B5FF">pane · active</div>
+          <div class="pane off">pane · idle</div>
+        </div>
+        <div class="keybar">
+          <span class="slot" style="background:rgba(34,181,255,.15);border-color:transparent;color:#7FDBFF">⇥ promoted</span>
+          <span class="slot" style="background:#22B5FF;border-color:#22B5FF;color:#04060D">esc · armed</span>
+          <span class="slot">ctrl</span><span class="slot">/</span>
+        </div>
+      </div>
+      <div class="legend">
+        <span class="sw"><span class="chip" style="background:#22B5FF"></span>accent</span>
+        <span class="sw"><span class="chip" style="background:#7FDBFF"></span>highlight</span>
+        <span class="sw"><span class="chip" style="background:#2CE59B"></span>success</span>
+        <span class="sw"><span class="chip" style="background:#FF5C6C"></span>error</span>
+        <span class="sw"><span class="chip" style="background:#FFB020"></span>warning</span>
+        <span class="sw"><span class="chip" style="background:#B98CFF"></span>purple</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============ CONCEPT B: EVEN-SPACED, BLUE-ANCHORED ============ -->
+  <h2>B · Even-spaced, blue-anchored <span class="sub">— a 72° hue ring; meaning wins on the snap</span></h2>
+  <p class="note">Anchor the ring on blue at <b style="color:var(--termfg)">216°</b>, step <b style="color:var(--termfg)">72°</b> five times → violet, red, (yellow), green. The pure-math yellow at 72° is nudged to amber (43°) so <code>warning</code> still reads warm — that's the "meaning wins" snap. Every hue is <code>hsl(h 88% 64%)</code>-class: identical saturation/lightness, only hue moves.</p>
+  <div class="ring">
+    <span class="deg"><b style="background:hsl(216 90% 64%)"></b>216° accent</span>
+    <span class="deg"><b style="background:hsl(288 82% 68%)"></b>288° highlight</span>
+    <span class="deg"><b style="background:hsl(360 85% 66%)"></b>360° error</span>
+    <span class="deg"><b style="background:hsl(43 92% 58%)"></b>72°→43° warning</span>
+    <span class="deg"><b style="background:hsl(144 72% 52%)"></b>144° success</span>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <div class="label"><h3>B · Even-spaced (blue-anchored)</h3><span class="hex">hsl(216 90% 64%)</span></div>
+      <div class="chrome"><span class="dot" style="background:hsl(360 85% 66%)"></span><span class="dot" style="background:hsl(43 92% 58%)"></span><span class="dot" style="background:hsl(144 72% 52%)"></span><span class="wt">ssh · web-01</span></div>
+      <div class="term">
+        <div><span style="color:hsl(216 90% 64%);font-weight:700">➜</span> <span style="color:hsl(216 90% 78%)">~/src/semicolyn</span> <span style="color:hsl(288 82% 68%)">git:(</span><span style="color:hsl(144 72% 52%)">main</span><span style="color:hsl(288 82% 68%)">)</span> <span class="fg">swift test</span></div>
+        <div><span style="color:hsl(144 72% 52%)">✓</span> <span class="fg">SemicolynKit</span> <span class="dim">— 142 passed</span></div>
+        <div><span style="color:hsl(43 92% 58%)">⚠</span> <span class="fg">3 skipped</span> <span class="dim">(needs sshd fixture)</span></div>
+        <div><span style="color:hsl(360 85% 66%)">✗</span> <span class="fg">ThemeTests.evenSpacing</span> <span class="dim">— assertion failed</span></div>
+        <div class="dim">see <span style="color:hsl(216 90% 64%);text-decoration:underline;text-underline-offset:2px">https://ci.log/9f2</span></div>
+        <div><span style="color:hsl(216 90% 64%);font-weight:700">➜</span> <span style="color:hsl(216 90% 78%)">~/src/semicolyn</span> <span class="cur" style="background:hsl(216 90% 64%);color:#04060D">█</span></div>
+      </div>
+      <div class="surf">
+        <div class="row">
+          <div class="pane" style="border:1.5px solid hsl(216 90% 64%)">pane · active</div>
+          <div class="pane off">pane · idle</div>
+          <div class="pane" style="border:1.5px solid hsl(216 90% 64%);box-shadow:inset 0 0 20px hsla(216,90%,64%,.55),0 0 16px hsla(216,90%,64%,.4)">bell<span class="belltag" style="background:hsl(216 90% 64%)">▲ bell</span></div>
+        </div>
+        <div class="keybar">
+          <span class="slot" style="background:hsla(216,90%,64%,.16);border-color:transparent;color:hsl(216 90% 78%)">⇥ promoted</span>
+          <span class="slot" style="background:hsl(216 90% 64%);border-color:hsl(216 90% 64%);color:#04060D">esc · armed</span>
+          <span class="slot" style="background:hsla(288,82%,68%,.16);border-color:transparent;color:hsl(288 82% 78%)">⌘ highlight</span>
+          <span class="slot">ctrl</span>
+        </div>
+      </div>
+      <div class="legend">
+        <span class="sw"><span class="chip" style="background:hsl(216 90% 64%)"></span>216° accent</span>
+        <span class="sw"><span class="chip" style="background:hsl(288 82% 68%)"></span>288° highlight</span>
+        <span class="sw"><span class="chip" style="background:hsl(144 72% 52%)"></span>144° success</span>
+        <span class="sw"><span class="chip" style="background:hsl(360 85% 66%)"></span>360° error</span>
+        <span class="sw"><span class="chip" style="background:hsl(43 92% 58%)"></span>43° warning</span>
+      </div>
+    </div>
+
+    <!-- B alt: purer math, warning stays yellow-green (no snap) -->
+    <div class="card">
+      <div class="label"><h3>B′ · Purer math (no amber snap)</h3><span class="hex">warning @ 72°</span></div>
+      <div class="chrome"><span class="dot" style="background:hsl(360 85% 66%)"></span><span class="dot" style="background:hsl(72 80% 55%)"></span><span class="dot" style="background:hsl(144 72% 52%)"></span><span class="wt">ssh · web-01</span></div>
+      <div class="term">
+        <div><span style="color:hsl(216 90% 64%);font-weight:700">➜</span> <span style="color:hsl(216 90% 78%)">~/src/semicolyn</span> <span style="color:hsl(288 82% 68%)">git:(</span><span style="color:hsl(144 72% 52%)">main</span><span style="color:hsl(288 82% 68%)">)</span> <span class="fg">swift test</span></div>
+        <div><span style="color:hsl(144 72% 52%)">✓</span> <span class="fg">SemicolynKit</span> <span class="dim">— 142 passed</span></div>
+        <div><span style="color:hsl(72 80% 55%)">⚠</span> <span class="fg">3 skipped</span> <span class="dim">(warning @ pure 72°)</span></div>
+        <div><span style="color:hsl(360 85% 66%)">✗</span> <span class="fg">ThemeTests.evenSpacing</span> <span class="dim">— assertion failed</span></div>
+        <div class="dim">see <span style="color:hsl(216 90% 64%);text-decoration:underline;text-underline-offset:2px">https://ci.log/9f2</span></div>
+        <div><span style="color:hsl(216 90% 64%);font-weight:700">➜</span> <span style="color:hsl(216 90% 78%)">~/src/semicolyn</span> <span class="cur" style="background:hsl(216 90% 64%);color:#04060D">█</span></div>
+      </div>
+      <div class="legend">
+        <span class="sw"><span class="chip" style="background:hsl(216 90% 64%)"></span>216° accent</span>
+        <span class="sw"><span class="chip" style="background:hsl(288 82% 68%)"></span>288° highlight</span>
+        <span class="sw"><span class="chip" style="background:hsl(144 72% 52%)"></span>144° success</span>
+        <span class="sw"><span class="chip" style="background:hsl(360 85% 66%)"></span>360° error</span>
+        <span class="sw"><span class="chip" style="background:hsl(72 80% 55%)"></span>72° warning (unsnapped)</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
