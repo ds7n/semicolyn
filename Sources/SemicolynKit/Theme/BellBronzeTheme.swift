@@ -15,29 +15,43 @@ private let red500          = ThemeColor("#E06B6B")
 private let textPrimary     = ThemeColor("#E8EBF0")
 private let textMuted       = ThemeColor("#8A93A3")
 
+// Bronze is the warm accent → yellow slot = bronze. degraded/warning use a
+// separate amber slot (brightYellow) so bronze-accent and amber-warning stay
+// visibly distinct, matching the shipped theme.
+private let bellBronzeANSI = ANSIPalette([
+    ThemeColor("#0A0C10"), // black
+    red500,                // red    (error)
+    patina500,             // green
+    bronze500,             // yellow (bronze / accent)
+    ThemeColor("#5E86C7"), // blue
+    ThemeColor("#A98BC7"), // magenta
+    ThemeColor("#5FA8B5"), // cyan
+    ThemeColor("#C9D1DE"), // white
+    ThemeColor("#2A323F"), // brightBlack
+    ThemeColor("#F08A8A"), // brightRed
+    ThemeColor("#7FC4B7"), // brightGreen
+    amber500,              // brightYellow (amber / warning)
+    ThemeColor("#8AAAE0"), // brightBlue
+    ThemeColor("#C8ADE0"), // brightMagenta
+    ThemeColor("#8FCDD9"), // brightCyan
+    ThemeColor("#F2F5FA"), // brightWhite
+])
+
 extension Theme {
-    public static let bellBronze = Theme(
+    public static let bellBronze = Theme.fromANSI(
+        ansi: bellBronzeANSI,
+        roles: ANSIRoleMap(accentPrimary: .yellow, success: .green,
+                           degraded: .brightYellow, broken: .red, warning: .brightYellow),
+        highlight: bronze300,
         surface: .init(bg: coolDarkAnchor, panel: coolDarkPanel,
                        panelHigh: coolDarkPanelHi, line: coolDarkLine),
-        text: .init(primary: textPrimary, secondary: textMuted,
-                    muted: textMuted, inverse: coolDarkAnchor),
-        accent: .init(primary: bronze500, highlight: bronze300),
-        state: .init(success: patina500, degraded: amber500,
-                     broken: red500, warning: amber500),
-        bell: .init(edge: bronze500),
-        focus: .init(paneBorder: bronze500, paneBorderInactive: coolDarkLine),
-        keybar: .init(slotBg: coolDarkPanel,
-                      slotBgPromoted: bronze500.alpha(0.12),
-                      slotBgArmed: bronze500.alpha(0.20),
-                      slotBgLocked: bronze500.alpha(0.30)),
-        predictor: .init(stripBg: coolDarkPanel, suggestionBg: coolDarkPanelHi,
-                         suggestionText: textPrimary),
-        banner: .init(amberBg: amber500.alpha(0.15), redBg: red500.alpha(0.15),
-                      neutralBg: coolDarkPanel),
-        terminal: .init(bg: ThemeColor("#0A0C10"), fg: ThemeColor("#CFD6E4"))
+        text: .init(primary: textPrimary, secondary: textMuted, muted: textMuted, inverse: coolDarkAnchor),
+        terminal: .init(bg: ThemeColor("#0A0C10"), fg: ThemeColor("#CFD6E4"),
+                        cursor: bronze500, cursorText: ThemeColor("#0A0C10"),
+                        selection: bronze500.alpha(0.30))
     )
 
     // Neon Midnight is the default (first); Bell-bronze retained as a switchable
-    // alternate (candidate Pro cosmetic). Picker UI is Phase 4.
+    // alternate (candidate Pro cosmetic).
     public static let all: [Theme] = catalog.map(\.theme)
 }

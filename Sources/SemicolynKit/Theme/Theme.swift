@@ -61,7 +61,18 @@ public struct Theme: Equatable, Sendable {
         public let amberBg, redBg, neutralBg: ThemeColor
     }
     public struct Terminal: Equatable, Sendable {
-        public let bg, fg: ThemeColor
+        public let bg, fg, cursor, cursorText, selection: ThemeColor
+        /// New fields default so existing `.init(bg:fg:)` call sites keep compiling:
+        /// cursor→fg, cursorText→bg, selection→fg @ 30%.
+        public init(bg: ThemeColor, fg: ThemeColor,
+                    cursor: ThemeColor? = nil, cursorText: ThemeColor? = nil,
+                    selection: ThemeColor? = nil) {
+            self.bg = bg
+            self.fg = fg
+            self.cursor = cursor ?? fg
+            self.cursorText = cursorText ?? bg
+            self.selection = selection ?? fg.alpha(0.30)
+        }
     }
 
     public let surface: Surface
@@ -74,4 +85,16 @@ public struct Theme: Equatable, Sendable {
     public let predictor: Predictor
     public let banner: Banner
     public let terminal: Terminal
+    /// Authored 16-color ANSI palette — source of hue for the terminal + UI refs.
+    public let ansi: ANSIPalette
+
+    public init(surface: Surface, text: Text, accent: Accent, state: State,
+                bell: Bell, focus: Focus, keybar: Keybar, predictor: Predictor,
+                banner: Banner, terminal: Terminal,
+                ansi: ANSIPalette = ANSIPalette.neutralFallback) {
+        self.surface = surface; self.text = text; self.accent = accent
+        self.state = state; self.bell = bell; self.focus = focus
+        self.keybar = keybar; self.predictor = predictor; self.banner = banner
+        self.terminal = terminal; self.ansi = ansi
+    }
 }
