@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — tuning COBALT for legibility.
+     User likes cobalt (A2 #4F63FF) but finds it hard to read. Pure #4F63FF
+     measures ~4.3:1 on the #04060D terminal — just under WCAG-AA (4.5:1) for
+     body text, which is why the prompt/path strain. Here are the same cobalt
+     lifted in lightness until it passes, with measured contrast ratios, plus
+     a "deep fill / readable text" split option. Same shell line in each. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semicolyn — Cobalt legibility tuning</title>
+<style>
+  :root{ color-scheme:dark;
+    --bg:#06080F; --panel:#0D1120; --panelHi:#151A2B; --line:#232B42;
+    --term:#04060D; --fg:#E8ECF5; --termfg:#CFD6E6; --muted:#8A93A8; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:#04050B; color:var(--fg);
+        font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap{ max-width:1100px; margin:0 auto; padding:32px 22px 80px; }
+  h1{ font-size:22px; margin:0 0 6px; } h1 em{ font-style:normal; color:#6E80FF; }
+  .lede{ color:var(--muted); font-size:13.5px; max-width:880px; line-height:1.6; margin:0 0 22px; }
+  .lede b{ color:var(--termfg); } .lede code{ color:var(--termfg); font-family:ui-monospace; }
+
+  .card{ border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--bg); margin-bottom:16px; }
+  .label{ display:flex; align-items:center; gap:10px; padding:11px 15px; background:var(--panel); border-bottom:1px solid var(--line); }
+  .label h3{ margin:0; font-size:14px; } .label .hex{ font:600 12px ui-monospace; color:var(--termfg); }
+  .label .cr{ margin-left:auto; font:700 11px ui-sans-serif; padding:3px 9px; border-radius:20px; }
+  .cr.pass{ background:rgba(44,229,155,.16); color:#2CE59B; }
+  .cr.fail{ background:rgba(255,92,108,.16); color:#FF5C6C; }
+  .cr.aaa{ background:rgba(110,128,255,.18); color:#95A3FF; }
+
+  .term{ background:var(--term); padding:15px; font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+         font-size:13px; line-height:2.0; }
+  .dim{ color:var(--muted); } .fg{ color:var(--termfg); }
+  .cur{ padding:0 3px; border-radius:2px; }
+  .surf{ display:flex; gap:9px; padding:12px 15px; background:var(--bg); border-top:1px solid var(--line); }
+  .pane{ border-radius:8px; padding:8px 11px; font:600 11px ui-sans-serif; color:var(--termfg); background:var(--term); }
+  .slot{ font:600 11.5px ui-sans-serif; padding:7px 11px; border-radius:7px; color:#04060D; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Cobalt, <em>tuned for legibility</em></h1>
+  <p class="lede">Pure cobalt <code>#4F63FF</code> is <b>~4.3:1</b> on the <code>#04060D</code> terminal — under the <b>4.5:1</b> AA line for body text, so the prompt/path strain. Below: the same cobalt lifted in lightness (hue held ~231°) until it clears AA, with <b>measured contrast</b>. The final row keeps deep cobalt for <b>fills</b> (armed keys, cursor, borders) and a readable cobalt for <b>text</b> — a common split that lets you keep the deep chrome and still read comfortably.</p>
+
+  <!-- reference: the problem -->
+  <div class="card">
+    <div class="label"><h3>Reference · pure cobalt</h3><span class="hex">#4F63FF</span><span class="cr fail">4.3:1 · fails AA text</span></div>
+    <div class="term">
+      <div><span style="color:#4F63FF;font-weight:700">➜</span> <span style="color:#4F63FF">~/src/semicolyn</span> <span class="dim">git:(</span><span style="color:#4F63FF">main</span><span class="dim">)</span> <span class="fg">swift test --filter ThemeTests</span></div>
+    </div>
+  </div>
+
+  <!-- C1 -->
+  <div class="card">
+    <div class="label"><h3>C1 · lifted cobalt</h3><span class="hex">#5D72FF</span><span class="cr pass">5.0:1 · AA</span></div>
+    <div class="term">
+      <div><span style="color:#5D72FF;font-weight:700">➜</span> <span style="color:#5D72FF">~/src/semicolyn</span> <span class="dim">git:(</span><span style="color:#5D72FF">main</span><span class="dim">)</span> <span class="fg">swift test --filter ThemeTests</span> <span class="cur" style="background:#5D72FF;color:#04060D">█</span></div>
+    </div>
+    <div class="surf">
+      <div class="pane" style="border:1.5px solid #5D72FF">focus border</div>
+      <span class="slot" style="background:#5D72FF">esc · armed</span>
+    </div>
+  </div>
+
+  <!-- C2 (recommended) -->
+  <div class="card">
+    <div class="label"><h3>C2 · periwinkle-cobalt <span class="dim" style="font-weight:400">— recommended</span></h3><span class="hex">#6E80FF</span><span class="cr pass">5.9:1 · comfortable AA</span></div>
+    <div class="term">
+      <div><span style="color:#6E80FF;font-weight:700">➜</span> <span style="color:#6E80FF">~/src/semicolyn</span> <span class="dim">git:(</span><span style="color:#6E80FF">main</span><span class="dim">)</span> <span class="fg">swift test --filter ThemeTests</span> <span class="cur" style="background:#6E80FF;color:#04060D">█</span></div>
+    </div>
+    <div class="surf">
+      <div class="pane" style="border:1.5px solid #6E80FF">focus border</div>
+      <span class="slot" style="background:#6E80FF">esc · armed</span>
+    </div>
+  </div>
+
+  <!-- C3 -->
+  <div class="card">
+    <div class="label"><h3>C3 · periwinkle (Tokyo-Night-ish)</h3><span class="hex">#7C8CFF</span><span class="cr aaa">6.7:1 · near-AAA</span></div>
+    <div class="term">
+      <div><span style="color:#7C8CFF;font-weight:700">➜</span> <span style="color:#7C8CFF">~/src/semicolyn</span> <span class="dim">git:(</span><span style="color:#7C8CFF">main</span><span class="dim">)</span> <span class="fg">swift test --filter ThemeTests</span> <span class="cur" style="background:#7C8CFF;color:#04060D">█</span></div>
+    </div>
+    <div class="surf">
+      <div class="pane" style="border:1.5px solid #7C8CFF">focus border</div>
+      <span class="slot" style="background:#7C8CFF">esc · armed</span>
+    </div>
+  </div>
+
+  <!-- Split -->
+  <div class="card">
+    <div class="label"><h3>Split · deep fills + readable text</h3><span class="hex">#4F63FF fill / #7C8CFF text</span><span class="cr pass">both roles pass</span></div>
+    <div class="term">
+      <div><span style="color:#7C8CFF;font-weight:700">➜</span> <span style="color:#7C8CFF">~/src/semicolyn</span> <span class="dim">git:(</span><span style="color:#2CE59B">main</span><span class="dim">)</span> <span class="fg">swift test --filter ThemeTests</span> <span class="cur" style="background:#4F63FF;color:#E8ECF5">█</span></div>
+      <div class="dim">text (prompt/path/links) uses the readable <span style="color:#7C8CFF">#7C8CFF</span>; the deep <span style="color:#95A3FF">#4F63FF</span> stays for solid fills</div>
+    </div>
+    <div class="surf">
+      <div class="pane" style="border:1.5px solid #4F63FF">focus border · deep</div>
+      <span class="slot" style="background:#4F63FF;color:#E8ECF5">esc · armed · deep</span>
+      <span class="slot" style="background:rgba(79,99,255,.16);color:#7C8CFF">⇥ promoted</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

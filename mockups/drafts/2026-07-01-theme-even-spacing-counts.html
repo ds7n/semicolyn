@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — "why 5?" — the blue-anchored even-spaced hue ring
+     at N = 4/5/6/7/8. All rings anchor accent at 216° (azure) and step 360/N,
+     every swatch the SAME hsl(h 82% 62%) so only hue moves. Pure math (no
+     semantic snap) so the crowding is honest. Each row notes which semantic
+     roles the hues fall near, and flags where adjacent hues get hard to tell
+     apart. N=6 = the ANSI wheel (R/Y/G/C/B/M, 60°). Plain flow; no JS. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semicolyn — Even-spacing color counts (why 5?)</title>
+<style>
+  :root{ color-scheme:dark;
+    --bg:#06080F; --panel:#0D1120; --panelHi:#151A2B; --line:#232B42;
+    --term:#04060D; --fg:#E8ECF5; --termfg:#CFD6E6; --muted:#8A93A8; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:#04050B; color:var(--fg);
+        font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap{ max-width:1100px; margin:0 auto; padding:32px 22px 80px; }
+  h1{ font-size:22px; margin:0 0 6px; } h1 em{ font-style:normal; color:hsl(216 82% 66%); }
+  .lede{ color:var(--muted); font-size:13.5px; max-width:880px; line-height:1.6; margin:0 0 6px; }
+  .lede b{ color:var(--termfg); } .lede code{ color:var(--termfg); font-family:ui-monospace; }
+
+  .rowc{ border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--bg); margin:16px 0; }
+  .rowc.pick{ border-color:hsl(216 82% 62%); box-shadow:0 0 0 1px hsl(216 82% 62%); }
+  .head{ display:flex; align-items:baseline; gap:12px; padding:11px 15px; background:var(--panel); border-bottom:1px solid var(--line); }
+  .head .n{ font:800 16px ui-sans-serif; } .head .step{ font:600 12px ui-monospace; color:var(--muted); }
+  .head .tag{ margin-left:auto; font:700 10px ui-sans-serif; letter-spacing:.4px; padding:3px 9px; border-radius:20px; }
+  .tag.good{ background:hsla(216,82%,62%,.18); color:hsl(216 82% 74%); }
+  .tag.warn{ background:rgba(255,176,32,.15); color:#FFC873; }
+  .tag.ansi{ background:rgba(44,229,155,.14); color:#8FEFC6; }
+
+  .swrow{ display:flex; }
+  .sw{ flex:1; height:74px; display:flex; align-items:flex-end; justify-content:center; padding-bottom:6px;
+       font:700 10px ui-monospace; color:rgba(4,6,13,.8); }
+  .note{ padding:10px 15px 13px; color:var(--muted); font-size:12.5px; line-height:1.55; background:var(--bg); border-top:1px solid var(--line); }
+  .note b{ color:var(--termfg); }
+  .role{ display:inline-block; font:600 10.5px ui-sans-serif; color:var(--fg); background:var(--panelHi);
+         border:1px solid var(--line); border-radius:6px; padding:1px 7px; margin:0 3px 3px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Why <em>5</em>? — the ring at N = 4…8</h1>
+  <p class="lede">Every row anchors the accent at <b>216° azure</b> and steps <b>360/N</b>, with identical <code>hsl(h 82% 62%)</code> so <b>only hue moves</b>. This is <b>pure math</b> — no semantic snap — so you can see honestly where hues crowd. The roles that actually consume a hue today: <span class="role">accent</span><span class="role">highlight</span><span class="role">success</span><span class="role">warning</span><span class="role">broken</span></p>
+
+  <!-- N=4 -->
+  <div class="rowc">
+    <div class="head"><span class="n">N = 4</span><span class="step">90° apart</span><span class="tag warn">too coarse</span></div>
+    <div class="swrow">
+      <div class="sw" style="background:hsl(216 82% 62%)">216°</div>
+      <div class="sw" style="background:hsl(306 82% 62%)">306°</div>
+      <div class="sw" style="background:hsl(36 82% 62%)">36°</div>
+      <div class="sw" style="background:hsl(126 82% 62%)">126°</div>
+    </div>
+    <div class="note">Blue · magenta · orange · green. <b>No distinct red</b> — "error" would have to borrow the orange (36°), colliding with warning. Only 4 hues = one semantic anchor goes missing.</div>
+  </div>
+
+  <!-- N=5 (chosen) -->
+  <div class="rowc pick">
+    <div class="head"><span class="n">N = 5</span><span class="step">72° apart</span><span class="tag good">fits the roles ✓</span></div>
+    <div class="swrow">
+      <div class="sw" style="background:hsl(216 82% 62%)">216°</div>
+      <div class="sw" style="background:hsl(288 82% 62%)">288°</div>
+      <div class="sw" style="background:hsl(360 82% 62%)">360°</div>
+      <div class="sw" style="background:hsl(72 82% 55%)">72°</div>
+      <div class="sw" style="background:hsl(144 82% 55%)">144°</div>
+    </div>
+    <div class="note">Blue → violet → red → (yellow) → green. Lands one hue on <b>each</b> role: <span class="role">accent 216</span><span class="role">highlight 288</span><span class="role">broken 360</span><span class="role">warning 72→amber</span><span class="role">success 144</span>. The 72° yellow snaps to amber ("meaning wins"). Every hue is easily distinguishable.</div>
+  </div>
+
+  <!-- N=6 (ANSI) -->
+  <div class="rowc">
+    <div class="head"><span class="n">N = 6</span><span class="step">60° apart</span><span class="tag ansi">= the ANSI wheel</span></div>
+    <div class="swrow">
+      <div class="sw" style="background:hsl(216 82% 62%)">216°</div>
+      <div class="sw" style="background:hsl(276 82% 62%)">276°</div>
+      <div class="sw" style="background:hsl(336 82% 62%)">336°</div>
+      <div class="sw" style="background:hsl(36 82% 60%)">36°</div>
+      <div class="sw" style="background:hsl(96 82% 55%)">96°</div>
+      <div class="sw" style="background:hsl(156 82% 52%)">156°</div>
+    </div>
+    <div class="note"><b>The natural "more colors" answer.</b> 60° is exactly the ANSI-16 chromatic wheel (R/Y/G/C/B/M). Gives a 6th hue for a <b>cyan/teal</b> role — but there's no UI token for it today. It pays off only if we also <b>theme the terminal's ANSI palette</b> (a separate, bigger feature). Hues still readable, but violet(276) and magenta(336) start to feel close.</div>
+  </div>
+
+  <!-- N=7 -->
+  <div class="rowc">
+    <div class="head"><span class="n">N = 7</span><span class="step">51.4° apart</span><span class="tag warn">crowding</span></div>
+    <div class="swrow">
+      <div class="sw" style="background:hsl(216 82% 62%)">216°</div>
+      <div class="sw" style="background:hsl(267 82% 62%)">267°</div>
+      <div class="sw" style="background:hsl(319 82% 62%)">319°</div>
+      <div class="sw" style="background:hsl(10 82% 60%)">10°</div>
+      <div class="sw" style="background:hsl(62 82% 55%)">62°</div>
+      <div class="sw" style="background:hsl(113 82% 55%)">113°</div>
+      <div class="sw" style="background:hsl(164 82% 52%)">164°</div>
+    </div>
+    <div class="note">7 doesn't map to any standard role set, and the warm side (10°/62°) plus the greens (113°/164°) begin to look like siblings. No clean semantic home for the extra two.</div>
+  </div>
+
+  <!-- N=8 -->
+  <div class="rowc">
+    <div class="head"><span class="n">N = 8</span><span class="step">45° apart</span><span class="tag warn">hues collide</span></div>
+    <div class="swrow">
+      <div class="sw" style="background:hsl(216 82% 62%)">216°</div>
+      <div class="sw" style="background:hsl(261 82% 62%)">261°</div>
+      <div class="sw" style="background:hsl(306 82% 62%)">306°</div>
+      <div class="sw" style="background:hsl(351 82% 60%)">351°</div>
+      <div class="sw" style="background:hsl(36 82% 60%)">36°</div>
+      <div class="sw" style="background:hsl(81 82% 55%)">81°</div>
+      <div class="sw" style="background:hsl(126 82% 55%)">126°</div>
+      <div class="sw" style="background:hsl(171 82% 52%)">171°</div>
+    </div>
+    <div class="note">Richest, but 216/261 (two blues) and 306/351 (magenta/red) sit close enough to read as pairs, and at a glance the ring loses the "one clear color per role" legibility. Great for a decorative spectrum, poor for semantic status colors.</div>
+  </div>
+
+  <p class="lede" style="margin-top:22px"><b>Takeaway:</b> <b>5</b> is the largest count where every hue still maps to a distinct role the app has today. <b>6</b> is the principled step up — but only if Theme B also ships a <b>themed ANSI-16 terminal palette</b>. 7–8 add colors with nowhere semantic to put them.</p>
+</div>
+</body>
+</html>
