@@ -35,7 +35,12 @@ set -euo pipefail
 OPENSSL_VERSION="3.3.2"          # https://github.com/openssl/openssl/releases
 NETTLE_VERSION="3.10"            # https://ftp.gnu.org/gnu/nettle/
 NCURSES_VERSION="6.5"            # https://ftp.gnu.org/gnu/ncurses/
-PROTOBUF_VERSION="27.3"          # protobuf-cpp; https://github.com/protocolbuffers/protobuf/releases
+PROTOBUF_VERSION="27.3"          # https://github.com/protocolbuffers/protobuf/releases
+# protobuf 27.x's release source tarball bundles third_party/utf8_range but NOT
+# third_party/abseil-cpp (that dir is empty), so the `module` ABSL provider fails
+# with "abseil-cpp does not contain a CMakeLists.txt". We populate it ourselves
+# with the abseil release protobuf 27.3 pins (MODULE.bazel -> 20230802.0.bcr.1).
+ABSEIL_VERSION="20230802.0"      # https://github.com/abseil/abseil-cpp/releases (protobuf 27.3 pin)
 
 # Minimum iOS deployment target (matches build-xcframework.sh / project.yml).
 IOS_MIN="17.0"
@@ -93,6 +98,21 @@ extract() {
   tar -xzf "$tarball" -C "$parent"
 }
 
+# populate_protobuf_abseil <protobuf-src-dir> — the protobuf release tarball ships
+# an EMPTY third_party/abseil-cpp, so download the pinned abseil release and unpack
+# it there. Idempotent: skips if already populated. Required for both the host and
+# the per-slice protobuf builds (protobuf_ABSL_PROVIDER=module).
+populate_protobuf_abseil() {
+  local src="$1"
+  local absl_dir="$src/third_party/abseil-cpp"
+  if [[ -f "$absl_dir/CMakeLists.txt" ]]; then return; fi
+  local tarball="$DL_DIR/abseil-cpp-${ABSEIL_VERSION}.tar.gz"
+  fetch "https://github.com/abseil/abseil-cpp/archive/refs/tags/${ABSEIL_VERSION}.tar.gz" "$tarball"
+  rm -rf "$absl_dir"; mkdir -p "$absl_dir"
+  tar -xzf "$tarball" -C "$absl_dir" --strip-components=1
+  test -f "$absl_dir/CMakeLists.txt" || { echo "FATAL: abseil-cpp not populated at $absl_dir"; exit 1; }
+}
+
 # --------------------------------------------------------------------------- #
 # Host protoc: build the protobuf compiler natively so we can run it during    #
 # the Mosh cross-compile. protoc must NOT be cross-compiled (we'd be unable to #
@@ -110,9 +130,10 @@ build_host_protoc() {
   rm -rf "$src"
   mkdir -p "$src"
   tar -xzf "$tarball" -C "$src" --strip-components=1
+  populate_protobuf_abseil "$src"
 
-  # Native (host) build of protoc + libprotobuf via CMake. Abseil is vendored
-  # in the protobuf tarball (protobuf_ABSL_PROVIDER=module).
+  # Native (host) build of protoc + libprotobuf via CMake. Abseil is supplied by
+  # populate_protobuf_abseil above (protobuf_ABSL_PROVIDER=module).
   cmake -S "$src" -B "$src/build-host" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$HOST_DIR" \
@@ -237,6 +258,7 @@ build_protobuf_target() {
   local src="$prefix/src/protobuf"
   rm -rf "$src"; mkdir -p "$src"
   tar -xzf "$tarball" -C "$src" --strip-components=1
+  populate_protobuf_abseil "$src"
 
   local sysroot; sysroot="$(xcrun --sdk "$SDK" --show-sdk-path)"
   # CMake cross-build of libprotobuf ONLY. protobuf_BUILD_PROTOC_BINARIES=OFF so
