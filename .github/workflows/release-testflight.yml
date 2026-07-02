@@ -67,6 +67,8 @@ jobs:
             -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_"$KEY_ID".p8 \
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PRODUCT_BUNDLE_IDENTIFIER=com.truepositive.semicolyn \
             DEVELOPMENT_TEAM="$TEAM" \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
 
