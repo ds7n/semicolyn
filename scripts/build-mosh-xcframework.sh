@@ -137,6 +137,8 @@ build_host_protoc() {
   cmake -S "$src" -B "$src/build-host" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$HOST_DIR" \
+    -DCMAKE_CXX_STANDARD=17 \
+    -DCMAKE_CXX_STANDARD_REQUIRED=ON \
     -Dprotobuf_BUILD_TESTS=OFF \
     -Dprotobuf_BUILD_PROTOC_BINARIES=ON \
     -Dprotobuf_ABSL_PROVIDER=module
@@ -271,6 +273,8 @@ build_protobuf_target() {
     -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_MIN" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$prefix" \
+    -DCMAKE_CXX_STANDARD=17 \
+    -DCMAKE_CXX_STANDARD_REQUIRED=ON \
     -Dprotobuf_BUILD_TESTS=OFF \
     -Dprotobuf_BUILD_PROTOC_BINARIES=OFF \
     -Dprotobuf_BUILD_SHARED_LIBS=OFF \
