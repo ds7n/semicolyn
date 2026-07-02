@@ -21,7 +21,10 @@ generated on a local Mac.
    `project.yml`), name `Semicolyn`, your primary language + SKU.
 
 2. **App Store Connect API key** — Users and Access → **Integrations** → App Store Connect API
-   → **Generate API Key**. Give it the **App Manager** role. Then capture:
+   → **Generate API Key**. Give it the **Admin** role. (App Manager authenticates and can
+   upload, but it **cannot create the distribution certificate** cloud-signing needs — you'll
+   hit `exportArchive Cloud signing permission error`. Admin is required for the first run.)
+   Then capture:
    - **Key ID** (e.g. `A1B2C3D4E5`)
    - **Issuer ID** (a UUID, shown at the top of the page)
    - **Download the `.p8` file** — *you can only download it once.*
