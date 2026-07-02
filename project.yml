@@ -49,5 +49,9 @@ targets:
         # bridges + SwiftTerm aren't Swift-6 strict-concurrency clean; tighten later.
         SWIFT_VERSION: "5.0"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        # SSH/mosh to hosts on the LAN (192.168.x, *.local) triggers iOS's Local
+        # Network permission prompt; without this string the connection silently
+        # fails. Not an App ID capability — a privacy usage string.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "semicolyn connects to the SSH and Mosh servers you specify."
         # No signing in CI; the simulator build is the gate.
         CODE_SIGNING_ALLOWED: NO
