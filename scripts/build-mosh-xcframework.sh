@@ -1,0 +1,393 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 True Positive LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# build-mosh-xcframework.sh — cross-compile the vendored blinksh/mosh C++ into
+# Mosh.xcframework for iOS (arm64 device + arm64/x86_64 simulator).
+#
+# This is macOS-only build engineering: it drives Xcode's clang, autotools,
+# lipo, and xcodebuild. It CANNOT run on Linux. It is verified by the macOS CI
+# job (Task 7), which also wires the resulting Mosh.xcframework into
+# Package.swift as an `#if os(macOS)` binaryTarget.
+#
+# Pipeline per iOS slice (arm64-device, arm64-sim, x86_64-sim):
+#   1. Cross-build Mosh's four REQUIRED native deps as iOS static libs:
+#        OpenSSL, Nettle, ncurses (tinfo), protobuf (runtime lib).
+#      `protoc` (the codegen compiler) is built ONCE for the build host so it
+#      can run natively — we never cross-run protoc.
+#   2. autogen + configure + make the Mosh iOS controller library, pointing its
+#      pkg-config / CPPFLAGS / LDFLAGS at the per-slice dep prefix. The product
+#      is src/frontend/libmoshiosclient.a (which contains `mosh_main`).
+# Then:
+#   3. lipo the two simulator slices into one fat archive.
+#   4. xcodebuild -create-xcframework (device slice + fat sim slice).
+#   5. M1 SUCCESS GATE: nm the device slice for the `mosh_main` bridge symbol.
+#
+# A maintainer bumps a dependency by editing the pinned versions below, or a
+# slice by editing the SLICES table. Each dep is built by its own function so a
+# CI failure points at exactly one dependency.
+
+set -euo pipefail
+
+# --------------------------------------------------------------------------- #
+# Pinned dependency versions (bump here; keep the URLs in the fetch helpers).  #
+# --------------------------------------------------------------------------- #
+OPENSSL_VERSION="3.3.2"          # https://github.com/openssl/openssl/releases
+NETTLE_VERSION="3.10"            # https://ftp.gnu.org/gnu/nettle/
+NCURSES_VERSION="6.5"            # https://ftp.gnu.org/gnu/ncurses/
+PROTOBUF_VERSION="27.3"          # protobuf-cpp; https://github.com/protocolbuffers/protobuf/releases
+
+# Minimum iOS deployment target (matches build-xcframework.sh / project.yml).
+IOS_MIN="17.0"
+
+# --------------------------------------------------------------------------- #
+# Paths.                                                                       #
+# --------------------------------------------------------------------------- #
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+MOSH_SRC="$REPO_ROOT/extern/mosh"          # vendored blinksh/mosh (read-only)
+BUILD_ROOT="$REPO_ROOT/target/mosh-xcframework"
+DL_DIR="$BUILD_ROOT/downloads"             # dependency source tarballs
+HOST_DIR="$BUILD_ROOT/host"                # native protoc for the build host
+OUT="$REPO_ROOT/Mosh.xcframework"          # final artifact (repo root, like SSHCore)
+
+LIB_NAME="libmoshiosclient.a"              # Mosh iOS controller static lib
+BRIDGE_HEADER="$MOSH_SRC/src/frontend/moshiosbridge.h"
+BRIDGE_SYMBOL="mosh_main"                  # M1 gate symbol (extern "C")
+
+# --------------------------------------------------------------------------- #
+# Slice table. Each entry: NAME|ARCH|SDK|HOST_TRIPLE|MIN_FLAG                  #
+#   NAME        logical slice id (build subdir)                               #
+#   ARCH        -arch value for clang                                         #
+#   SDK         xcrun SDK (iphoneos | iphonesimulator)                        #
+#   HOST_TRIPLE autotools --host= value                                       #
+#   MIN_FLAG    deployment-target flag (device vs simulator differ)           #
+# The two arm64 slices share the aarch64 host triple; the SDK + min-version   #
+# flags are what actually distinguish device from simulator.                  #
+# --------------------------------------------------------------------------- #
+SLICES=(
+  "ios-arm64|arm64|iphoneos|aarch64-apple-darwin|-mios-version-min=${IOS_MIN}"
+  "ios-arm64-sim|arm64|iphonesimulator|aarch64-apple-darwin|-mios-simulator-version-min=${IOS_MIN}"
+  "ios-x86_64-sim|x86_64|iphonesimulator|x86_64-apple-darwin|-mios-simulator-version-min=${IOS_MIN}"
+)
+
+# --------------------------------------------------------------------------- #
+# Small utilities.                                                            #
+# --------------------------------------------------------------------------- #
+
+# fetch <url> <dest-tarball> — download a source tarball once (idempotent).
+fetch() {
+  local url="$1" dest="$2"
+  if [[ -f "$dest" ]]; then
+    echo "  [cached] $(basename "$dest")"
+    return
+  fi
+  echo "  [fetch]  $url"
+  curl -fsSL "$url" -o "$dest"
+}
+
+# extract <tarball> <parent-dir> — untar into parent-dir, echoing the top dir.
+extract() {
+  local tarball="$1" parent="$2"
+  mkdir -p "$parent"
+  tar -xzf "$tarball" -C "$parent"
+}
+
+# --------------------------------------------------------------------------- #
+# Host protoc: build the protobuf compiler natively so we can run it during    #
+# the Mosh cross-compile. protoc must NOT be cross-compiled (we'd be unable to #
+# execute it); only libprotobuf is cross-built per slice below.                #
+# --------------------------------------------------------------------------- #
+build_host_protoc() {
+  echo "==> Building host protoc (protobuf $PROTOBUF_VERSION)"
+  if [[ -x "$HOST_DIR/bin/protoc" ]]; then
+    echo "  [cached] host protoc"
+    return
+  fi
+  local tarball="$DL_DIR/protobuf-${PROTOBUF_VERSION}.tar.gz"
+  fetch "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-${PROTOBUF_VERSION}.tar.gz" "$tarball"
+  local src="$BUILD_ROOT/src/protobuf-host"
+  rm -rf "$src"
+  mkdir -p "$src"
+  tar -xzf "$tarball" -C "$src" --strip-components=1
+
+  # Native (host) build of protoc + libprotobuf via CMake. Abseil is vendored
+  # in the protobuf tarball (protobuf_ABSL_PROVIDER=module).
+  cmake -S "$src" -B "$src/build-host" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$HOST_DIR" \
+    -Dprotobuf_BUILD_TESTS=OFF \
+    -Dprotobuf_BUILD_PROTOC_BINARIES=ON \
+    -Dprotobuf_ABSL_PROVIDER=module
+  cmake --build "$src/build-host" --target protoc --parallel
+  cmake --install "$src/build-host"
+  test -x "$HOST_DIR/bin/protoc" || { echo "FATAL: host protoc not built"; exit 1; }
+}
+
+# --------------------------------------------------------------------------- #
+# Per-dependency cross builds. Each takes (arch, sdk, host_triple, min_flag,   #
+# prefix) and installs an iOS static lib + headers + a .pc file under prefix.  #
+# CC/CXX/CFLAGS/CXXFLAGS/LDFLAGS are exported by build_slice before calling.   #
+# --------------------------------------------------------------------------- #
+
+# build_openssl <prefix> — OpenSSL crypto (Mosh's selected AES backend).
+build_openssl() {
+  local prefix="$1"
+  echo "  --> OpenSSL $OPENSSL_VERSION"
+  if [[ -f "$prefix/lib/libcrypto.a" ]]; then echo "     [cached]"; return; fi
+  local tarball="$DL_DIR/openssl-${OPENSSL_VERSION}.tar.gz"
+  fetch "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" "$tarball"
+  local src="$prefix/src/openssl"
+  rm -rf "$src"; mkdir -p "$src"
+  tar -xzf "$tarball" -C "$src" --strip-components=1
+
+  # OpenSSL uses its own Configure targets, not autotools --host. Pick the
+  # target from the current ARCH/SDK the caller exported.
+  local ossl_target
+  case "${ARCH}-${SDK}" in
+    arm64-iphoneos)          ossl_target="ios64-xcrun" ;;
+    arm64-iphonesimulator)   ossl_target="iossimulator-arm64-xcrun" ;;
+    x86_64-iphonesimulator)  ossl_target="iossimulator-xcrun" ;;
+    *) echo "FATAL: no OpenSSL target for ${ARCH}-${SDK}"; exit 1 ;;
+  esac
+
+  ( cd "$src"
+    # CROSS_TOP/CROSS_SDK let OpenSSL's *-xcrun targets locate the SDK; we also
+    # pass our min-version flag through CFLAGS so symbols match the slice.
+    CFLAGS="${MIN_FLAG}" \
+    ./Configure "$ossl_target" \
+      no-shared no-dso no-async no-tests no-engine \
+      --prefix="$prefix" --openssldir="$prefix/ssl"
+    make -j"$(sysctl -n hw.ncpu)" build_libs
+    make install_dev
+  )
+  test -f "$prefix/lib/libcrypto.a" || { echo "FATAL: OpenSSL libcrypto.a missing"; exit 1; }
+}
+
+# build_nettle <prefix> — Nettle. Mosh's configure runs PKG_CHECK_MODULES for
+# Nettle unconditionally; provide it so detection succeeds even though OpenSSL
+# is the active AES backend.
+build_nettle() {
+  local prefix="$1"
+  echo "  --> Nettle $NETTLE_VERSION"
+  if [[ -f "$prefix/lib/libnettle.a" ]]; then echo "     [cached]"; return; fi
+  local tarball="$DL_DIR/nettle-${NETTLE_VERSION}.tar.gz"
+  fetch "https://ftp.gnu.org/gnu/nettle/nettle-${NETTLE_VERSION}.tar.gz" "$tarball"
+  local src="$prefix/src/nettle"
+  rm -rf "$src"; mkdir -p "$src"
+  tar -xzf "$tarball" -C "$src" --strip-components=1
+
+  ( cd "$src"
+    # Nettle is autotools. Disable asm (--disable-assembler) so it builds
+    # cleanly for the cross iOS arch; static only; needs GMP -> --disable-gmp
+    # keeps it self-contained (Mosh only calls the AES core if selected).
+    ./configure \
+      --host="${HOST_TRIPLE}" \
+      --prefix="$prefix" \
+      --disable-shared --enable-static \
+      --disable-assembler --disable-documentation --disable-openssl
+    make -j"$(sysctl -n hw.ncpu)"
+    make install
+  )
+  test -f "$prefix/lib/libnettle.a" || { echo "FATAL: Nettle libnettle.a missing"; exit 1; }
+}
+
+# build_ncurses <prefix> — ncurses provides the tinfo library Mosh requires
+# (the iOS SDK ships no curses). We build the tinfo half only.
+build_ncurses() {
+  local prefix="$1"
+  echo "  --> ncurses $NCURSES_VERSION"
+  if [[ -f "$prefix/lib/libncurses.a" ]]; then echo "     [cached]"; return; fi
+  local tarball="$DL_DIR/ncurses-${NCURSES_VERSION}.tar.gz"
+  fetch "https://ftp.gnu.org/gnu/ncurses/ncurses-${NCURSES_VERSION}.tar.gz" "$tarball"
+  local src="$prefix/src/ncurses"
+  rm -rf "$src"; mkdir -p "$src"
+  tar -xzf "$tarball" -C "$src" --strip-components=1
+
+  ( cd "$src"
+    # ncurses cross-compiles need a native tic/build compiler for the terminfo
+    # DB generation; --with-build-cc points at the host clang. Static, no progs.
+    ./configure \
+      --host="${HOST_TRIPLE}" \
+      --prefix="$prefix" \
+      --with-build-cc="$(xcrun --sdk macosx --find clang)" \
+      --without-shared --without-debug --without-ada --without-cxx-binding \
+      --without-manpages --without-progs --without-tests \
+      --enable-termcap --disable-database --with-fallbacks=xterm,xterm-256color,vt100,linux
+    make -j"$(sysctl -n hw.ncpu)"
+    make install
+  )
+  # Some ncurses builds emit libtinfo separately; Mosh's pkg-config probe looks
+  # for `tinfo` then `ncurses`. Ensure a tinfo.pc alias exists if only ncurses
+  # was produced, so PKG_CHECK_MODULES([TINFO],[tinfo]) or [ncurses] resolves.
+  test -f "$prefix/lib/libncurses.a" || { echo "FATAL: ncurses libncurses.a missing"; exit 1; }
+  if [[ ! -f "$prefix/lib/pkgconfig/tinfo.pc" && -f "$prefix/lib/pkgconfig/ncurses.pc" ]]; then
+    cp "$prefix/lib/pkgconfig/ncurses.pc" "$prefix/lib/pkgconfig/tinfo.pc"
+  fi
+}
+
+# build_protobuf_target <prefix> — cross-build libprotobuf (runtime) for the
+# iOS slice. protoc is NOT built here (we use the host protoc from build_host_protoc).
+build_protobuf_target() {
+  local prefix="$1"
+  echo "  --> protobuf (runtime lib) $PROTOBUF_VERSION"
+  if [[ -f "$prefix/lib/libprotobuf.a" ]]; then echo "     [cached]"; return; fi
+  local tarball="$DL_DIR/protobuf-${PROTOBUF_VERSION}.tar.gz"
+  fetch "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-${PROTOBUF_VERSION}.tar.gz" "$tarball"
+  local src="$prefix/src/protobuf"
+  rm -rf "$src"; mkdir -p "$src"
+  tar -xzf "$tarball" -C "$src" --strip-components=1
+
+  local sysroot; sysroot="$(xcrun --sdk "$SDK" --show-sdk-path)"
+  # CMake cross-build of libprotobuf ONLY. protobuf_BUILD_PROTOC_BINARIES=OFF so
+  # we don't try to build/run protoc for the target arch. Point at the host
+  # protoc via protobuf_PROTOC_EXE for any codegen protobuf itself needs.
+  cmake -S "$src" -B "$src/build-$ARCH-$SDK" \
+    -DCMAKE_SYSTEM_NAME=iOS \
+    -DCMAKE_OSX_ARCHITECTURES="$ARCH" \
+    -DCMAKE_OSX_SYSROOT="$sysroot" \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_MIN" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$prefix" \
+    -Dprotobuf_BUILD_TESTS=OFF \
+    -Dprotobuf_BUILD_PROTOC_BINARIES=OFF \
+    -Dprotobuf_BUILD_SHARED_LIBS=OFF \
+    -Dprotobuf_ABSL_PROVIDER=module \
+    -Dprotobuf_PROTOC_EXE="$HOST_DIR/bin/protoc"
+  cmake --build "$src/build-$ARCH-$SDK" --parallel
+  cmake --install "$src/build-$ARCH-$SDK"
+  test -f "$prefix/lib/libprotobuf.a" || { echo "FATAL: protobuf libprotobuf.a missing"; exit 1; }
+}
+
+# --------------------------------------------------------------------------- #
+# Cross-compile Mosh for a single slice. Produces                              #
+#   $BUILD_ROOT/<name>/libmoshiosclient.a                                      #
+# --------------------------------------------------------------------------- #
+build_slice() {
+  local name="$1" arch="$2" sdk="$3" host_triple="$4" min_flag="$5"
+
+  echo "==> Slice: $name  (arch=$arch sdk=$sdk host=$host_triple)"
+  local prefix="$BUILD_ROOT/$name/deps"     # per-slice dependency install prefix
+  local workdir="$BUILD_ROOT/$name"
+  mkdir -p "$prefix/lib/pkgconfig"
+
+  # Toolchain for this slice.
+  local clang clangxx sysroot
+  clang="$(xcrun --sdk "$sdk" --find clang)"
+  clangxx="$(xcrun --sdk "$sdk" --find clang++)"
+  sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
+
+  # Export the slice toolchain so the dep build functions inherit it.
+  export ARCH="$arch" SDK="$sdk" HOST_TRIPLE="$host_triple" MIN_FLAG="$min_flag"
+  export CC="$clang" CXX="$clangxx"
+  export CFLAGS="-arch $arch -isysroot $sysroot $min_flag -fembed-bitcode-marker -O2"
+  export CXXFLAGS="$CFLAGS -std=c++17"
+  export CPPFLAGS="-arch $arch -isysroot $sysroot $min_flag -I$prefix/include"
+  export LDFLAGS="-arch $arch -isysroot $sysroot $min_flag -L$prefix/lib"
+  # Force pkg-config to resolve ONLY against our cross prefix (never host libs).
+  export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
+  export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig"
+  # Host protoc on PATH so Mosh's AC_PATH_PROG([PROTOC]) finds the runnable one.
+  export PATH="$HOST_DIR/bin:$PATH"
+
+  # 1. Native deps for this slice.
+  build_openssl "$prefix"
+  build_nettle "$prefix"
+  build_ncurses "$prefix"
+  build_protobuf_target "$prefix"
+
+  # 2. Configure + build the Mosh iOS controller library.
+  #    We build in a per-slice copy of the tree so we never mutate extern/mosh
+  #    and so each slice gets its own config.h / Makefiles.
+  local build_tree="$workdir/mosh"
+  rm -rf "$build_tree"
+  cp -R "$MOSH_SRC" "$build_tree"
+  ( cd "$build_tree"
+    ./autogen.sh                              # autoreconf -fi (needs autotools)
+    # Deployment-target vars help Xcode clang stamp the right platform on
+    # objects even where our explicit -m*-version-min flag is not threaded.
+    ./configure \
+      --host="$host_triple" \
+      --enable-ios-controller \
+      --disable-server \
+      --disable-client \
+      --with-crypto-library=openssl \
+      --disable-hardening \
+      PROTOC="$HOST_DIR/bin/protoc" \
+      CC="$CC" CXX="$CXX" \
+      CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" \
+      CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS"
+    # Only the iOS controller lib is needed; build the frontend dir (it depends
+    # on the sibling libmosh*.a, which make builds transitively).
+    make -j"$(sysctl -n hw.ncpu)"
+  )
+
+  local produced="$build_tree/src/frontend/$LIB_NAME"
+  test -f "$produced" || { echo "FATAL: $name did not produce $LIB_NAME"; exit 1; }
+  cp "$produced" "$workdir/$LIB_NAME"
+  echo "    built $workdir/$LIB_NAME"
+}
+
+# --------------------------------------------------------------------------- #
+# Main.                                                                        #
+# --------------------------------------------------------------------------- #
+main() {
+  test -d "$MOSH_SRC" || { echo "FATAL: vendored mosh missing at $MOSH_SRC"; exit 1; }
+  test -f "$BRIDGE_HEADER" || { echo "FATAL: bridge header missing at $BRIDGE_HEADER"; exit 1; }
+
+  # Clean output + build dirs for a reproducible run; keep the downloads cache.
+  rm -rf "$OUT"
+  mkdir -p "$DL_DIR"
+
+  # Host codegen compiler (built once, arch-independent).
+  build_host_protoc
+
+  # Build every slice.
+  for entry in "${SLICES[@]}"; do
+    IFS='|' read -r name arch sdk host_triple min_flag <<< "$entry"
+    build_slice "$name" "$arch" "$sdk" "$host_triple" "$min_flag"
+  done
+
+  # lipo the two simulator slices (arm64-sim + x86_64-sim) into one fat archive.
+  # An xcframework static-lib slice must be ONE arch per platform-variant, so:
+  #   device  = single arch (arm64)
+  #   sim     = fat (arm64 + x86_64)  -- these two share the simulator variant.
+  # Device and simulator are NEVER lipo'd together.
+  local sim_fat="$BUILD_ROOT/ios-sim-fat/$LIB_NAME"
+  mkdir -p "$(dirname "$sim_fat")"
+  lipo -create \
+    "$BUILD_ROOT/ios-arm64-sim/$LIB_NAME" \
+    "$BUILD_ROOT/ios-x86_64-sim/$LIB_NAME" \
+    -output "$sim_fat"
+
+  # Headers dir for the xcframework (single public bridge header).
+  local hdrs="$BUILD_ROOT/Headers"
+  rm -rf "$hdrs"; mkdir -p "$hdrs"
+  cp "$BRIDGE_HEADER" "$hdrs/"
+
+  # Assemble: device slice + fat simulator slice.
+  xcodebuild -create-xcframework \
+    -library "$BUILD_ROOT/ios-arm64/$LIB_NAME"  -headers "$hdrs" \
+    -library "$sim_fat"                          -headers "$hdrs" \
+    -output "$OUT"
+
+  # ----------------------------------------------------------------------- #
+  # M1 SUCCESS GATE: the built device slice must export the `mosh_main`      #
+  # bridge symbol. This is the line that proves M1 in CI.                    #
+  # ----------------------------------------------------------------------- #
+  local device_lib
+  device_lib="$(find "$OUT" -path '*ios-arm64*' -name "$LIB_NAME" | head -n1)"
+  test -n "$device_lib" || { echo "GATE FAIL: no device $LIB_NAME inside $OUT"; exit 1; }
+
+  echo "==> M1 gate: nm '$device_lib' | grep ' T _${BRIDGE_SYMBOL}$'"
+  if nm "$device_lib" 2>/dev/null | grep -Eq " T _${BRIDGE_SYMBOL}\$"; then
+    echo "OK: bridge symbol '${BRIDGE_SYMBOL}' present in device slice."
+    echo "SUCCESS: built $OUT"
+  else
+    echo "GATE FAIL: bridge symbol '${BRIDGE_SYMBOL}' NOT found in $device_lib" >&2
+    echo "  (expected an exported 'T _${BRIDGE_SYMBOL}' entry from nm)" >&2
+    exit 1
+  fi
+}
+
+main "$@"
