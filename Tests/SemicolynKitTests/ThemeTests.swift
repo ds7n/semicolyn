@@ -18,10 +18,12 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(promoted, ThemeColor("#D49A5C", opacity: 0.12))
     }
 
-    func testRegistryHasNeonMidnightDefaultThenBellBronze() {
-        XCTAssertEqual(Theme.all.count, 2)
-        XCTAssertEqual(Theme.all.first, Theme.neonMidnight)   // default is first
-        XCTAssertEqual(Theme.all.last, Theme.bellBronze)   // bronze retained, second
+    func testRegistryOrderMidnightBronzeCobaltGlacier() {
+        XCTAssertEqual(Theme.all.count, 4)
+        XCTAssertEqual(Theme.all[0], Theme.neonMidnight)   // default is first
+        XCTAssertEqual(Theme.all[1], Theme.bellBronze)     // bronze retained, second
+        XCTAssertEqual(Theme.all[2], Theme.neonCobalt)     // electric blue, third
+        XCTAssertEqual(Theme.all[3], Theme.glacier)        // soft blue, fourth
     }
 
     func testNeonMidnightAccentIsCoral() {

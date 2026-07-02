@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — Neon Cobalt ANSI-16 palette review (Piece 2, theme #1).
+     UI palette is LOCKED (see 2026-07-01-theme-neon-cobalt-final.html); this page
+     designs the 16-color ANSI *terminal* fill. Status slots are pinned to the locked
+     hues (red=broken, green=success, yellow=warning, blue=accent, brightBlue=highlight);
+     the discretionary picks — magenta, cyan, blacks, brights — are shown in a real
+     terminal render so they can be judged in context, not just as chips. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semicolyn — Neon Cobalt ANSI-16</title>
+<style>
+  :root{ color-scheme:dark;
+    --bg:#06080F; --panel:#0D1120; --panelHi:#151A2B; --line:#232B42;
+    --term:#04060D; --fg:#E8ECF5; --termfg:#CFD6E6; --muted:#8A93A8;
+    --acc:#6E80FF; --hi:#9FADFF;
+    /* ANSI-16 under review */
+    --a0:#0A0D16; --a1:#FF5C6C; --a2:#2CE59B; --a3:#FFB020;
+    --a4:#6E80FF; --a5:#A98CFF; --a6:#4FD0E0; --a7:#C9D1E0;
+    --a8:#2A3346; --a9:#FF8A94; --a10:#6DF2BE; --a11:#FFC860;
+    --a12:#9FADFF; --a13:#C9B0FF; --a14:#86ECF7; --a15:#F2F5FA; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:#04050B; color:var(--fg);
+        font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap{ max-width:1180px; margin:0 auto; padding:32px 22px 70px; }
+  h1{ font-size:23px; margin:0 0 6px; } h1 em{ font-style:normal; color:var(--acc); }
+  h2{ font-size:14px; letter-spacing:.4px; text-transform:uppercase; color:var(--muted); margin:34px 0 12px; }
+  .lede{ color:var(--muted); font-size:13.5px; max-width:880px; line-height:1.6; margin:0 0 6px; }
+  .lede b{ color:var(--termfg); } .lede code{ color:var(--termfg); font-family:ui-monospace; }
+
+  /* ANSI-16 grid — two rows of 8 (normal / bright), index order */
+  .ansi{ display:grid; grid-template-columns:repeat(8,1fr); gap:8px; }
+  .cell{ border:1px solid var(--line); border-radius:11px; overflow:hidden; background:var(--bg); }
+  .cell .fill{ height:52px; display:flex; align-items:flex-end; justify-content:space-between; padding:6px 8px;
+               font:700 10px ui-monospace; color:rgba(0,0,0,.55); }
+  .cell.dk .fill{ color:rgba(255,255,255,.5); }
+  .cell .meta{ padding:6px 8px 8px; }
+  .cell .role{ font:700 10px ui-sans-serif; color:var(--fg); }
+  .cell .hex{ font:600 9.5px ui-monospace; color:var(--muted); margin-top:1px; }
+  .cell .pin{ display:inline-block; font:700 8px ui-sans-serif; letter-spacing:.3px; padding:1px 5px; border-radius:8px;
+              background:rgba(110,128,255,.18); color:var(--acc); margin-top:4px; }
+  .cell .pin.free{ background:var(--panelHi); color:var(--muted); }
+
+  /* sample terminal exercising the palette */
+  .card{ border:1px solid var(--line); border-radius:15px; overflow:hidden; background:var(--bg); }
+  .chrome{ display:flex; align-items:center; gap:7px; padding:11px 15px; background:var(--panel); border-bottom:1px solid var(--line); }
+  .dot{ width:10px; height:10px; border-radius:50%; }
+  .wt{ margin-left:8px; color:var(--muted); font-size:11px; font-weight:600; }
+  .term{ background:var(--term); padding:16px 18px; font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+         font-size:12.5px; line-height:1.9; white-space:pre-wrap; }
+  .term .p{ color:var(--acc); font-weight:700; }
+  .term .path{ color:var(--a12); } .term .fg{ color:var(--termfg); } .term .dim{ color:var(--muted); }
+  .c1{color:var(--a1)} .c2{color:var(--a2)} .c3{color:var(--a3)} .c4{color:var(--a4)}
+  .c5{color:var(--a5)} .c6{color:var(--a6)} .c7{color:var(--a7)}
+  .c9{color:var(--a9)} .c10{color:var(--a10)} .c11{color:var(--a11)} .c12{color:var(--a12)}
+  .c13{color:var(--a13)} .c14{color:var(--a14)}
+  .cur{ background:var(--acc); color:var(--term); padding:0 3px; border-radius:2px; }
+  .sel{ background:rgba(110,128,255,.30); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>semicolyn — <em>Neon Cobalt</em> · ANSI-16 review</h1>
+  <p class="lede">UI palette is <b>locked</b>. This page reviews the <b>16-color terminal palette</b>.
+    <b>Pinned</b> slots reproduce the locked UI hues via the role map; <b>free</b> slots
+    (magenta, cyan, blacks, most brights) are the only open calls — judge them in the sample
+    session below, not as chips alone.</p>
+
+  <h2>The 16 ANSI colors (index order · normal 0–7 / bright 8–15)</h2>
+  <div class="ansi">
+    <div class="cell dk"><div class="fill" style="background:var(--a0)"><span>0</span><span>blk</span></div><div class="meta"><div class="role">black</div><div class="hex">#0A0D16</div><span class="pin free">free</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a1)"><span>1</span><span>red</span></div><div class="meta"><div class="role">red</div><div class="hex">#FF5C6C</div><span class="pin">broken</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a2)"><span>2</span><span>grn</span></div><div class="meta"><div class="role">green</div><div class="hex">#2CE59B</div><span class="pin">success</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a3)"><span>3</span><span>yel</span></div><div class="meta"><div class="role">yellow</div><div class="hex">#FFB020</div><span class="pin">warning</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a4)"><span>4</span><span>blu</span></div><div class="meta"><div class="role">blue</div><div class="hex">#6E80FF</div><span class="pin">accent</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a5)"><span>5</span><span>mag</span></div><div class="meta"><div class="role">magenta</div><div class="hex">#A98CFF</div><span class="pin free">free</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a6)"><span>6</span><span>cyn</span></div><div class="meta"><div class="role">cyan</div><div class="hex">#4FD0E0</div><span class="pin free">free</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a7)"><span>7</span><span>wht</span></div><div class="meta"><div class="role">white</div><div class="hex">#C9D1E0</div><span class="pin free">free</span></div></div>
+
+    <div class="cell dk"><div class="fill" style="background:var(--a8)"><span>8</span><span>blk+</span></div><div class="meta"><div class="role">brightBlack</div><div class="hex">#2A3346</div><span class="pin free">free</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a9)"><span>9</span><span>red+</span></div><div class="meta"><div class="role">brightRed</div><div class="hex">#FF8A94</div><span class="pin free">free</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a10)"><span>10</span><span>grn+</span></div><div class="meta"><div class="role">brightGreen</div><div class="hex">#6DF2BE</div><span class="pin free">free</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a11)"><span>11</span><span>yel+</span></div><div class="meta"><div class="role">brightYellow</div><div class="hex">#FFC860</div><span class="pin free">free</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a12)"><span>12</span><span>blu+</span></div><div class="meta"><div class="role">brightBlue</div><div class="hex">#9FADFF</div><span class="pin">highlight</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a13)"><span>13</span><span>mag+</span></div><div class="meta"><div class="role">brightMagenta</div><div class="hex">#C9B0FF</div><span class="pin free">free</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a14)"><span>14</span><span>cyn+</span></div><div class="meta"><div class="role">brightCyan</div><div class="hex">#86ECF7</div><span class="pin free">free</span></div></div>
+    <div class="cell"><div class="fill" style="background:var(--a15)"><span>15</span><span>wht+</span></div><div class="meta"><div class="role">brightWhite</div><div class="hex">#F2F5FA</div><span class="pin free">free</span></div></div>
+  </div>
+
+  <h2>In context — a real session (exercises blue / magenta / cyan / green / red / yellow)</h2>
+  <div class="card">
+    <div class="chrome"><span class="dot" style="background:var(--a1)"></span><span class="dot" style="background:var(--a3)"></span><span class="dot" style="background:var(--a2)"></span><span class="wt">ssh · web-01 · zsh</span></div>
+    <div class="term"><span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="dim">git:(</span><span class="c2">main</span><span class="dim">)</span> <span class="fg">ls --color</span>
+<span class="c4">Sources</span>/  <span class="c4">Tests</span>/  <span class="c6">Package.swift</span>  <span class="c6">Package.resolved</span>  <span class="fg">README.md</span>  <span class="c2">build.sh</span><span class="c2">*</span>  <span class="c5">docs</span>@
+<span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="dim">git:(</span><span class="c2">main</span><span class="dim">)</span> <span class="fg">git status</span>
+<span class="fg">On branch </span><span class="c2">main</span>
+<span class="fg">Changes not staged for commit:</span>
+  <span class="c1">modified:   Sources/SemicolynKit/Theme/ThemeCatalog.swift</span>
+  <span class="c2">new file:   Sources/SemicolynKit/Theme/NeonCobaltTheme.swift</span>
+<span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="fg">grep -n</span> <span class="c3">"accent"</span> <span class="fg">*.swift</span>
+<span class="c5">Theme.swift</span><span class="dim">:</span><span class="c2">42</span><span class="dim">:</span>    <span class="fg">public let accent: </span><span class="c6">Accent</span>
+<span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="fg">swift test</span>
+<span class="c2">✓</span> <span class="fg">SemicolynKit</span> <span class="dim">— 142 passed</span>  <span class="c3">⚠ 3 skipped</span>  <span class="c1">✗ 1 failed</span>
+<span class="dim"># selection → </span><span class="sel">git commit -m "feat(theme): Neon Cobalt"</span>
+<span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="cur">█</span></div>
+  </div>
+
+  <p class="lede" style="margin-top:22px"><b>Judge:</b> does the free <b class="c5" style="color:var(--a5)">magenta #A98CFF</b> read
+    distinct from the <b style="color:var(--acc)">accent blue</b> and the <b style="color:var(--hi)">highlight</b>?
+    Is the <b class="c6" style="color:var(--a6)">cyan #4FD0E0</b> teal enough to not blur into green/blue?
+    Do the <b>blacks</b> (0 <code>#0A0D16</code> / 8 <code>#2A3346</code>) sit right on the <code>#04060D</code> ground?</p>
+</div>
+</body>
+</html>

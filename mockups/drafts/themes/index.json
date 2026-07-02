@@ -1,0 +1,96 @@
+{
+  "themes": [
+    {
+      "id": "neonMidnight",
+      "name": "Neon Midnight",
+      "file": "neon-midnight.itermcolors",
+      "pro": false,
+      "accentSlot": 9,
+      "warningSlot": 3,
+      "status": "shipped \u00b7 default \u00b7 warm-vivid",
+      "recipe": "the <b>warm-vivid</b> one. neo \u2192 <b>neon</b> (neon gas glows orange-red) on a midnight blue-near-black night \u2014 coral accent, saturated warm palette. Chrome derived."
+    },
+    {
+      "id": "bellBronze",
+      "name": "Bell Bronze",
+      "file": "bell-bronze.itermcolors",
+      "pro": true,
+      "accentSlot": 3,
+      "warningSlot": 11,
+      "status": "shipped \u00b7 Pro \u00b7 warm-muted \u00b7 hand-tuned",
+      "recipe": "the <b>warm-muted</b> one. earthy bronze on a <b>warm charcoal</b> base \u2014 the one theme whose chrome stays <b>hand-authored</b> (overrides), not derived.",
+      "overrides": {
+        "bg": "#17130D",
+        "panel": "#1F1A12",
+        "panelHi": "#29231A",
+        "line": "#3A3225",
+        "text": "#ECE4D5",
+        "muted": "#9E9382",
+        "highlight": "#F2C58A"
+      }
+    },
+    {
+      "id": "neonCobalt",
+      "name": "Neon Cobalt",
+      "file": "neon-cobalt.itermcolors",
+      "pro": true,
+      "accentSlot": 4,
+      "warningSlot": 3,
+      "status": "NEW \u00b7 electric",
+      "recipe": "the <b>loud</b> one. <b>max-saturation electric</b> cobalt on a deep near-black navy, high contrast. Its whole 16-color palette runs hot \u2014 so even terminal output reads unmistakably Cobalt. Chrome derived."
+    },
+    {
+      "id": "glacier",
+      "name": "Glacier",
+      "file": "glacier.itermcolors",
+      "pro": true,
+      "accentSlot": 4,
+      "warningSlot": 3,
+      "status": "NEW \u00b7 soft \u00b7 name TBD",
+      "recipe": "the <b>calm</b> one. <b>soft desaturated pastel</b> (Nord/Catppuccin family) on a distinctly <b>lighter slate</b> base \u2014 low contrast, powder-blue accent. Reads completely differently from Cobalt though both are blue. Chrome derived."
+    },
+    {
+      "id": "dracula",
+      "name": "Dracula",
+      "file": "dracula.itermcolors",
+      "ref": true,
+      "accentSlot": 4,
+      "highlight": "#FF79C6",
+      "warningSlot": 3,
+      "status": "reference \u00b7 imported",
+      "recipe": "imported .itermcolors \u2192 chrome derived. Vivid pink/purple/cyan/green; still pins green=success \u00b7 red=failure \u00b7 yellow=warning."
+    },
+    {
+      "id": "nord",
+      "name": "Nord",
+      "file": "nord.itermcolors",
+      "ref": true,
+      "accentSlot": 6,
+      "warningSlot": 3,
+      "status": "reference \u00b7 imported",
+      "recipe": "imported .itermcolors \u2192 chrome derived. Arctic, desaturated, low-contrast \u2014 the canonical calm palette; Glacier's family."
+    },
+    {
+      "id": "gruvboxDark",
+      "name": "Gruvbox Dark",
+      "file": "gruvbox-dark.itermcolors",
+      "ref": true,
+      "accentSlot": 11,
+      "highlight": "#FE8019",
+      "warningSlot": 3,
+      "status": "reference \u00b7 imported",
+      "recipe": "imported .itermcolors \u2192 chrome derived. Warm retro earthy \u2014 the template Bronze reaches for."
+    },
+    {
+      "id": "catppuccinMocha",
+      "name": "Catppuccin Mocha",
+      "file": "catppuccin-mocha.itermcolors",
+      "ref": true,
+      "accent": "#CBA6F7",
+      "highlight": "#F5C2E7",
+      "warningSlot": 3,
+      "status": "reference \u00b7 imported",
+      "recipe": "imported .itermcolors \u2192 chrome derived. Soft modern pastel; mauve accent isn't a palette slot, so it's an explicit accent override."
+    }
+  ]
+}

@@ -5,13 +5,30 @@ import XCTest
 
 final class ThemeCatalogTests: XCTestCase {
     func testCatalogOrderAndFlags() {
-        XCTAssertEqual(Theme.catalog.count, 2)
+        XCTAssertEqual(Theme.catalog.count, 4)
         XCTAssertEqual(Theme.catalog[0].id, ThemeID("neonMidnight"))
         XCTAssertFalse(Theme.catalog[0].isPro)
         XCTAssertEqual(Theme.catalog[0].theme, .neonMidnight)
         XCTAssertEqual(Theme.catalog[1].id, ThemeID("bellBronze"))
         XCTAssertTrue(Theme.catalog[1].isPro)
         XCTAssertEqual(Theme.catalog[1].theme, .bellBronze)
+        XCTAssertEqual(Theme.catalog[2].id, ThemeID("neonCobalt"))
+        XCTAssertTrue(Theme.catalog[2].isPro)
+        XCTAssertEqual(Theme.catalog[2].theme, .neonCobalt)
+        XCTAssertEqual(Theme.catalog[3].id, ThemeID("glacier"))
+        XCTAssertTrue(Theme.catalog[3].isPro)
+        XCTAssertEqual(Theme.catalog[3].theme, .glacier)
+    }
+
+    // Gate: the new blue Pro themes unlock with Pro, fall back to default without.
+    func testResolveNeonCobaltGate() {
+        XCTAssertEqual(resolveTheme(selectedID: ThemeID("neonCobalt"), isPro: true), .neonCobalt)
+        XCTAssertEqual(resolveTheme(selectedID: ThemeID("neonCobalt"), isPro: false), .neonMidnight)
+    }
+
+    func testResolveGlacierGate() {
+        XCTAssertEqual(resolveTheme(selectedID: ThemeID("glacier"), isPro: true), .glacier)
+        XCTAssertEqual(resolveTheme(selectedID: ThemeID("glacier"), isPro: false), .neonMidnight)
     }
 
     func testCatalogIDsAreUnique() {

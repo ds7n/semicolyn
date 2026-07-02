@@ -33,6 +33,10 @@ extension Theme {
                         isPro: false, theme: .neonMidnight),
         ThemeDescriptor(id: ThemeID("bellBronze"), displayName: "Bell Bronze",
                         isPro: true, theme: .bellBronze),
+        ThemeDescriptor(id: ThemeID("neonCobalt"), displayName: "Neon Cobalt",
+                        isPro: true, theme: .neonCobalt),
+        ThemeDescriptor(id: ThemeID("glacier"), displayName: "Glacier",
+                        isPro: true, theme: .glacier),
     ]
 
     /// The free default descriptor (first in the catalog).
