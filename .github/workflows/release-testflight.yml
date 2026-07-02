@@ -22,7 +22,7 @@ jobs:
     # Stays inert until you set the repo variable TESTFLIGHT_ENABLED=true (Settings →
     # Secrets and variables → Actions → Variables). Until then this job is skipped.
     if: vars.TESTFLIGHT_ENABLED == 'true'
-    runs-on: macos-14   # Apple Silicon + Xcode
+    runs-on: macos-15   # Apple Silicon + Xcode 26 (App Store now requires the iOS 26 SDK)
     steps:
       - uses: actions/checkout@v4
 
@@ -51,23 +51,17 @@ jobs:
           mkdir -p ~/.appstoreconnect/private_keys
           printf '%s' "$KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_"$KEY_ID".p8
 
-      - name: Archive (device, signed via the API key)
-        env:
-          KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
-          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+      # Archive UNSIGNED. Automatic signing at archive time insists on a *development*
+      # profile (which embeds device UDIDs → fails with "team has no devices"), and a
+      # manual distribution identity conflicts with the SPM/framework targets' automatic
+      # signing. TestFlight only needs *distribution* signing, which we apply at export.
+      - name: Archive (unsigned — signed at export)
         run: |
           xcodebuild archive \
             -project Semicolyn.xcodeproj -scheme Semicolyn \
             -destination 'generic/platform=iOS' \
             -archivePath build/Semicolyn.xcarchive \
-            -allowProvisioningUpdates \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER" \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_"$KEY_ID".p8 \
-            CODE_SIGNING_ALLOWED=YES \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="$TEAM" \
+            CODE_SIGNING_ALLOWED=NO \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
 
       - name: Export signed .ipa
