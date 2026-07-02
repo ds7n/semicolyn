@@ -106,12 +106,7 @@ async fn mosh_server_emits_connect_line() {
 
     // mosh-server daemonizes: it forks, the parent prints "MOSH CONNECT <port> <key>"
     // to stdout (which the SSH channel captures), then exits. We poll up to 10s.
-    let saw = wait_until(|| {
-        col.text()
-            .lines()
-            .any(|l| l.starts_with("MOSH CONNECT "))
-    })
-    .await;
+    let saw = wait_until(|| col.text().lines().any(|l| l.starts_with("MOSH CONNECT "))).await;
 
     let collected = col.text();
     assert!(
@@ -133,8 +128,16 @@ async fn mosh_server_emits_connect_line() {
         "MOSH CONNECT line must have exactly 4 space-separated parts (MOSH CONNECT <port> <key>), got: {:?}",
         connect_line
     );
-    assert_eq!(parts[0], "MOSH", "first token must be 'MOSH', got: {:?}", parts[0]);
-    assert_eq!(parts[1], "CONNECT", "second token must be 'CONNECT', got: {:?}", parts[1]);
+    assert_eq!(
+        parts[0], "MOSH",
+        "first token must be 'MOSH', got: {:?}",
+        parts[0]
+    );
+    assert_eq!(
+        parts[1], "CONNECT",
+        "second token must be 'CONNECT', got: {:?}",
+        parts[1]
+    );
 
     let port: u16 = parts[2]
         .parse()
