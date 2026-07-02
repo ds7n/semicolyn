@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 True Positive LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- DRAFT brainstorm mockup — semicolyn THEME GALLERY. All four themes, tabs (click /
+     1-4 / ← →). Model: the ANSI-16 is hand-authored per theme. Only THREE slots are
+     semantically locked to the app's UI status colors — green≈success, red≈failure,
+     yellow/amber≈warning — so terminal status output matches the chrome. The other 13
+     slots are FREE design (accent/highlight sit in some for harmony, but nothing is
+     forced or auto-derived). Shipped themes use their real palettes; the two blues are
+     the ones under design. Edit THEMES + re-open to retune. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semicolyn — theme gallery</title>
+<style>
+  *{ box-sizing:border-box; }
+  html{ color-scheme:dark; }
+  body{ margin:0; background:#04050B; color:#E8ECF5; font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap{ max-width:1180px; margin:0 auto; padding:26px 22px 70px; }
+  h1{ font-size:22px; margin:0 0 4px; }
+  .sub{ color:#8A93A8; font-size:12.5px; margin:0 0 8px; }
+  .sub kbd{ font:600 11px ui-monospace; background:#151A2B; border:1px solid #232B42; border-radius:5px; padding:1px 6px; color:#CFD6E6; }
+  .legend{ display:flex; gap:16px; flex-wrap:wrap; font-size:11px; color:#8A93A8; margin:0 0 20px; }
+  .legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .legend i{ width:20px; height:12px; border-radius:3px; display:inline-block; }
+
+  .tabs{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:22px; }
+  .tab{ display:flex; align-items:center; gap:9px; cursor:pointer; border:1px solid #232B42; background:#0D1120;
+        border-radius:12px; padding:9px 14px; font:600 13px ui-sans-serif; color:#CFD6E6; transition:border-color .15s; }
+  .tab:hover{ border-color:#3A4560; }
+  .tab .num{ font:700 10px ui-monospace; color:#8A93A8; }
+  .tab .dots{ display:flex; gap:3px; } .tab .d{ width:11px; height:11px; border-radius:50%; }
+  .tab .pro{ font:700 9px ui-sans-serif; letter-spacing:.4px; padding:2px 7px; border-radius:10px; background:#151A2B; color:#8A93A8; }
+  .tab .ref{ font:700 9px ui-sans-serif; letter-spacing:.4px; padding:2px 7px; border-radius:10px; background:#151A2B; color:#6B7488; }
+  .tab.ref{ border-style:dashed; }
+  .tab.active{ border-color:currentColor; }
+  .grouplabel{ width:100%; font:700 10px ui-sans-serif; letter-spacing:.6px; text-transform:uppercase; color:#5A6478; margin:8px 2px 0; }
+
+  .panel{ display:none; } .panel.active{ display:block; }
+  .recipe{ color:var(--muted); font-size:13px; line-height:1.6; max-width:900px; margin:0 0 20px; }
+  .recipe b{ color:var(--termfg); } .recipe code{ color:var(--termfg); font-family:ui-monospace; font-size:12px; }
+  h2{ font-size:12px; letter-spacing:.5px; text-transform:uppercase; color:var(--muted); margin:26px 0 11px; }
+  h2 .tag{ font-size:10px; text-transform:none; letter-spacing:0; color:#8A93A8; margin-left:8px; }
+
+  .swatches{ display:grid; grid-template-columns:repeat(auto-fit,minmax(92px,1fr)); gap:8px; }
+  .sw{ border:1px solid var(--line); border-radius:11px; overflow:hidden; background:var(--bg); }
+  .sw .f{ height:46px; } .sw .m{ padding:6px 9px 8px; } .sw .r{ font:700 10px ui-sans-serif; color:var(--fg); }
+  .sw .h{ font:600 9.5px ui-monospace; color:var(--muted); margin-top:1px; }
+
+  .ansi{ display:grid; grid-template-columns:repeat(8,1fr); gap:7px; }
+  .cell{ border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--bg); position:relative; }
+  .cell.sem{ border-color:var(--acc); box-shadow:0 0 0 1px var(--acc); }
+  .cell .f{ height:44px; display:flex; align-items:flex-end; padding:5px 7px; font:700 9px ui-monospace; }
+  .cell .m{ padding:5px 7px 7px; } .cell .r{ font:700 9px ui-sans-serif; color:var(--fg); }
+  .cell .h{ font:600 9px ui-monospace; color:var(--muted); margin-top:1px; }
+  .cell .pin{ display:inline-block; font:700 7.5px ui-sans-serif; letter-spacing:.2px; padding:1px 5px; border-radius:7px; margin-top:3px; }
+  .pin.sem{ background:var(--accSoft); color:var(--acc); }
+  .pin.free{ background:#ffffff10; color:var(--muted); }
+  .pin.harm{ background:#ffffff10; color:var(--termfg); }
+
+  .card{ border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--bg); }
+  .chrome{ display:flex; align-items:center; gap:7px; padding:10px 14px; background:var(--panel); border-bottom:1px solid var(--line); }
+  .dot{ width:10px; height:10px; border-radius:50%; }
+  .wt{ margin-left:8px; color:var(--muted); font-size:11px; font-weight:600; }
+  .term{ background:var(--term); padding:15px 17px; font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; line-height:1.9; white-space:pre-wrap; color:var(--termfg); }
+  .p{ color:var(--acc); font-weight:700; } .path{ color:var(--hl); } .fg{ color:var(--termfg); } .dim{ color:var(--muted); }
+  .c1{color:var(--a1)} .c2{color:var(--a2)} .c3{color:var(--a3)} .c4{color:var(--a4)} .c5{color:var(--a5)}
+  .c6{color:var(--a6)} .c9{color:var(--a9)} .c11{color:var(--a11)} .c13{color:var(--a13)}
+  .cur{ background:var(--acc); color:var(--term); padding:0 3px; border-radius:2px; }
+  .sel{ background:var(--accSoft); }
+
+  .banners{ display:flex; flex-direction:column; gap:8px; margin-top:14px; }
+  .banner{ display:flex; align-items:center; gap:10px; padding:9px 13px; border-radius:10px; font:600 12px ui-sans-serif; }
+  .banner .bd{ width:9px; height:9px; border-radius:50%; }
+  .b-ok{ background:var(--okSoft); color:var(--a10); } .b-ok .bd{ background:var(--ok); }
+  .b-warn{ background:var(--warnSoft); color:var(--a11); } .b-warn .bd{ background:var(--warn); }
+  .b-err{ background:var(--errSoft); color:var(--a9); } .b-err .bd{ background:var(--err); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>semicolyn — theme gallery</h1>
+  <p class="sub">Four <b style="color:#CFD6E6">distinct personalities</b> — warm-vivid · warm-muted · cool-electric · cool-soft. Each has its own base + its own take on all 16 colors. Click a tab, press <kbd>1</kbd>–<kbd>8</kbd>, or <kbd>←</kbd> <kbd>→</kbd>. Only 3 slots are locked to status (green/red/amber); the rest carry the personality. Below our four: the most popular themes, for benchmarking.</p>
+  <div class="legend">
+    <span><i style="background:#2CE59B"></i> <b style="color:#CFD6E6">semantic</b> — green≈success · red≈failure · yellow≈warning</span>
+    <span><i style="background:#2A3346"></i> free design</span>
+    <span><i style="background:#4a5578"></i> free · holds accent/highlight for harmony</span>
+  </div>
+  <div class="tabs" id="tabs"></div>
+  <div id="panels"></div>
+</div>
+
+<!-- theme data (config-driven) — edit themes in the .config.js, not here -->
+<script src="2026-07-01-theme-gallery.config.js"></script>
+<script>
+const NAMES=["black","red","green","yellow","blue","magenta","cyan","white","brightBlack","brightRed","brightGreen","brightYellow","brightBlue","brightMagenta","brightCyan","brightWhite"];
+
+// Theme definitions come from GALLERY_THEMES (loaded from the .config.js above).
+const THEMES = (typeof GALLERY_THEMES !== "undefined") ? GALLERY_THEMES : [];
+if (!THEMES.length) document.body.insertAdjacentHTML("afterbegin",
+  "<p style='color:#FF6E6E;padding:14px 22px'>⚠ Could not load 2026-07-01-theme-gallery.config.js — keep it next to this file.</p>");
+
+const SWATCHES=[["accent","accent"],["highlight","highlight"],["success","success"],["warning","warning"],["broken","broken"],
+  ["bg","ground"],["panel","panel"],["panelHi","panelHigh"],["line","line"],["term","terminal"],["text","text"],["termfg","term-fg"],["muted","muted"]];
+const h2r=h=>{h=h.replace('#','');return [0,2,4].map(i=>parseInt(h.substr(i,2),16));};
+const soft=(hex,a)=>{const [r,g,b]=h2r(hex);return `rgba(${r},${g},${b},${a})`;};
+const dark=hex=>{const [r,g,b]=h2r(hex);return 0.2126*r+0.7152*g+0.0722*b<140;};
+
+function vars(t){ const u=t.ui;
+  let s=`--bg:${u.bg};--panel:${u.panel};--panelHi:${u.panelHi};--line:${u.line};--term:${u.term};--fg:${u.text};--termfg:${u.termfg};--muted:${u.muted};`;
+  s+=`--acc:${u.accent};--hl:${u.highlight};--ok:${u.success};--warn:${u.warning};--err:${u.broken};`;
+  s+=`--accSoft:${soft(u.accent,.16)};--okSoft:${soft(u.success,.15)};--warnSoft:${soft(u.warning,.15)};--errSoft:${soft(u.broken,.15)};`;
+  t.ansi.forEach((c,i)=> s+=`--a${i}:${c};`); return s; }
+
+const swatchStrip=t=>`<div class="swatches">`+SWATCHES.map(([k,l])=>{const c=t.ui[k];
+  return `<div class="sw"><div class="f" style="background:${c}"></div><div class="m"><div class="r">${l}</div><div class="h">${c.toUpperCase()}</div></div></div>`;}).join("")+`</div>`;
+
+function ansiGrid(t){ return `<div class="ansi">`+t.ansi.map((c,i)=>{
+  let cls,label,cell="";
+  if(t.sem[i]){cls="sem";label=t.sem[i];cell=" sem";}
+  else if(t.harm&&t.harm[i]){cls="harm";label=t.harm[i];}
+  else {cls="free";label="free";}
+  const lbl=dark(c)?"rgba(255,255,255,.55)":"rgba(0,0,0,.55)";
+  return `<div class="cell${cell}"><div class="f" style="background:${c};color:${lbl}">${i}</div><div class="m"><div class="r">${NAMES[i]}</div><div class="h">${c.toUpperCase()}</div><span class="pin ${cls}">${label}</span></div></div>`;
+}).join("")+`</div>`; }
+
+const TERM=`<div class="card">
+  <div class="chrome"><span class="dot" style="background:var(--a1)"></span><span class="dot" style="background:var(--a3)"></span><span class="dot" style="background:var(--a2)"></span><span class="wt">ssh · web-01 · zsh</span></div>
+  <div class="term"><span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="dim">git:(</span><span class="c2">main</span><span class="dim">)</span> <span class="fg">ls --color</span>
+<span class="c4">Sources</span>/  <span class="c4">Tests</span>/  <span class="c6">Package.swift</span>  <span class="fg">README.md</span>  <span class="c2">build.sh</span><span class="c2">*</span>  <span class="c5">docs</span>@
+<span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="dim">git:(</span><span class="c2">main</span><span class="dim">)</span> <span class="fg">git status</span>
+  <span class="c1">modified:   ThemeCatalog.swift</span>
+  <span class="c2">new file:   NeonCobaltTheme.swift</span>
+<span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="fg">grep</span> <span class="c3">"accent"</span> <span class="fg">Theme.swift</span> <span class="dim">| head</span>
+<span class="c5">Theme.swift</span><span class="dim">:</span><span class="c2">42</span><span class="dim">:</span>  <span class="fg">public let accent:</span> <span class="c6">Accent</span>
+<span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="fg">swift test</span>   <span class="c2">✓ 142 passed</span>  <span class="c3">⚠ 3 skipped</span>  <span class="c1">✗ 1 failed</span>
+<span class="dim"># select → </span><span class="sel">git commit -m "feat(theme)…"</span>
+<span class="p">➜</span> <span class="path">~/src/semicolyn</span> <span class="cur">█</span></div>
+</div>
+<div class="banners">
+  <div class="banner b-ok"><span class="bd"></span>Connected · web-01 · publickey · 12ms</div>
+  <div class="banner b-warn"><span class="bd"></span>Degraded — mosh roaming, reconnecting… (attempt 2)</div>
+  <div class="banner b-err"><span class="bd"></span>Connection lost — host unreachable</div>
+</div>`;
+
+const tabsEl=document.getElementById("tabs"), panelsEl=document.getElementById("panels");
+THEMES.forEach((t,i)=>{ const u=t.ui;
+  if(t.ref && i>0 && !THEMES[i-1].ref){ const g=document.createElement("div"); g.className="grouplabel"; g.textContent="Popular themes — benchmark"; tabsEl.appendChild(g); }
+  const tab=document.createElement("button"); tab.className="tab"+(t.ref?" ref":""); tab.style.color=u.accent;
+  tab.innerHTML=`<span class="num">${i+1}</span><span class="dots"><span class="d" style="background:${u.accent}"></span><span class="d" style="background:${u.success}"></span><span class="d" style="background:${u.warning}"></span><span class="d" style="background:${u.broken}"></span></span><span class="name" style="color:#CFD6E6">${t.name}</span>`+(t.ref?`<span class="ref">REF</span>`:t.pro?`<span class="pro">✦ PRO</span>`:``);
+  tab.onclick=()=>select(i); tabsEl.appendChild(tab);
+
+  const p=document.createElement("section"); p.className="panel"; p.setAttribute("style",vars(t));
+  p.innerHTML=`<p class="recipe"><b style="color:${u.accent}">${t.name}</b> — <span style="color:var(--muted)">${t.status}</span><br>${t.recipe}</p>`+
+    `<h2>UI palette</h2>${swatchStrip(t)}`+
+    `<h2>ANSI-16 terminal palette <span class="tag">3 slots locked to status · 13 free</span></h2>${ansiGrid(t)}`+
+    `<h2>in context</h2>${TERM}`;
+  panelsEl.appendChild(p);
+});
+
+let cur=-1;
+function select(i){ cur=(i+THEMES.length)%THEMES.length;
+  [...tabsEl.children].forEach((t,j)=>t.classList.toggle("active",j===cur));
+  [...panelsEl.children].forEach((p,j)=>p.classList.toggle("active",j===cur)); }
+document.addEventListener("keydown",e=>{ if(e.key>="1"&&e.key<="9"){ const n=+e.key-1; if(n<THEMES.length) select(n); }
+  else if(e.key==="ArrowRight") select(cur+1); else if(e.key==="ArrowLeft") select(cur-1); });
+select(2); // open on Neon Cobalt
+</script>
+</body>
+</html>
