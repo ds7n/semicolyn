@@ -123,7 +123,10 @@ build_host_protoc() {
     -DCMAKE_INSTALL_PREFIX="$HOST_DIR" \
     -Dprotobuf_BUILD_TESTS=OFF \
     -Dprotobuf_BUILD_PROTOC_BINARIES=ON
-  cmake --build "$src/build-host" --target protoc --parallel
+  # Build the full default target set (protoc + libprotobuf + libprotobuf-lite),
+  # not just --target protoc: `cmake --install` installs ALL targets and errors on
+  # a missing libprotobuf-lite.a otherwise. These host libs are small (3.21.x).
+  cmake --build "$src/build-host" --parallel
   cmake --install "$src/build-host"
   test -x "$HOST_DIR/bin/protoc" || { echo "FATAL: host protoc not built"; exit 1; }
 }
