@@ -130,3 +130,11 @@ jobs:
           xcodebuild -project Semicolyn.xcodeproj -scheme Semicolyn \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO build
+
+      - name: Test MoshSession bridge plumbing (loopback fake mosh_main — M3)
+        # Runs the Obj-C++ bridge tests on a booted simulator. Verifies the pipe /
+        # thread / setvbuf plumbing without a network (fake_mosh_main echoes input).
+        run: |
+          xcodebuild -project Semicolyn.xcodeproj -scheme SemicolynBridgeTests \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            CODE_SIGNING_ALLOWED=NO test
