@@ -76,6 +76,17 @@ struct SessionView: View {
                     }
                     .animation(.easeInOut, value: vm.degraded)
                     .overlay(alignment: .top) {
+                        if let reason = vm.moshFallback {
+                            MoshFallbackBanner(reason: reason) { vm.moshFallback = nil }
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                                .task {
+                                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                                    vm.moshFallback = nil
+                                }
+                        }
+                    }
+                    .animation(.easeInOut, value: vm.moshFallback)
+                    .overlay(alignment: .top) {
                         if vm.crashBanner != nil {
                             CrashBanner(
                                 onReattach: { vm.reattachTmux() },
@@ -112,6 +123,17 @@ struct SessionView: View {
                             }
                         }
                         .animation(.easeInOut, value: vm.degraded)
+                        .overlay(alignment: .top) {
+                            if let reason = vm.moshFallback {
+                                MoshFallbackBanner(reason: reason) { vm.moshFallback = nil }
+                                    .transition(.move(edge: .top).combined(with: .opacity))
+                                    .task {
+                                        try? await Task.sleep(nanoseconds: 4_000_000_000)
+                                        vm.moshFallback = nil
+                                    }
+                            }
+                        }
+                        .animation(.easeInOut, value: vm.moshFallback)
                         .overlay(alignment: .top) {
                             if vm.crashBanner != nil {
                                 CrashBanner(
