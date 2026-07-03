@@ -63,6 +63,37 @@
     [s stop];
 }
 
+// onFirstFrame fires exactly once — on the first output byte — and NOT again on
+// later bytes. Proves the handshake-completed signal the VM uses to divide
+// pre-frame SSH fallback from mid-session crash. Asserts the exact fire count (1),
+// not merely "it fired".
+- (void)testFirstFrameFiresExactlyOnceThenNever {
+    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
+                                                cols:80 rows:24 predictMode:@"none"];
+    XCTestExpectation *firstFrame = [self expectationWithDescription:@"onFirstFrame"];
+    XCTestExpectation *sawFiveBytes = [self expectationWithDescription:@"5 bytes echoed"];
+    __block int firstFrameCount = 0;
+    __block NSUInteger echoed = 0;
+    __block BOOL frameFulfilled = NO;
+    __block BOOL byteFulfilled = NO;
+    s.onFirstFrame = ^{
+        firstFrameCount += 1;
+        if (!frameFulfilled) { frameFulfilled = YES; [firstFrame fulfill]; }
+    };
+    // Accumulate echoed bytes; once all 5 have round-tripped, the reader has
+    // processed input past the first byte — so a second onFirstFrame would already
+    // have fired if the gate were broken.
+    s.onOutput = ^(NSData *d) {
+        echoed += d.length;
+        if (echoed >= 5 && !byteFulfilled) { byteFulfilled = YES; [sawFiveBytes fulfill]; }
+    };
+    [s start];
+    [s writeInput:[@"hello" dataUsingEncoding:NSUTF8StringEncoding]];
+    [self waitForExpectations:@[ firstFrame, sawFiveBytes ] timeout:2.0];
+    XCTAssertEqual(firstFrameCount, 1, @"onFirstFrame must fire exactly once across all output bytes");
+    [s stop];
+}
+
 // stop() is idempotent and safe to call without a prior clean end. The real
 // assertion is crash-freedom of the double-close path (the fd bookkeeping that
 // nils the pipe fds after the first stop is what makes the second stop a no-op).

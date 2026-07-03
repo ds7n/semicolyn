@@ -37,6 +37,13 @@ NS_ASSUME_NONNULL_BEGIN
 /// Output bytes from Mosh (main queue). Wire to `terminalView.feed(byteArray:)`.
 @property (nonatomic, copy, nullable) void (^onOutput)(NSData *bytes);
 
+/// Fires exactly once (main queue) when the FIRST output byte arrives from Mosh —
+/// i.e. the UDP handshake completed and frames are flowing. The VM uses this to
+/// divide "pre-handoff" failures (fall back to SSH on the retained connection)
+/// from "mid-session" loop exits (crash banner). Fires before that first
+/// `onOutput`. Never fires if the loop dies before any byte (→ pre-frame `onEnd`).
+@property (nonatomic, copy, nullable) void (^onFirstFrame)(void);
+
 /// Fires once when the mosh loop exits (main queue). `reason` nil = clean exit.
 @property (nonatomic, copy, nullable) void (^onEnd)(NSString *_Nullable reason);
 
