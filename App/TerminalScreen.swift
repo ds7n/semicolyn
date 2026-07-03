@@ -79,6 +79,15 @@ struct TerminalScreen: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TerminalView, context: Context) {
+        // Claim keyboard focus ONCE so the on-screen keyboard appears on the raw/mosh
+        // path (the tmux path does the equivalent per active pane). Done here, not in
+        // makeUIView, because a view must be in a window for becomeFirstResponder to
+        // take — the first updateUIView is the earliest that reliably holds. Claiming
+        // only once means a user who later dismisses the keyboard is not fought.
+        if !context.coordinator.didClaimFocus, uiView.window != nil {
+            context.coordinator.didClaimFocus = true
+            uiView.becomeFirstResponder()
+        }
         // Refresh halo color when theme changes.
         context.coordinator.halo.configure(color: UIColor(Color(theme.bell.edge)))
         // Recolor the live terminal when the theme changes.
@@ -120,6 +129,11 @@ struct TerminalScreen: UIViewRepresentable {
         var baseSize: Double
         /// Cursor-placement drag (halo + pan → synthesized arrow keys); installed in makeUIView.
         var cursorDrag: CursorDragController?
+        /// True once we have claimed keyboard focus for this terminal. We claim it a
+        /// single time (on the first `updateUIView` after the view is in a window, so
+        /// `becomeFirstResponder` can actually succeed) and then never re-grab it, so
+        /// a user who dismisses the keyboard is not fought on every SwiftUI pass.
+        var didClaimFocus = false
 
         init(send: @escaping ([UInt8]) -> Void, session: ShellSession?, settings: TerminalSettings, theme: Theme,
              osc52Allowed: Bool = true, onTitle: ((String) -> Void)? = nil) {
