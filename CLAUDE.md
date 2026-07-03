@@ -27,6 +27,7 @@ HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev cargo test -p se
 
 - **`cargo` IS on the host**, but `target/` is root-owned (written by the container) → on the host use `CARGO_TARGET_DIR=/tmp/semicolyn-target cargo test -p semicolyn-ssh-core --lib` (lib/unit tests need no sshd). Integration tests need the `sshd`/`sshd-legacy` containers + the `SEMICOLYN_TEST_SSHD*` env (set in `docker-compose.yml`).
 - **Apple tier** (xcframework, app, BridgeTests) needs macOS + Xcode → only the **macOS CI job** validates it locally-unbuildable code. `scripts/build-xcframework.sh` (Rust → all iOS triples → UniFFI), `xcodegen generate` (`project.yml` → `.xcodeproj`).
+- **`Mosh.xcframework`** (`scripts/build-mosh-xcframework.sh`) cross-compiles the vendored `extern/mosh` submodule (protobuf 3.21.12 + ncurses 6.5 + Mosh, crypto = Apple CommonCrypto) → macOS-CI-only, needs `submodules: recursive` on checkout. Linked as a `#if os(macOS)` binaryTarget in `Package.swift` (kept off the Linux `swift test` job).
 
 ## Remotes & CI
 
