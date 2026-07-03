@@ -25,6 +25,14 @@ static void mosh_state_noop(const void *ctx, const void *buf, size_t len) {
     (void)len;
 }
 
+// Private methods invoked from the C pthread trampolines below, which are defined
+// before the @implementation — declare them here so the trampolines compile.
+@interface MoshSession ()
+- (void *)runMoshLoop;
+- (void *)runReaderLoop;
+- (void)fireEnd:(NSString *_Nullable)reason;
+@end
+
 @implementation MoshSession {
     NSString *_ip, *_port, *_key, *_predict;
     struct winsize _winsize;  // shared with the mosh thread; updated on resize
