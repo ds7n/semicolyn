@@ -68,6 +68,9 @@ static void *reader_thread_main(void *ctx) { return [(__bridge MoshSession *)ctx
 - (void)start {
     if (_started) return;
     _started = YES;
+    // Writing to a pipe whose read end has closed raises SIGPIPE, which would kill the
+    // process. We handle short writes by return value instead, so ignore SIGPIPE.
+    signal(SIGPIPE, SIG_IGN);
     if (pipe(_inPipe) != 0 || pipe(_outPipe) != 0) {
         [self fireEnd:@"Mosh connection failed — using SSH"];
         return;
@@ -98,18 +101,27 @@ static void *reader_thread_main(void *ctx) { return [(__bridge MoshSession *)ctx
     int rc = mosh_main(fin, fout, &_winsize, mosh_state_noop, (__bridge void *)self,
                        _ip.UTF8String, _port.UTF8String, _key.UTF8String, _predict.UTF8String,
                        &emptyState, 0, _predict.UTF8String);
-    // mosh_main returned: closing the output write end makes the reader see EOF.
-    // rc == 0 means a clean exit.
-    fclose(fout);  // closes _outPipe[1]
+    // runMoshLoop OWNS both mosh-side FILE*s: fclose each exactly once (which closes
+    // the underlying _inPipe[0]/_outPipe[1] fds). `stop` never touches these fds — it
+    // only closes the APP-side ends — so there is no double-close race. Mark the
+    // mosh-side fds consumed so nothing else can reference them.
+    _inPipe[0] = -1;
+    _outPipe[1] = -1;
+    fclose(fin);
+    fclose(fout);   // closing the output write end makes the reader see EOF
     [self fireEnd:(rc == 0 ? nil : @"Mosh connection failed — using SSH")];
     return NULL;
 }
 
 - (void *)runReaderLoop {
+    // Capture the read fd ONCE so the loop never re-reads the ivar (which `stop` nils
+    // from another thread). `stop`/runMoshLoop closing the pipe makes this read() return
+    // 0/-1 and the loop exits cleanly.
+    int fd = _outPipe[0];
     const size_t bufSize = 16384;
     unsigned char *buf = (unsigned char *)malloc(bufSize);
     for (;;) {
-        ssize_t n = read(_outPipe[0], buf, bufSize);
+        ssize_t n = read(fd, buf, bufSize);
         if (n <= 0) break;  // EOF or error → mosh loop ended / pipe closed
         NSData *data = [NSData dataWithBytes:buf length:(NSUInteger)n];
         void (^cb)(NSData *) = self.onOutput;
@@ -145,23 +157,28 @@ static void *reader_thread_main(void *ctx) { return [(__bridge MoshSession *)ctx
 - (void)stop {
     if (_stopped) return;
     _stopped = YES;
-    // Ask Mosh to shut the network down cleanly.
+    // Ask Mosh to shut the network down cleanly (best-effort; ignored if the loop
+    // already exited and closed its read end).
     if (_inPipe[1] >= 0) { write(_inPipe[1], kMoshQuitSequence, sizeof(kMoshQuitSequence)); }
-    // Join off the main thread with a bounded wait; then hard-close fds so the
-    // reader unblocks even if Mosh never exits (dead UDP path).
+
+    // fd OWNERSHIP: runMoshLoop owns the mosh-side ends (_inPipe[0], _outPipe[1]) and
+    // fcloses them itself. `stop` owns ONLY the app-side ends: close the app WRITE end
+    // (_inPipe[1]) so the mosh read() sees EOF and the loop exits even without a quit
+    // seq, and the app READ end (_outPipe[0]) so the reader thread's read() unblocks.
+    // Never touch the mosh-side fds here → no double-close/use-after-free.
     BOOL threadLive = _threadLive;
     pthread_t moshT = _moshThread, readerT = _readerThread;
-    int inW = _inPipe[1], outW = _outPipe[1], inR = _inPipe[0], outR = _outPipe[0];
-    _inPipe[0] = _inPipe[1] = _outPipe[0] = _outPipe[1] = -1;
+    int appWrite = _inPipe[1], appRead = _outPipe[0];
+    _inPipe[1] = -1;
+    _outPipe[0] = -1;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        // Give the clean shutdown ~500ms; then force the pipes closed.
-        usleep(500 * 1000);
-        if (inW >= 0) close(inW);   // input write end → mosh read side sees EOF
-        if (outW >= 0) close(outW); // mosh write end (may already be closed by runMoshLoop)
+        if (appWrite >= 0) close(appWrite);   // mosh read side → EOF → loop exits
         if (threadLive) pthread_join(moshT, NULL);
+        // Join the mosh loop first; only then close the app read end and join the
+        // reader (the loop's fclose(fout) already closed the mosh write end, so the
+        // reader is already at EOF or will be once we close our read end).
+        if (appRead >= 0) close(appRead);
         pthread_join(readerT, NULL);
-        if (inR >= 0) close(inR);
-        if (outR >= 0) close(outR);
     });
 }
 
