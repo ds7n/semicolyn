@@ -35,12 +35,12 @@ set -euo pipefail
 OPENSSL_VERSION="3.3.2"          # https://github.com/openssl/openssl/releases
 NETTLE_VERSION="3.10"            # https://ftp.gnu.org/gnu/nettle/
 NCURSES_VERSION="6.5"            # https://ftp.gnu.org/gnu/ncurses/
-PROTOBUF_VERSION="27.3"          # https://github.com/protocolbuffers/protobuf/releases
-# protobuf 27.x's release source tarball bundles third_party/utf8_range but NOT
-# third_party/abseil-cpp (that dir is empty), so the `module` ABSL provider fails
-# with "abseil-cpp does not contain a CMakeLists.txt". We populate it ourselves
-# with the abseil release protobuf 27.3 pins (MODULE.bazel -> 20230802.0.bcr.1).
-ABSEIL_VERSION="20230802.0"      # https://github.com/abseil/abseil-cpp/releases (protobuf 27.3 pin)
+# protobuf 3.21.x is the last "classic" C++ protobuf BEFORE the Abseil dependency
+# (landed in 22.x). Mosh (2016-era) uses the classic generated `.pb.h` API and only
+# needs 4 tiny .proto files compiled, so 3.21.12 is self-contained (no Abseil, no
+# utf8_range/upb), builds fast, and avoids 27.x's protoc-backend explosion + link
+# hang. Its source archive unpacks to protobuf-3.21.12/ with a top-level CMakeLists.
+PROTOBUF_VERSION="3.21.12"       # https://github.com/protocolbuffers/protobuf/releases
 
 # Minimum iOS deployment target (matches build-xcframework.sh / project.yml).
 IOS_MIN="17.0"
@@ -98,21 +98,6 @@ extract() {
   tar -xzf "$tarball" -C "$parent"
 }
 
-# populate_protobuf_abseil <protobuf-src-dir> — the protobuf release tarball ships
-# an EMPTY third_party/abseil-cpp, so download the pinned abseil release and unpack
-# it there. Idempotent: skips if already populated. Required for both the host and
-# the per-slice protobuf builds (protobuf_ABSL_PROVIDER=module).
-populate_protobuf_abseil() {
-  local src="$1"
-  local absl_dir="$src/third_party/abseil-cpp"
-  if [[ -f "$absl_dir/CMakeLists.txt" ]]; then return; fi
-  local tarball="$DL_DIR/abseil-cpp-${ABSEIL_VERSION}.tar.gz"
-  fetch "https://github.com/abseil/abseil-cpp/archive/refs/tags/${ABSEIL_VERSION}.tar.gz" "$tarball"
-  rm -rf "$absl_dir"; mkdir -p "$absl_dir"
-  tar -xzf "$tarball" -C "$absl_dir" --strip-components=1
-  test -f "$absl_dir/CMakeLists.txt" || { echo "FATAL: abseil-cpp not populated at $absl_dir"; exit 1; }
-}
-
 # --------------------------------------------------------------------------- #
 # Host protoc: build the protobuf compiler natively so we can run it during    #
 # the Mosh cross-compile. protoc must NOT be cross-compiled (we'd be unable to #
@@ -125,23 +110,19 @@ build_host_protoc() {
     return
   fi
   local tarball="$DL_DIR/protobuf-${PROTOBUF_VERSION}.tar.gz"
-  fetch "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-${PROTOBUF_VERSION}.tar.gz" "$tarball"
+  fetch "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v${PROTOBUF_VERSION}.tar.gz" "$tarball"
   local src="$BUILD_ROOT/src/protobuf-host"
   rm -rf "$src"
   mkdir -p "$src"
   tar -xzf "$tarball" -C "$src" --strip-components=1
-  populate_protobuf_abseil "$src"
 
-  # Native (host) build of protoc + libprotobuf via CMake. Abseil is supplied by
-  # populate_protobuf_abseil above (protobuf_ABSL_PROVIDER=module).
+  # Native (host) build of protoc + libprotobuf via CMake. 3.21.x is self-contained
+  # (no Abseil), so no ABSL provider / C++ standard override is needed.
   cmake -S "$src" -B "$src/build-host" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$HOST_DIR" \
-    -DCMAKE_CXX_STANDARD=17 \
-    -DCMAKE_CXX_STANDARD_REQUIRED=ON \
     -Dprotobuf_BUILD_TESTS=OFF \
-    -Dprotobuf_BUILD_PROTOC_BINARIES=ON \
-    -Dprotobuf_ABSL_PROVIDER=module
+    -Dprotobuf_BUILD_PROTOC_BINARIES=ON
   cmake --build "$src/build-host" --target protoc --parallel
   cmake --install "$src/build-host"
   test -x "$HOST_DIR/bin/protoc" || { echo "FATAL: host protoc not built"; exit 1; }
@@ -256,16 +237,16 @@ build_protobuf_target() {
   echo "  --> protobuf (runtime lib) $PROTOBUF_VERSION"
   if [[ -f "$prefix/lib/libprotobuf.a" ]]; then echo "     [cached]"; return; fi
   local tarball="$DL_DIR/protobuf-${PROTOBUF_VERSION}.tar.gz"
-  fetch "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-${PROTOBUF_VERSION}.tar.gz" "$tarball"
+  fetch "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v${PROTOBUF_VERSION}.tar.gz" "$tarball"
   local src="$prefix/src/protobuf"
   rm -rf "$src"; mkdir -p "$src"
   tar -xzf "$tarball" -C "$src" --strip-components=1
-  populate_protobuf_abseil "$src"
 
   local sysroot; sysroot="$(xcrun --sdk "$SDK" --show-sdk-path)"
   # CMake cross-build of libprotobuf ONLY. protobuf_BUILD_PROTOC_BINARIES=OFF so
   # we don't try to build/run protoc for the target arch. Point at the host
-  # protoc via protobuf_PROTOC_EXE for any codegen protobuf itself needs.
+  # protoc via protobuf_PROTOC_EXE for any codegen protobuf itself needs. 3.21.x
+  # is self-contained (no Abseil) so no ABSL provider / C++ standard override.
   cmake -S "$src" -B "$src/build-$ARCH-$SDK" \
     -DCMAKE_SYSTEM_NAME=iOS \
     -DCMAKE_OSX_ARCHITECTURES="$ARCH" \
@@ -273,12 +254,9 @@ build_protobuf_target() {
     -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_MIN" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$prefix" \
-    -DCMAKE_CXX_STANDARD=17 \
-    -DCMAKE_CXX_STANDARD_REQUIRED=ON \
     -Dprotobuf_BUILD_TESTS=OFF \
     -Dprotobuf_BUILD_PROTOC_BINARIES=OFF \
     -Dprotobuf_BUILD_SHARED_LIBS=OFF \
-    -Dprotobuf_ABSL_PROVIDER=module \
     -Dprotobuf_PROTOC_EXE="$HOST_DIR/bin/protoc"
   cmake --build "$src/build-$ARCH-$SDK" --parallel
   cmake --install "$src/build-$ARCH-$SDK"
