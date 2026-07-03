@@ -100,6 +100,7 @@ static void mosh_state_noop(const void *ctx, const void *buf, size_t len) {
     BOOL _readerThreadLive;  // reader thread was created (guards pthread_join)
     BOOL _stopped;           // teardown requested — set once, under _lock
     BOOL _endFired;          // onEnd dispatched already (fire at most once), under _lock
+    BOOL _firstFrameFired;   // onFirstFrame dispatched already (fire at most once), under _lock
     pthread_mutex_t _lock;
 }
 
@@ -267,13 +268,21 @@ static void *reader_thread_main(void *ctx) {
         if (n < 0 && errno == EINTR) continue;  // interrupted by a signal; retry
         if (n <= 0) break;                       // EOF or hard error → loop ends
         NSData *data = [NSData dataWithBytes:buf length:(NSUInteger)n];
-        // Re-read the callback under the lock; -stop clears it before join so no
-        // dispatch is enqueued for a session the app already tore down. The block
-        // itself is [weak self] on the Swift side, so even an in-flight dispatch
-        // is safe if the object is gone.
+        // Re-read the callbacks under the lock; -stop clears them before join so no
+        // dispatch is enqueued for a session the app already tore down. The blocks
+        // themselves are [weak self] on the Swift side, so even an in-flight dispatch
+        // is safe if the object is gone. On the FIRST byte, also fire onFirstFrame
+        // (once) — enqueued BEFORE this byte's onOutput, so the "frames are flowing"
+        // signal reaches the main actor before the byte it announces.
         pthread_mutex_lock(&_lock);
+        void (^firstFrame)(void) = nil;
+        if (!_firstFrameFired) {
+            _firstFrameFired = YES;
+            firstFrame = self.onFirstFrame;
+        }
         void (^cb)(NSData *) = self.onOutput;
         pthread_mutex_unlock(&_lock);
+        if (firstFrame) dispatch_async(dispatch_get_main_queue(), ^{ firstFrame(); });
         if (cb) dispatch_async(dispatch_get_main_queue(), ^{ cb(data); });
     }
     free(buf);
@@ -331,8 +340,10 @@ static void *reader_thread_main(void *ctx) {
     pthread_t readerT = _readerThread;
     int inWrite = _inPipe[1];    // app write end → close to give mosh EOF
     _inPipe[1] = -1;             // publish -1 NOW: writeInput will see it and bail
-    // Silence callbacks under the lock: nothing fires onOutput/onEnd after -stop.
+    // Silence callbacks under the lock: nothing fires onOutput/onFirstFrame/onEnd
+    // after -stop.
     self.onOutput = nil;
+    self.onFirstFrame = nil;
     self.onEnd = nil;
     pthread_mutex_unlock(&_lock);
 
