@@ -49,6 +49,31 @@ public func resolveUser(host: Host, defaults: Defaults) throws -> String {
     throw ResolutionError.userUnset
 }
 
+/// How the UI should obtain credentials before connecting, mirroring the auth
+/// precedence in `ConnectionViewModel.authenticate`: a usable publickey identity
+/// wins over any stored password, and only the no-key/no-password case needs a
+/// manual prompt. Extracted here (pure, Linux-tested) so `SessionView` cannot
+/// regress into forcing a password screen on a key-configured host.
+public enum CredentialResolution: Equatable, Sendable {
+    /// The host has a resolvable identity whose private key is available → connect
+    /// via publickey; do NOT prompt for a password.
+    case connectWithKey
+    /// No usable key, but a non-empty password is stored → connect with it silently.
+    case connectWithStoredPassword
+    /// No usable key and no stored password → show the password prompt.
+    case promptForPassword
+}
+
+/// Decide `CredentialResolution` from the two facts the app tier can cheaply
+/// establish: whether the host resolves to an identity with an available private
+/// key, and whether a non-empty password secret is stored. Key precedence matches
+/// `authenticate` — publickey is preferred whenever a usable key exists.
+public func credentialResolution(hasUsableKey: Bool, hasStoredPassword: Bool) -> CredentialResolution {
+    if hasUsableKey { return .connectWithKey }
+    if hasStoredPassword { return .connectWithStoredPassword }
+    return .promptForPassword
+}
+
 // MARK: Tier 1 list fields (fallback: empty)
 
 public func resolveIdentities(host: Host, defaults: Defaults) -> [IdentityRef] {
