@@ -61,9 +61,23 @@ static void mosh_state_noop(const void *ctx, const void *buf, size_t len) {
     return self;
 }
 
-// Trampolines: pthread entry points hop back into the ObjC object.
-static void *mosh_thread_main(void *ctx) { return [(__bridge MoshSession *)ctx runMoshLoop]; }
-static void *reader_thread_main(void *ctx) { return [(__bridge MoshSession *)ctx runReaderLoop]; }
+// Trampolines: pthread entry points hop back into the ObjC object. Each thread is
+// handed a RETAINED (+1) reference via CFBridgingRetain at pthread_create, and releases
+// it (CFBridgingRelease) when it exits. This keeps the MoshSession alive for the whole
+// lifetime of its threads — otherwise ARC can dealloc it (when the owner drops its ref)
+// while a thread is still touching its ivars → use-after-free crash.
+static void *mosh_thread_main(void *ctx) {
+    MoshSession *self = (__bridge MoshSession *)ctx;
+    void *r = [self runMoshLoop];
+    CFBridgingRelease(ctx);   // balance the CFBridgingRetain in -start
+    return r;
+}
+static void *reader_thread_main(void *ctx) {
+    MoshSession *self = (__bridge MoshSession *)ctx;
+    void *r = [self runReaderLoop];
+    CFBridgingRelease(ctx);
+    return r;
+}
 
 - (void)start {
     if (_started) return;
@@ -75,9 +89,17 @@ static void *reader_thread_main(void *ctx) { return [(__bridge MoshSession *)ctx
         [self fireEnd:@"Mosh connection failed — using SSH"];
         return;
     }
-    pthread_create(&_readerThread, NULL, reader_thread_main, (__bridge void *)self);
-    if (pthread_create(&_moshThread, NULL, mosh_thread_main, (__bridge void *)self) == 0) {
+    // CFBridgingRetain gives each thread its own +1; the trampoline releases it on exit.
+    // If pthread_create fails the trampoline never runs, so reclaim that +1 here.
+    CFTypeRef readerCtx = CFBridgingRetain(self);
+    if (pthread_create(&_readerThread, NULL, reader_thread_main, (void *)readerCtx) != 0) {
+        CFBridgingRelease(readerCtx);
+    }
+    CFTypeRef moshCtx = CFBridgingRetain(self);
+    if (pthread_create(&_moshThread, NULL, mosh_thread_main, (void *)moshCtx) == 0) {
         _threadLive = YES;
+    } else {
+        CFBridgingRelease(moshCtx);
     }
 }
 
