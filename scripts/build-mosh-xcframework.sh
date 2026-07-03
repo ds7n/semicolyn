@@ -361,9 +361,11 @@ build_slice() {
 
   # Re-archive the plain OBJECTS (not archives): no cross-archive basename dedup, so
   # every definition is preserved; libtool also writes a proper Mach-O symbol table and
-  # tolerates empty objects like iOS's pty_compat.o (-no_warning_for_no_symbol is cosmetic).
+  # tolerates empty objects like iOS's pty_compat.o. (No -no_warning_for_no_symbol* flag:
+  # its spelling varies across libtool builds and it is purely cosmetic — the empty-member
+  # warnings are harmless.)
   rm -f "$workdir/$LIB_NAME"
-  libtool -static -no_warning_for_no_symbol -o "$workdir/$LIB_NAME" "${all_objs[@]}"
+  libtool -static -o "$workdir/$LIB_NAME" "${all_objs[@]}"
 
   # Regression guard for THIS bug: the util definition the old archive-merge silently
   # dropped must now be a DEFINED text symbol (T), not undefined (U). Mangled C++ name
