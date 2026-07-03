@@ -205,11 +205,26 @@ build_ncurses() {
   local prefix="$1"
   echo "  --> ncurses $NCURSES_VERSION"
   if [[ -f "$prefix/lib/libncurses.a" ]]; then echo "     [cached]"; return; fi
+  # Ensure a modern host tic is available for the fallback-terminfo step (macOS's
+  # system tic is ncurses 5.7 and errors on ncurses 6.5's terminfo.src). Idempotent.
+  if command -v brew >/dev/null 2>&1; then
+    brew list ncurses >/dev/null 2>&1 || brew install ncurses || true
+  fi
   local tarball="$DL_DIR/ncurses-${NCURSES_VERSION}.tar.gz"
   fetch "https://ftp.gnu.org/gnu/ncurses/ncurses-${NCURSES_VERSION}.tar.gz" "$tarball"
   local src="$prefix/src/ncurses"
   rm -rf "$src"; mkdir -p "$src"
   tar -xzf "$tarball" -C "$src" --strip-components=1
+
+  # The fallback-terminfo step runs the HOST tic/infocmp over ncurses 6.5's
+  # terminfo.src. macOS's system /usr/bin/tic is ancient (ncurses 5.7) and errors
+  # ("error writing … mintty") on the modern source. Prefer Homebrew's current
+  # ncurses tic/infocmp when available so MKfallback.sh succeeds.
+  local brew_ncurses; brew_ncurses="$(brew --prefix ncurses 2>/dev/null || true)"
+  local tic_path="/usr/bin"
+  if [[ -n "$brew_ncurses" && -x "$brew_ncurses/bin/tic" ]]; then
+    tic_path="$brew_ncurses/bin"
+  fi
 
   ( cd "$src"
     # ncurses cross-compiles need a native tic/build compiler for the terminfo
@@ -218,8 +233,9 @@ build_ncurses() {
     # poison ncurses' "does the build compiler work?" probe (it can't produce a
     # runnable host binary), yielding "Cross-build requires two compilers". Give the
     # BUILD compiler clean host flags via --with-build-c*flags so the probe passes.
+    # Put a modern tic first on PATH for MKfallback.sh.
     local host_sdk; host_sdk="$(xcrun --sdk macosx --show-sdk-path)"
-    ./configure \
+    PATH="$tic_path:$PATH" ./configure \
       --host="${HOST_TRIPLE}" \
       --prefix="$prefix" \
       --with-build-cc="$(xcrun --sdk macosx --find clang)" \
@@ -228,8 +244,8 @@ build_ncurses() {
       --with-build-ldflags="-isysroot $host_sdk" \
       --without-shared --without-debug --without-ada --without-cxx-binding \
       --without-manpages --without-progs --without-tests \
-      --enable-termcap --disable-database --with-fallbacks=xterm,xterm-256color,vt100,linux
-    make -j"$(sysctl -n hw.ncpu)"
+      --enable-termcap --disable-database --with-fallbacks=xterm-256color,vt100,linux
+    PATH="$tic_path:$PATH" make -j"$(sysctl -n hw.ncpu)"
     make install
   )
   # Some ncurses builds emit libtinfo separately; Mosh's pkg-config probe looks
