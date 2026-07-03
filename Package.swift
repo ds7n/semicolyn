@@ -22,13 +22,14 @@ var products: [Product] = [.library(name: "SemicolynKit", targets: ["SemicolynKi
 // The UniFFI XCFramework exists only on Apple platforms; never reference it on Linux.
 #if os(macOS)
 targets += [
-    .target(name: "SemicolynSSHCoreFFI", dependencies: ["SemicolynSSHCore"],
+    .target(name: "SemicolynSSHCoreFFI", dependencies: ["SemicolynSSHCore", "Mosh"],
             // The UniFFI-generated bindings aren't Swift 6 strict-concurrency
             // clean (sending-closure diagnostics on the foreign-trait callbacks).
             // It's vendored generated code we don't edit, so compile it in Swift 5
             // language mode; SemicolynKit and the app stay on Swift 6.
             swiftSettings: [.swiftLanguageMode(.v5)]),
     .binaryTarget(name: "SemicolynSSHCore", path: "SemicolynSSHCore.xcframework"),
+    .binaryTarget(name: "Mosh", path: "Mosh.xcframework"),
     .testTarget(name: "BridgeTests", dependencies: ["SemicolynSSHCoreFFI"]),
 ]
 // Expose the UniFFI bridge module as a product so the iOS app target can link it.
