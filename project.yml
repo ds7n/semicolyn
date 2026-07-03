@@ -36,6 +36,10 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+        # Mosh's Network::Compressor uses zlib (_compress/_uncompress). The Mosh
+        # xcframework provides the Mosh objects but not zlib; link the iOS SDK's
+        # libz here (Mosh's own build gets it via a system -lz).
+        OTHER_LDFLAGS: -lz
         PRODUCT_BUNDLE_IDENTIFIER: com.truepositive.semicolyn
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "0.1.0"
