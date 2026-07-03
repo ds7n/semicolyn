@@ -141,7 +141,7 @@ build_host_protoc() {
 build_ncurses() {
   local prefix="$1"
   echo "  --> ncurses $NCURSES_VERSION"
-  if [[ -f "$prefix/lib/libncurses.a" ]]; then echo "     [cached]"; return; fi
+  if [[ -f "$prefix/lib/libncursesw.a" ]]; then echo "     [cached]"; return; fi
   # Ensure a modern host tic is available for the fallback-terminfo step (macOS's
   # system tic is ncurses 5.7 and errors on ncurses 6.5's terminfo.src). Idempotent.
   if command -v brew >/dev/null 2>&1; then
@@ -190,12 +190,20 @@ build_ncurses() {
     PATH="$tic_path:$PATH" make -j"$(sysctl -n hw.ncpu)"
     make install
   )
-  # Some ncurses builds emit libtinfo separately; Mosh's pkg-config probe looks
-  # for `tinfo` then `ncurses`. Ensure a tinfo.pc alias exists if only ncurses
-  # was produced, so PKG_CHECK_MODULES([TINFO],[tinfo]) or [ncurses] resolves.
-  test -f "$prefix/lib/libncurses.a" || { echo "FATAL: ncurses libncurses.a missing"; exit 1; }
-  if [[ ! -f "$prefix/lib/pkgconfig/tinfo.pc" && -f "$prefix/lib/pkgconfig/ncurses.pc" ]]; then
-    cp "$prefix/lib/pkgconfig/ncurses.pc" "$prefix/lib/pkgconfig/tinfo.pc"
+  # ncurses 6.5 builds the wide-char variant: libncursesw.a + ncursesw.pc. Mosh's
+  # configure probes pkg-config `tinfo` then `ncurses` (unsuffixed) and links
+  # -lncurses/-ltinfo, so alias the lib and .pc names it expects to the w variant.
+  test -f "$prefix/lib/libncursesw.a" || { echo "FATAL: ncurses libncursesw.a missing"; exit 1; }
+  local libdir="$prefix/lib" pcdir="$prefix/lib/pkgconfig"
+  cp -f "$libdir/libncursesw.a" "$libdir/libncurses.a"
+  cp -f "$libdir/libncursesw.a" "$libdir/libtinfo.a"
+  local base_pc=""
+  [[ -f "$pcdir/ncursesw.pc" ]] && base_pc="$pcdir/ncursesw.pc"
+  [[ -z "$base_pc" && -f "$pcdir/ncurses.pc" ]] && base_pc="$pcdir/ncurses.pc"
+  if [[ -n "$base_pc" ]]; then
+    for name in ncurses tinfo; do
+      [[ -f "$pcdir/$name.pc" ]] || cp "$base_pc" "$pcdir/$name.pc"
+    done
   fi
 }
 
