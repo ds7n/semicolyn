@@ -213,11 +213,19 @@ build_ncurses() {
 
   ( cd "$src"
     # ncurses cross-compiles need a native tic/build compiler for the terminfo
-    # DB generation; --with-build-cc points at the host clang. Static, no progs.
+    # DB generation; --with-build-cc points at the host clang. The exported CFLAGS/
+    # CPPFLAGS carry iOS cross flags (-arch arm64 -isysroot <iOS SDK>), which would
+    # poison ncurses' "does the build compiler work?" probe (it can't produce a
+    # runnable host binary), yielding "Cross-build requires two compilers". Give the
+    # BUILD compiler clean host flags via --with-build-c*flags so the probe passes.
+    local host_sdk; host_sdk="$(xcrun --sdk macosx --show-sdk-path)"
     ./configure \
       --host="${HOST_TRIPLE}" \
       --prefix="$prefix" \
       --with-build-cc="$(xcrun --sdk macosx --find clang)" \
+      --with-build-cflags="-isysroot $host_sdk" \
+      --with-build-cppflags="-isysroot $host_sdk" \
+      --with-build-ldflags="-isysroot $host_sdk" \
       --without-shared --without-debug --without-ada --without-cxx-binding \
       --without-manpages --without-progs --without-tests \
       --enable-termcap --disable-database --with-fallbacks=xterm,xterm-256color,vt100,linux
