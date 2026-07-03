@@ -317,6 +317,17 @@ main() {
   test -d "$MOSH_SRC" || { echo "FATAL: vendored mosh missing at $MOSH_SRC"; exit 1; }
   test -f "$BRIDGE_HEADER" || { echo "FATAL: bridge header missing at $BRIDGE_HEADER"; exit 1; }
 
+  # Mosh's autogen.sh runs `autoreconf -fi`; macOS runners don't ship autotools.
+  # Install them (+ pkg-config for the PKG_CHECK_MODULES m4 macros). Idempotent.
+  if command -v brew >/dev/null 2>&1; then
+    for f in autoconf automake libtool pkg-config; do
+      brew list "$f" >/dev/null 2>&1 || brew install "$f" || true
+    done
+  fi
+  command -v autoreconf >/dev/null 2>&1 || {
+    echo "FATAL: autoreconf not found and could not be installed (need autotools)"; exit 1;
+  }
+
   # Clean output + build dirs for a reproducible run; keep the downloads cache.
   rm -rf "$OUT"
   mkdir -p "$DL_DIR"
