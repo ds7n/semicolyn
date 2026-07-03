@@ -591,7 +591,8 @@ Wires the working bridge into the connect flow, after SSH auth, before the tmux/
 - Produces: session wiring + a new `@Published var moshFallback: String?` banner slot; a resolved-config helper `resolveMoshConfig(host:defaults:)`.
 
 > **Confirmed against current code (do NOT invent APIs):**
-> - There is **no** existing `resolveMoshConfig`. `MoshConfig` is held as `host.mosh` (an `Inherited<MoshConfig>`; accessed elsewhere as `host.mosh.value?.enabled`). Task 4 adds a small resolver that reads `host.mosh.value` and falls back to `defaults.mosh.value` (mirror how `resolveTmuxAttemptControlMode` walks host→defaults in `HostExtensions.swift`), returning a `MoshConfig` (default `MoshConfig(enabled: false)`).
+> - `resolveMoshEnabled(host:defaults:) -> Bool` **already exists** (`Sources/SemicolynKit/Model/Resolution.swift:95`): `resolveOptional(host.mosh, defaults.mosh)?.enabled ?? false`. **Reuse it** for the enabled gate.
+> - For the full effective config, **use `resolveOptional(host.mosh, defaults.mosh) -> MoshConfig?`** (also in `Resolution.swift`). **Do NOT use `host.mosh.value`** — `Resolution.swift` documents that `.value` collapses `.inherit` and `.explicit(nil)` and MUST NOT be used for resolution (a cleared host field would wrongly inherit the Defaults value). `host`/`defaults` both carry `mosh: Inherited<MoshConfig>` (Host.swift:74, :132). So Task 4 does NOT add a resolver — it calls the existing `resolveOptional`/`resolveMoshEnabled`.
 > - `DegradeReason` (in `Tmux/TmuxLaunch.swift`) is a **fixed enum** (`.optedOut`/`.tmuxNotFound`/`.tooOld`) with **no free-text case** and is tmux-specific. Do NOT overload it for Mosh. The pre-handoff Mosh banner uses a **new `moshFallback: String?`** published slot rendered by `SessionView` (mirror the existing `degraded`/`crashBanner` banner rendering).
 
 - [ ] **Step 1: Add the `moshSession` slot + teardown**
@@ -607,17 +608,10 @@ In `ConnectionViewModel`, add near the `tmux`/`session` properties:
     @Published var moshFallback: String?
 ```
 
-Add the config resolver (near the other `resolve*` helpers; mirror `resolveTmuxAttemptControlMode`'s host→defaults walk):
-
-```swift
-    /// Resolve the effective MoshConfig: the host's explicit config, else the
-    /// Defaults', else Mosh-off. (`host.mosh`/`defaults.mosh` are `Inherited<MoshConfig>`.)
-    private func resolveMoshConfig(host: Host, defaults: Defaults) -> MoshConfig {
-        host.mosh.value ?? defaults.mosh.value ?? MoshConfig(enabled: false)
-    }
-```
-
-> Confirm at execution: the exact `Inherited` accessor (`host.mosh.value`) and whether `Defaults` carries a `mosh` field — grep `var mosh` in `Model/`. If `Defaults` has no `mosh`, drop the `defaults.mosh.value` term (host-only resolution) rather than inventing a field.
+No new resolver is needed — reuse the existing `Resolution.swift` helpers. The effective
+config is `resolveOptional(host.mosh, defaults.mosh)` (a `MoshConfig?`, honoring `Inherited`
+three-state); the enabled gate is `resolveMoshEnabled(host:defaults:)`. **Never** use
+`host.mosh.value` for resolution (it collapses `.inherit`/`.explicit(nil)`).
 
 In `teardown()`, add (before `session = nil`):
 
@@ -663,8 +657,9 @@ Mirror `probeTmuxVersion`'s capture-via-sink-with-2s-race pattern:
     /// a banner. Returns true if a Mosh session was attached; false if it fell back
     /// (the caller then runs the existing tmux/raw branch).
     private func attachMoshIfPossible(conn: Connection, host: Host, defaults: Defaults) async -> Bool {
-        let cfg = resolveMoshConfig(host: host, defaults: defaults)   // existing resolution
-        guard cfg.enabled else { return false }
+        guard resolveMoshEnabled(host: host, defaults: defaults) else { return false }
+        // Effective config for the argv (port range, server path, prediction mode).
+        let cfg = resolveOptional(host.mosh, defaults.mosh) ?? MoshConfig(enabled: true)
         let command = moshServerCommand(cfg).joined(separator: " ")
         let stdout = await captureMoshBootstrap(conn: conn, command: command)
         switch moshBranchOutcome(stdout: stdout, enabled: true) {
