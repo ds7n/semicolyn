@@ -64,3 +64,31 @@ targets:
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "semicolyn connects to the SSH and Mosh servers you specify."
         # No signing in CI; the simulator build is the gate.
         CODE_SIGNING_ALLOWED: NO
+        # The Mosh transport bridge (App/Mosh/MoshSession.mm) is Obj-C++ over
+        # Mosh.xcframework; expose it to Swift + set the C++ dialect it needs.
+        SWIFT_OBJC_BRIDGING_HEADER: App/Mosh/Semicolyn-Bridging-Header.h
+        CLANG_CXX_LANGUAGE_STANDARD: gnu++17
+
+  # macOS-CI-only unit tests for the Obj-C++ MoshSession bridge. STANDALONE — it
+  # compiles the real bridge (App/Mosh/MoshSession.mm) + a loopback fake mosh_main
+  # (Tests/AppTests/fake_mosh_main.mm) and deliberately does NOT link Mosh.xcframework
+  # or the app. The fake is therefore the ONLY `mosh_main` definition (no duplicate-
+  # symbol collision with the real network one), and the bridge only needs the
+  # `mosh_main` *declaration*, supplied by the vendored header on the search path
+  # below. (The app-links-Mosh gate is the separate "Build Semicolyn app" CI step.)
+  SemicolynBridgeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests/AppTests
+      - path: App/Mosh/MoshSession.mm
+    settings:
+      base:
+        CLANG_CXX_LANGUAGE_STANDARD: gnu++17
+        CODE_SIGNING_ALLOWED: NO
+        # MoshSession.mm's `#if __has_include(<Mosh/moshiosbridge.h>)` falls back to
+        # the bare "moshiosbridge.h"; point the compiler at the vendored copy so the
+        # declaration resolves without linking the framework binary.
+        HEADER_SEARCH_PATHS: $(SRCROOT)/extern/mosh/src/frontend
+        # No app host: run as a logic-test bundle.
+        TEST_HOST: ""
