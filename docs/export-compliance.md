@@ -9,6 +9,30 @@ LLC asserts the mass-market exemption for this usage.
 This document records the basis for that classification so it can be reviewed or
 revised (e.g. with counsel) rather than re-derived each release.
 
+## TL;DR — obligations & triggers
+
+**Ongoing obligations today: effectively none.** With russh + standard published
+algorithms, keeping this posture requires:
+
+- ❌ No export license, no government pre-approval.
+- ❌ No CCATS (that's for non-standard/proprietary crypto — we have none).
+- ❌ No BIS/NSA self-classification report (removed for standard-algorithm
+  mass-market software by the March 2021 BIS rule change).
+- ❌ No annual filing.
+- ✅ One truthful Info.plist checkbox (`ITSAppUsesNonExemptEncryption = NO`) — done.
+- ✅ Keep France excluded in App Store Connect availability — already set.
+
+**Only two things would create real work (revisit if either happens):**
+
+1. A dependency adds **non-standard / proprietary** crypto → mass-market exemption
+   no longer applies; self-classification report (possibly CCATS) becomes required.
+2. You decide to **list publicly in France** → complete the ANSSI declaration first
+   (a notification, not an approval; not triggered by TestFlight or other markets).
+
+Before any **public, non-TestFlight release**, a short confirmation with export-control
+counsel is cheap insurance — but nothing must be filed to ship a TestFlight build or to
+distribute standard-crypto SSH outside France.
+
 ## What crypto the app actually uses
 
 All cryptography is **standard, well-known, and published** — no custom primitives:
@@ -71,3 +95,21 @@ export-compliance question manually per build in App Store Connect.
   issues an `ITSEncryptionExportComplianceCode`, switch to `YES` + that code.
 - This classification is an assertion by True Positive LLC; confirm with export-control
   counsel before a public (non-TestFlight) release if in doubt.
+
+## Note: could a different library get the "Apple-OS-crypto only" exemption?
+
+Apple's *fully*-exempt answer ("encryption limited to that within the Apple operating
+system") is about **who provides the crypto**, not which algorithms. semicolyn doesn't
+qualify for it because the SSH path's crypto comes from **russh → aws-lc-rs / RustCrypto**
+(bundled), not from Apple's OS crypto. The only realistic way to reach the OS-crypto
+exemption would be to adopt **[`swift-nio-ssh`](https://github.com/apple/swift-nio-ssh)**
+(which brings `swift-crypto`, routing to CryptoKit/CommonCrypto on Apple platforms).
+
+**That is a full SSH-core replacement, not a crypto swap** — russh only exposes
+`aws-lc-rs`/`ring` backends, and swift-nio-ssh is a whole competing engine, so you cannot
+bolt swift-crypto onto russh without hand-writing a russh↔CommonCrypto backend (a
+multi-month, high-risk crypto-plumbing project). It would also discard the project's
+Rust-core → UniFFI → Linux-tested architecture. **Not worth it for a compliance nicety:**
+the mass-market 5D992.c posture above is valid, paperwork-free, and is exactly what
+comparable SSH clients (Blink, Termius) rely on. Revisit swift-nio-ssh only as a
+deliberate architecture decision, never as a compliance fix.
