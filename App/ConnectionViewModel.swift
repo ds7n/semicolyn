@@ -98,6 +98,10 @@ final class ConnectionViewModel: ObservableObject {
     /// Non-nil while a Mosh session is driving the terminal (mutually exclusive
     /// with `tmux`). Retained so teardown can shut the UDP loop down.
     private var moshSession: MoshSession?
+    /// True once the current Mosh session has delivered its first output frame (the
+    /// UDP handshake completed). Gates `onEnd`: a pre-first-frame exit falls back to
+    /// SSH on the retained connection; a post-first-frame exit is a mid-session crash.
+    private var moshFirstFrameSeen = false
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -271,6 +275,7 @@ final class ConnectionViewModel: ObservableObject {
     private func teardown() {
         moshSession?.stop()
         moshSession = nil
+        moshFirstFrameSeen = false
         moshFallback = nil
         tmux?.stop()
         tmux = nil
@@ -407,6 +412,22 @@ final class ConnectionViewModel: ObservableObject {
         state = .shell
     }
 
+    /// Probe tmux on the authenticated connection and attach the tmux control-mode
+    /// session or fall back to a degraded raw shell. This is the shared SSH tail of
+    /// both `connect` methods, factored out so the Mosh pre-frame fallback can re-run
+    /// it on the SAME retained connection (see `attachMoshIfPossible`).
+    private func attachSSHShell(conn: Connection, host: Host, defaults: Defaults) async throws {
+        let allow = resolveTmuxAttemptControlMode(host: host, defaults: defaults)
+        let probe = allow ? await probeTmuxVersion(conn: conn) : nil
+        switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
+        case .attach:
+            try await attachTmux(conn: conn)
+        case .degrade(let reason):
+            degraded = reason
+            try await openRawShell(conn: conn)
+        }
+    }
+
     // MARK: - Mosh path
 
     /// Run the `mosh-server` bootstrap over a one-shot exec and return its stdout
@@ -447,15 +468,40 @@ final class ConnectionViewModel: ObservableObject {
             let predict = cfg.predictionMode?.rawValue ?? "adaptive"
             let sess = MoshSession(ip: host.hostName, port: String(port), key: key,
                                    cols: 80, rows: 24, predictMode: predict)
+            // Reset the handshake gate: onEnd before the first frame means the UDP
+            // handshake never completed → fall back to SSH on the retained connection;
+            // onEnd after a frame is a genuine mid-session exit → crash banner.
+            moshFirstFrameSeen = false
             sess.onOutput = { [weak self] data in
                 self?.output.onBytes?([UInt8](data))
             }
-            sess.onEnd = { [weak self] reason in
+            sess.onFirstFrame = { [weak self] in
+                // Frames are flowing: the UDP path is up. From here on, loop exits are
+                // mid-session events, not handshake failures.
+                self?.moshFirstFrameSeen = true
+            }
+            sess.onEnd = { [weak self] _ in
                 guard let self else { return }
-                // Post-handoff loop exit: a reason → failure; clean nil → reuse the
-                // mid-session crash banner (same state the tmux crash path uses).
-                if let reason { self.state = .failed(reason) }
-                else { self.crashBanner = .tmuxEnded }
+                if self.moshFirstFrameSeen {
+                    // Post-first-frame exit (session/server death, clean or not):
+                    // reuse the mid-session crash banner — the same state tmux uses.
+                    self.crashBanner = .tmuxEnded
+                    return
+                }
+                // Pre-first-frame exit: the UDP handshake never completed (blocked
+                // firewall / crypto mismatch). Fall back to SSH on the SAME retained
+                // connection with a banner, instead of dead-ending the whole connect.
+                self.moshSession?.stop()
+                self.moshSession = nil
+                self.moshFallback = "Mosh UDP unreachable (check firewall) — using SSH"
+                Task { [weak self] in
+                    guard let self else { return }
+                    do {
+                        try await self.attachSSHShell(conn: conn, host: host, defaults: defaults)
+                    } catch {
+                        self.state = .failed(String(describing: error))
+                    }
+                }
             }
             sess.start()
             moshSession = sess
@@ -706,15 +752,7 @@ final class ConnectionViewModel: ObservableObject {
                 if await attachMoshIfPossible(conn: conn, host: savedHost, defaults: defaults2) {
                     return
                 }
-                let allow = resolveTmuxAttemptControlMode(host: savedHost, defaults: defaults2)
-                let probe = allow ? await probeTmuxVersion(conn: conn) : nil
-                switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
-                case .attach:
-                    try await attachTmux(conn: conn)
-                case .degrade(let reason):
-                    degraded = reason
-                    try await openRawShell(conn: conn)
-                }
+                try await attachSSHShell(conn: conn, host: savedHost, defaults: defaults2)
             } catch ConnectError.HostKeyRejected {
                 state = .failed("Host key not trusted")
             } catch {
@@ -760,15 +798,7 @@ final class ConnectionViewModel: ObservableObject {
                 if await attachMoshIfPossible(conn: conn, host: hostRecord, defaults: defaults2) {
                     return
                 }
-                let allow = resolveTmuxAttemptControlMode(host: hostRecord, defaults: defaults2)
-                let probe = allow ? await probeTmuxVersion(conn: conn) : nil
-                switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
-                case .attach:
-                    try await attachTmux(conn: conn)
-                case .degrade(let reason):
-                    degraded = reason
-                    try await openRawShell(conn: conn)
-                }
+                try await attachSSHShell(conn: conn, host: hostRecord, defaults: defaults2)
             } catch ConnectError.HostKeyRejected {
                 state = .failed("Host key not trusted")
             } catch {
