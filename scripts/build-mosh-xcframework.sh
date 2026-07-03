@@ -287,7 +287,9 @@ build_slice() {
   # Export the slice toolchain so the dep build functions inherit it.
   export ARCH="$arch" SDK="$sdk" HOST_TRIPLE="$host_triple" MIN_FLAG="$min_flag"
   export CC="$clang" CXX="$clangxx"
-  export CFLAGS="-arch $arch -isysroot $sysroot $min_flag -fembed-bitcode-marker -O2"
+  # No -fembed-bitcode-marker: bitcode is deprecated (App Store dropped it) and
+  # Xcode 16 removed the flag, which breaks autotools' link-executable probe.
+  export CFLAGS="-arch $arch -isysroot $sysroot $min_flag -O2"
   export CXXFLAGS="$CFLAGS -std=c++17"
   export CPPFLAGS="-arch $arch -isysroot $sysroot $min_flag -I$prefix/include"
   export LDFLAGS="-arch $arch -isysroot $sysroot $min_flag -L$prefix/lib"
