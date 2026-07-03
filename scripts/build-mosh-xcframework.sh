@@ -234,8 +234,11 @@ build_ncurses() {
     # runnable host binary), yielding "Cross-build requires two compilers". Give the
     # BUILD compiler clean host flags via --with-build-c*flags so the probe passes.
     # Put a modern tic first on PATH for MKfallback.sh.
+    # Force sys/ttydev.h absent: it exists on the macOS build host but NOT the iOS
+    # SDK, and ncurses' lib_baudrate.c includes it when configure (mis)detects it in
+    # a cross build → "'sys/ttydev.h' file not found". The cache var stops that.
     local host_sdk; host_sdk="$(xcrun --sdk macosx --show-sdk-path)"
-    PATH="$tic_path:$PATH" ./configure \
+    PATH="$tic_path:$PATH" ac_cv_header_sys_ttydev_h=no ./configure \
       --host="${HOST_TRIPLE}" \
       --prefix="$prefix" \
       --with-build-cc="$(xcrun --sdk macosx --find clang)" \
