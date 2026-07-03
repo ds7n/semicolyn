@@ -6,9 +6,10 @@
 #   linux-swift : SemicolynKit + SeedKit pure-logic tests (swift-crypto)        — the fast loop
 #   linux-rust  : Rust SSH core, unit + integration vs containerized sshd   — the fast loop
 #   lint        : cargo fmt --check + clippy
-#   macos       : the Apple-gated path Linux can't reach — builds SemicolynKit under CryptoKit
-#                 and the UniFFI XCFramework (compiles the Rust core for all three iOS
-#                 triples, validating aws-lc-rs on iOS = roadmap risk D4).
+#   macos       : the Apple-gated path Linux can't reach — builds SemicolynKit under CryptoKit,
+#                 Mosh.xcframework (vendored blinksh/mosh — M1), and the UniFFI XCFramework
+#                 (compiles the Rust core for all three iOS triples, validating aws-lc-rs on iOS
+#                 = roadmap risk D4).
 #
 # NOTE: macOS BridgeTests (the FFI bridge proof) need an iOS-Simulator destination and
 # arrive with the iOS app target; this workflow builds the bridge but does not yet run it.
@@ -95,6 +96,8 @@ jobs:
     runs-on: macos-14   # Apple Silicon + Xcode
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Select latest-stable Xcode (the default is too old for Swift tools 6.0)
         uses: maxim-lobanov/setup-xcode@v1
@@ -103,6 +106,9 @@ jobs:
 
       - name: Add iOS Rust targets
         run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+
+      - name: Build Mosh.xcframework (cross-compile vendored blinksh/mosh — M1)
+        run: bash scripts/build-mosh-xcframework.sh
 
       - name: Build UniFFI XCFramework (compiles Rust core for all iOS triples — D4)
         # Must precede any swift build: the macOS package manifest references this

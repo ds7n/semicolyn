@@ -14,6 +14,7 @@
 
 # CI build artifacts (not source)
 /SemicolynSSHCore.xcframework/
+/Mosh.xcframework/
 # Generated UniFFI Swift wrapper (produced by scripts/build-xcframework.sh)
 /Sources/SemicolynSSHCoreFFI/
 # Generated Xcode project (produced by `xcodegen generate` from project.yml)

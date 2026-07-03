@@ -1,0 +1,3 @@
+[submodule "extern/mosh"]
+	path = extern/mosh
+	url = https://github.com/blinksh/mosh.git
