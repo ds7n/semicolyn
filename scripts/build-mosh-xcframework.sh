@@ -309,14 +309,20 @@ build_slice() {
 
   # `libmoshiosclient.a` (frontend: moshiosbridge.o + iosclient.o + terminaloverlay.o)
   # is NOT self-contained — it references the sibling Mosh static libs (util defines
-  # is_utf8_locale/set_native_locale/freeze_timestamp/…, plus network/crypto/terminal/
-  # statesync/protobuf) exactly as the frontend Makefile.am LDADD lists them. A normal
-  # Mosh build links those into the final executable; shipping the frontend .a alone
-  # leaves those symbols Undefined at the app link step. So MERGE every archive the app
-  # needs into one complete static lib via `libtool -static` (the correct tool for
-  # combining archives — `ar` mishandles same-named members across libs). Apple
-  # CommonCrypto is header-only in the SDK (no archive to merge).
-  local -a merge=(
+  # is_utf8_locale/set_native_locale/freeze_timestamp/LocaleVar::str, plus network/
+  # crypto/terminal/statesync/protobuf) exactly as the frontend Makefile.am LDADD lists.
+  # A normal Mosh build links those into the final executable; shipping the frontend .a
+  # alone leaves those symbols Undefined at the app link step. Apple CommonCrypto is
+  # header-only in the SDK (no archive to merge).
+  #
+  # DO NOT merge with `libtool -static <a.a> <b.a> …`: Apple libtool de-dups members
+  # ACROSS input archives by bare basename (keeping the first), so a basename collision
+  # with the autotools-built libprotobuf.a / libncurses.a silently drops whole Mosh
+  # members — this exact bug ate locale_utils.o's definitions (they stayed `U` in the
+  # output). Instead explode every archive into its OWN scratch dir (identical basenames
+  # from different archives can't clobber) and re-archive the resulting OBJECT files —
+  # objects carry no basename-dedup semantics, so nothing is dropped.
+  local -a src_archives=(
     "$produced"
     "$build_tree/src/util/libmoshutil.a"
     "$build_tree/src/network/libmoshnetwork.a"
@@ -327,12 +333,48 @@ build_slice() {
     "$prefix/lib/libprotobuf.a"        # protobuf runtime (target slice)
     "$prefix/lib/libncurses.a"         # tinfo/ncurses (aliased from libncursesw.a)
   )
-  local m
-  for m in "${merge[@]}"; do
-    test -f "$m" || { echo "FATAL: $name missing archive to merge: $m"; exit 1; }
+  local a
+  for a in "${src_archives[@]}"; do
+    test -f "$a" || { echo "FATAL: $name missing archive to merge: $a"; exit 1; }
   done
-  libtool -static -o "$workdir/$LIB_NAME" "${merge[@]}"
-  echo "    built self-contained $workdir/$LIB_NAME (merged ${#merge[@]} archives)"
+
+  # Explode each archive into an isolated numbered dir so same-basename members from
+  # different archives (e.g. protobuf/ncurses vs Mosh) never overwrite one another.
+  local objdir="$workdir/merge-objs"
+  rm -rf "$objdir"; mkdir -p "$objdir"
+  local ar_tool; ar_tool="$(xcrun --sdk "$sdk" --find ar)"
+  local -a all_objs=()
+  local idx=0
+  for a in "${src_archives[@]}"; do
+    local sub="$objdir/$idx"
+    mkdir -p "$sub"
+    ( cd "$sub" && "$ar_tool" x "$a" )   # `ar x` writes to CWD; subshell keeps ours put
+    local o
+    while IFS= read -r -d '' o; do
+      local dest="$objdir/$(printf '%02d' "$idx")-$(basename "$o")"
+      mv "$o" "$dest"
+      all_objs+=("$dest")
+    done < <(find "$sub" -maxdepth 1 -name '*.o' -print0)
+    idx=$((idx + 1))
+  done
+  test "${#all_objs[@]}" -gt 0 || { echo "FATAL: $name extracted no objects to merge"; exit 1; }
+
+  # Re-archive the plain OBJECTS (not archives): no cross-archive basename dedup, so
+  # every definition is preserved; libtool also writes a proper Mach-O symbol table and
+  # tolerates empty objects like iOS's pty_compat.o (-no_warning_for_no_symbol is cosmetic).
+  rm -f "$workdir/$LIB_NAME"
+  libtool -static -no_warning_for_no_symbol -o "$workdir/$LIB_NAME" "${all_objs[@]}"
+
+  # Regression guard for THIS bug: the util definition the old archive-merge silently
+  # dropped must now be a DEFINED text symbol (T), not undefined (U). Mangled C++ name
+  # (Itanium ABI, identical across all three slices).
+  if ! nm -arch "$arch" "$workdir/$LIB_NAME" 2>/dev/null | grep -q 'T __Z17set_native_localev'; then
+    echo "FATAL: $name $LIB_NAME is missing the set_native_locale DEFINITION (T) —" \
+         "the object merge dropped util objects again" >&2
+    exit 1
+  fi
+  rm -rf "$objdir"
+  echo "    built self-contained $workdir/$LIB_NAME (${#src_archives[@]} archives, ${#all_objs[@]} objects)"
 }
 
 # --------------------------------------------------------------------------- #
@@ -423,21 +465,21 @@ main() {
     exit 1
   fi
 
-  # SELF-CONTAINMENT GATE (added after the M3 app-link surfaced Undefined symbols):
-  # exporting mosh_main is necessary but NOT sufficient — the frontend lib references
-  # sibling helpers (e.g. set_native_locale in libmoshutil) that must be MERGED in, or
-  # the app link fails with "Undefined symbols". Assert a representative helper is now
-  # DEFINED (a T symbol), not merely referenced (U). This fails an incomplete merge at
-  # BUILD time (one CI run) instead of at the downstream app-link step.
-  local sentinel="set_native_locale"
-  sentinel_hit="$(printf '%s\n' "$nm_out" | grep -E "[[:space:]]T[[:space:]]+_?${sentinel}" || true)"
+  # SELF-CONTAINMENT GATE on the FINAL packaged device slice (belt-and-suspenders over
+  # build_slice's per-slice guard): exporting mosh_main is necessary but NOT sufficient —
+  # the frontend lib references sibling helpers (set_native_locale in libmoshutil) that
+  # must be merged in, or the app link fails with "Undefined symbols". Match the MANGLED
+  # C++ name (`__Z17set_native_localev`) — it is C++-linkage, not extern "C" like
+  # mosh_main, so it never appears unmangled. Assert it's DEFINED (T), not undefined (U).
+  local sentinel_hit
+  sentinel_hit="$(printf '%s\n' "$nm_out" | grep -E "[[:space:]]T[[:space:]]+_?__Z17set_native_localev$" || true)"
   if [[ -n "$sentinel_hit" ]]; then
-    echo "OK: sentinel helper '${sentinel}' is DEFINED — archive is self-contained."
+    echo "OK: set_native_locale is DEFINED (T) in the packaged device slice — self-contained."
     echo "SUCCESS: built $OUT"
   else
-    echo "GATE FAIL: '${sentinel}' is not a defined (T) symbol in $device_lib — the sibling" >&2
-    echo "  Mosh archives were not merged in; the app will fail to link. Check build_slice's merge." >&2
-    printf '%s\n' "$nm_out" | grep -Ei "locale|timestamp" | head -20 >&2 || true
+    echo "GATE FAIL: set_native_locale is not a defined (T) symbol in $device_lib — the sibling" >&2
+    echo "  Mosh objects were not merged in; the app will fail to link. Check build_slice's object merge." >&2
+    printf '%s\n' "$nm_out" | grep -Ei "locale|native" | head -20 >&2 || true
     exit 1
   fi
 }
