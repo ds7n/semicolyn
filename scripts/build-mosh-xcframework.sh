@@ -368,17 +368,26 @@ main() {
   # M1 SUCCESS GATE: the built device slice must export the `mosh_main`      #
   # bridge symbol. This is the line that proves M1 in CI.                    #
   # ----------------------------------------------------------------------- #
+  # The device-only slice dir is literally `ios-arm64`; the simulator dir is
+  # `ios-arm64_x86_64-simulator` (also contains the substring "ios-arm64"), so
+  # exclude any path containing "simulator" to avoid matching the fat sim lib.
   local device_lib
-  device_lib="$(find "$OUT" -path '*ios-arm64*' -name "$LIB_NAME" | head -n1)"
+  device_lib="$(find "$OUT" -name "$LIB_NAME" -path '*ios-arm64*' -not -path '*simulator*' | head -n1)"
   test -n "$device_lib" || { echo "GATE FAIL: no device $LIB_NAME inside $OUT"; exit 1; }
 
-  echo "==> M1 gate: nm '$device_lib' | grep ' T _${BRIDGE_SYMBOL}$'"
-  if nm "$device_lib" 2>/dev/null | grep -Eq " T _${BRIDGE_SYMBOL}\$"; then
+  # Match `mosh_main` as an exported (T) text symbol. Use `-arch arm64` so nm reads
+  # the right slice, and match with/without the Mach-O leading underscore. Dump the
+  # mosh-related symbols on failure so a naming mismatch is diagnosable in one run.
+  echo "==> M1 gate: nm -arch arm64 '$device_lib' | grep ' T _${BRIDGE_SYMBOL}'"
+  local nm_out
+  nm_out="$(nm -arch arm64 "$device_lib" 2>/dev/null || nm "$device_lib" 2>/dev/null)"
+  if printf '%s\n' "$nm_out" | grep -Eq "[[:space:]]T[[:space:]]+_?${BRIDGE_SYMBOL}$"; then
     echo "OK: bridge symbol '${BRIDGE_SYMBOL}' present in device slice."
     echo "SUCCESS: built $OUT"
   else
-    echo "GATE FAIL: bridge symbol '${BRIDGE_SYMBOL}' NOT found in $device_lib" >&2
-    echo "  (expected an exported 'T _${BRIDGE_SYMBOL}' entry from nm)" >&2
+    echo "GATE FAIL: bridge symbol '${BRIDGE_SYMBOL}' NOT found (as an exported T symbol) in $device_lib" >&2
+    echo "  --- mosh-related symbols present (for diagnosis): ---" >&2
+    printf '%s\n' "$nm_out" | grep -Ei "mosh|_main" | head -30 >&2 || echo "  (none matched mosh|_main)" >&2
     exit 1
   fi
 }
