@@ -95,6 +95,12 @@ final class ConnectionViewModel: ObservableObject {
     private var promptContinuation: CheckedContinuation<Bool, Never>?
 
     private var connection: Connection?
+    /// Non-nil while a Mosh session is driving the terminal (mutually exclusive
+    /// with `tmux`). Retained so teardown can shut the UDP loop down.
+    private var moshSession: MoshSession?
+    /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
+    /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
+    @Published var moshFallback: String?
     /// Last saved-host connect args, retained so `⇧⌘R` can reconnect (Phase 4e).
     private var lastSavedHost: Host?
     private var lastPassword: String?
@@ -148,7 +154,9 @@ final class ConnectionViewModel: ObservableObject {
     /// attached, else straight to the raw-PTY channel.
     func sendTerminalInput(_ bytes: [UInt8]) {
         observePredictorInput(bytes)
-        if let tmux {
+        if let moshSession {
+            moshSession.writeInput(Data(bytes))
+        } else if let tmux {
             tmux.sendInput(bytes)
         } else {
             rawWriter?.enqueue(bytes)
@@ -261,6 +269,9 @@ final class ConnectionViewModel: ObservableObject {
     /// Reset all connection and pane state. Call at the start of each connect
     /// attempt so no stale handles or buffered bytes carry over to the new session.
     private func teardown() {
+        moshSession?.stop()
+        moshSession = nil
+        moshFallback = nil
         tmux?.stop()
         tmux = nil
         paneContexts = [:]
@@ -395,6 +406,71 @@ final class ConnectionViewModel: ObservableObject {
         }
         state = .shell
     }
+
+    // MARK: - Mosh path
+
+    /// Run the `mosh-server` bootstrap over a one-shot exec and return its stdout
+    /// (empty string if nothing came back or the channel failed). Resolves when the
+    /// exec channel closes or a 2s guard fires — same race as `probeTmuxVersion`.
+    private func captureMoshBootstrap(conn: Connection, command: String) async -> String {
+        let sink = TerminalShellOutput()
+        var captured: [UInt8] = []
+        sink.onBytes = { captured.append(contentsOf: $0) }
+        let done = AsyncStream<Void> { cont in
+            sink.onExit = { _ in cont.yield(); cont.finish() }
+        }
+        let sess = try? await conn.openExec(command: command, term: "xterm-256color",
+                                            cols: 80, rows: 24, output: sink)
+        guard sess != nil else { return "" }
+        defer { if let sess { Task { try? await sess.close() } } }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { for await _ in done { break } }
+            group.addTask { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+            await group.next(); group.cancelAll()
+        }
+        return String(decoding: captured, as: UTF8.self)
+    }
+
+    /// Attach a Mosh session on the authenticated connection: bootstrap mosh-server,
+    /// decide, and either create a `MoshSession` or fall back to the SSH/tmux path
+    /// with a banner. Returns true if a Mosh session was attached; false if it fell
+    /// back (the caller then runs the existing tmux/raw branch).
+    private func attachMoshIfPossible(conn: Connection, host: Host, defaults: Defaults) async -> Bool {
+        guard resolveMoshEnabled(host: host, defaults: defaults) else { return false }
+        // Effective config for the argv (port range, server path, prediction mode).
+        // resolveOptional honors Inherited three-state (NOT host.mosh.value).
+        let cfg = resolveOptional(host.mosh, defaults.mosh) ?? MoshConfig(enabled: true)
+        let command = moshServerCommand(cfg).joined(separator: " ")
+        let stdout = await captureMoshBootstrap(conn: conn, command: command)
+        switch moshBranchOutcome(stdout: stdout, enabled: true) {
+        case let .mosh(port, key):
+            let predict = cfg.predictionMode?.rawValue ?? "adaptive"
+            let sess = MoshSession(ip: host.hostName, port: String(port), key: key,
+                                   cols: 80, rows: 24, predictMode: predict)
+            sess.onOutput = { [weak self] data in
+                self?.output.onBytes?([UInt8](data))
+            }
+            sess.onEnd = { [weak self] reason in
+                guard let self else { return }
+                // Post-handoff loop exit: a reason → failure; clean nil → reuse the
+                // mid-session crash banner (same state the tmux crash path uses).
+                if let reason { self.state = .failed(reason) }
+                else { self.crashBanner = .tmuxEnded }
+            }
+            sess.start()
+            moshSession = sess
+            connection = conn
+            tmuxState = nil
+            state = .shell
+            return true
+        case let .fallback(reason):
+            moshFallback = reason   // pre-handoff banner; caller runs the SSH/tmux path
+            return false
+        }
+    }
+
+    /// Push a new terminal size to the running Mosh session. No-op outside Mosh mode.
+    func setMoshClientSize(cols: Int, rows: Int) { moshSession?.resizeCols(Int32(cols), rows: Int32(rows)) }
 
     /// Reconcile Fn auto-engage with the active pane's foreground process.
     private func refreshFnAutoEngage() {
@@ -626,6 +702,10 @@ final class ConnectionViewModel: ObservableObject {
                 let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
                 osc52Allowed = resolveOsc52Allow(host: savedHost, defaults: defaults2)
                 startPredictor(host: savedHost, defaults: defaults2)
+                // Mosh takes precedence over tmux when enabled + bootstrappable.
+                if await attachMoshIfPossible(conn: conn, host: savedHost, defaults: defaults2) {
+                    return
+                }
                 let allow = resolveTmuxAttemptControlMode(host: savedHost, defaults: defaults2)
                 let probe = allow ? await probeTmuxVersion(conn: conn) : nil
                 switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
@@ -676,6 +756,10 @@ final class ConnectionViewModel: ObservableObject {
                 let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
                 osc52Allowed = resolveOsc52Allow(host: hostRecord, defaults: defaults2)
                 startPredictor(host: hostRecord, defaults: defaults2)
+                // Mosh takes precedence over tmux when enabled + bootstrappable.
+                if await attachMoshIfPossible(conn: conn, host: hostRecord, defaults: defaults2) {
+                    return
+                }
                 let allow = resolveTmuxAttemptControlMode(host: hostRecord, defaults: defaults2)
                 let probe = allow ? await probeTmuxVersion(conn: conn) : nil
                 switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
