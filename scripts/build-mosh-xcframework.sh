@@ -365,14 +365,24 @@ build_slice() {
   # its spelling varies across libtool builds and it is purely cosmetic — the empty-member
   # warnings are harmless.)
   rm -f "$workdir/$LIB_NAME"
+  echo "    re-archiving ${#all_objs[@]} objects from ${#src_archives[@]} archives"
   libtool -static -o "$workdir/$LIB_NAME" "${all_objs[@]}"
 
   # Regression guard for THIS bug: the util definition the old archive-merge silently
-  # dropped must now be a DEFINED text symbol (T), not undefined (U). Mangled C++ name
-  # (Itanium ABI, identical across all three slices).
-  if ! nm -arch "$arch" "$workdir/$LIB_NAME" 2>/dev/null | grep -q 'T __Z17set_native_localev'; then
+  # dropped must now be a DEFINED text symbol (T), not undefined (U). C++-mangled name
+  # (Itanium ABI, same across slices). Capture nm into a var and grep WITHOUT -q: on the
+  # large merged archive, `nm | grep -q` closes the pipe on first match while nm is still
+  # writing → SIGPIPE → under `set -o pipefail` the pipeline is non-zero and the guard
+  # false-fails even when the symbol IS present (the exact bug that hit the M1 gate).
+  local slice_nm sentinel_def
+  slice_nm="$(nm -arch "$arch" "$workdir/$LIB_NAME" 2>/dev/null || true)"
+  sentinel_def="$(printf '%s\n' "$slice_nm" | grep -E '[[:space:]]T[[:space:]]+_?__Z17set_native_localev$' || true)"
+  if [[ -z "$sentinel_def" ]]; then
     echo "FATAL: $name $LIB_NAME is missing the set_native_locale DEFINITION (T) —" \
-         "the object merge dropped util objects again" >&2
+         "the object merge dropped util objects." >&2
+    echo "  --- locale/native symbols present (for diagnosis): ---" >&2
+    printf '%s\n' "$slice_nm" | grep -Ei "set_native_locale|locale_utils|is_utf8" | head -20 >&2 \
+      || echo "  (no locale symbols AT ALL — locale_utils.o was not extracted/merged)" >&2
     exit 1
   fi
   rm -rf "$objdir"
