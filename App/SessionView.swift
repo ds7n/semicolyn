@@ -12,12 +12,11 @@ private struct IdentifiableHost: Identifiable {
     init(_ host: Host) { self.id = host.id; self.host = host }
 }
 
-/// Presents a live SSH session for a saved `Host`. Resolves credentials from
-/// the host's stored `passwordRef` secret if available; otherwise prompts the
-/// user to enter a password before connecting.
-///
-/// Auth scope (Phase 2a): password + keyboard-interactive only.
-/// Publickey/cert connect is deferred to Phase 2b (Apple key-minting).
+/// Presents a live SSH session for a saved `Host`. Resolves credentials in the
+/// same precedence the connect path uses (`ConnectionViewModel.authenticate`):
+/// a host with a usable publickey identity connects via that key with no prompt;
+/// otherwise a stored password auto-connects; only a host with neither prompts
+/// the user for a password.
 struct SessionView: View {
     let host: Host
 
@@ -232,23 +231,48 @@ struct SessionView: View {
     private func resolveCredentials() {
         guard !credentialsResolved else { return }
         defer { resolving = false }
-        if let passwordID = host.passwordRef.value,
-           let data = try? AppStores.shared.secrets.getSecret(.password(id: passwordID)) {
-            let stored = String(decoding: data, as: UTF8.self)
-            guard !stored.isEmpty else {
-                // Stored blob is empty — fall back to manual entry.
-                credentialsResolved = true
-                needsPasswordEntry = true
-                return
-            }
-            credentialsResolved = true
-            password = stored
-            vm.connect(savedHost: host, password: stored)
-        } else {
-            // No stored secret — surface the password entry form.
-            credentialsResolved = true
+        credentialsResolved = true
+
+        let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+        let storedPassword = storedPassword()
+        // Mirror the connect-path auth precedence so a key-configured host never
+        // gets stuck on the password prompt (the "key auth coming in 2b" regression).
+        switch credentialResolution(hasUsableKey: hostHasUsableKey(defaults: defaults),
+                                     hasStoredPassword: storedPassword != nil) {
+        case .connectWithKey:
+            // `authenticate` uses the resolved identity's key and ignores the
+            // password argument, so an empty password is correct here.
+            vm.connect(savedHost: host, password: "")
+        case .connectWithStoredPassword:
+            password = storedPassword ?? ""
+            vm.connect(savedHost: host, password: password)
+        case .promptForPassword:
             needsPasswordEntry = true
         }
+    }
+
+    /// The host's non-empty stored password, or nil (absent, unreadable, or empty).
+    private func storedPassword() -> String? {
+        guard let passwordID = host.passwordRef.value,
+              let data = try? AppStores.shared.secrets.getSecret(.password(id: passwordID))
+        else { return nil }
+        let stored = String(decoding: data, as: UTF8.self)
+        return stored.isEmpty ? nil : stored
+    }
+
+    /// True if the host resolves to an identity whose private key is available on
+    /// this device — the same check `ConnectionViewModel.authenticate` gates on.
+    /// A Keychain read error is treated as "no usable key" here (the connect path
+    /// re-reads and surfaces a genuine failure), so a transient error only means we
+    /// fall back to the password prompt rather than silently blocking.
+    private func hostHasUsableKey(defaults: Defaults) -> Bool {
+        guard let identityID = resolveIdentities(host: host, defaults: defaults).first else {
+            return false
+        }
+        // privateKeyOpenSSH returns String? (nil = absent); `try?` collapses a read
+        // error to nil too. Either nil → no usable key on this device.
+        let key = try? AppStores.shared.identities.privateKeyOpenSSH(for: identityID)
+        return (key ?? nil) != nil
     }
 
     // MARK: - Password prompt
@@ -268,8 +292,9 @@ struct SessionView: View {
 
                 Section("Authentication") {
                     SecureField("Password", text: $password)
-                    // Phase 2b note — publickey/cert connect deferred.
-                    Text("Password or keyboard-interactive auth only (key auth coming in 2b).")
+                    // This prompt only appears when the host has no usable key. Key
+                    // auth is used automatically for hosts with an assigned identity.
+                    Text("No SSH key assigned to this host — enter a password, or assign an identity in the host editor to use key auth.")
                         .font(.caption)
                         .foregroundStyle(Color(theme.text.secondary))
                 }
