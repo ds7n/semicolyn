@@ -15,7 +15,12 @@
                                                 cols:80 rows:24 predictMode:@"none"];
     XCTestExpectation *got = [self expectationWithDescription:@"onOutput"];
     __block NSMutableData *acc = [NSMutableData data];
-    s.onOutput = ^(NSData *d) { [acc appendData:d]; if (acc.length >= 1) [got fulfill]; };
+    __block BOOL fulfilled = NO;
+    // onOutput can fire in multiple chunks; fulfill EXACTLY once (double-fulfill asserts).
+    s.onOutput = ^(NSData *d) {
+        [acc appendData:d];
+        if (acc.length >= 1 && !fulfilled) { fulfilled = YES; [got fulfill]; }
+    };
     [s start];
     unsigned char byte = 'X';
     [s writeInput:[NSData dataWithBytes:&byte length:1]];
@@ -30,7 +35,12 @@
                                                 cols:80 rows:24 predictMode:@"none"];
     XCTestExpectation *got = [self expectationWithDescription:@"onOutput"];
     __block NSMutableData *acc = [NSMutableData data];
-    s.onOutput = ^(NSData *d) { [acc appendData:d]; if (acc.length >= 5) [got fulfill]; };
+    __block BOOL fulfilled = NO;
+    // "hello" may arrive as several chunks; fulfill EXACTLY once (double-fulfill asserts).
+    s.onOutput = ^(NSData *d) {
+        [acc appendData:d];
+        if (acc.length >= 5 && !fulfilled) { fulfilled = YES; [got fulfill]; }
+    };
     [s start];
     [s writeInput:[@"hello" dataUsingEncoding:NSUTF8StringEncoding]];
     [self waitForExpectations:@[ got ] timeout:2.0];
