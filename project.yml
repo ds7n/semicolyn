@@ -57,11 +57,14 @@ targets:
         # A terminal is comfortable in any orientation; iPhone omits upside-down per norm.
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        # SSH/Mosh use non-exempt (but standard, mass-market) encryption. Declaring this
-        # auto-answers the per-build export-compliance prompt. Standard crypto → US annual
-        # self-classification (ECCN 5D992.c); France requires the ANSSI declaration only if
-        # France is kept in App Store availability.
-        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: "YES"
+        # SSH/Mosh use ONLY standard, well-known encryption (AES, ChaCha20, curve25519,
+        # ed25519) to secure the user's own connections — the classic mass-market /
+        # "exempt" case for a terminal client. Declaring NO auto-answers the per-build
+        # export-compliance prompt as exempt, so no ITSEncryptionExportComplianceCode is
+        # required (a "YES" here 409s the TestFlight upload without a matching code) and
+        # no France/ANSSI per-build declaration is triggered. (True Positive LLC asserts
+        # the mass-market exemption applies to this standard-crypto usage.)
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: "NO"
         # SSH/mosh to hosts on the LAN (192.168.x, *.local) triggers iOS's Local
         # Network permission prompt; without this string the connection silently
         # fails. Not an App ID capability — a privacy usage string.
