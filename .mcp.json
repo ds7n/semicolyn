@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "memyr": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "/home/djmyers/proj/truepositive/memyr",
+        "memyr",
+        "mcp"
+      ]
+    }
+  }
+}
