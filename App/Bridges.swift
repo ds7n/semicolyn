@@ -45,8 +45,25 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
 /// hand-off hops to main before touching UIKit/SwiftTerm. Decoupled from the
 /// terminal view via closures so this stays SwiftTerm-free.
 final class TerminalShellOutput: ShellOutput {
-    /// Set by the terminal view to render output bytes (called on the main thread).
-    var onBytes: (([UInt8]) -> Void)?
+    /// Render slot, set by the terminal view (main thread). Backed by a
+    /// `PendingOutputBuffer` so output that arrives BEFORE the view installs its
+    /// render closure — notably Mosh's one-shot first framebuffer diff, emitted
+    /// synchronously during connect before `TerminalScreen.makeUIView` runs — is
+    /// buffered and replayed on install instead of being silently dropped (which
+    /// left the Mosh terminal permanently blank). Setting nil detaches (teardown /
+    /// view rebuild); the next non-nil set flushes anything buffered meanwhile.
+    var onBytes: (([UInt8]) -> Void)? {
+        didSet {
+            if let onBytes {
+                renderBuffer.attachSink(onBytes)
+            } else {
+                renderBuffer.detachSink()
+            }
+        }
+    }
+    /// Buffers render bytes across the pre-install / detached windows. All access is
+    /// on the main thread (both `onOutput`'s hop and the `onBytes` didSet run there).
+    private var renderBuffer = PendingOutputBuffer()
     /// Set by the view model to harvest output bytes for the predictor (main thread).
     /// A separate slot from `onBytes` because `TerminalScreen.makeUIView` installs
     /// its own render closure into `onBytes`; without this second slot the raw-shell
@@ -59,8 +76,11 @@ final class TerminalShellOutput: ShellOutput {
     func onOutput(data: Data) {
         let bytes = [UInt8](data)   // UniFFI maps Rust Vec<u8> → Swift Data
         DispatchQueue.main.async { [weak self] in
-            self?.onBytes?(bytes)
-            self?.onHarvestBytes?(bytes)
+            guard let self else { return }
+            // Route render bytes through the buffer: delivered now if a sink is
+            // attached, held for replay if not. Harvest is a separate pass-through.
+            self.renderBuffer.append(bytes)
+            self.onHarvestBytes?(bytes)
         }
     }
 
