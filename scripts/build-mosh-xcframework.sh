@@ -306,8 +306,33 @@ build_slice() {
 
   local produced="$build_tree/src/frontend/$LIB_NAME"
   test -f "$produced" || { echo "FATAL: $name did not produce $LIB_NAME"; exit 1; }
-  cp "$produced" "$workdir/$LIB_NAME"
-  echo "    built $workdir/$LIB_NAME"
+
+  # `libmoshiosclient.a` (frontend: moshiosbridge.o + iosclient.o + terminaloverlay.o)
+  # is NOT self-contained — it references the sibling Mosh static libs (util defines
+  # is_utf8_locale/set_native_locale/freeze_timestamp/…, plus network/crypto/terminal/
+  # statesync/protobuf) exactly as the frontend Makefile.am LDADD lists them. A normal
+  # Mosh build links those into the final executable; shipping the frontend .a alone
+  # leaves those symbols Undefined at the app link step. So MERGE every archive the app
+  # needs into one complete static lib via `libtool -static` (the correct tool for
+  # combining archives — `ar` mishandles same-named members across libs). Apple
+  # CommonCrypto is header-only in the SDK (no archive to merge).
+  local -a merge=(
+    "$produced"
+    "$build_tree/src/util/libmoshutil.a"
+    "$build_tree/src/network/libmoshnetwork.a"
+    "$build_tree/src/crypto/libmoshcrypto.a"
+    "$build_tree/src/terminal/libmoshterminal.a"
+    "$build_tree/src/statesync/libmoshstatesync.a"
+    "$build_tree/src/protobufs/libmoshprotos.a"
+    "$prefix/lib/libprotobuf.a"        # protobuf runtime (target slice)
+    "$prefix/lib/libncurses.a"         # tinfo/ncurses (aliased from libncursesw.a)
+  )
+  local m
+  for m in "${merge[@]}"; do
+    test -f "$m" || { echo "FATAL: $name missing archive to merge: $m"; exit 1; }
+  done
+  libtool -static -o "$workdir/$LIB_NAME" "${merge[@]}"
+  echo "    built self-contained $workdir/$LIB_NAME (merged ${#merge[@]} archives)"
 }
 
 # --------------------------------------------------------------------------- #
@@ -383,11 +408,27 @@ main() {
   nm_out="$(nm -arch arm64 "$device_lib" 2>/dev/null || nm "$device_lib" 2>/dev/null)"
   if printf '%s\n' "$nm_out" | grep -Eq "[[:space:]]T[[:space:]]+_?${BRIDGE_SYMBOL}$"; then
     echo "OK: bridge symbol '${BRIDGE_SYMBOL}' present in device slice."
-    echo "SUCCESS: built $OUT"
   else
     echo "GATE FAIL: bridge symbol '${BRIDGE_SYMBOL}' NOT found (as an exported T symbol) in $device_lib" >&2
     echo "  --- mosh-related symbols present (for diagnosis): ---" >&2
     printf '%s\n' "$nm_out" | grep -Ei "mosh|_main" | head -30 >&2 || echo "  (none matched mosh|_main)" >&2
+    exit 1
+  fi
+
+  # SELF-CONTAINMENT GATE (added after the M3 app-link surfaced Undefined symbols):
+  # exporting mosh_main is necessary but NOT sufficient — the frontend lib references
+  # sibling helpers (e.g. set_native_locale in libmoshutil) that must be MERGED in, or
+  # the app link fails with "Undefined symbols". Assert a representative helper is now
+  # DEFINED (a T symbol), not merely referenced (U). This fails an incomplete merge at
+  # BUILD time (one CI run) instead of at the downstream app-link step.
+  local sentinel="set_native_locale"
+  if printf '%s\n' "$nm_out" | grep -Eq "[[:space:]]T[[:space:]]+_?${sentinel}"; then
+    echo "OK: sentinel helper '${sentinel}' is DEFINED — archive is self-contained."
+    echo "SUCCESS: built $OUT"
+  else
+    echo "GATE FAIL: '${sentinel}' is not a defined (T) symbol in $device_lib — the sibling" >&2
+    echo "  Mosh archives were not merged in; the app will fail to link. Check build_slice's merge." >&2
+    printf '%s\n' "$nm_out" | grep -Ei "locale|timestamp" | head -20 >&2 || true
     exit 1
   fi
 }
