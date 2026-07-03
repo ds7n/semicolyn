@@ -406,7 +406,15 @@ main() {
   echo "==> M1 gate: nm -arch arm64 '$device_lib' | grep ' T _${BRIDGE_SYMBOL}'"
   local nm_out
   nm_out="$(nm -arch arm64 "$device_lib" 2>/dev/null || nm "$device_lib" 2>/dev/null)"
-  if printf '%s\n' "$nm_out" | grep -Eq "[[:space:]]T[[:space:]]+_?${BRIDGE_SYMBOL}$"; then
+
+  # NB: grep the captured string into a variable (NOT `grep -q` in a pipe). The merged
+  # archive is large, so `grep -q` closes the pipe on the first match while the feeding
+  # `printf` is still writing → SIGPIPE/"Broken pipe" → under `set -o pipefail` the
+  # pipeline exits non-zero and the gate false-fails even though the symbol is present.
+  # `grep ... || true` consumes the whole stream and never early-closes.
+  local mosh_hit sentinel_hit
+  mosh_hit="$(printf '%s\n' "$nm_out" | grep -E "[[:space:]]T[[:space:]]+_?${BRIDGE_SYMBOL}$" || true)"
+  if [[ -n "$mosh_hit" ]]; then
     echo "OK: bridge symbol '${BRIDGE_SYMBOL}' present in device slice."
   else
     echo "GATE FAIL: bridge symbol '${BRIDGE_SYMBOL}' NOT found (as an exported T symbol) in $device_lib" >&2
@@ -422,7 +430,8 @@ main() {
   # DEFINED (a T symbol), not merely referenced (U). This fails an incomplete merge at
   # BUILD time (one CI run) instead of at the downstream app-link step.
   local sentinel="set_native_locale"
-  if printf '%s\n' "$nm_out" | grep -Eq "[[:space:]]T[[:space:]]+_?${sentinel}"; then
+  sentinel_hit="$(printf '%s\n' "$nm_out" | grep -E "[[:space:]]T[[:space:]]+_?${sentinel}" || true)"
+  if [[ -n "$sentinel_hit" ]]; then
     echo "OK: sentinel helper '${sentinel}' is DEFINED — archive is self-contained."
     echo "SUCCESS: built $OUT"
   else
