@@ -32,8 +32,7 @@ set -euo pipefail
 # --------------------------------------------------------------------------- #
 # Pinned dependency versions (bump here; keep the URLs in the fetch helpers).  #
 # --------------------------------------------------------------------------- #
-OPENSSL_VERSION="3.3.2"          # https://github.com/openssl/openssl/releases
-NETTLE_VERSION="3.10"            # https://ftp.gnu.org/gnu/nettle/
+# Crypto = Apple CommonCrypto (iOS SDK header, no cross-build) → no OpenSSL/Nettle.
 NCURSES_VERSION="6.5"            # https://ftp.gnu.org/gnu/ncurses/
 # protobuf 3.21.x is the last "classic" C++ protobuf BEFORE the Abseil dependency
 # (landed in 22.x). Mosh (2016-era) uses the classic generated `.pb.h` API and only
@@ -136,68 +135,6 @@ build_host_protoc() {
 # prefix) and installs an iOS static lib + headers + a .pc file under prefix.  #
 # CC/CXX/CFLAGS/CXXFLAGS/LDFLAGS are exported by build_slice before calling.   #
 # --------------------------------------------------------------------------- #
-
-# build_openssl <prefix> — OpenSSL crypto (Mosh's selected AES backend).
-build_openssl() {
-  local prefix="$1"
-  echo "  --> OpenSSL $OPENSSL_VERSION"
-  if [[ -f "$prefix/lib/libcrypto.a" ]]; then echo "     [cached]"; return; fi
-  local tarball="$DL_DIR/openssl-${OPENSSL_VERSION}.tar.gz"
-  fetch "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" "$tarball"
-  local src="$prefix/src/openssl"
-  rm -rf "$src"; mkdir -p "$src"
-  tar -xzf "$tarball" -C "$src" --strip-components=1
-
-  # OpenSSL uses its own Configure targets, not autotools --host. Pick the
-  # target from the current ARCH/SDK the caller exported.
-  local ossl_target
-  case "${ARCH}-${SDK}" in
-    arm64-iphoneos)          ossl_target="ios64-xcrun" ;;
-    arm64-iphonesimulator)   ossl_target="iossimulator-arm64-xcrun" ;;
-    x86_64-iphonesimulator)  ossl_target="iossimulator-xcrun" ;;
-    *) echo "FATAL: no OpenSSL target for ${ARCH}-${SDK}"; exit 1 ;;
-  esac
-
-  ( cd "$src"
-    # CROSS_TOP/CROSS_SDK let OpenSSL's *-xcrun targets locate the SDK; we also
-    # pass our min-version flag through CFLAGS so symbols match the slice.
-    CFLAGS="${MIN_FLAG}" \
-    ./Configure "$ossl_target" \
-      no-shared no-dso no-async no-tests no-engine \
-      --prefix="$prefix" --openssldir="$prefix/ssl"
-    make -j"$(sysctl -n hw.ncpu)" build_libs
-    make install_dev
-  )
-  test -f "$prefix/lib/libcrypto.a" || { echo "FATAL: OpenSSL libcrypto.a missing"; exit 1; }
-}
-
-# build_nettle <prefix> — Nettle. Mosh's configure runs PKG_CHECK_MODULES for
-# Nettle unconditionally; provide it so detection succeeds even though OpenSSL
-# is the active AES backend.
-build_nettle() {
-  local prefix="$1"
-  echo "  --> Nettle $NETTLE_VERSION"
-  if [[ -f "$prefix/lib/libnettle.a" ]]; then echo "     [cached]"; return; fi
-  local tarball="$DL_DIR/nettle-${NETTLE_VERSION}.tar.gz"
-  fetch "https://ftp.gnu.org/gnu/nettle/nettle-${NETTLE_VERSION}.tar.gz" "$tarball"
-  local src="$prefix/src/nettle"
-  rm -rf "$src"; mkdir -p "$src"
-  tar -xzf "$tarball" -C "$src" --strip-components=1
-
-  ( cd "$src"
-    # Nettle is autotools. Disable asm (--disable-assembler) so it builds
-    # cleanly for the cross iOS arch; static only; needs GMP -> --disable-gmp
-    # keeps it self-contained (Mosh only calls the AES core if selected).
-    ./configure \
-      --host="${HOST_TRIPLE}" \
-      --prefix="$prefix" \
-      --disable-shared --enable-static \
-      --disable-assembler --disable-documentation --disable-openssl
-    make -j"$(sysctl -n hw.ncpu)"
-    make install
-  )
-  test -f "$prefix/lib/libnettle.a" || { echo "FATAL: Nettle libnettle.a missing"; exit 1; }
-}
 
 # build_ncurses <prefix> — ncurses provides the tinfo library Mosh requires
 # (the iOS SDK ships no curses). We build the tinfo half only.
@@ -328,9 +265,8 @@ build_slice() {
   # Host protoc on PATH so Mosh's AC_PATH_PROG([PROTOC]) finds the runnable one.
   export PATH="$HOST_DIR/bin:$PATH"
 
-  # 1. Native deps for this slice.
-  build_openssl "$prefix"
-  build_nettle "$prefix"
+  # 1. Native deps for this slice. Crypto is Apple CommonCrypto (an iOS SDK
+  # header, nothing to cross-build), so only ncurses (tinfo) + protobuf remain.
   build_ncurses "$prefix"
   build_protobuf_target "$prefix"
 
@@ -349,7 +285,7 @@ build_slice() {
       --enable-ios-controller \
       --disable-server \
       --disable-client \
-      --with-crypto-library=openssl \
+      --with-crypto-library=apple-common-crypto \
       --disable-hardening \
       PROTOC="$HOST_DIR/bin/protoc" \
       CC="$CC" CXX="$CXX" \
