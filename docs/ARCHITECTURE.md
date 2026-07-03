@@ -38,13 +38,13 @@ The design keeps the **Apple-only UI/SDK layer thin** so the maximum surface sta
 | `docs/superpowers/plans/` | The roadmap + per-phase implementation plans |
 | `docs/brainstorming-decisions.md` | Every locked decision, by topic, with the deferred list |
 | `mockups/specs/`, `mockups/drafts/` | Locked visual record · pre-decision explorations |
-| `scripts/` | `build-xcframework.sh`, `build-seed.sh` |
+| `scripts/` | `build-xcframework.sh`, `build-mosh-xcframework.sh`, `build-seed.sh` |
 
 ## Spec map
 
 Every v1 subsystem has a locked spec under [`docs/superpowers/specs/`](superpowers/specs/). Primary specs by area (the granular sub-spec families are noted where they exist):
 
-**Connection & SSH** — `ssh-algorithms` (4-tier allowlist, PQC `mlkem768x25519` in Tier 1) · `host-key-trust` (TOFU + mismatch) · `ssh-cert-auth` · `chain-auth` (ProxyJump) · `pty-shell-channel`.
+**Connection & SSH** — `ssh-algorithms` (4-tier allowlist, PQC `mlkem768x25519` in Tier 1) · `host-key-trust` (TOFU + mismatch) · `ssh-cert-auth` · `chain-auth` (ProxyJump) · `pty-shell-channel` · `mosh-transport` (vendored `blinksh/mosh` → `Mosh.xcframework`, russh bootstrap; M1+M2 shipped, M3/M4 pending).
 
 **Terminal & tmux** — `terminal-emulator-scope` (`xterm-256color`, OSC policy, mouse modes) · `terminal-ux-additions` (font zoom, URL tap, cursor, scrollback, resize) · `terminal-feedback` (bell halo + haptic, never sound) · `degraded-mode` (tmux ≥3.0, raw-PTY fallback) · `context-detection` · `tmux-session` + the `tmux-control-channel` / `-control-mode-parser` / `-command-encoder` / `-session-model` / `-session-controller` family · `phase-3c-terminal-ux-integration`.
 
