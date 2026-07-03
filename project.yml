@@ -57,13 +57,16 @@ targets:
         # A terminal is comfortable in any orientation; iPhone omits upside-down per norm.
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        # SSH/Mosh use ONLY standard, well-known encryption (AES, ChaCha20, curve25519,
-        # ed25519) to secure the user's own connections — the classic mass-market /
-        # "exempt" case for a terminal client. Declaring NO auto-answers the per-build
-        # export-compliance prompt as exempt, so no ITSEncryptionExportComplianceCode is
-        # required (a "YES" here 409s the TestFlight upload without a matching code) and
-        # no France/ANSSI per-build declaration is triggered. (True Positive LLC asserts
-        # the mass-market exemption applies to this standard-crypto usage.)
+        # Export compliance — see docs/export-compliance.md for the full basis.
+        # semicolyn uses ONLY standard, published crypto (AES, ChaCha20-Poly1305,
+        # curve25519, ed25519): Mosh via Apple CommonCrypto, SSH via russh
+        # (aws-lc-rs). This is the mass-market case (ECCN 5D992.c) for a terminal
+        # client — standard algorithms, publicly available, used to secure the
+        # user's own connections. NOT proprietary/non-standard crypto. We answer
+        # NO here (no ITSEncryptionExportComplianceCode; a "YES" without a matching
+        # code 409s the TestFlight upload). True Positive LLC self-classifies under
+        # the mass-market exemption; France availability stays excluded pending the
+        # ANSSI declaration (see the testflight-lane memory + docs).
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: "NO"
         # SSH/mosh to hosts on the LAN (192.168.x, *.local) triggers iOS's Local
         # Network permission prompt; without this string the connection silently
