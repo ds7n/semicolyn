@@ -62,11 +62,16 @@ final class ConnectionViewModel: ObservableObject {
     private var engine: PredictorEngine?
     private var tracker = InputTokenTracker()
     private var learnedStore: LearnedStore?
-    /// Write-time gate that keeps typed passwords out of the learned vocabulary
-    /// (echo-inference + prompt-text, biased toward suppression). Fed the output
-    /// stream at the harvest tap and consulted per committed line in
-    /// `observePredictorInput`. See `PasswordEntryDetector`.
-    private var passwordDetector = PasswordEntryDetector()
+    /// Write-time gate keeping typed secrets out of the learned vocabulary
+    /// (`observePredictorInput`). See `PasswordEntryDetector`. Lazily wires the
+    /// L1 echo oracle to the active pane's rendered grid on first access.
+    private lazy var passwordDetector: PasswordEntryDetector = {
+        var d = PasswordEntryDetector()
+        d.setOracle(SwiftTermEchoOracle(resolveActiveView: { [weak self] in
+            self?.activePaneView()
+        }))
+        return d
+    }()
     /// Tokens committed on the current input line, buffered until the line commits
     /// so the whole line is learned or dropped as a unit per the detector verdict.
     private var pendingLineTokens: [CommittedToken] = []
@@ -185,6 +190,19 @@ final class ConnectionViewModel: ObservableObject {
               let pane = tmuxState?.window(win)?.activePane,
               let tv = paneViews[pane] else { return false }
         return tv.getTerminal().applicationCursor
+    }
+
+    /// The `TerminalView` the user is currently typing into: the tmux active
+    /// pane, or — in a raw (non-tmux) session — the single registered pane.
+    /// Nil until a pane is registered. Used by the L1 echo oracle.
+    private func activePaneView() -> TerminalView? {
+        if let win = tmuxState?.activeWindow,
+           let pane = tmuxState?.window(win)?.activePane,
+           let tv = paneViews[pane] {
+            return tv
+        }
+        // Raw session: exactly one pane view once registered.
+        return paneViews.count == 1 ? paneViews.first?.value : nil
     }
 
     // MARK: - Pane registry + tmux commands
@@ -736,18 +754,35 @@ final class ConnectionViewModel: ObservableObject {
     /// the token filter alone can't catch a short low-entropy password.
     private func observePredictorInput(_ bytes: [UInt8]) {
         guard engine != nil else { return }
+        // L1: snapshot cursor before each printable keystroke, then settle after a
+        // bounded window (off the hot path; verdict is consumed at line commit).
+        for b in bytes where (0x21...0x7e).contains(b) || b == 0x20 {
+            if let scalar = Unicode.Scalar(exactly: UInt32(b)) {
+                passwordDetector.beginKeystroke(scalar: scalar)
+            }
+        }
         passwordDetector.noteInput(bytes)
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
         }
+        // Settle the just-typed keystrokes after a short window so the echo has
+        // arrived. Hop through main; never awaited on the input path.
+        let deadline = DispatchTime.now() + .milliseconds(40)
+        DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
+            self?.passwordDetector.settleKeystroke()
+            self?.refreshPredictorSuggestions()
+        }
         // Flush the line's buffered tokens on each line commit (Enter / newline).
         for b in bytes where b == 0x0d || b == 0x0a {
-            let learn = passwordDetector.shouldLearnCommittedLine()
-            if learn {
-                for c in pendingLineTokens { engine?.record(c.token, after: c.previous) }
+            // Give the last keystrokes their settle window before judging the line.
+            DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(10)) { [weak self] in
+                guard let self else { return }
+                if self.passwordDetector.shouldLearnCommittedLine() {
+                    for c in self.pendingLineTokens { self.engine?.record(c.token, after: c.previous) }
+                }
+                self.pendingLineTokens.removeAll(keepingCapacity: true)
+                self.passwordDetector.resetLine()
             }
-            pendingLineTokens.removeAll(keepingCapacity: true)
-            passwordDetector.resetLine()
         }
         refreshPredictorSuggestions()
     }
