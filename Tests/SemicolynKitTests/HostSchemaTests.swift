@@ -47,4 +47,20 @@ final class HostSchemaTests: XCTestCase {
         let back = try JSONDecoder().decode(Defaults.self, from: JSONEncoder().encode(d))
         XCTAssertEqual(back, d)
     }
+
+    func testTmuxConfigSessionNameRoundTrips() {
+        let cfg = TmuxConfig(attemptControlMode: true, sessionName: "work")
+        let data = try! JSONEncoder().encode(cfg)
+        let back = try! JSONDecoder().decode(TmuxConfig.self, from: data)
+        XCTAssertEqual(back.sessionName, "work")
+        XCTAssertEqual(back.attemptControlMode, true)
+    }
+
+    func testTmuxConfigDecodesLegacyRecordWithoutSessionName() {
+        // A record written before this field existed must decode with sessionName nil.
+        let json = Data(#"{"attemptControlMode":true}"#.utf8)
+        let back = try! JSONDecoder().decode(TmuxConfig.self, from: json)
+        XCTAssertNil(back.sessionName)
+        XCTAssertEqual(back.attemptControlMode, true)
+    }
 }

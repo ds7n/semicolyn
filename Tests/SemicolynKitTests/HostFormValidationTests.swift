@@ -89,4 +89,27 @@ final class HostFormValidationTests: XCTestCase {
         XCTAssertTrue(issues.contains { $0.kind == .dynamicForwardMissingField(index: 0) && $0.severity == .hardBlock })
         XCTAssertFalse(canSave(issues))
     }
+
+    func testInvalidTmuxSessionNameHardBlocks() {
+        var h = Host(id: UUID(), label: "l", hostName: "h")
+        h.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: "a.b")))   // dot → invalid
+        let issues = validateHostForm(h, others: [], defaults: Defaults(), passwordRefResolves: true)
+        XCTAssertTrue(issues.contains { $0.kind == .invalidTmuxSessionName && $0.severity == .hardBlock })
+        XCTAssertFalse(canSave(issues))
+    }
+
+    func testValidTmuxSessionNameDoesNotBlock() {
+        var h = Host(id: UUID(), label: "l", hostName: "h")
+        h.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: "work")))
+        let issues = validateHostForm(h, others: [], defaults: Defaults(), passwordRefResolves: true)
+        XCTAssertFalse(issues.contains { $0.kind == .invalidTmuxSessionName })
+    }
+
+    func testBlankTmuxSessionNameIsNotAnError() {
+        // Blank = "inherit / use default", not a validation error.
+        var h = Host(id: UUID(), label: "l", hostName: "h")
+        h.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: "   ")))
+        let issues = validateHostForm(h, others: [], defaults: Defaults(), passwordRefResolves: true)
+        XCTAssertFalse(issues.contains { $0.kind == .invalidTmuxSessionName })
+    }
 }

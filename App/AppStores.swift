@@ -88,11 +88,10 @@ final class AppStores {
     // MARK: - Device seed
 
     /// Returns a stable per-install random seed, persisted in `UserDefaults`.
-    /// Used as input to `tmuxSessionName(seed:)` so the tmux session name is
-    /// deterministic for this device across reconnects.
     ///
-    /// This is a local stub for Plan A; Plan 2b will derive the seed from the
-    /// CloudKit-account-bound key instead.
+    /// No longer feeds the tmux session name — that is now the user-configurable
+    /// `resolveTmuxSessionName` (builtin default `"semicolyn"`). Retained for a
+    /// future 2b-ii CloudKit-account-bound derivation that may reuse this seed.
     ///
     /// - Returns: A UUID string that is stable for the lifetime of the app install.
     func deviceSeed() throws -> String {
