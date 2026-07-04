@@ -169,6 +169,21 @@ mod tests {
     }
 
     #[test]
+    fn import_encrypted_key_with_correct_passphrase_yields_the_underlying_key() {
+        // Valid-path coverage for the encrypted branch: an impl that
+        // unconditionally errored on decrypt would pass every OTHER keys.rs test,
+        // so assert the decrypted import round-trips to the SAME material as the
+        // pre-encryption key (public key + fingerprint), not merely that it's Ok.
+        let (enc, expected_public, expected_fingerprint) =
+            encrypted_fixture_with_material("hunter2");
+        let m = import_private_key(enc, Some("hunter2".to_string()))
+            .expect("correct passphrase must decrypt");
+        assert_eq!(m.algorithm, "ed25519");
+        assert_eq!(m.public_key_openssh, expected_public);
+        assert_eq!(m.fingerprint_sha256, expected_fingerprint);
+    }
+
+    #[test]
     fn algorithm_tag_returns_some_for_supported_and_none_for_unsupported() {
         // Positive anchor: ed25519 is supported.
         assert_eq!(algorithm_tag(&Algorithm::Ed25519), Some("ed25519"));
@@ -197,11 +212,25 @@ mod tests {
     /// Generates an in-test passphrase-encrypted ed25519 key (`hunter2`) in
     /// OpenSSH format, so the encrypted-import cases need no committed secret.
     fn encrypted_fixture() -> String {
+        encrypted_fixture_with_material("hunter2").0
+    }
+
+    /// Like `encrypted_fixture`, but also returns the pre-encryption public key
+    /// and SHA256 fingerprint so a valid-path test can assert the decrypted
+    /// import reconstructs the SAME key material.
+    fn encrypted_fixture_with_material(passphrase: &str) -> (String, String, String) {
         let key = PrivateKey::random(&mut UnwrapErr(SysRng), Algorithm::Ed25519).unwrap();
-        key.encrypt(&mut SysRng, b"hunter2")
+        let material = material(&key).expect("fixture key is a modeled algorithm");
+        let encrypted = key
+            .encrypt(&mut SysRng, passphrase.as_bytes())
             .unwrap()
             .to_openssh(LineEnding::LF)
             .unwrap()
-            .to_string()
+            .to_string();
+        (
+            encrypted,
+            material.public_key_openssh,
+            material.fingerprint_sha256,
+        )
     }
 }

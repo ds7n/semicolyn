@@ -62,6 +62,14 @@ final class ConnectionViewModel: ObservableObject {
     private var engine: PredictorEngine?
     private var tracker = InputTokenTracker()
     private var learnedStore: LearnedStore?
+    /// Write-time gate that keeps typed passwords out of the learned vocabulary
+    /// (echo-inference + prompt-text, biased toward suppression). Fed the output
+    /// stream at the harvest tap and consulted per committed line in
+    /// `observePredictorInput`. See `PasswordEntryDetector`.
+    private var passwordDetector = PasswordEntryDetector()
+    /// Tokens committed on the current input line, buffered until the line commits
+    /// so the whole line is learned or dropped as a unit per the detector verdict.
+    private var pendingLineTokens: [CommittedToken] = []
 
     /// Bundled promotion sets (user override is a 4d concern).
     private let promotionRegistry = PromotionRegistry.bundledDefault
@@ -298,6 +306,8 @@ final class ConnectionViewModel: ObservableObject {
         output.onHarvestBytes = nil
         engine = nil
         tracker.reset()
+        passwordDetector.reset()          // clear echo/prompt state across sessions
+        pendingLineTokens.removeAll()     // drop any un-flushed line tokens
         predictorSuggestions = []
     }
 
@@ -407,7 +417,11 @@ final class ConnectionViewModel: ObservableObject {
         // (previously the render closure clobbered this and degraded-mode output
         // never trained the predictor).
         output.onHarvestBytes = { [weak self] bytes in
-            self?.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
+            guard let self else { return }
+            // Feed the output stream to the password gate (echo inference +
+            // prompt-text) so it can classify the next typed line.
+            self.passwordDetector.noteOutput(bytes)
+            self.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
         }
         state = .shell
     }
@@ -466,14 +480,29 @@ final class ConnectionViewModel: ObservableObject {
         switch moshBranchOutcome(stdout: stdout, enabled: true) {
         case let .mosh(port, key):
             let predict = cfg.predictionMode?.rawValue ?? "adaptive"
+            // Seeded at 80×24: the terminal view hasn't laid out yet at connect time,
+            // so the real grid isn't known here. The first debounced resize from
+            // TerminalScreen (via setMoshClientSize) corrects it once layout happens,
+            // and mosh reflows. FUTURE (item #5 Q2(b)): to skip the brief 80×24 first
+            // frame, track the last-known terminal grid on the VM and pass it here.
             let sess = MoshSession(ip: host.hostName, port: String(port), key: key,
                                    cols: 80, rows: 24, predictMode: predict)
             // Reset the handshake gate: onEnd before the first frame means the UDP
             // handshake never completed → fall back to SSH on the retained connection;
             // onEnd after a frame is a genuine mid-session exit → crash banner.
             moshFirstFrameSeen = false
+            // Route Mosh output through the SAME buffered entry point as the Rust
+            // SSH path (`output.onOutput`) rather than calling the stored `onBytes`
+            // sink directly. Mosh's first framebuffer diff is emitted synchronously
+            // during `sess.start()` — before `state = .shell` triggers SwiftUI's
+            // `makeUIView`, which is what installs the render sink — so a direct
+            // `onBytes?` call would silently drop that frame (nil sink → no-op) and
+            // leave the terminal permanently blank. `onOutput` appends to the
+            // `PendingOutputBuffer`, which replays on sink-install. (Harvest stays
+            // off the Mosh path: `onHarvestBytes` is never installed here, so its
+            // pass in `onOutput` is a no-op.)
             sess.onOutput = { [weak self] data in
-                self?.output.onBytes?([UInt8](data))
+                self?.output.onOutput(data: data)
             }
             sess.onFirstFrame = { [weak self] in
                 // Frames are flowing: the UDP path is up. From here on, loop exits are
@@ -483,8 +512,16 @@ final class ConnectionViewModel: ObservableObject {
             sess.onEnd = { [weak self] _ in
                 guard let self else { return }
                 if self.moshFirstFrameSeen {
-                    // Post-first-frame exit (session/server death, clean or not):
-                    // reuse the mid-session crash banner — the same state tmux uses.
+                    // Post-first-frame exit (session/server death, clean or not).
+                    // Tear the dead Mosh session down FIRST: sendTerminalInput checks
+                    // `moshSession` before tmux/raw, so a lingering non-nil session
+                    // would swallow every keystroke into the dead input pipe (EPIPE,
+                    // silently dropped) after the user reattaches tmux via the banner.
+                    // stop() is idempotent and joins the already-exiting mosh thread.
+                    self.moshSession?.stop()
+                    self.moshSession = nil
+                    self.moshFirstFrameSeen = false
+                    // Then reuse the mid-session crash banner — the same state tmux uses.
                     self.crashBanner = .tmuxEnded
                     return
                 }
@@ -514,6 +551,12 @@ final class ConnectionViewModel: ObservableObject {
             return false
         }
     }
+
+    /// Whether a Mosh session is currently driving the terminal. The view uses
+    /// this to route its debounced resize to `setMoshClientSize` (Mosh has no
+    /// `ShellSession`, so `TerminalScreen`'s default `session?.resize` is a no-op).
+    /// Keeps the `MoshSession` object itself private.
+    var isMoshActive: Bool { moshSession != nil }
 
     /// Push a new terminal size to the running Mosh session. No-op outside Mosh mode.
     func setMoshClientSize(cols: Int, rows: Int) { moshSession?.resizeCols(Int32(cols), rows: Int32(rows)) }
@@ -555,6 +598,7 @@ final class ConnectionViewModel: ObservableObject {
             }
             // Harvest pane output for the predictor — visible panes only (a live
             // view or pending registration), not filtered by active pane.
+            self.passwordDetector.noteOutput(bytes)
             self.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
         }
         runtime.onStateChanged = { [weak self] state in
@@ -673,12 +717,30 @@ final class ConnectionViewModel: ObservableObject {
         engine = PredictorEngine(learned: store.load(), seed: AppStores.shared.predictorSeed())
     }
 
-    /// Fold outgoing bytes into the token tracker, learn committed tokens, and
-    /// refresh the suggestion chips.
+    /// Fold outgoing bytes into the token tracker, learn committed tokens (unless
+    /// the line is a password entry), and refresh the suggestion chips.
+    ///
+    /// Learning is gated by `passwordDetector`: tokens committed on a line are
+    /// buffered and only recorded once the line commits (Enter) AND the detector
+    /// confirms the line was echoed and not preceded by a password prompt. A
+    /// space-committed token mid-line is held until its line's verdict is known,
+    /// so a multi-word line is learned or dropped as a unit. This keeps typed
+    /// passwords (sudo / ssh / passphrase prompts) out of the synced vocabulary;
+    /// the token filter alone can't catch a short low-entropy password.
     private func observePredictorInput(_ bytes: [UInt8]) {
         guard engine != nil else { return }
+        passwordDetector.noteInput(bytes)
         for committed in tracker.observe(bytes) {
-            engine?.record(committed.token, after: committed.previous)
+            pendingLineTokens.append(committed)
+        }
+        // Flush the line's buffered tokens on each line commit (Enter / newline).
+        for b in bytes where b == 0x0d || b == 0x0a {
+            let learn = passwordDetector.shouldLearnCommittedLine()
+            if learn {
+                for c in pendingLineTokens { engine?.record(c.token, after: c.previous) }
+            }
+            pendingLineTokens.removeAll(keepingCapacity: true)
+            passwordDetector.resetLine()
         }
         refreshPredictorSuggestions()
     }
@@ -735,7 +797,9 @@ final class ConnectionViewModel: ObservableObject {
                     hostID: savedHost.id, trust: AppStores.shared.trust,
                     present: { [weak self] prompt in await self?.present(prompt) ?? false })
                 let conn = try await SemicolynSSHCoreFFI.connect(
-                    addr: addr, allowLegacy: false, allowDeprecated: false, verifier: verifier)
+                    addr: addr, allowLegacy: false, allowDeprecated: false,
+                    keepalive: keepaliveConfig(host: savedHost, defaults: defaults),
+                    verifier: verifier)
                 let outcome = try await authenticate(conn: conn, user: user, host: savedHost, defaults: defaults, password: password)
                 switch outcome {
                 case .success:
@@ -755,6 +819,8 @@ final class ConnectionViewModel: ObservableObject {
                 try await attachSSHShell(conn: conn, host: savedHost, defaults: defaults2)
             } catch ConnectError.HostKeyRejected {
                 state = .failed("Host key not trusted")
+            } catch ConnectError.Timeout {
+                state = .failed("Couldn't reach host — connection timed out")
             } catch {
                 state = .failed(String(describing: error))
             }
@@ -781,7 +847,9 @@ final class ConnectionViewModel: ObservableObject {
                     hostID: hostRecord.id, trust: AppStores.shared.trust,
                     present: { [weak self] prompt in await self?.present(prompt) ?? false })
                 let conn = try await SemicolynSSHCoreFFI.connect(
-                    addr: addr, allowLegacy: false, allowDeprecated: false, verifier: verifier)
+                    addr: addr, allowLegacy: false, allowDeprecated: false,
+                    keepalive: keepaliveConfig(host: hostRecord, defaults: defaults),
+                    verifier: verifier)
                 let outcome = try await authenticate(conn: conn, user: user, host: hostRecord, defaults: defaults, password: password)
                 switch outcome {
                 case .success:
@@ -801,9 +869,21 @@ final class ConnectionViewModel: ObservableObject {
                 try await attachSSHShell(conn: conn, host: hostRecord, defaults: defaults2)
             } catch ConnectError.HostKeyRejected {
                 state = .failed("Host key not trusted")
+            } catch ConnectError.Timeout {
+                state = .failed("Couldn't reach host — connection timed out")
             } catch {
                 state = .failed(String(describing: error))
             }
         }
+    }
+
+    /// Resolves the host's keepalive policy (OpenSSH `ServerAliveInterval` /
+    /// `ServerAliveCountMax`) into the Rust core's `KeepaliveConfig`, so an idle
+    /// interactive session stays alive. `interval == 0` disables keepalives
+    /// (the resolve fallbacks are 30 / 3).
+    private func keepaliveConfig(host: Host, defaults: Defaults) -> KeepaliveConfig {
+        KeepaliveConfig(
+            intervalSecs: UInt32(max(0, resolveServerAliveInterval(host: host, defaults: defaults))),
+            countMax: UInt32(max(0, resolveServerAliveCountMax(host: host, defaults: defaults))))
     }
 }

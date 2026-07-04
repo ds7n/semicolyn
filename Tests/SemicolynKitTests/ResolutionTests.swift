@@ -75,4 +75,53 @@ final class ResolutionTests: XCTestCase {
             host: host(),
             defaults: Defaults(semicolyn: .explicit(SemicolynConfig(osc52: Osc52Config(allow: true))))))
     }
+
+    // MARK: - Leaf-independent resolution (regression for the container-shadowing bug)
+    //
+    // A host that sets SOME leaves of a nested config must still inherit the
+    // Defaults values for the leaves it leaves UNSET. The old code resolved the
+    // whole container (host's explicit container won entirely), silently dropping
+    // the Defaults leaves — e.g. a global "clipboard off" re-enabled by a host that
+    // only toggled the predictor. Each assertion FAILS against that old behavior.
+
+    func testHostSetsOneLeafStillInheritsDefaultsForOtherLeaves() {
+        // Host sets ONLY predictor.incognito; Defaults sets osc52.allow = false.
+        // The Defaults osc52 leaf must survive (old bug: builtin `true` won).
+        let h = host {
+            $0.semicolyn = .explicit(SemicolynConfig(predictor: PredictorConfig(incognito: true)))
+        }
+        let d = Defaults(semicolyn: .explicit(SemicolynConfig(osc52: Osc52Config(allow: false))))
+        XCTAssertFalse(resolveOsc52Allow(host: h, defaults: d),
+                       "Defaults osc52.allow=false must not be shadowed by an unrelated host leaf")
+        XCTAssertTrue(resolvePredictorIncognito(host: h, defaults: d),
+                      "the host's own leaf still wins")
+    }
+
+    func testHostSetsOneLeafStillInheritsDefaultsTmuxLeaf() {
+        // Host sets ONLY osc52.allow; Defaults sets tmux.attemptControlMode = false.
+        let h = host {
+            $0.semicolyn = .explicit(SemicolynConfig(osc52: Osc52Config(allow: true)))
+        }
+        let d = Defaults(semicolyn: .explicit(SemicolynConfig(tmux: TmuxConfig(attemptControlMode: false))))
+        XCTAssertFalse(resolveTmuxAttemptControlMode(host: h, defaults: d),
+                       "Defaults tmux leaf must survive a host that only set osc52")
+    }
+
+    func testHostLeafWinsOverDefaultsLeafWhenBothSet() {
+        // Both set the SAME leaf → host wins (unchanged precedence, guarded here).
+        let h = host {
+            $0.semicolyn = .explicit(SemicolynConfig(osc52: Osc52Config(allow: false)))
+        }
+        let d = Defaults(semicolyn: .explicit(SemicolynConfig(osc52: Osc52Config(allow: true))))
+        XCTAssertFalse(resolveOsc52Allow(host: h, defaults: d))
+    }
+
+    func testUnsetLeafOnBothFallsToBuiltin() {
+        // Host sets predictor only; neither sets osc52 → builtin `true`.
+        let h = host {
+            $0.semicolyn = .explicit(SemicolynConfig(predictor: PredictorConfig(incognito: true)))
+        }
+        let d = Defaults(semicolyn: .explicit(SemicolynConfig(predictor: PredictorConfig(incognito: false))))
+        XCTAssertTrue(resolveOsc52Allow(host: h, defaults: d), "no osc52 anywhere → builtin true")
+    }
 }
