@@ -23,6 +23,7 @@ public struct ValidationIssue: Equatable, Sendable {
         case remoteForwardMissingField(index: Int)
         case dynamicForwardMissingField(index: Int)
         case stalePasswordRef
+        case invalidTmuxSessionName
         // Soft blocks
         case duplicateLabel(existing: [HostRef])
         case noUserSet
@@ -104,6 +105,15 @@ public func validateHostForm(
     // --- Hard: stale password reference ---
     if host.passwordRef.value != nil && !passwordRefResolves {
         issues.append(ValidationIssue(kind: .stalePasswordRef, severity: .hardBlock))
+    }
+
+    // --- Hard: tmux session name, if set, must be command-safe ---
+    // A blank/whitespace name means "inherit" (normalizedTmuxSessionName → nil) and
+    // is NOT an error; only a set-but-invalid name blocks Save.
+    if let raw = host.semicolyn.value?.tmux?.sessionName,
+       normalizedTmuxSessionName(raw) != nil,           // not blank
+       !isValidTmuxSessionName(raw) {
+        issues.append(ValidationIssue(kind: .invalidTmuxSessionName, severity: .hardBlock))
     }
 
     // --- Soft: duplicate label ---

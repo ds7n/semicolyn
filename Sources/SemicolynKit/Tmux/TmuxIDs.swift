@@ -40,15 +40,3 @@ extension SessionID {
         self.init(raw: n)
     }
 }
-
-/// True iff `name` is a valid Semicolyn tmux session name: a non-empty string of
-/// lowercase ASCII letters, digits, and hyphens (`^[a-z0-9-]+$`) — the only
-/// characters a Semicolyn-minted session name ever contains (per the tmux-session
-/// naming spec). Shared by the command encoder (`kill-session`) and the session
-/// controller (`new-session` attach) so the two can never drift.
-func isValidTmuxSessionName(_ name: String) -> Bool {
-    guard !name.isEmpty else { return false }
-    return name.utf8.allSatisfy { b in
-        (b >= 0x61 && b <= 0x7A) || (b >= 0x30 && b <= 0x39) || b == 0x2D // a-z, 0-9, '-'
-    }
-}

@@ -98,10 +98,11 @@ public enum TmuxCommand {
         "list-panes -a -F \"#{pane_id} #{pane_current_command}\""
     }
 
-    /// Kill the session named `name`. Validates against the Semicolyn session charset
-    /// `[a-z0-9-]+` ([[2026-06-17-tmux-session-design]]) and returns nil for
-    /// anything else — names outside that set can't occur in practice, so they
-    /// signal a bug rather than a value to quote around.
+    /// Kill the session named `name`. Validates against the session-name charset
+    /// `[A-Za-z0-9_-]` (`isValidTmuxSessionName`) and returns nil for anything else.
+    /// Names are user-choosable (the configurable-session-name feature), so an
+    /// invalid name is a real possibility, not a bug — rejecting it keeps the name
+    /// safe to interpolate without shell-quoting.
     public static func killSession(name: String) -> String? {
         guard isValidTmuxSessionName(name) else { return nil }
         return "kill-session -t \(name)"

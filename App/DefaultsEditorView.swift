@@ -622,6 +622,40 @@ struct DefaultsEditorView: View {
                 }
             }
 
+            // Tmux session name — built-in fallback: inherit (semicolyn)
+            LabeledContent {
+                TextField(
+                    "inherit · semicolyn",
+                    text: Binding(
+                        get: { vm.defaults.semicolyn.value?.tmux?.sessionName ?? "" },
+                        set: { newName in
+                            var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
+                            var tmux = cfg.tmux ?? TmuxConfig()
+                            tmux.sessionName = newName.isEmpty ? nil : newName
+                            cfg.tmux = tmux
+                            vm.defaults.semicolyn = .explicit(cfg)
+                        }
+                    )
+                )
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            } label: {
+                Text("tmux session name")
+                    .foregroundStyle(Color(theme.text.primary))
+            }
+            .swipeActions {
+                if vm.defaults.semicolyn.value?.tmux?.sessionName != nil {
+                    Button("Clear override") {
+                        var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
+                        var tmux = cfg.tmux ?? TmuxConfig()
+                        tmux.sessionName = nil
+                        cfg.tmux = tmux
+                        vm.defaults.semicolyn = .explicit(cfg)
+                    }
+                    .tint(Color(theme.accent.primary))
+                }
+            }
+
             if case .inherit = vm.defaults.semicolyn {
                 Text("inherit · predictor on, tmux control mode on")
                     .font(.caption)

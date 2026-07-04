@@ -54,9 +54,12 @@ public struct PredictorConfig: Codable, Equatable, Sendable {
 /// `semicolyn.tmux.*` — per-host tmux controls.
 public struct TmuxConfig: Codable, Equatable, Sendable {
     public var attemptControlMode: Bool?
+    /// User-chosen tmux -CC session name; nil = inherit (→ Defaults → "semicolyn").
+    public var sessionName: String?
 
-    public init(attemptControlMode: Bool? = nil) {
+    public init(attemptControlMode: Bool? = nil, sessionName: String? = nil) {
         self.attemptControlMode = attemptControlMode
+        self.sessionName = sessionName
     }
 }
 
