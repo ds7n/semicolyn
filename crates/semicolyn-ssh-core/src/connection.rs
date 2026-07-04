@@ -331,13 +331,21 @@ impl Connection {
     }
 
     /// Keyboard-interactive authentication. `responses` answers each server
-    /// prompt in order (typically a single password). Each `InfoRequest` round
-    /// is answered with exactly `prompts.len()` replies taken from `responses`
-    /// in order — a zero-prompt round (e.g. PAM's final confirmation) gets an
-    /// empty reply, never a stray password. SSH requires the reply count to
-    /// match the prompt count; mismatched counts make the server drop the
-    /// connection. The loop is bounded to avoid a misbehaving server spinning
-    /// forever.
+    /// prompt in order (typically a single password).
+    ///
+    /// Each `InfoRequest` round is answered with exactly `prompts.len()` replies
+    /// so the reply count always matches the prompt count (SSH drops the
+    /// connection on a mismatch). Two cases keep that invariant:
+    /// - **Zero-prompt round** (e.g. PAM's final confirmation banner): answered
+    ///   with an empty batch — never a stray password.
+    /// - **Prompts remain but `responses` is exhausted** (the server is
+    ///   re-prompting after a wrong password): we have no answer to give, so we
+    ///   return a typed `AuthOutcome::Failure` rather than send blank replies
+    ///   (which would just burn the server's retry counter) or a short batch
+    ///   (which would trip the count mismatch → a transport drop instead of the
+    ///   `Failure` the API contract promises).
+    ///
+    /// The loop is bounded to avoid a misbehaving server spinning forever.
     pub async fn authenticate_keyboard_interactive(
         &self,
         user: String,
@@ -362,6 +370,12 @@ impl Connection {
                     });
                 }
                 Kir::InfoRequest { prompts, .. } => {
+                    // Out of answers for a real (non-empty) prompt round → auth
+                    // has failed; stop cleanly with a typed Failure. A zero-prompt
+                    // round is NOT exhaustion — answer it with an empty batch.
+                    if !prompts.is_empty() && sent >= responses.len() {
+                        return Ok(AuthOutcome::Failure);
+                    }
                     let batch: Vec<String> = responses
                         .iter()
                         .skip(sent)
@@ -884,23 +898,18 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    /// Trust double used as a fixture by the handshake-timeout test below. It is
+    /// NOT exercised as a system-under-test — the real trust/reject paths are
+    /// covered by `connect_integration.rs` (which asserts `HostKeyRejected` and
+    /// the presented fingerprint). (The former `verifier_double_is_callable_*`
+    /// test that asserted only this fake's hardcoded `true` was removed as a
+    /// mock-only tautology per the testing standard.)
     struct AlwaysTrust;
     #[async_trait::async_trait]
     impl HostKeyVerifier for AlwaysTrust {
         async fn verify(&self, _info: HostKeyInfo) -> bool {
             true
         }
-    }
-
-    #[tokio::test]
-    async fn verifier_double_is_callable_through_trait_object() {
-        let v: Arc<dyn HostKeyVerifier> = Arc::new(AlwaysTrust);
-        let info = HostKeyInfo {
-            host_label: "build-01".into(),
-            key_type: "ssh-ed25519".into(),
-            fingerprint: "SHA256:abc".into(),
-        };
-        assert!(v.verify(info).await);
     }
 
     // --- derive_timers: the keepalive/inactivity policy (Core tier) ------------
