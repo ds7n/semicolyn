@@ -1,0 +1,173 @@
+// SPDX-FileCopyrightText: 2026 True Positive LLC
+// SPDX-License-Identifier: GPL-3.0-only
+import XCTest
+@testable import SemicolynKit
+
+/// Critical-tier: a false negative here is a leaked plaintext password, so the
+/// suite is adversarial — every password vector is a negative that must FAIL to
+/// learn, and the positive cases prove we didn't just suppress everything.
+final class PasswordEntryDetectorTests: XCTestCase {
+    /// Drive a full line through the detector: prime with `output`, type `input`
+    /// (with its echo, if `echoed`), then commit. Returns the learn verdict.
+    private func verdict(promptOutput: String, typed: String, echoed: Bool) -> Bool {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array(promptOutput.utf8))
+        d.resetLine()                                  // classify the prompt tail
+        for ch in typed {
+            let b = Array(String(ch).utf8)
+            d.noteInput(b)
+            if echoed { d.noteOutput(b) }              // echoing shell streams it back
+        }
+        let learn = d.shouldLearnCommittedLine()
+        d.noteInput([0x0d])                            // Enter
+        return learn
+    }
+
+    // MARK: - Echo inference (the primary, prompt-independent signal)
+
+    func testEchoedLineIsLearned() {
+        // Normal shell: every typed char comes back in output → learn.
+        XCTAssertTrue(verdict(promptOutput: "$ ", typed: "kubectl", echoed: true))
+    }
+
+    func testNonEchoedLineIsSuppressed() {
+        // Password prompt (no prompt text, pure echo-off): chars typed, none
+        // echoed → must NOT learn, even without a recognizable prompt string.
+        XCTAssertFalse(verdict(promptOutput: "$ ", typed: "hunter2", echoed: false))
+    }
+
+    func testMaskedEchoStillSuppressesRealCharacters() {
+        // Some prompts echo a constant mask ('*') rather than the typed char.
+        // The typed chars themselves never appear, so the line is not confirmed.
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("Password: ".utf8))
+        d.resetLine()
+        for ch in "s3cret" {
+            d.noteInput(Array(String(ch).utf8))
+            d.noteOutput(Array("*".utf8))              // mask, not the real char
+        }
+        // Prompt text alone already suppresses; assert the verdict is false and
+        // that it holds via the prompt path (masking is the belt, prompt the
+        // suspenders — either is sufficient).
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    // MARK: - Prompt-text suppressor (the orthogonal signal)
+
+    func testSudoPromptSuppressesNextLine() {
+        // The classic leak: `sudo` asks, user types the login password.
+        XCTAssertFalse(verdict(promptOutput: "[sudo] password for alice: ",
+                               typed: "hunter2", echoed: false))
+    }
+
+    func testSshPasswordPromptSuppresses() {
+        XCTAssertFalse(verdict(promptOutput: "alice@build-01's password: ",
+                               typed: "hunter2", echoed: false))
+    }
+
+    func testPassphrasePromptSuppresses() {
+        XCTAssertFalse(verdict(promptOutput: "Enter passphrase for key '/home/a/.ssh/id_ed25519': ",
+                               typed: "hunter2", echoed: false))
+    }
+
+    func testVerificationCodePromptSuppresses() {
+        // 2FA/OTP is also secret-shaped.
+        XCTAssertFalse(verdict(promptOutput: "Verification code: ",
+                               typed: "123456", echoed: false))
+    }
+
+    func testPromptSuppressesEvenIfSomehowEchoed() {
+        // Adversarial: even if a password prompt DID echo (e.g. a broken TUI),
+        // the prompt-text suppressor must still fire — OR semantics.
+        XCTAssertFalse(verdict(promptOutput: "Password: ", typed: "hunter2", echoed: true))
+    }
+
+    func testPromptMatchIsCaseInsensitive() {
+        XCTAssertFalse(verdict(promptOutput: "PASSWORD: ", typed: "hunter2", echoed: false))
+    }
+
+    func testPromptMatchToleratesTrailingSpaces() {
+        XCTAssertFalse(verdict(promptOutput: "Password:     ", typed: "hunter2", echoed: false))
+    }
+
+    // MARK: - Negatives: normal commands after non-prompt output MUST be learned
+
+    func testWordPasswordMidOutputDoesNotSuppress() {
+        // "password" appearing in normal output (not as a trailing prompt) must
+        // NOT suppress the next command — the match is a suffix of the last line.
+        XCTAssertTrue(verdict(promptOutput: "changing password policy\n$ ",
+                              typed: "kubectl", echoed: true))
+    }
+
+    func testCommandAfterCleanPromptIsLearned() {
+        XCTAssertTrue(verdict(promptOutput: "alice@host:~$ ", typed: "ls", echoed: true))
+    }
+
+    // MARK: - Boundary / fail-safe
+
+    func testEmptyLineIsNotLearned() {
+        // Nothing typed → nothing to learn (and never a spurious true).
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("$ ".utf8))
+        d.resetLine()
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testUnconfirmedLineFailsSafeToSuppress() {
+        // Chars typed but output/echo lost (dropped, latency) → default suppress.
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("$ ".utf8))
+        d.resetLine()
+        d.noteInput(Array("secret".utf8))              // typed, NO noteOutput echo
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testOneCharSlackToleratesTrailingByteInFlight() {
+        // A single not-yet-echoed trailing char must not flip an otherwise-echoed
+        // line to suppressed (the +1 slack). Type 4, echo only 3.
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("$ ".utf8))
+        d.resetLine()
+        for (i, ch) in "grep".enumerated() {
+            d.noteInput(Array(String(ch).utf8))
+            if i < 3 { d.noteOutput(Array(String(ch).utf8)) }   // echo 3 of 4
+        }
+        XCTAssertTrue(d.shouldLearnCommittedLine(), "3-of-4 echoed is within slack")
+    }
+
+    func testTwoCharsMissingExceedsSlackAndSuppresses() {
+        // BVA: 2 missing echoes (echo 2 of 4) exceeds the 1-char slack → suppress.
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("$ ".utf8))
+        d.resetLine()
+        for (i, ch) in "grep".enumerated() {
+            d.noteInput(Array(String(ch).utf8))
+            if i < 2 { d.noteOutput(Array(String(ch).utf8)) }   // echo 2 of 4
+        }
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testResetClearsPromptContext() {
+        // A full reset (host switch) must clear a pending prompt suppression.
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("Password: ".utf8))
+        d.resetLine()
+        XCTAssertFalse(d.shouldLearnCommittedLine())   // suppressed by prompt
+        d.reset()
+        d.noteOutput(Array("$ ".utf8))
+        d.resetLine()
+        for ch in "ls" { d.noteInput(Array(String(ch).utf8)); d.noteOutput(Array(String(ch).utf8)) }
+        XCTAssertTrue(d.shouldLearnCommittedLine(), "post-reset echoed line learns again")
+    }
+
+    func testBackspaceReducesTypedCount() {
+        // Type 5, backspace 2, echo the net 3 → confirmed, learned.
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("$ ".utf8))
+        d.resetLine()
+        d.noteInput(Array("abcde".utf8))
+        d.noteInput([0x7f, 0x7f])                        // two backspaces → net 3 typed
+        d.noteOutput(Array("abc".utf8))                  // echo the 3 survivors
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+    }
+}
