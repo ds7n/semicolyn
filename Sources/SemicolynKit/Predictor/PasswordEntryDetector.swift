@@ -69,10 +69,10 @@ public struct PasswordEntryDetector: Sendable {
 
     /// The injected read-only grid view. Nil ⇒ fall back to byte-count inference.
     private var oracle: EchoOracle?
-    /// Cursor cell recorded just before the pending keystroke was delivered.
-    private var preCursor: EchoCursor?
-    /// The scalar of the pending (delivered, not-yet-settled) keystroke.
-    private var pendingScalar: Unicode.Scalar?
+    /// Cursor cell recorded just before the current outgoing batch was delivered
+    /// — the anchor from which each keystroke's expected echo cell is derived at
+    /// settle. Nil when no oracle is set or the cursor was unreadable at capture.
+    private var batchStartCursor: EchoCursor?
     /// Classification of the most recently settled keystroke (test-observable).
     public private(set) var lastClass: EchoClass?
     /// Count of positively-`echoed` printables on the current line (oracle path).
@@ -145,42 +145,55 @@ public struct PasswordEntryDetector: Sendable {
         self.oracle = oracle
     }
 
-    /// Call BEFORE delivering a printable keystroke: snapshot the cursor cell the
-    /// echo would land in. A no-op if no oracle is set or the cursor is unreadable.
-    public mutating func beginKeystroke(scalar: Unicode.Scalar) {
-        guard let oracle else { preCursor = nil; pendingScalar = nil; return }
-        preCursor = oracle.cursor()
-        pendingScalar = scalar
+    /// Call BEFORE delivering an outgoing batch of printable keystrokes: snapshot
+    /// the cursor cell the FIRST keystroke's echo will land in. The subsequent
+    /// keystrokes' echo cells are derived by walking forward from here at settle.
+    /// A no-op (records nil) if no oracle is set or the cursor is unreadable.
+    public mutating func beginBatch() {
+        batchStartCursor = oracle?.cursor()
     }
 
-    /// Call AFTER the settle window: sample the echo cell + new cursor, classify
-    /// the pending keystroke, and fold it into the line tally. Fail-safe: any
-    /// unreadable signal classifies `hidden` (suppress).
-    public mutating func settleKeystroke() {
-        guard let oracle, let pre = preCursor, let scalar = pendingScalar else {
-            pendingScalar = nil
-            return
+    /// Call AFTER the settle window with the batch's printable `scalars` (in order,
+    /// excluding control bytes). Reads the now-rendered cumulative grid once and
+    /// classifies EACH keystroke against its expected echo cell, folding all into
+    /// the line tally. Fail-safe: no oracle / no batch anchor / cursor did not
+    /// advance / any unreadable cell ⇒ that keystroke (or the whole batch) is
+    /// `hidden` (suppress). An empty `scalars` array is a no-op.
+    public mutating func settleLine(scalars: [Unicode.Scalar]) {
+        defer { batchStartCursor = nil }
+        guard let oracle, let start = batchStartCursor, !scalars.isEmpty else { return }
+        // Non-echoing prompt: if the cursor never advanced past the batch anchor,
+        // the whole burst was swallowed — classify every keystroke hidden.
+        let post = oracle.cursor()
+        let advanced = (post?.col ?? start.col) > start.col
+            || (post?.row ?? start.row) > start.row
+        for (i, scalar) in scalars.enumerated() {
+            let cls: EchoClass
+            if post == nil || !advanced {
+                cls = .hidden
+            } else {
+                // Keystroke i's echo cell is `start.col + i` on the anchor row.
+                // (Line-wrap within a single batch is a rare Phase-1 edge; a
+                // wrapped cell simply reads blank → hidden, biasing to suppress.)
+                cls = Self.classifyCell(oracle: oracle, row: start.row, col: start.col + i, scalar: scalar)
+            }
+            lastClass = cls
+            oracleActiveThisLine = true
+            oracleClassifiedThisLine += 1
+            if cls == .echoed { oracleEchoedThisLine += 1 }
         }
-        defer { preCursor = nil; pendingScalar = nil }
-        let cls = Self.classify(oracle: oracle, pre: pre, scalar: scalar)
-        lastClass = cls
-        oracleActiveThisLine = true
-        oracleClassifiedThisLine += 1
-        if cls == .echoed { oracleEchoedThisLine += 1 }
     }
 
-    /// Pure three-way classifier: echoed (scalar at the pre-cell + cursor
-    /// advanced), masked (cursor advanced but cell holds a different glyph),
-    /// hidden (no advance, or any signal unreadable). Static so it is trivially
-    /// unit-testable and has no hidden state.
-    private static func classify(
-        oracle: EchoOracle, pre: EchoCursor, scalar: Unicode.Scalar
+    /// Pure per-cell classifier: echoed (expected scalar rendered at the cell),
+    /// masked (a different non-nil glyph rendered — a mask like `*`), hidden (blank
+    /// cell or unreadable). No cursor-advance check here — the caller (`settleLine`)
+    /// gates the whole batch on cursor advance; per-cell we only compare glyphs.
+    private static func classifyCell(
+        oracle: EchoOracle, row: Int, col: Int, scalar: Unicode.Scalar
     ) -> EchoClass {
-        guard let post = oracle.cursor() else { return .hidden }
-        let advanced = post.col > pre.col || post.row > pre.row
-        guard advanced else { return .hidden }
-        guard let cell = oracle.cell(row: pre.row, col: pre.col),
-              let shown = cell.scalar else { return .hidden }
+        guard let cell = oracle.cell(row: row, col: col), let shown = cell.scalar else {
+            return .hidden
+        }
         return shown == scalar ? .echoed : .masked
     }
 
@@ -216,8 +229,7 @@ public struct PasswordEntryDetector: Sendable {
         oracleActiveThisLine = false
         outputSeenThisLine = false
         lastClass = nil
-        preCursor = nil
-        pendingScalar = nil
+        batchStartCursor = nil
         typedThisLine = 0
         echoedThisLine = 0
         promptSuppressedThisLine = tailLooksLikePasswordPrompt()
@@ -230,8 +242,7 @@ public struct PasswordEntryDetector: Sendable {
         oracleActiveThisLine = false
         outputSeenThisLine = false
         lastClass = nil
-        preCursor = nil
-        pendingScalar = nil
+        batchStartCursor = nil
         typedThisLine = 0
         echoedThisLine = 0
         promptSuppressedThisLine = false

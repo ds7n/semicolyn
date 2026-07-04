@@ -173,53 +173,50 @@ final class PasswordEntryDetectorTests: XCTestCase {
 
     // MARK: - L1 buffer-anchored echo (oracle-driven)
 
-    /// Drive one printable keystroke through the oracle path and return the
-    /// classification implied by the resulting tally. Cursor pre = (0,0);
-    /// after settle the oracle reports cursor advanced to (0,1) and the cell the
-    /// test scripts. Uses the *internal* tallies to assert the class precisely.
-    private func classifyOne(
+    /// Drive one printable keystroke through the oracle path (batch contract) and
+    /// return the classification. Snapshots `startCursor`, then after settle sets
+    /// `postCursor` and the cell callback.
+    private func classifyOneBatch(
         typed: Unicode.Scalar,
-        preCursor: EchoCursor,
+        startCursor: EchoCursor,
         postCursor: EchoCursor?,
-        echoCell: EchoCell?,
-        alt: Bool = false
+        echoCell: EchoCell?
     ) -> PasswordEntryDetector.EchoClass? {
         var d = PasswordEntryDetector()
         let oracle = ScriptedEchoOracle()
-        oracle.isAlternateBuffer = alt
-        oracle.nextCursor = preCursor
+        oracle.nextCursor = startCursor
         d.setOracle(oracle)
-        d.beginKeystroke(scalar: typed)          // snapshots preCursor
-        oracle.nextCursor = postCursor
+        d.beginBatch()                    // snapshots startCursor
+        oracle.nextCursor = postCursor    // cursor after echo
         oracle.cellAt = { r, c in
-            (r == preCursor.row && c == preCursor.col) ? echoCell : EchoCell(scalar: nil)
+            (r == startCursor.row && c == startCursor.col) ? echoCell : EchoCell(scalar: nil)
         }
-        d.settleKeystroke()                      // samples + classifies
+        d.settleLine(scalars: [typed])
         return d.lastClass
     }
 
     func testKeystrokeEchoedWhenScalarAtCellAndCursorAdvanced() {
-        let cls = classifyOne(
+        let cls = classifyOneBatch(
             typed: "k",
-            preCursor: EchoCursor(row: 0, col: 0),
+            startCursor: EchoCursor(row: 0, col: 0),
             postCursor: EchoCursor(row: 0, col: 1),
             echoCell: EchoCell(scalar: "k"))
         XCTAssertEqual(cls, .echoed)
     }
 
     func testKeystrokeMaskedWhenConstantMaskCharDespiteAdvance() {
-        let cls = classifyOne(
+        let cls = classifyOneBatch(
             typed: "s",
-            preCursor: EchoCursor(row: 0, col: 0),
+            startCursor: EchoCursor(row: 0, col: 0),
             postCursor: EchoCursor(row: 0, col: 1),
             echoCell: EchoCell(scalar: "*"))     // cursor advanced but wrong glyph
         XCTAssertEqual(cls, .masked)
     }
 
     func testKeystrokeHiddenWhenCursorDidNotAdvance() {
-        let cls = classifyOne(
+        let cls = classifyOneBatch(
             typed: "h",
-            preCursor: EchoCursor(row: 0, col: 0),
+            startCursor: EchoCursor(row: 0, col: 0),
             postCursor: EchoCursor(row: 0, col: 0),   // no advance
             echoCell: EchoCell(scalar: nil))
         XCTAssertEqual(cls, .hidden)
@@ -227,9 +224,9 @@ final class PasswordEntryDetectorTests: XCTestCase {
 
     func testKeystrokeHiddenWhenOracleCursorUnreadable() {
         // Oracle drift: post-cursor nil → cannot confirm echo → hidden (suppress).
-        let cls = classifyOne(
+        let cls = classifyOneBatch(
             typed: "x",
-            preCursor: EchoCursor(row: 0, col: 0),
+            startCursor: EchoCursor(row: 0, col: 0),
             postCursor: nil,
             echoCell: EchoCell(scalar: "x"))
         XCTAssertEqual(cls, .hidden)
@@ -237,87 +234,96 @@ final class PasswordEntryDetectorTests: XCTestCase {
 
     // MARK: - L1 line-level aggregation
 
-    /// Drive a whole typed line through the oracle path. `perChar` gives, per
-    /// typed scalar, the (postCursor, echoCell) the oracle should report at settle;
-    /// pre-cursor advances one column per accepted char. Returns the learn verdict.
+    /// Drive a whole typed string as ONE batch through the oracle path. The entire
+    /// typed string is one batch: `beginBatch` once at start, `settleLine` once at
+    /// end. `cellFor(index, scalar)` returns the rendered cell for each keystroke's
+    /// expected echo column. `finalCursor` is the post-echo cursor. `live` controls
+    /// whether `noteOutput` is called (liveness gate). Returns the learn verdict.
     private func oracleVerdict(
         typed: String,
         alt: Bool,
-        perChar: (Int) -> (EchoCursor?, EchoCell?)
+        cellFor: @escaping (Int, Unicode.Scalar) -> EchoCell?,
+        finalCursor: EchoCursor?,
+        live: Bool = true
     ) -> Bool {
         var d = PasswordEntryDetector()
         let oracle = ScriptedEchoOracle()
         oracle.isAlternateBuffer = alt
+        oracle.nextCursor = EchoCursor(row: 0, col: 0)   // batch start
         d.setOracle(oracle)
-        var col = 0
-        for (i, ch) in typed.unicodeScalars.enumerated() {
-            let pre = EchoCursor(row: 0, col: col)
-            oracle.nextCursor = pre
-            d.beginKeystroke(scalar: ch)
+        d.beginBatch()
+        let scalars = Array(typed.unicodeScalars)
+        for ch in scalars {
             d.noteInput(Array(String(ch).utf8))
-            d.noteOutput(Array(String(ch).utf8))
-            let (post, cell) = perChar(i)
-            oracle.nextCursor = post
-            oracle.cellAt = { r, c in (r == 0 && c == pre.col) ? cell : EchoCell(scalar: nil) }
-            d.settleKeystroke()
-            col += 1
+            if live { d.noteOutput(Array(String(ch).utf8)) }
         }
-        let learn = d.shouldLearnCommittedLine()
-        d.noteInput([0x0d])
-        return learn
+        oracle.cellAt = { r, c in
+            guard r == 0, c >= 0, c < scalars.count else { return EchoCell(scalar: nil) }
+            return cellFor(c, scalars[c])
+        }
+        oracle.nextCursor = finalCursor
+        d.settleLine(scalars: scalars)
+        return d.shouldLearnCommittedLine()
     }
 
     func testAllEchoedLineLearnsViaOracle() {
         let s = Array("kubectl".unicodeScalars)
-        let learn = oracleVerdict(typed: "kubectl", alt: false) { i in
-            (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: s[i]))
-        }
+        let learn = oracleVerdict(
+            typed: "kubectl", alt: false,
+            cellFor: { i, scalar in EchoCell(scalar: scalar) },
+            finalCursor: EchoCursor(row: 0, col: s.count))
         XCTAssertTrue(learn)
     }
 
     func testAllHiddenLineSuppressedViaOracle() {
         // A hidden password: cursor never advances, cell stays blank → suppress.
-        let learn = oracleVerdict(typed: "hunter2", alt: false) { _ in
-            (EchoCursor(row: 0, col: 0), EchoCell(scalar: nil))
-        }
+        let learn = oracleVerdict(
+            typed: "hunter2", alt: false,
+            cellFor: { _, _ in EchoCell(scalar: nil) },
+            finalCursor: EchoCursor(row: 0, col: 0))   // no advance
         XCTAssertFalse(learn)
     }
 
     func testMaskedLineSuppressedViaOracle() {
         // Every char masked with '*' (advance but wrong glyph) → suppress.
-        let learn = oracleVerdict(typed: "s3cr3t!", alt: false) { i in
-            (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: "*"))
-        }
+        let s = Array("s3cr3t!".unicodeScalars)
+        let learn = oracleVerdict(
+            typed: "s3cr3t!", alt: false,
+            cellFor: { _, _ in EchoCell(scalar: "*") },
+            finalCursor: EchoCursor(row: 0, col: s.count))
         XCTAssertFalse(learn)
     }
 
     func testAltScreenLineSuppressedEvenIfEchoed() {
         let s = Array("dd".unicodeScalars)
-        let learn = oracleVerdict(typed: "dd", alt: true) { i in
-            (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: s[i]))
-        }
+        let learn = oracleVerdict(
+            typed: "dd", alt: true,
+            cellFor: { i, scalar in EchoCell(scalar: scalar) },
+            finalCursor: EchoCursor(row: 0, col: s.count))
         XCTAssertFalse(learn)   // alt-screen ⇒ suppress the whole line
     }
 
     func testMajorityEchoedLineLearns() {
-        // 6 of 7 echoed, 1 hidden (a settle miss) → majority ⇒ learn.
+        // 6 of 7 echoed, 1 hidden (a settle miss at index 3) → majority ⇒ learn.
         let s = Array("kubectl".unicodeScalars)
-        let learn = oracleVerdict(typed: "kubectl", alt: false) { i in
-            i == 3
-                ? (EchoCursor(row: 0, col: 3), EchoCell(scalar: nil))   // one miss, no advance
-                : (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: s[i]))
-        }
+        let learn = oracleVerdict(
+            typed: "kubectl", alt: false,
+            cellFor: { i, scalar in
+                i == 3 ? EchoCell(scalar: nil) : EchoCell(scalar: scalar)
+            },
+            finalCursor: EchoCursor(row: 0, col: s.count))
         XCTAssertTrue(learn)
     }
 
     func testMinorityEchoedLineSuppressed() {
         // Only 2 of 7 echoed → below majority ⇒ suppress (bias to not-learn).
         let s = Array("secret7".unicodeScalars)
-        let learn = oracleVerdict(typed: "secret7", alt: false) { i in
-            i < 2
-                ? (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: s[i]))
-                : (EchoCursor(row: 0, col: i), EchoCell(scalar: nil))
-        }
+        let learn = oracleVerdict(
+            typed: "secret7", alt: false,
+            cellFor: { i, scalar in
+                i < 2 ? EchoCell(scalar: scalar) : EchoCell(scalar: nil)
+            },
+            finalCursor: EchoCursor(row: 0, col: s.count))
         XCTAssertFalse(learn)
     }
 
@@ -326,11 +332,12 @@ final class PasswordEntryDetectorTests: XCTestCase {
         // Guards the strict `>` in the majority test against a `>=` regression.
         // 4*2 = 8, and 8 > 8 is false → suppress; 8 >= 8 would be true → learn.
         let s = Array("passw0rd".unicodeScalars)
-        let learn = oracleVerdict(typed: "passw0rd", alt: false) { i in
-            i < 4
-                ? (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: s[i]))   // echoed
-                : (EchoCursor(row: 0, col: i), EchoCell(scalar: nil))        // hidden (no advance)
-        }
+        let learn = oracleVerdict(
+            typed: "passw0rd", alt: false,
+            cellFor: { i, scalar in
+                i < 4 ? EchoCell(scalar: scalar) : EchoCell(scalar: nil)
+            },
+            finalCursor: EchoCursor(row: 0, col: s.count))
         XCTAssertFalse(learn)
     }
 
@@ -338,46 +345,25 @@ final class PasswordEntryDetectorTests: XCTestCase {
 
     func testOracleLineWithNoOutputIsSuppressed() {
         // Cursor "advances" and cells "match" per the oracle, but NO output byte
-        // ever arrived (a stall) → ambiguous → suppress. This drives the oracle
-        // path directly WITHOUT calling noteOutput.
-        var d = PasswordEntryDetector()
-        let oracle = ScriptedEchoOracle()
-        d.setOracle(oracle)
+        // ever arrived (a stall) → ambiguous → suppress.
         let s = Array("kubectl".unicodeScalars)
-        var col = 0
-        for (i, ch) in "kubectl".unicodeScalars.enumerated() {
-            let pre = EchoCursor(row: 0, col: col)
-            oracle.nextCursor = pre
-            d.beginKeystroke(scalar: ch)
-            d.noteInput(Array(String(ch).utf8))
-            oracle.nextCursor = EchoCursor(row: 0, col: col + 1)
-            oracle.cellAt = { r, c in (r == 0 && c == pre.col) ? EchoCell(scalar: s[i]) : EchoCell(scalar: nil) }
-            d.settleKeystroke()
-            col += 1
-        }
-        XCTAssertFalse(d.shouldLearnCommittedLine())   // no noteOutput ⇒ not live ⇒ suppress
+        let learn = oracleVerdict(
+            typed: "kubectl", alt: false,
+            cellFor: { i, scalar in EchoCell(scalar: scalar) },
+            finalCursor: EchoCursor(row: 0, col: s.count),
+            live: false)   // no noteOutput ⇒ not live ⇒ suppress
+        XCTAssertFalse(learn)
     }
 
     func testOracleLineWithOutputStaysLearnable() {
-        // Same as above but a single output byte arrives → liveness satisfied,
-        // majority echoed ⇒ learn. Proves the gate doesn't suppress real echoes.
-        var d = PasswordEntryDetector()
-        let oracle = ScriptedEchoOracle()
-        d.setOracle(oracle)
+        // Same as above but liveness satisfied → majority echoed ⇒ learn.
         let s = Array("kubectl".unicodeScalars)
-        var col = 0
-        for (i, ch) in "kubectl".unicodeScalars.enumerated() {
-            let pre = EchoCursor(row: 0, col: col)
-            oracle.nextCursor = pre
-            d.beginKeystroke(scalar: ch)
-            d.noteInput(Array(String(ch).utf8))
-            d.noteOutput(Array(String(ch).utf8))       // echoing shell emits output
-            oracle.nextCursor = EchoCursor(row: 0, col: col + 1)
-            oracle.cellAt = { r, c in (r == 0 && c == pre.col) ? EchoCell(scalar: s[i]) : EchoCell(scalar: nil) }
-            d.settleKeystroke()
-            col += 1
-        }
-        XCTAssertTrue(d.shouldLearnCommittedLine())
+        let learn = oracleVerdict(
+            typed: "kubectl", alt: false,
+            cellFor: { i, scalar in EchoCell(scalar: scalar) },
+            finalCursor: EchoCursor(row: 0, col: s.count),
+            live: true)
+        XCTAssertTrue(learn)
     }
 
     // MARK: - L1 prompt-text corroboration
@@ -391,19 +377,46 @@ final class PasswordEntryDetectorTests: XCTestCase {
         d.resetLine()                                  // classify the prompt tail
         let oracle = ScriptedEchoOracle()
         d.setOracle(oracle)
+        oracle.nextCursor = EchoCursor(row: 0, col: 0)
+        d.beginBatch()
         let s = Array("hunter2".unicodeScalars)
-        var col = 0
-        for (i, ch) in "hunter2".unicodeScalars.enumerated() {
-            let pre = EchoCursor(row: 0, col: col)
-            oracle.nextCursor = pre
-            d.beginKeystroke(scalar: ch)
+        for ch in s {
             d.noteInput(Array(String(ch).utf8))
             d.noteOutput(Array(String(ch).utf8))       // literal echoed back
-            oracle.nextCursor = EchoCursor(row: 0, col: col + 1)
-            oracle.cellAt = { r, c in (r == 0 && c == pre.col) ? EchoCell(scalar: s[i]) : EchoCell(scalar: nil) }
-            d.settleKeystroke()
-            col += 1
         }
+        oracle.cellAt = { r, c in
+            guard r == 0, c >= 0, c < s.count else { return EchoCell(scalar: nil) }
+            return EchoCell(scalar: s[c])
+        }
+        oracle.nextCursor = EchoCursor(row: 0, col: s.count)
+        d.settleLine(scalars: s)
         XCTAssertFalse(d.shouldLearnCommittedLine())   // prompt corroboration wins
+    }
+
+    // MARK: - L1 multi-keystroke batch regression guard
+
+    func testMultiKeystrokeBatchClassifiesEveryKeystroke() {
+        // A 5-char burst delivered as ONE batch where only the LAST char echoes and
+        // the first four are blank (hidden). Under the OLD 1-settle-per-batch bug this
+        // classified only the last char → 1-of-1 echoed → LEARN. With per-cell settle
+        // it is 1-of-5 echoed → minority → SUPPRESS.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.nextCursor = EchoCursor(row: 0, col: 0)
+        d.setOracle(oracle)
+        d.beginBatch()
+        let scalars = Array("s3cr7".unicodeScalars)   // 5 chars
+        for ch in scalars {
+            d.noteInput(Array(String(ch).utf8))
+            d.noteOutput(Array(String(ch).utf8))
+        }
+        oracle.cellAt = { r, c in
+            (r == 0 && c == 4) ? EchoCell(scalar: scalars[4]) : EchoCell(scalar: nil)
+        }
+        oracle.nextCursor = EchoCursor(row: 0, col: 5)   // cursor advanced
+        d.settleLine(scalars: scalars)
+        XCTAssertFalse(d.shouldLearnCommittedLine())   // 1 echoed of 5 → minority → suppress
+        XCTAssertEqual(d.lastClass, .echoed)           // the LAST keystroke was echoed…
+        // …but the tally saw all 5, so the majority correctly suppresses.
     }
 }
