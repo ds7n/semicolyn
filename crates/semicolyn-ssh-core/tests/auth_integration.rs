@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
-use semicolyn_ssh_core::connection::{connect_core, AuthOutcome, HostKeyInfo, HostKeyVerifier};
+use semicolyn_ssh_core::connection::{
+    connect_core, AuthOutcome, HostKeyInfo, HostKeyVerifier, KeepaliveConfig,
+};
 use std::sync::{Arc, Mutex};
 
 struct TrustAll;
@@ -21,9 +23,15 @@ async fn password_auth_succeeds_with_correct_credentials() {
         eprintln!("skipping: set SEMICOLYN_TEST_SSHD");
         return;
     };
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect");
     let outcome = conn
         .authenticate_password("tester".into(), "testpass".into())
         .await
@@ -37,9 +45,15 @@ async fn password_auth_fails_with_wrong_password() {
         eprintln!("skipping: set SEMICOLYN_TEST_SSHD");
         return;
     };
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect");
     let outcome = conn
         .authenticate_password("tester".into(), "wrong".into())
         .await
@@ -60,9 +74,15 @@ async fn publickey_auth_succeeds_with_authorized_key() {
             return;
         }
     };
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect");
     let outcome = conn
         .authenticate_publickey("tester".into(), key)
         .await
@@ -76,9 +96,15 @@ async fn keyboard_interactive_auth_succeeds_with_password_response() {
         eprintln!("skipping: set SEMICOLYN_TEST_SSHD");
         return;
     };
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect");
     // PAM keyboard-interactive presents a single password prompt.
     let outcome = conn
         .authenticate_keyboard_interactive("tester".into(), vec!["testpass".into()])
@@ -93,9 +119,15 @@ async fn keyboard_interactive_auth_fails_with_wrong_response() {
         eprintln!("skipping: set SEMICOLYN_TEST_SSHD");
         return;
     };
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect");
     let outcome = conn
         .authenticate_keyboard_interactive("tester".into(), vec!["wrong".into()])
         .await

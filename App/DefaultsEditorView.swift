@@ -151,7 +151,7 @@ struct DefaultsEditorView: View {
                     "inherit · 30",
                     text: Binding(
                         get: { inheritedIntToText(vm.defaults.serverAliveInterval) },
-                        set: { vm.defaults.serverAliveInterval = textToInheritedInt($0) }
+                        set: { vm.defaults.serverAliveInterval = textToInheritedInt($0, minimum: 0) }
                     )
                 )
                 .keyboardType(.numberPad)
@@ -177,7 +177,7 @@ struct DefaultsEditorView: View {
                     "inherit · 3",
                     text: Binding(
                         get: { inheritedIntToText(vm.defaults.serverAliveCountMax) },
-                        set: { vm.defaults.serverAliveCountMax = textToInheritedInt($0) }
+                        set: { vm.defaults.serverAliveCountMax = textToInheritedInt($0, minimum: 0) }
                     )
                 )
                 .keyboardType(.numberPad)

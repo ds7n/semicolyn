@@ -735,7 +735,9 @@ final class ConnectionViewModel: ObservableObject {
                     hostID: savedHost.id, trust: AppStores.shared.trust,
                     present: { [weak self] prompt in await self?.present(prompt) ?? false })
                 let conn = try await SemicolynSSHCoreFFI.connect(
-                    addr: addr, allowLegacy: false, allowDeprecated: false, verifier: verifier)
+                    addr: addr, allowLegacy: false, allowDeprecated: false,
+                    keepalive: keepaliveConfig(host: savedHost, defaults: defaults),
+                    verifier: verifier)
                 let outcome = try await authenticate(conn: conn, user: user, host: savedHost, defaults: defaults, password: password)
                 switch outcome {
                 case .success:
@@ -755,6 +757,8 @@ final class ConnectionViewModel: ObservableObject {
                 try await attachSSHShell(conn: conn, host: savedHost, defaults: defaults2)
             } catch ConnectError.HostKeyRejected {
                 state = .failed("Host key not trusted")
+            } catch ConnectError.Timeout {
+                state = .failed("Couldn't reach host — connection timed out")
             } catch {
                 state = .failed(String(describing: error))
             }
@@ -781,7 +785,9 @@ final class ConnectionViewModel: ObservableObject {
                     hostID: hostRecord.id, trust: AppStores.shared.trust,
                     present: { [weak self] prompt in await self?.present(prompt) ?? false })
                 let conn = try await SemicolynSSHCoreFFI.connect(
-                    addr: addr, allowLegacy: false, allowDeprecated: false, verifier: verifier)
+                    addr: addr, allowLegacy: false, allowDeprecated: false,
+                    keepalive: keepaliveConfig(host: hostRecord, defaults: defaults),
+                    verifier: verifier)
                 let outcome = try await authenticate(conn: conn, user: user, host: hostRecord, defaults: defaults, password: password)
                 switch outcome {
                 case .success:
@@ -801,9 +807,21 @@ final class ConnectionViewModel: ObservableObject {
                 try await attachSSHShell(conn: conn, host: hostRecord, defaults: defaults2)
             } catch ConnectError.HostKeyRejected {
                 state = .failed("Host key not trusted")
+            } catch ConnectError.Timeout {
+                state = .failed("Couldn't reach host — connection timed out")
             } catch {
                 state = .failed(String(describing: error))
             }
         }
+    }
+
+    /// Resolves the host's keepalive policy (OpenSSH `ServerAliveInterval` /
+    /// `ServerAliveCountMax`) into the Rust core's `KeepaliveConfig`, so an idle
+    /// interactive session stays alive. `interval == 0` disables keepalives
+    /// (the resolve fallbacks are 30 / 3).
+    private func keepaliveConfig(host: Host, defaults: Defaults) -> KeepaliveConfig {
+        KeepaliveConfig(
+            intervalSecs: UInt32(max(0, resolveServerAliveInterval(host: host, defaults: defaults))),
+            countMax: UInt32(max(0, resolveServerAliveCountMax(host: host, defaults: defaults))))
     }
 }
