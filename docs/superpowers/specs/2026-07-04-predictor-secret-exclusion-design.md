@@ -4,7 +4,49 @@
 # Predictor secret-exclusion — defense-in-depth (design)
 
 **Date:** 2026-07-04
-**Status:** DRAFT (in review)
+**Status:** DRAFT — design approved section-by-section; awaiting a final read before
+implementation-planning. Written durably so work can resume after a context clear.
+
+## Decisions locked (chosen this session — settled, not re-litigable)
+
+- **All 8 layers in scope**, comprehensive in one design (not a focused subset).
+- **Reframe governs:** predictor, not scanner — a false positive costs one skipped word,
+  a false negative leaks a credential → *exclusion wins ties; filter aggressively.*
+- **Echo IS detectable** (the prior "can't detect echo" was half-wrong): L1 buffer-anchored
+  check (SSH, all-public SwiftTerm APIs) + L2 mosh prediction-engine state. Only the
+  *deterministic SSH-wire flag* is genuinely absent. See the research doc.
+- **`EchoOracle` protocol seam** keeps L1's logic pure-Kit/Linux-tested; the SwiftTerm
+  adapter is the only Apple-only piece.
+- **Alt-screen ⇒ suppress the whole line** (don't learn inside vim/htop; safe default).
+- **L4a leading-space opt-out: YES** (shell-`ignorespace` gesture; the power-user "don't
+  learn this" escape hatch).
+- **L4b denylist: conservative defaults only**, no user-editable rules in v1 (YAGNI).
+- **L6 graduation threshold N = 3 across *distinct* contexts** (distinct = different
+  preceding token/command; same line replayed does not over-count).
+- **L7 keeps the two-tier confidence split** (high-confidence → literal stored for prefix
+  completion; low-confidence → lossy count only) — NOT everything-lossy (that would kill
+  literal completion for all learned tokens).
+- **Both forget tools:** *forget-last-line* is the primary surgical tool (cheap because L6
+  defers learning — a regretted line is still un-graduated in the ephemeral tier);
+  *panic-purge* is the nuclear fallback (wipes all user-derived state, keeps the static
+  seed vocab).
+- **Phased into 6 slices; each spec-phase should become its OWN implementation plan** —
+  do NOT write one monolithic plan. Start with Phase 1 (L1 + `EchoOracle`).
+
+## Current state (for a cold resume)
+
+- This spec + `docs/superpowers/research/2026-07-04-echo-detection-investigation.md` live
+  on branch **`feat/predictor-secret-exclusion`** (off `main`). Nothing implemented yet.
+- The shipped **`PasswordEntryDetector`** (`Sources/SemicolynKit/Predictor/`, merged in
+  PR #41 on `main`) is the single-signal detector this design UPGRADES (L1), not removes.
+- Capture chokepoint today: `observePredictorInput` in `App/ConnectionViewModel.swift`
+  (fed by `sendTerminalInput`); output taps `passwordDetector.noteOutput` at the
+  raw + tmux harvest sites. `InputTokenTracker` (Kit) reconstructs lines. `PrefixIndex`
+  stores literal tokens verbatim (the recoverability problem L7 fixes). Mosh's
+  `OverlayManager`/`PredictionEngine` is already instantiated in
+  `extern/mosh/src/frontend/iosclient.h` (L2's signal exists on-device, no getter yet).
+- Predictor is **local-only** today — no CloudKit sync yet (L8 gates that future).
+- **Next step:** invoke `writing-plans` for **Phase 1 only**.
 **Supersedes-in-part:** the shipped single-signal `PasswordEntryDetector`
 (PR #41) — kept and upgraded, not removed.
 **Grounded in:** `docs/superpowers/research/2026-07-04-echo-detection-investigation.md`
