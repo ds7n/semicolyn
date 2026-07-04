@@ -14,6 +14,7 @@ struct DegradedBanner: View {
         case .optedOut:        return "tmux control mode is off for this host — running as plain SSH."
         case .tmuxNotFound:    return "tmux not found — running as plain SSH."
         case .tooOld(let v):   return "tmux \(v.major).\(v.minor) is too old (need 3.0+) — running as plain SSH."
+        case .couldNotStart:   return "Couldn't start tmux (check the session name) — running as plain SSH."
         }
     }
 

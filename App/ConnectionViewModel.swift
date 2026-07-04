@@ -584,7 +584,11 @@ final class ConnectionViewModel: ObservableObject {
     private func attachTmux(conn: Connection) async throws {
         let runtime = TmuxRuntime(sessionName: tmuxSessionNameForConnection)
         guard let startCmd = runtime.makeStartCommand() else {
-            // Controller couldn't build a start command; fall through to raw PTY.
+            // Controller couldn't build a start command (e.g. an invalid resolved
+            // session name — which a Defaults-level value can be, since the Defaults
+            // editor has no per-field validation). Surface it via the degraded
+            // banner instead of silently dropping to a raw shell everywhere.
+            degraded = .couldNotStart
             try await openRawShell(conn: conn)
             return
         }
