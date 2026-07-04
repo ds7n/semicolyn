@@ -21,8 +21,16 @@ struct CrashBanner: View {
                 Spacer()
             }
             HStack(spacing: 12) {
-                Button("Reattach", action: onReattach).buttonStyle(.borderedProminent).tint(.white)
-                Button("Start new tmux", action: onStartNew).buttonStyle(.bordered)
+                // White pill on the red banner — force a DARK label so the text is
+                // legible (the banner's .foregroundStyle(.white) would otherwise make
+                // it white-on-white and invisible).
+                Button("Reattach", action: onReattach)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white)
+                    .foregroundStyle(Color(theme.state.broken))
+                Button("Start new tmux", action: onStartNew)
+                    .buttonStyle(.bordered)
+                    .tint(.white)
                 Spacer()
                 Button("Dismiss", action: onDismiss).buttonStyle(.plain)
             }
