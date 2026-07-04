@@ -466,14 +466,29 @@ final class ConnectionViewModel: ObservableObject {
         switch moshBranchOutcome(stdout: stdout, enabled: true) {
         case let .mosh(port, key):
             let predict = cfg.predictionMode?.rawValue ?? "adaptive"
+            // Seeded at 80×24: the terminal view hasn't laid out yet at connect time,
+            // so the real grid isn't known here. The first debounced resize from
+            // TerminalScreen (via setMoshClientSize) corrects it once layout happens,
+            // and mosh reflows. FUTURE (item #5 Q2(b)): to skip the brief 80×24 first
+            // frame, track the last-known terminal grid on the VM and pass it here.
             let sess = MoshSession(ip: host.hostName, port: String(port), key: key,
                                    cols: 80, rows: 24, predictMode: predict)
             // Reset the handshake gate: onEnd before the first frame means the UDP
             // handshake never completed → fall back to SSH on the retained connection;
             // onEnd after a frame is a genuine mid-session exit → crash banner.
             moshFirstFrameSeen = false
+            // Route Mosh output through the SAME buffered entry point as the Rust
+            // SSH path (`output.onOutput`) rather than calling the stored `onBytes`
+            // sink directly. Mosh's first framebuffer diff is emitted synchronously
+            // during `sess.start()` — before `state = .shell` triggers SwiftUI's
+            // `makeUIView`, which is what installs the render sink — so a direct
+            // `onBytes?` call would silently drop that frame (nil sink → no-op) and
+            // leave the terminal permanently blank. `onOutput` appends to the
+            // `PendingOutputBuffer`, which replays on sink-install. (Harvest stays
+            // off the Mosh path: `onHarvestBytes` is never installed here, so its
+            // pass in `onOutput` is a no-op.)
             sess.onOutput = { [weak self] data in
-                self?.output.onBytes?([UInt8](data))
+                self?.output.onOutput(data: data)
             }
             sess.onFirstFrame = { [weak self] in
                 // Frames are flowing: the UDP path is up. From here on, loop exits are
@@ -483,8 +498,16 @@ final class ConnectionViewModel: ObservableObject {
             sess.onEnd = { [weak self] _ in
                 guard let self else { return }
                 if self.moshFirstFrameSeen {
-                    // Post-first-frame exit (session/server death, clean or not):
-                    // reuse the mid-session crash banner — the same state tmux uses.
+                    // Post-first-frame exit (session/server death, clean or not).
+                    // Tear the dead Mosh session down FIRST: sendTerminalInput checks
+                    // `moshSession` before tmux/raw, so a lingering non-nil session
+                    // would swallow every keystroke into the dead input pipe (EPIPE,
+                    // silently dropped) after the user reattaches tmux via the banner.
+                    // stop() is idempotent and joins the already-exiting mosh thread.
+                    self.moshSession?.stop()
+                    self.moshSession = nil
+                    self.moshFirstFrameSeen = false
+                    // Then reuse the mid-session crash banner — the same state tmux uses.
                     self.crashBanner = .tmuxEnded
                     return
                 }
@@ -514,6 +537,12 @@ final class ConnectionViewModel: ObservableObject {
             return false
         }
     }
+
+    /// Whether a Mosh session is currently driving the terminal. The view uses
+    /// this to route its debounced resize to `setMoshClientSize` (Mosh has no
+    /// `ShellSession`, so `TerminalScreen`'s default `session?.resize` is a no-op).
+    /// Keeps the `MoshSession` object itself private.
+    var isMoshActive: Bool { moshSession != nil }
 
     /// Push a new terminal size to the running Mosh session. No-op outside Mosh mode.
     func setMoshClientSize(cols: Int, rows: Int) { moshSession?.resizeCols(Int32(cols), rows: Int32(rows)) }

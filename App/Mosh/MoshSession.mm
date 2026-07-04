@@ -62,14 +62,17 @@ static void mosh_state_noop(const void *ctx, const void *buf, size_t len) {
 //         with setting it to -1, so no writeInput can be mid-write on it (writeInput
 //         snapshots the same fd under the same lock and, seeing _stopped, bails).
 //         Closing it gives the mosh read side EOF → mosh_main returns.
-//       – _outPipe[0] (output read end): closed by the teardown block, but only as
-//         a fallback to force the reader's read() to EOF if the mosh thread never
-//         ran (normally the mosh thread's fclose(f_out) already gave EOF). It is
-//         closed AFTER joining the mosh thread and BEFORE joining the reader.
-// Because the teardown block joins the mosh thread BEFORE it does anything that
-// could observe a recycled _inPipe[0]/_outPipe[1] number, and joins the reader
-// AFTER closing _outPipe[0], no close() ever races a read()/write()/fclose() on a
-// live-or-recycled number. Every fd number is live for its whole thread's life.
+//       – _outPipe[0] (output read end): closed by the teardown block AFTER the
+//         reader thread is joined, so the reader's read() can never race the close
+//         and hit a recycled fd number. In the normal path the mosh thread's
+//         fclose(f_out) is what EOFs the reader (so it exits, then we join, then we
+//         close); only in the degenerate "mosh thread never ran" path do we first
+//         close the WRITE end (_outPipe[1]) to deliver EOF, then join, then close
+//         the read end.
+// Because the teardown block joins each thread BEFORE closing any fd that thread
+// touches, no close() ever races a read()/write()/fclose() on a live-or-recycled
+// number. Every fd number is live for its whole thread's life. (Single reader +
+// join barrier = no self-pipe/refcount needed; see -stop for the upgrade note.)
 //
 // TEARDOWN SEQUENCE in -stop:
 //   Phase 1 (caller thread, under _lock): if already stopping, return (idempotent).
@@ -77,8 +80,10 @@ static void mosh_state_noop(const void *ctx, const void *buf, size_t len) {
 //     quit sequence and close _inPipe[1] (→ mosh EOF), clear onOutput/onEnd so no
 //     callback fires after -stop returns. Drop the lock.
 //   Phase 2 (async, off-main utility queue): join the mosh thread (it fclose()s
-//     the mosh-side fds and fires onEnd on the way out). Then close _outPipe[0]
-//     (fallback EOF for the reader) under _lock, then join the reader thread.
+//     the mosh-side fds and fires onEnd on the way out). Then retire the reader:
+//     in the normal path join it (it already EOF'd via the mosh fclose) THEN close
+//     _outPipe[0]; in the degenerate no-mosh-thread path close _outPipe[1] first to
+//     deliver EOF, join, then close _outPipe[0]. Join-before-close throughout.
 //   The block retains self, so teardown safely outlives the app dropping its ref.
 //
 // CALLBACK-AFTER-STOP: -stop nils onOutput/onEnd under _lock before joining, and
@@ -361,23 +366,56 @@ static void *reader_thread_main(void *ctx) {
     // the object outlives the async teardown even if the app drops its ref now.
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         // Retain self across the async teardown (block captures self strongly).
-        // Join the mosh thread FIRST. After this returns, runMoshLoop has fully
+        // Join the mosh thread first. After this returns, runMoshLoop has fully
         // finished — including its fclose(_outPipe[1]) — so the reader is at (or is
-        // about to hit) EOF. mosh-side fds (_inPipe[0]/_outPipe[1]) are already
-        // closed by runMoshLoop's fclose and their numbers are dead.
+        // about to hit) EOF, and the mosh-side fds (_inPipe[0]/_outPipe[1]) are
+        // already closed by that fclose (their numbers are dead) UNLESS the mosh
+        // thread never ran (the degenerate branch below handles that).
         if (moshLive) pthread_join(moshT, NULL);
 
-        // Join the reader. Its read() has returned 0 (EOF from the mosh fclose, or
-        // from our close of the app read end below if the mosh thread never ran).
-        // If the mosh thread was never created, the reader would block forever on
-        // read(), so close the app READ end to force EOF before joining it.
-        pthread_mutex_lock(&_lock);
-        int appRead = _outPipe[0];
-        _outPipe[0] = -1;
-        pthread_mutex_unlock(&_lock);
-        if (appRead >= 0) close(appRead);
+        // Now retire the reader and close the app read end. The ORDER matters and
+        // differs by case — the reader thread reads _outPipe[0] with no lock between
+        // iterations, so closing that fd while the reader is mid-loop would free its
+        // number for another thread to recycle (e.g. attachSSHShell opening a russh
+        // socket during the pre-frame fallback), and the reader's next read() would
+        // then target a foreign fd. `pthread_join` is the barrier that proves the
+        // reader is done with the fd; the close must sit on the safe side of it.
+        //
+        // Single reader + a real join barrier is why this needs no self-pipe/refcount
+        // machinery. If a SECOND consumer of _outPipe[0] is ever added, switch the
+        // reader to a select() over a self-pipe wakeup instead of relying on join.
+        if (moshLive) {
+            // Normal path: the mosh thread's fclose(_outPipe[1]) already EOF'd the
+            // reader, so it exits on its own. Join FIRST (honoring runReaderLoop's
+            // "fd valid until after join" invariant), THEN close the read end — no
+            // window in which a live reader can hit a recycled fd number.
+            if (readerLive) pthread_join(readerT, NULL);
+            pthread_mutex_lock(&_lock);
+            int appRead = _outPipe[0];
+            _outPipe[0] = -1;
+            pthread_mutex_unlock(&_lock);
+            if (appRead >= 0) close(appRead);
+        } else {
+            // Degenerate path: the mosh thread never ran, so nothing fclose'd the
+            // write end and the reader (if it started) is blocked in read() with no
+            // EOF coming. Deliver EOF by closing the WRITE end first (closing the read
+            // end does NOT reliably wake a blocked reader on Darwin), THEN join, THEN
+            // close the read end. No concurrent russh fd traffic exists on this path
+            // (the connection never handed off), so there is no recycle hazard here.
+            pthread_mutex_lock(&_lock);
+            int outWrite = _outPipe[1];
+            _outPipe[1] = -1;
+            pthread_mutex_unlock(&_lock);
+            if (outWrite >= 0) close(outWrite);  // → reader read() returns 0 (EOF)
 
-        if (readerLive) pthread_join(readerT, NULL);
+            if (readerLive) pthread_join(readerT, NULL);
+
+            pthread_mutex_lock(&_lock);
+            int appRead = _outPipe[0];
+            _outPipe[0] = -1;
+            pthread_mutex_unlock(&_lock);
+            if (appRead >= 0) close(appRead);
+        }
         // All threads joined; all fds closed exactly once. Teardown complete.
         (void)self;  // keep self alive to end of block
     });
