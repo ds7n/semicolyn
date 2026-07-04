@@ -184,6 +184,10 @@ private struct HostRow: View {
                 .foregroundStyle(Color(theme.text.secondary))
         }
         .padding(.vertical, 2)
+        // Fill the row width and make the whole area (not just the text glyphs)
+        // the button's hit target, so a tap anywhere in the row connects.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 

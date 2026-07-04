@@ -124,4 +124,39 @@ final class ResolutionTests: XCTestCase {
         let d = Defaults(semicolyn: .explicit(SemicolynConfig(predictor: PredictorConfig(incognito: false))))
         XCTAssertTrue(resolveOsc52Allow(host: h, defaults: d), "no osc52 anywhere → builtin true")
     }
+
+    // MARK: - resolveTmuxSessionName
+
+    func testTmuxSessionNameHostWins() {
+        let h = host { $0.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: "work"))) }
+        let d = Defaults(semicolyn: .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: "shared"))))
+        XCTAssertEqual(resolveTmuxSessionName(host: h, defaults: d), "work")
+    }
+
+    func testTmuxSessionNameInheritsDefaults() {
+        let d = Defaults(semicolyn: .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: "shared"))))
+        XCTAssertEqual(resolveTmuxSessionName(host: host(), defaults: d), "shared")
+    }
+
+    func testTmuxSessionNameBuiltinWhenUnset() {
+        XCTAssertEqual(resolveTmuxSessionName(host: host(), defaults: Defaults()), "semicolyn")
+    }
+
+    func testTmuxSessionNameEmptyLeafFallsThrough() {
+        // A host leaf set to "" (or whitespace) is treated as unset → Defaults → builtin.
+        let h = host { $0.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: "   "))) }
+        XCTAssertEqual(resolveTmuxSessionName(host: h, defaults: Defaults()), "semicolyn")
+        let h2 = host { $0.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: ""))) }
+        let d = Defaults(semicolyn: .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: "shared"))))
+        XCTAssertEqual(resolveTmuxSessionName(host: h2, defaults: d), "shared")
+    }
+
+    func testTmuxSessionNameLeafIndependence() {
+        // Host sets ONLY sessionName; Defaults sets ONLY attemptControlMode=false.
+        // Each leaf resolves independently (regression for the #7 container-shadow bug).
+        let h = host { $0.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: "work"))) }
+        let d = Defaults(semicolyn: .explicit(SemicolynConfig(tmux: TmuxConfig(attemptControlMode: false))))
+        XCTAssertEqual(resolveTmuxSessionName(host: h, defaults: d), "work")
+        XCTAssertFalse(resolveTmuxAttemptControlMode(host: h, defaults: d))
+    }
 }
