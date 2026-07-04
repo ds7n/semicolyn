@@ -115,24 +115,51 @@ public func resolvePreferredAuthentications(host: Host, defaults: Defaults) -> [
 }
 
 // MARK: Semicolyn-extension nested-config leaves
-// Resolved at the leaf: host config leaf → Defaults config leaf → built-in.
+// Resolved at the LEAF: host config leaf → Defaults config leaf → built-in.
+//
+// These must resolve each leaf INDEPENDENTLY. Using `resolveOptional` on the
+// whole container is wrong: it picks the host container entirely whenever the
+// host container is `.explicit`, so a host that sets only SOME leaves (e.g. the
+// editor writes `.explicit(SemicolynConfig(predictor: ...))` with `osc52` unset)
+// would silently shadow the Defaults values of the leaves it left nil. The
+// editors write partial containers as the norm, so that path is routinely hit.
+
+/// Resolve a single leaf of a nested `Inherited` config, leaf-independently:
+/// the host's leaf (when the host container is explicit AND that leaf is set) →
+/// the Defaults' leaf (likewise) → `fallback`. A host container that sets some
+/// leaves does NOT shadow the Defaults values of the leaves it leaves unset.
+///
+/// `.explicit(nil)` at the container level (a "cleared" container) carries no
+/// per-leaf intent and simply falls through here — matching `.inherit`. That
+/// state is not reachable through the current editors (they write either a
+/// populated `.explicit(cfg)` or `.inherit`), so the choice is moot in practice.
+private func resolveLeaf<Container, Leaf>(
+    _ host: Inherited<Container>,
+    _ defaults: Inherited<Container>,
+    _ leaf: (Container) -> Leaf?,
+    fallback: Leaf
+) -> Leaf {
+    if case .explicit(let c?) = host, let v = leaf(c) { return v }
+    if case .explicit(let c?) = defaults, let v = leaf(c) { return v }
+    return fallback
+}
 
 public func resolveMoshEnabled(host: Host, defaults: Defaults) -> Bool {
-    resolveOptional(host.mosh, defaults.mosh)?.enabled ?? false
+    resolveLeaf(host.mosh, defaults.mosh, { $0.enabled }, fallback: false)
 }
 public func resolveTailscaleRequired(host: Host, defaults: Defaults) -> Bool {
-    resolveOptional(host.tailscale, defaults.tailscale)?.required ?? false
+    resolveLeaf(host.tailscale, defaults.tailscale, { $0.required }, fallback: false)
 }
 public func resolvePredictorIncognito(host: Host, defaults: Defaults) -> Bool {
-    resolveOptional(host.semicolyn, defaults.semicolyn)?.predictor?.incognito ?? false
+    resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.predictor?.incognito }, fallback: false)
 }
 public func resolveTmuxAttemptControlMode(host: Host, defaults: Defaults) -> Bool {
-    resolveOptional(host.semicolyn, defaults.semicolyn)?.tmux?.attemptControlMode ?? true
+    resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.tmux?.attemptControlMode }, fallback: true)
 }
 
 /// Resolve whether OSC 52 clipboard writes are permitted (builtin default: true).
 public func resolveOsc52Allow(host: Host, defaults: Defaults) -> Bool {
-    resolveOptional(host.semicolyn, defaults.semicolyn)?.osc52?.allow ?? true
+    resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.osc52?.allow }, fallback: true)
 }
 
 /// Returns true if saving `savingHostId` with `chain` would loop back through a

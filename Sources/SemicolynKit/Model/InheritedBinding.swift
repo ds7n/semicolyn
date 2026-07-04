@@ -58,10 +58,15 @@ public func inheritedIntToText(_ inherited: Inherited<Int>) -> String {
 }
 
 /// Converts a text-field string back to `Inherited<Int>`.
-/// Empty string → `.inherit`. Non-numeric or negative string → `.inherit`.
-/// Valid positive integer string → `.explicit(int)`.
-public func textToInheritedInt(_ text: String) -> Inherited<Int> {
-    guard !text.isEmpty, let n = Int(text), n > 0 else { return .inherit }
+/// Empty string → `.inherit`. Non-numeric, or a number below `minimum` → `.inherit`.
+/// An integer `>= minimum` → `.explicit(int)`.
+///
+/// `minimum` defaults to `1`, which rejects `0` — correct for a port field. Pass
+/// `minimum: 0` for fields where `0` is a meaningful value the user should be
+/// able to enter, e.g. `ServerAliveInterval 0` (OpenSSH "keepalives disabled")
+/// or `ServerAliveCountMax 0`. Negatives are always rejected → `.inherit`.
+public func textToInheritedInt(_ text: String, minimum: Int = 1) -> Inherited<Int> {
+    guard !text.isEmpty, let n = Int(text), n >= minimum, n >= 0 else { return .inherit }
     return .explicit(n)
 }
 

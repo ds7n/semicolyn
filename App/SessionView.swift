@@ -106,6 +106,17 @@ struct SessionView: View {
                     TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
                                    output: vm.output,
                                    session: vm.session,
+                                   // Mosh has no ShellSession, so its debounced resize routes
+                                   // through an explicit sink → setMoshClientSize → the bridge's
+                                   // shared winsize + SIGWINCH. Raw SSH leaves this nil and uses
+                                   // session?.resize. (Note: MoshSession is currently seeded at
+                                   // 80×24 and corrected by the first resize event here; to avoid
+                                   // that brief initial reflow we could plumb the real grid size
+                                   // into attachMoshIfPossible before creating the session — a
+                                   // future refinement, see item #5 Q2(b).)
+                                   onResize: vm.isMoshActive
+                                       ? { [weak vm] cols, rows in vm?.setMoshClientSize(cols: cols, rows: rows) }
+                                       : nil,
                                    theme: theme,
                                    osc52Allowed: vm.osc52Allowed,
                                    onTitle: { [weak vm] t in vm?.terminalTitle = t },
