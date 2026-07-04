@@ -609,6 +609,38 @@ extension HostEditorView {
                 }
             }
 
+            // tmux session name — Inherited via the nested leaf. Blank = inherit
+            // (→ Defaults → "semicolyn"). Disabled when control mode is off.
+            let controlModeOn = (vm.host.semicolyn.value?.tmux?.attemptControlMode ?? true)
+            LabeledContent {
+                TextField(
+                    "inherit · semicolyn",
+                    text: Binding(
+                        get: { vm.host.semicolyn.value?.tmux?.sessionName ?? "" },
+                        set: { newName in
+                            var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
+                            var tmux = cfg.tmux ?? TmuxConfig()
+                            tmux.sessionName = newName.isEmpty ? nil : newName
+                            cfg.tmux = tmux
+                            vm.host.semicolyn = .explicit(cfg)
+                        }
+                    )
+                )
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .onChange(of: vm.host.semicolyn) { _, _ in vm.revalidate() }
+            } label: {
+                Text("tmux session name")
+                    .foregroundStyle(Color(theme.text.primary))
+            }
+            .disabled(!controlModeOn)
+
+            if vm.issues.contains(where: { $0.kind == .invalidTmuxSessionName }) {
+                Text("Only letters, digits, - and _ (no spaces, dots, or colons).")
+                    .font(.caption)
+                    .foregroundStyle(Color(theme.state.broken))
+            }
+
             // OSC 52 clipboard — default true per resolution
             Toggle(isOn: Binding(
                 get: { vm.host.semicolyn.value?.osc52?.allow ?? true },
