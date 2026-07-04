@@ -146,8 +146,17 @@ final class TmuxCommandTests: XCTestCase {
         XCTAssertNil(TmuxCommand.killSession(name: "x\nkill-server"))
     }
 
-    func testKillSessionRejectsUppercase() { // charset is [a-z0-9-]
-        XCTAssertNil(TmuxCommand.killSession(name: "Semicolyn-ABCD"))
+    func testKillSessionAcceptsUppercaseAndUnderscore() {
+        // The session-name charset is [A-Za-z0-9_-] (widened when user-chosen
+        // names landed — see resolveTmuxSessionName): uppercase and underscore
+        // are legal tmux names and injection-safe, so they encode, not reject.
+        XCTAssertEqual(TmuxCommand.killSession(name: "Semicolyn-ABCD"), "kill-session -t Semicolyn-ABCD")
+        XCTAssertEqual(TmuxCommand.killSession(name: "my_session"), "kill-session -t my_session")
+    }
+
+    func testKillSessionRejectsDotAndColon() { // tmux-forbidden name chars
+        XCTAssertNil(TmuxCommand.killSession(name: "a.b"))
+        XCTAssertNil(TmuxCommand.killSession(name: "a:b"))
     }
 
     // MARK: refresh-client -C — control-mode resize (BVA on dimensions)
