@@ -319,4 +319,17 @@ final class PasswordEntryDetectorTests: XCTestCase {
         }
         XCTAssertFalse(learn)
     }
+
+    func testExactTieSuppressed() {
+        // Exactly 50% echoed (4 of 8): a tie must SUPPRESS — exclusion wins ties.
+        // Guards the strict `>` in the majority test against a `>=` regression.
+        // 4*2 = 8, and 8 > 8 is false → suppress; 8 >= 8 would be true → learn.
+        let s = Array("passw0rd".unicodeScalars)
+        let learn = oracleVerdict(typed: "passw0rd", alt: false) { i in
+            i < 4
+                ? (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: s[i]))   // echoed
+                : (EchoCursor(row: 0, col: i), EchoCell(scalar: nil))        // hidden (no advance)
+        }
+        XCTAssertFalse(learn)
+    }
 }
