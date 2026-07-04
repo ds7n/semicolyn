@@ -754,27 +754,24 @@ final class ConnectionViewModel: ObservableObject {
     /// the token filter alone can't catch a short low-entropy password.
     private func observePredictorInput(_ bytes: [UInt8]) {
         guard engine != nil else { return }
-        // L1: snapshot cursor before each printable keystroke, then settle after a
-        // bounded window (off the hot path; verdict is consumed at line commit).
-        for b in bytes where (0x21...0x7e).contains(b) || b == 0x20 {
-            if let scalar = Unicode.Scalar(exactly: UInt32(b)) {
-                passwordDetector.beginKeystroke(scalar: scalar)
-            }
+        // L1: snapshot the pre-batch cursor, then after a bounded settle window
+        // classify the whole batch's echo against the cumulative grid at once.
+        let scalars: [Unicode.Scalar] = bytes.compactMap { b in
+            ((0x21...0x7e).contains(b) || b == 0x20) ? Unicode.Scalar(UInt32(b)) : nil
         }
+        if !scalars.isEmpty { passwordDetector.beginBatch() }
         passwordDetector.noteInput(bytes)
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
         }
-        // Settle the just-typed keystrokes after a short window so the echo has
-        // arrived. Hop through main; never awaited on the input path.
         let deadline = DispatchTime.now() + .milliseconds(40)
-        DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
-            self?.passwordDetector.settleKeystroke()
-            self?.refreshPredictorSuggestions()
+        if !scalars.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
+                self?.passwordDetector.settleLine(scalars: scalars)
+                self?.refreshPredictorSuggestions()
+            }
         }
-        // Flush the line's buffered tokens on each line commit (Enter / newline).
         for b in bytes where b == 0x0d || b == 0x0a {
-            // Give the last keystrokes their settle window before judging the line.
             DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(10)) { [weak self] in
                 guard let self else { return }
                 if self.passwordDetector.shouldLearnCommittedLine() {
