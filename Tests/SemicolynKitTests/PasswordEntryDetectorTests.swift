@@ -234,4 +234,89 @@ final class PasswordEntryDetectorTests: XCTestCase {
             echoCell: EchoCell(scalar: "x"))
         XCTAssertEqual(cls, .hidden)
     }
+
+    // MARK: - L1 line-level aggregation
+
+    /// Drive a whole typed line through the oracle path. `perChar` gives, per
+    /// typed scalar, the (postCursor, echoCell) the oracle should report at settle;
+    /// pre-cursor advances one column per accepted char. Returns the learn verdict.
+    private func oracleVerdict(
+        typed: String,
+        alt: Bool,
+        perChar: (Int) -> (EchoCursor?, EchoCell?)
+    ) -> Bool {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = alt
+        d.setOracle(oracle)
+        var col = 0
+        for (i, ch) in typed.unicodeScalars.enumerated() {
+            let pre = EchoCursor(row: 0, col: col)
+            oracle.nextCursor = pre
+            d.beginKeystroke(scalar: ch)
+            d.noteInput(Array(String(ch).utf8))
+            let (post, cell) = perChar(i)
+            oracle.nextCursor = post
+            oracle.cellAt = { r, c in (r == 0 && c == pre.col) ? cell : EchoCell(scalar: nil) }
+            d.settleKeystroke()
+            col += 1
+        }
+        let learn = d.shouldLearnCommittedLine()
+        d.noteInput([0x0d])
+        return learn
+    }
+
+    func testAllEchoedLineLearnsViaOracle() {
+        let s = Array("kubectl".unicodeScalars)
+        let learn = oracleVerdict(typed: "kubectl", alt: false) { i in
+            (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: s[i]))
+        }
+        XCTAssertTrue(learn)
+    }
+
+    func testAllHiddenLineSuppressedViaOracle() {
+        // A hidden password: cursor never advances, cell stays blank → suppress.
+        let learn = oracleVerdict(typed: "hunter2", alt: false) { _ in
+            (EchoCursor(row: 0, col: 0), EchoCell(scalar: nil))
+        }
+        XCTAssertFalse(learn)
+    }
+
+    func testMaskedLineSuppressedViaOracle() {
+        // Every char masked with '*' (advance but wrong glyph) → suppress.
+        let learn = oracleVerdict(typed: "s3cr3t!", alt: false) { i in
+            (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: "*"))
+        }
+        XCTAssertFalse(learn)
+    }
+
+    func testAltScreenLineSuppressedEvenIfEchoed() {
+        let s = Array("dd".unicodeScalars)
+        let learn = oracleVerdict(typed: "dd", alt: true) { i in
+            (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: s[i]))
+        }
+        XCTAssertFalse(learn)   // alt-screen ⇒ suppress the whole line
+    }
+
+    func testMajorityEchoedLineLearns() {
+        // 6 of 7 echoed, 1 hidden (a settle miss) → majority ⇒ learn.
+        let s = Array("kubectl".unicodeScalars)
+        let learn = oracleVerdict(typed: "kubectl", alt: false) { i in
+            i == 3
+                ? (EchoCursor(row: 0, col: 3), EchoCell(scalar: nil))   // one miss, no advance
+                : (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: s[i]))
+        }
+        XCTAssertTrue(learn)
+    }
+
+    func testMinorityEchoedLineSuppressed() {
+        // Only 2 of 7 echoed → below majority ⇒ suppress (bias to not-learn).
+        let s = Array("secret7".unicodeScalars)
+        let learn = oracleVerdict(typed: "secret7", alt: false) { i in
+            i < 2
+                ? (EchoCursor(row: 0, col: i + 1), EchoCell(scalar: s[i]))
+                : (EchoCursor(row: 0, col: i), EchoCell(scalar: nil))
+        }
+        XCTAssertFalse(learn)
+    }
 }

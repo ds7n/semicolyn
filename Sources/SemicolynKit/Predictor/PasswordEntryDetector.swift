@@ -183,10 +183,17 @@ public struct PasswordEntryDetector: Sendable {
     /// Call once, at the moment a line commits, BEFORE `resetLine`.
     public func shouldLearnCommittedLine() -> Bool {
         if promptSuppressedThisLine { return false }
+        // Oracle path: when the buffer check classified this line, trust the
+        // majority-echoed statistic (the far stronger signal per spec L1).
+        if oracleActiveThisLine {
+            if oracle?.isAlternateBuffer == true { return false }   // alt-screen ⇒ suppress
+            guard oracleClassifiedThisLine > 0 else { return false }
+            // Strong majority required (> 50%). A tie or worse suppresses —
+            // exclusion wins ties.
+            return oracleEchoedThisLine * 2 > oracleClassifiedThisLine
+        }
+        // Byte-count fallback (no oracle set): unchanged positive-echo-required.
         guard typedThisLine > 0 else { return false }
-        // Positive-echo-required: the line's characters must have come back in
-        // output. A short slack (1 char) tolerates a trailing byte still in
-        // flight at commit without opening the door to a fully-silent password.
         return echoedThisLine + 1 >= typedThisLine
     }
 
@@ -194,6 +201,12 @@ public struct PasswordEntryDetector: Sendable {
     /// control that clears the line). Re-evaluates whether the CURRENT output tail
     /// looks like a password prompt, so the next line inherits that suppression.
     public mutating func resetLine() {
+        oracleEchoedThisLine = 0
+        oracleClassifiedThisLine = 0
+        oracleActiveThisLine = false
+        lastClass = nil
+        preCursor = nil
+        pendingScalar = nil
         typedThisLine = 0
         echoedThisLine = 0
         promptSuppressedThisLine = tailLooksLikePasswordPrompt()
@@ -201,6 +214,12 @@ public struct PasswordEntryDetector: Sendable {
 
     /// Full reset (host/session switch): clears the tail too.
     public mutating func reset() {
+        oracleEchoedThisLine = 0
+        oracleClassifiedThisLine = 0
+        oracleActiveThisLine = false
+        lastClass = nil
+        preCursor = nil
+        pendingScalar = nil
         typedThisLine = 0
         echoedThisLine = 0
         promptSuppressedThisLine = false
