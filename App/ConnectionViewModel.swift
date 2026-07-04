@@ -62,6 +62,14 @@ final class ConnectionViewModel: ObservableObject {
     private var engine: PredictorEngine?
     private var tracker = InputTokenTracker()
     private var learnedStore: LearnedStore?
+    /// Write-time gate that keeps typed passwords out of the learned vocabulary
+    /// (echo-inference + prompt-text, biased toward suppression). Fed the output
+    /// stream at the harvest tap and consulted per committed line in
+    /// `observePredictorInput`. See `PasswordEntryDetector`.
+    private var passwordDetector = PasswordEntryDetector()
+    /// Tokens committed on the current input line, buffered until the line commits
+    /// so the whole line is learned or dropped as a unit per the detector verdict.
+    private var pendingLineTokens: [CommittedToken] = []
 
     /// Bundled promotion sets (user override is a 4d concern).
     private let promotionRegistry = PromotionRegistry.bundledDefault
@@ -298,6 +306,8 @@ final class ConnectionViewModel: ObservableObject {
         output.onHarvestBytes = nil
         engine = nil
         tracker.reset()
+        passwordDetector.reset()          // clear echo/prompt state across sessions
+        pendingLineTokens.removeAll()     // drop any un-flushed line tokens
         predictorSuggestions = []
     }
 
@@ -407,7 +417,11 @@ final class ConnectionViewModel: ObservableObject {
         // (previously the render closure clobbered this and degraded-mode output
         // never trained the predictor).
         output.onHarvestBytes = { [weak self] bytes in
-            self?.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
+            guard let self else { return }
+            // Feed the output stream to the password gate (echo inference +
+            // prompt-text) so it can classify the next typed line.
+            self.passwordDetector.noteOutput(bytes)
+            self.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
         }
         state = .shell
     }
@@ -584,6 +598,7 @@ final class ConnectionViewModel: ObservableObject {
             }
             // Harvest pane output for the predictor — visible panes only (a live
             // view or pending registration), not filtered by active pane.
+            self.passwordDetector.noteOutput(bytes)
             self.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
         }
         runtime.onStateChanged = { [weak self] state in
@@ -702,12 +717,30 @@ final class ConnectionViewModel: ObservableObject {
         engine = PredictorEngine(learned: store.load(), seed: AppStores.shared.predictorSeed())
     }
 
-    /// Fold outgoing bytes into the token tracker, learn committed tokens, and
-    /// refresh the suggestion chips.
+    /// Fold outgoing bytes into the token tracker, learn committed tokens (unless
+    /// the line is a password entry), and refresh the suggestion chips.
+    ///
+    /// Learning is gated by `passwordDetector`: tokens committed on a line are
+    /// buffered and only recorded once the line commits (Enter) AND the detector
+    /// confirms the line was echoed and not preceded by a password prompt. A
+    /// space-committed token mid-line is held until its line's verdict is known,
+    /// so a multi-word line is learned or dropped as a unit. This keeps typed
+    /// passwords (sudo / ssh / passphrase prompts) out of the synced vocabulary;
+    /// the token filter alone can't catch a short low-entropy password.
     private func observePredictorInput(_ bytes: [UInt8]) {
         guard engine != nil else { return }
+        passwordDetector.noteInput(bytes)
         for committed in tracker.observe(bytes) {
-            engine?.record(committed.token, after: committed.previous)
+            pendingLineTokens.append(committed)
+        }
+        // Flush the line's buffered tokens on each line commit (Enter / newline).
+        for b in bytes where b == 0x0d || b == 0x0a {
+            let learn = passwordDetector.shouldLearnCommittedLine()
+            if learn {
+                for c in pendingLineTokens { engine?.record(c.token, after: c.previous) }
+            }
+            pendingLineTokens.removeAll(keepingCapacity: true)
+            passwordDetector.resetLine()
         }
         refreshPredictorSuggestions()
     }
