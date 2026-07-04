@@ -157,6 +157,15 @@ public func resolveTmuxAttemptControlMode(host: Host, defaults: Defaults) -> Boo
     resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.tmux?.attemptControlMode }, fallback: true)
 }
 
+/// Resolve the tmux -CC session name: host leaf → Defaults leaf → builtin.
+/// Normalization runs inside the leaf accessor, so an empty/whitespace-only leaf
+/// is seen as absent and falls through to the next level (ultimately "semicolyn").
+public func resolveTmuxSessionName(host: Host, defaults: Defaults) -> String {
+    resolveLeaf(host.semicolyn, defaults.semicolyn,
+                { $0.tmux?.sessionName.flatMap(normalizedTmuxSessionName) },
+                fallback: builtInTmuxSessionName)
+}
+
 /// Resolve whether OSC 52 clipboard writes are permitted (builtin default: true).
 public func resolveOsc52Allow(host: Host, defaults: Defaults) -> Bool {
     resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.osc52?.allow }, fallback: true)
