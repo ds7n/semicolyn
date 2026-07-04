@@ -115,6 +115,9 @@ final class ConnectionViewModel: ObservableObject {
     @Published var moshFallback: String?
     /// Last saved-host connect args, retained so `⇧⌘R` can reconnect (Phase 4e).
     private var lastSavedHost: Host?
+    /// The resolved tmux session name for the current connection, computed once at
+    /// connect time and reused by attach + the reattach/start-new banner actions.
+    private var tmuxSessionNameForConnection = builtInTmuxSessionName
     private var lastPassword: String?
     private(set) var session: ShellSession?
     /// Serializes raw-PTY keystroke writes (FIFO under channel back-pressure).
@@ -435,6 +438,7 @@ final class ConnectionViewModel: ObservableObject {
         let probe = allow ? await probeTmuxVersion(conn: conn) : nil
         switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
         case .attach:
+            self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
             try await attachTmux(conn: conn)
         case .degrade(let reason):
             degraded = reason
@@ -578,8 +582,7 @@ final class ConnectionViewModel: ObservableObject {
     /// Attach tmux control mode: open the `-CC` exec, pump its bytes into a
     /// `TmuxRuntime`, and route the active pane's output into the terminal view.
     private func attachTmux(conn: Connection) async throws {
-        let seed = (try? AppStores.shared.deviceSeed()) ?? "semicolyn-local"
-        let runtime = TmuxRuntime(sessionName: tmuxSessionName(seed: seed))
+        let runtime = TmuxRuntime(sessionName: tmuxSessionNameForConnection)
         guard let startCmd = runtime.makeStartCommand() else {
             // Controller couldn't build a start command; fall through to raw PTY.
             try await openRawShell(conn: conn)
