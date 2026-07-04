@@ -78,6 +78,10 @@ public struct PasswordEntryDetector: Sendable {
     /// Set once the oracle path has classified at least one keystroke this line,
     /// so `shouldLearnCommittedLine` knows to trust the buffer tally over bytes.
     private var oracleActiveThisLine = false
+    /// True once any output byte arrived while the current line was being typed.
+    /// Gates the oracle verdict: a "clean echo" reading during a total stall is
+    /// ambiguous, so an oracle line with no output is suppressed.
+    private var outputSeenThisLine = false
 
     /// Substrings (lowercased) that, appearing at the tail end of output, mark the
     /// following typed line as a password entry. Matched as a suffix (ignoring
@@ -97,6 +101,7 @@ public struct PasswordEntryDetector: Sendable {
     /// Fold a chunk of REMOTE output. Updates the prompt-tail and consumes echoes
     /// of characters typed on the current line (echo inference).
     public mutating func noteOutput(_ bytes: [UInt8]) {
+        if !bytes.isEmpty { outputSeenThisLine = true }
         for b in bytes {
             // Count a printable output byte as an echo of a pending typed char,
             // up to the number typed. Masked prompts echo a constant char, which
@@ -187,6 +192,7 @@ public struct PasswordEntryDetector: Sendable {
         // majority-echoed statistic (the far stronger signal per spec L1).
         if oracleActiveThisLine {
             if oracle?.isAlternateBuffer == true { return false }   // alt-screen ⇒ suppress
+            guard outputSeenThisLine else { return false }          // stall ⇒ ambiguous ⇒ suppress
             guard oracleClassifiedThisLine > 0 else { return false }
             // Strong majority required (> 50%). A tie or worse suppresses —
             // exclusion wins ties.
@@ -204,6 +210,7 @@ public struct PasswordEntryDetector: Sendable {
         oracleEchoedThisLine = 0
         oracleClassifiedThisLine = 0
         oracleActiveThisLine = false
+        outputSeenThisLine = false
         lastClass = nil
         preCursor = nil
         pendingScalar = nil
@@ -217,6 +224,7 @@ public struct PasswordEntryDetector: Sendable {
         oracleEchoedThisLine = 0
         oracleClassifiedThisLine = 0
         oracleActiveThisLine = false
+        outputSeenThisLine = false
         lastClass = nil
         preCursor = nil
         pendingScalar = nil

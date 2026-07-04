@@ -255,6 +255,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
             oracle.nextCursor = pre
             d.beginKeystroke(scalar: ch)
             d.noteInput(Array(String(ch).utf8))
+            d.noteOutput(Array(String(ch).utf8))
             let (post, cell) = perChar(i)
             oracle.nextCursor = post
             oracle.cellAt = { r, c in (r == 0 && c == pre.col) ? cell : EchoCell(scalar: nil) }
@@ -331,5 +332,51 @@ final class PasswordEntryDetectorTests: XCTestCase {
                 : (EchoCursor(row: 0, col: i), EchoCell(scalar: nil))        // hidden (no advance)
         }
         XCTAssertFalse(learn)
+    }
+
+    // MARK: - L1 output-liveness gate
+
+    func testOracleLineWithNoOutputIsSuppressed() {
+        // Cursor "advances" and cells "match" per the oracle, but NO output byte
+        // ever arrived (a stall) → ambiguous → suppress. This drives the oracle
+        // path directly WITHOUT calling noteOutput.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        d.setOracle(oracle)
+        let s = Array("kubectl".unicodeScalars)
+        var col = 0
+        for (i, ch) in "kubectl".unicodeScalars.enumerated() {
+            let pre = EchoCursor(row: 0, col: col)
+            oracle.nextCursor = pre
+            d.beginKeystroke(scalar: ch)
+            d.noteInput(Array(String(ch).utf8))
+            oracle.nextCursor = EchoCursor(row: 0, col: col + 1)
+            oracle.cellAt = { r, c in (r == 0 && c == pre.col) ? EchoCell(scalar: s[i]) : EchoCell(scalar: nil) }
+            d.settleKeystroke()
+            col += 1
+        }
+        XCTAssertFalse(d.shouldLearnCommittedLine())   // no noteOutput ⇒ not live ⇒ suppress
+    }
+
+    func testOracleLineWithOutputStaysLearnable() {
+        // Same as above but a single output byte arrives → liveness satisfied,
+        // majority echoed ⇒ learn. Proves the gate doesn't suppress real echoes.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        d.setOracle(oracle)
+        let s = Array("kubectl".unicodeScalars)
+        var col = 0
+        for (i, ch) in "kubectl".unicodeScalars.enumerated() {
+            let pre = EchoCursor(row: 0, col: col)
+            oracle.nextCursor = pre
+            d.beginKeystroke(scalar: ch)
+            d.noteInput(Array(String(ch).utf8))
+            d.noteOutput(Array(String(ch).utf8))       // echoing shell emits output
+            oracle.nextCursor = EchoCursor(row: 0, col: col + 1)
+            oracle.cellAt = { r, c in (r == 0 && c == pre.col) ? EchoCell(scalar: s[i]) : EchoCell(scalar: nil) }
+            d.settleKeystroke()
+            col += 1
+        }
+        XCTAssertTrue(d.shouldLearnCommittedLine())
     }
 }
