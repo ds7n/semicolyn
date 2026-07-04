@@ -5,7 +5,8 @@
 //! independent of tmux; the `tmux -CC` smoke proves the real target command
 //! produces a control-mode handshake. Gated on `SEMICOLYN_TEST_SSHD`.
 use semicolyn_ssh_core::connection::{
-    connect_core, AuthOutcome, Connection, HostKeyInfo, HostKeyVerifier, ShellExit, ShellOutput,
+    connect_core, AuthOutcome, Connection, HostKeyInfo, HostKeyVerifier, KeepaliveConfig,
+    ShellExit, ShellOutput,
 };
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -75,9 +76,15 @@ async fn wait_until(mut pred: impl FnMut() -> bool) -> bool {
 }
 
 async fn connect_and_auth(addr: String) -> Connection {
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect");
     let outcome = conn
         .authenticate_password("tester".into(), "testpass".into())
         .await

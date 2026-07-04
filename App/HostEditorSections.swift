@@ -24,7 +24,7 @@ extension HostEditorView {
                     serverAliveIntervalPlaceholder,
                     text: Binding(
                         get: { inheritedIntToText(vm.host.serverAliveInterval) },
-                        set: { vm.host.serverAliveInterval = textToInheritedInt($0) }
+                        set: { vm.host.serverAliveInterval = textToInheritedInt($0, minimum: 0) }
                     )
                 )
                 .keyboardType(.numberPad)
@@ -48,7 +48,7 @@ extension HostEditorView {
                     serverAliveCountMaxPlaceholder,
                     text: Binding(
                         get: { inheritedIntToText(vm.host.serverAliveCountMax) },
-                        set: { vm.host.serverAliveCountMax = textToInheritedInt($0) }
+                        set: { vm.host.serverAliveCountMax = textToInheritedInt($0, minimum: 0) }
                     )
                 )
                 .keyboardType(.numberPad)

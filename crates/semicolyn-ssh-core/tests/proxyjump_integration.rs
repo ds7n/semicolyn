@@ -15,8 +15,8 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 
 use semicolyn_ssh_core::connection::{
-    connect_core, AuthOutcome, ConnectError, Connection, HostKeyInfo, HostKeyVerifier, ShellExit,
-    ShellOutput,
+    connect_core, AuthOutcome, ConnectError, Connection, HostKeyInfo, HostKeyVerifier,
+    KeepaliveConfig, ShellExit, ShellOutput,
 };
 
 struct TrustAll;
@@ -83,9 +83,15 @@ async fn wait_until(mut pred: impl FnMut() -> bool) -> bool {
 
 /// Connect + password-auth to the jump host (modern algorithms).
 async fn connect_jump_host(addr: String) -> Connection {
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect to jump host");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect to jump host");
     let outcome = conn
         .authenticate_password("tester".into(), "testpass".into())
         .await
@@ -112,7 +118,14 @@ async fn two_hop_chain_runs_shell_on_target() {
     let jump = connect_jump_host(jump).await;
     // allow_deprecated=true: the legacy target offers only Tier-3 algorithms.
     let target = jump
-        .connect_jump(target_host, 22, false, true, Arc::new(TrustAll))
+        .connect_jump(
+            target_host,
+            22,
+            false,
+            true,
+            KeepaliveConfig::default(),
+            Arc::new(TrustAll),
+        )
         .await
         .expect("jump to target");
     let outcome = target
@@ -160,7 +173,14 @@ async fn local_forward_works_over_a_jump() {
     let jump = connect_jump_host(jump).await;
     // Target = the jump host itself, reached as 127.0.0.1:22 from its own view.
     let target = jump
-        .connect_jump("127.0.0.1".into(), 22, false, false, Arc::new(TrustAll))
+        .connect_jump(
+            "127.0.0.1".into(),
+            22,
+            false,
+            false,
+            KeepaliveConfig::default(),
+            Arc::new(TrustAll),
+        )
         .await
         .expect("jump to target");
     let outcome = target
@@ -203,7 +223,14 @@ async fn dropping_intermediate_connection_keeps_chain_alive() {
 
     let jump = connect_jump_host(jump_addr).await;
     let target = jump
-        .connect_jump("127.0.0.1".into(), 22, false, false, Arc::new(TrustAll))
+        .connect_jump(
+            "127.0.0.1".into(),
+            22,
+            false,
+            false,
+            KeepaliveConfig::default(),
+            Arc::new(TrustAll),
+        )
         .await
         .expect("jump to target");
     let outcome = target
@@ -246,7 +273,14 @@ async fn target_host_key_rejection_is_typed() {
 
     let jump = connect_jump_host(jump).await;
     let err = jump
-        .connect_jump("127.0.0.1".into(), 22, false, false, Arc::new(RejectAll))
+        .connect_jump(
+            "127.0.0.1".into(),
+            22,
+            false,
+            false,
+            KeepaliveConfig::default(),
+            Arc::new(RejectAll),
+        )
         .await
         .expect_err("rejecting verifier on target must fail the jump");
     assert!(
@@ -267,7 +301,14 @@ async fn target_auth_failure_is_independent_of_jump() {
 
     let jump = connect_jump_host(jump).await;
     let target = jump
-        .connect_jump("127.0.0.1".into(), 22, false, false, Arc::new(TrustAll))
+        .connect_jump(
+            "127.0.0.1".into(),
+            22,
+            false,
+            false,
+            KeepaliveConfig::default(),
+            Arc::new(TrustAll),
+        )
         .await
         .expect("jump to target");
     let outcome = target

@@ -16,6 +16,12 @@ struct TerminalScreen: UIViewRepresentable {
     let output: TerminalShellOutput
     /// The live session is retained here for resize notifications only.
     let session: ShellSession?
+    /// Optional explicit resize sink (debounced cols/rows). When set, it OWNS
+    /// resize delivery and `session?.resize` is NOT called — used by the Mosh path
+    /// (which has no `ShellSession`; it drives `MoshSession.resizeCols:rows:` via
+    /// `vm.setMoshClientSize`). When nil, resize falls back to `session?.resize`
+    /// (the raw-SSH path). Mirrors the tmux branch's `onTmuxResize` convention.
+    var onResize: ((Int, Int) -> Void)? = nil
     /// Terminal rendering preferences (font, cursor, scrollback). Defaults from
     /// `AppStores.shared.terminalSettings.settings` at the call site.
     var settings: TerminalSettings = TerminalSettings()
@@ -31,6 +37,7 @@ struct TerminalScreen: UIViewRepresentable {
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(send: send, session: session, settings: settings, theme: theme, osc52Allowed: osc52Allowed, onTitle: onTitle)
         c.onSSHLink = onSSHLink
+        c.onResize = onResize
         return c
     }
 
@@ -114,6 +121,9 @@ struct TerminalScreen: UIViewRepresentable {
         // TODO(phase4): wired when the connect-prefill / Esc-pill lands
         /// Called when the user taps an ssh:// link; set by the connect view to prefill the connect form.
         var onSSHLink: ((URL) -> Void)?
+        /// Explicit resize sink (set by `makeCoordinator`). When non-nil it owns
+        /// resize delivery; when nil, `sizeChanged` falls back to `session?.resize`.
+        var onResize: ((Int, Int) -> Void)?
         /// Debounces rapid resize events (rotation / keyboard show-hide) into a
         /// single remote window-change once the grid is stable for ~100ms.
         private var resizeDebounce: ResizeDebounce = ResizeDebounce()
@@ -191,10 +201,18 @@ struct TerminalScreen: UIViewRepresentable {
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
             resizeDebounce.note(cols: newCols, rows: newRows, at: Date())
             let session = self.session
+            let onResize = self.onResize
             DispatchQueue.main.asyncAfter(deadline: .now() + ResizeDebounce.quiet) { [weak self] in
                 guard let self else { return }
                 if let size = self.resizeDebounce.tick(at: Date()) {
-                    Task { try? await session?.resize(cols: UInt32(size.cols), rows: UInt32(size.rows)) }
+                    if let onResize {
+                        // Mosh path: the explicit sink owns delivery (→ vm.setMoshClientSize
+                        // → MoshSession.resizeCols:rows: → shared winsize + SIGWINCH).
+                        onResize(size.cols, size.rows)
+                    } else {
+                        // Raw-SSH path: resize the retained ShellSession directly.
+                        Task { try? await session?.resize(cols: UInt32(size.cols), rows: UInt32(size.rows)) }
+                    }
                 }
             }
         }

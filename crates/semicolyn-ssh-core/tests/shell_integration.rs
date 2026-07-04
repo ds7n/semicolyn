@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 use semicolyn_ssh_core::connection::{
-    connect_core, AuthOutcome, ConnectError, Connection, HostKeyInfo, HostKeyVerifier, ShellExit,
-    ShellOutput,
+    connect_core, AuthOutcome, ConnectError, Connection, HostKeyInfo, HostKeyVerifier,
+    KeepaliveConfig, ShellExit, ShellOutput,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -63,9 +63,15 @@ async fn wait_until(mut pred: impl FnMut() -> bool) -> bool {
 }
 
 async fn connect_and_auth(addr: String) -> Connection {
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect");
     let outcome = conn
         .authenticate_password("tester".into(), "testpass".into())
         .await

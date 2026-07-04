@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 use semicolyn_ssh_core::connection::{
-    connect_core, AuthOutcome, ConnectError, HostKeyInfo, HostKeyVerifier,
+    connect_core, AuthOutcome, ConnectError, HostKeyInfo, HostKeyVerifier, KeepaliveConfig,
 };
 use std::sync::Arc;
 
@@ -37,9 +37,15 @@ async fn cert_auth_succeeds_with_valid_cert() {
     else {
         return;
     };
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect");
     let outcome = conn
         .authenticate_openssh_cert("tester".into(), key, cert)
         .await
@@ -57,9 +63,15 @@ async fn cert_auth_rejects_expired_cert() {
     else {
         return;
     };
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect");
     let err = conn
         .authenticate_openssh_cert("tester".into(), key, cert)
         .await
@@ -82,9 +94,15 @@ async fn cert_auth_rejects_not_yet_valid_cert() {
     else {
         return;
     };
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect");
     let err = conn
         .authenticate_openssh_cert("tester".into(), key, cert)
         .await
@@ -108,9 +126,15 @@ async fn cert_auth_rejects_cert_for_a_different_key() {
     let (Some(wrong_key), Some(cert)) = (read_testkey("ca"), read_testkey("valid-cert.pub")) else {
         return;
     };
-    let conn = connect_core(addr, false, false, Arc::new(TrustAll))
-        .await
-        .expect("connect");
+    let conn = connect_core(
+        addr,
+        false,
+        false,
+        KeepaliveConfig::default(),
+        Arc::new(TrustAll),
+    )
+    .await
+    .expect("connect");
     let err = conn
         .authenticate_openssh_cert("tester".into(), wrong_key, cert)
         .await

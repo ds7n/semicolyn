@@ -93,6 +93,38 @@ final class InheritedBindingTests: XCTestCase {
         XCTAssertEqual(out, .explicit(22))
     }
 
+    // MARK: - textToInheritedInt(minimum: 0) — serverAlive fields
+    //
+    // For ServerAliveInterval/CountMax, `0` is a meaningful value (OpenSSH:
+    // keepalives disabled), so those bindings pass `minimum: 0`. The boundary is
+    // the whole point of the fix — a user typing `0` must reach `.explicit(0)`,
+    // not silently become `.inherit`.
+
+    func testZeroWithMinimumZeroBecomesExplicitZero() {
+        // BVA at the boundary: 0 is accepted when minimum is 0.
+        XCTAssertEqual(textToInheritedInt("0", minimum: 0), .explicit(0))
+    }
+
+    func testZeroWithDefaultMinimumStillInherits() {
+        // Contrast: the same "0" is rejected under the default (port) minimum,
+        // so the port field's behavior is unchanged by the new parameter.
+        XCTAssertEqual(textToInheritedInt("0"), .inherit)
+    }
+
+    func testPositiveWithMinimumZeroBecomesExplicit() {
+        XCTAssertEqual(textToInheritedInt("30", minimum: 0), .explicit(30))
+    }
+
+    func testNegativeWithMinimumZeroStillInherits() {
+        // min−1 boundary: negatives are rejected even at minimum 0.
+        XCTAssertEqual(textToInheritedInt("-1", minimum: 0), .inherit)
+    }
+
+    func testEmptyWithMinimumZeroInherits() {
+        // An empty serverAlive field still means "inherit", not "0/disabled".
+        XCTAssertEqual(textToInheritedInt("", minimum: 0), .inherit)
+    }
+
     // MARK: - inheritedBoolToSelection
 
     func testBoolInheritYieldsNilSelection() {
