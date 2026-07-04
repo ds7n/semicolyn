@@ -69,10 +69,6 @@ public struct PasswordEntryDetector: Sendable {
 
     /// The injected read-only grid view. Nil ⇒ fall back to byte-count inference.
     private var oracle: EchoOracle?
-    /// Cursor cell recorded just before the current outgoing batch was delivered
-    /// — the anchor from which each keystroke's expected echo cell is derived at
-    /// settle. Nil when no oracle is set or the cursor was unreadable at capture.
-    private var batchStartCursor: EchoCursor?
     /// Classification of the most recently settled keystroke (test-observable).
     public private(set) var lastClass: EchoClass?
     /// Count of positively-`echoed` printables on the current line (oracle path).
@@ -145,25 +141,25 @@ public struct PasswordEntryDetector: Sendable {
         self.oracle = oracle
     }
 
-    /// Call BEFORE delivering an outgoing batch of printable keystrokes: snapshot
-    /// the cursor cell the FIRST keystroke's echo will land in. The subsequent
-    /// keystrokes' echo cells are derived by walking forward from here at settle.
-    /// A no-op (records nil) if no oracle is set or the cursor is unreadable.
-    public mutating func beginBatch() {
-        batchStartCursor = oracle?.cursor()
+    /// The current cursor cell from the injected oracle, or nil if no oracle is
+    /// set / the cursor is unreadable. The caller snapshots this BEFORE delivering
+    /// a keystroke to use as that keystroke's echo anchor at settle time.
+    public func currentCursor() -> EchoCursor? {
+        oracle?.cursor()
     }
 
-    /// Call AFTER the settle window with the batch's printable `scalars` (in order,
-    /// excluding control bytes). Reads the now-rendered cumulative grid once and
-    /// classifies EACH keystroke against its expected echo cell, folding all into
-    /// the line tally. Fail-safe: no oracle / no batch anchor / cursor did not
-    /// advance / any unreadable cell ⇒ that keystroke (or the whole batch) is
-    /// `hidden` (suppress). An empty `scalars` array is a no-op.
-    public mutating func settleLine(scalars: [Unicode.Scalar]) {
-        defer { batchStartCursor = nil }
-        guard let oracle, let start = batchStartCursor, !scalars.isEmpty else { return }
-        // Non-echoing prompt: if the cursor never advanced past the batch anchor,
-        // the whole burst was swallowed — classify every keystroke hidden.
+    /// Call AFTER the settle window with the batch's printable `scalars` (in order)
+    /// and `from` = the cursor cell snapshotted BEFORE those keystrokes were
+    /// delivered (this call's own anchor — NOT shared struct state, so concurrent
+    /// per-keystroke settles don't clobber each other). Reads the now-rendered
+    /// cumulative grid once and classifies EACH keystroke against its expected echo
+    /// cell (`from.col + i`), folding all into the line tally. Fail-safe: no oracle
+    /// / nil `from` / cursor did not advance / any unreadable cell ⇒ `.hidden`
+    /// (suppress). Empty `scalars` is a no-op.
+    public mutating func settleLine(scalars: [Unicode.Scalar], from start: EchoCursor?) {
+        guard let oracle, let start, !scalars.isEmpty else { return }
+        // Non-echoing prompt: if the cursor never advanced past the anchor, the
+        // keystrokes were swallowed — classify every one hidden.
         let post = oracle.cursor()
         let advanced = (post?.col ?? start.col) > start.col
             || (post?.row ?? start.row) > start.row
@@ -173,8 +169,8 @@ public struct PasswordEntryDetector: Sendable {
                 cls = .hidden
             } else {
                 // Keystroke i's echo cell is `start.col + i` on the anchor row.
-                // (Line-wrap within a single batch is a rare Phase-1 edge; a
-                // wrapped cell simply reads blank → hidden, biasing to suppress.)
+                // (Line-wrap within one call is a rare Phase-1 edge; a wrapped cell
+                // reads blank → hidden, biasing to suppress.)
                 cls = Self.classifyCell(oracle: oracle, row: start.row, col: start.col + i, scalar: scalar)
             }
             lastClass = cls
@@ -229,7 +225,6 @@ public struct PasswordEntryDetector: Sendable {
         oracleActiveThisLine = false
         outputSeenThisLine = false
         lastClass = nil
-        batchStartCursor = nil
         typedThisLine = 0
         echoedThisLine = 0
         promptSuppressedThisLine = tailLooksLikePasswordPrompt()
@@ -242,7 +237,6 @@ public struct PasswordEntryDetector: Sendable {
         oracleActiveThisLine = false
         outputSeenThisLine = false
         lastClass = nil
-        batchStartCursor = nil
         typedThisLine = 0
         echoedThisLine = 0
         promptSuppressedThisLine = false

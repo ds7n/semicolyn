@@ -184,14 +184,12 @@ final class PasswordEntryDetectorTests: XCTestCase {
     ) -> PasswordEntryDetector.EchoClass? {
         var d = PasswordEntryDetector()
         let oracle = ScriptedEchoOracle()
-        oracle.nextCursor = startCursor
-        d.setOracle(oracle)
-        d.beginBatch()                    // snapshots startCursor
-        oracle.nextCursor = postCursor    // cursor after echo
+        oracle.nextCursor = postCursor              // cursor AT settle (post-echo)
         oracle.cellAt = { r, c in
             (r == startCursor.row && c == startCursor.col) ? echoCell : EchoCell(scalar: nil)
         }
-        d.settleLine(scalars: [typed])
+        d.setOracle(oracle)
+        d.settleLine(scalars: [typed], from: startCursor)
         return d.lastClass
     }
 
@@ -249,9 +247,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
         var d = PasswordEntryDetector()
         let oracle = ScriptedEchoOracle()
         oracle.isAlternateBuffer = alt
-        oracle.nextCursor = EchoCursor(row: 0, col: 0)   // batch start
         d.setOracle(oracle)
-        d.beginBatch()
         let scalars = Array(typed.unicodeScalars)
         for ch in scalars {
             d.noteInput(Array(String(ch).utf8))
@@ -262,7 +258,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
             return cellFor(c, scalars[c])
         }
         oracle.nextCursor = finalCursor
-        d.settleLine(scalars: scalars)
+        d.settleLine(scalars: scalars, from: EchoCursor(row: 0, col: 0))
         return d.shouldLearnCommittedLine()
     }
 
@@ -377,8 +373,6 @@ final class PasswordEntryDetectorTests: XCTestCase {
         d.resetLine()                                  // classify the prompt tail
         let oracle = ScriptedEchoOracle()
         d.setOracle(oracle)
-        oracle.nextCursor = EchoCursor(row: 0, col: 0)
-        d.beginBatch()
         let s = Array("hunter2".unicodeScalars)
         for ch in s {
             d.noteInput(Array(String(ch).utf8))
@@ -389,7 +383,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
             return EchoCell(scalar: s[c])
         }
         oracle.nextCursor = EchoCursor(row: 0, col: s.count)
-        d.settleLine(scalars: s)
+        d.settleLine(scalars: s, from: EchoCursor(row: 0, col: 0))
         XCTAssertFalse(d.shouldLearnCommittedLine())   // prompt corroboration wins
     }
 
@@ -402,9 +396,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
         // it is 1-of-5 echoed → minority → SUPPRESS.
         var d = PasswordEntryDetector()
         let oracle = ScriptedEchoOracle()
-        oracle.nextCursor = EchoCursor(row: 0, col: 0)
         d.setOracle(oracle)
-        d.beginBatch()
         let scalars = Array("s3cr7".unicodeScalars)   // 5 chars
         for ch in scalars {
             d.noteInput(Array(String(ch).utf8))
@@ -414,9 +406,52 @@ final class PasswordEntryDetectorTests: XCTestCase {
             (r == 0 && c == 4) ? EchoCell(scalar: scalars[4]) : EchoCell(scalar: nil)
         }
         oracle.nextCursor = EchoCursor(row: 0, col: 5)   // cursor advanced
-        d.settleLine(scalars: scalars)
+        d.settleLine(scalars: scalars, from: EchoCursor(row: 0, col: 0))
         XCTAssertFalse(d.shouldLearnCommittedLine())   // 1 echoed of 5 → minority → suppress
         XCTAssertEqual(d.lastClass, .echoed)           // the LAST keystroke was echoed…
         // …but the tally saw all 5, so the majority correctly suppresses.
+    }
+
+    // MARK: - L1 per-keystroke-call regression (the runtime-faithful path)
+
+    func testPerKeystrokeCallsAccumulateAcrossLine() {
+        // Runtime reality: SwiftTerm calls send() once per keystroke, so the detector
+        // gets one settleLine PER keystroke, each with its OWN anchor. The line tally
+        // must accumulate across those separate calls (not be clobbered by a shared
+        // anchor). Type "ls" as two separate calls, each echoed → line must LEARN.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        d.setOracle(oracle)
+        let scalars = Array("ls".unicodeScalars)
+        for (i, ch) in scalars.enumerated() {
+            let anchor = EchoCursor(row: 0, col: i)      // cursor before THIS keystroke
+            d.noteInput(Array(String(ch).utf8))
+            d.noteOutput(Array(String(ch).utf8))         // echoing shell → liveness
+            oracle.cellAt = { r, c in
+                (r == 0 && c == i) ? EchoCell(scalar: ch) : EchoCell(scalar: nil)
+            }
+            oracle.nextCursor = EchoCursor(row: 0, col: i + 1)   // advanced after echo
+            d.settleLine(scalars: [ch], from: anchor)    // separate call per keystroke
+        }
+        // 2 of 2 echoed across two separate calls → majority → LEARN.
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+        XCTAssertEqual(d.lastClass, .echoed)
+    }
+
+    func testPerKeystrokeHiddenLineSuppressed() {
+        // Same per-keystroke driving, but a hidden prompt: cursor never advances and
+        // cells stay blank → each call classifies hidden → line SUPPRESSES.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        d.setOracle(oracle)
+        let scalars = Array("pw".unicodeScalars)
+        for ch in scalars {
+            d.noteInput(Array(String(ch).utf8))
+            d.noteOutput(Array(String(ch).utf8))          // output arrives (liveness ok)…
+            oracle.cellAt = { _, _ in EchoCell(scalar: nil) }   // …but nothing echoes
+            oracle.nextCursor = EchoCursor(row: 0, col: 0)      // cursor never advances
+            d.settleLine(scalars: [ch], from: EchoCursor(row: 0, col: 0))
+        }
+        XCTAssertFalse(d.shouldLearnCommittedLine())      // all hidden → suppress
     }
 }
