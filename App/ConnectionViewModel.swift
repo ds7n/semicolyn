@@ -754,12 +754,14 @@ final class ConnectionViewModel: ObservableObject {
     /// the token filter alone can't catch a short low-entropy password.
     private func observePredictorInput(_ bytes: [UInt8]) {
         guard engine != nil else { return }
-        // L1: snapshot the pre-batch cursor, then after a bounded settle window
-        // classify the whole batch's echo against the cumulative grid at once.
+        // L1: snapshot the pre-delivery cursor as THIS call's echo anchor, then
+        // after a bounded window classify this call's keystrokes against the grid.
+        // The anchor is captured per-call (not shared state), so concurrent
+        // per-keystroke settles never clobber each other.
         let scalars: [Unicode.Scalar] = bytes.compactMap { b in
             ((0x21...0x7e).contains(b) || b == 0x20) ? Unicode.Scalar(UInt32(b)) : nil
         }
-        if !scalars.isEmpty { passwordDetector.beginBatch() }
+        let anchor = scalars.isEmpty ? nil : passwordDetector.currentCursor()
         passwordDetector.noteInput(bytes)
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
@@ -767,7 +769,7 @@ final class ConnectionViewModel: ObservableObject {
         let deadline = DispatchTime.now() + .milliseconds(40)
         if !scalars.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
-                self?.passwordDetector.settleLine(scalars: scalars)
+                self?.passwordDetector.settleLine(scalars: scalars, from: anchor)
                 self?.refreshPredictorSuggestions()
             }
         }
