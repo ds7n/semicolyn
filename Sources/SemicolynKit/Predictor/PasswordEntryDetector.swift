@@ -211,7 +211,10 @@ public struct PasswordEntryDetector: Sendable {
             // exclusion wins ties.
             return oracleEchoedThisLine * 2 > oracleClassifiedThisLine
         }
-        // Byte-count fallback (no oracle set): unchanged positive-echo-required.
+        // Byte-count fallback (no oracle set): positive-echo-required — the line's
+        // characters must have come back in output. A short slack (1 char) tolerates
+        // a trailing byte still in flight at commit without opening the door to a
+        // fully-silent password.
         guard typedThisLine > 0 else { return false }
         return echoedThisLine + 1 >= typedThisLine
     }

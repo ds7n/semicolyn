@@ -232,11 +232,12 @@ final class PasswordEntryDetectorTests: XCTestCase {
 
     // MARK: - L1 line-level aggregation
 
-    /// Drive a whole typed string as ONE batch through the oracle path. The entire
-    /// typed string is one batch: `beginBatch` once at start, `settleLine` once at
-    /// end. `cellFor(index, scalar)` returns the rendered cell for each keystroke's
-    /// expected echo column. `finalCursor` is the post-echo cursor. `live` controls
-    /// whether `noteOutput` is called (liveness gate). Returns the learn verdict.
+    /// Drive a whole typed string as ONE batch through the oracle path: a single
+    /// `settleLine(scalars:from:)` call anchored at the line start. `cellFor(index,
+    /// scalar)` returns the rendered cell for each keystroke's expected echo column.
+    /// `finalCursor` is the post-echo cursor. `live` controls whether `noteOutput`
+    /// is called (liveness gate). Returns the learn verdict. (The per-keystroke-call
+    /// path is covered separately by `testPerKeystrokeCallsAccumulateAcrossLine`.)
     private func oracleVerdict(
         typed: String,
         alt: Bool,
