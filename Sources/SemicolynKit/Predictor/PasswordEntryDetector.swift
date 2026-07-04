@@ -16,8 +16,12 @@
 ///
 /// Over raw SSH the terminal runs in raw mode and **echo happens on the remote**:
 /// a password prompt disables `ECHO` in the *remote* PTY's termios, which is never
-/// signaled back over the wire (SwiftTerm exposes no echo/SRM flag; russh surfaces
-/// no termios-change event). So the only observable signals are:
+/// signaled back over the wire (SwiftTerm exposes no deterministic echo/SRM flag;
+/// russh surfaces no termios-change event). L1 therefore infers echo from the
+/// *rendered grid* via an injected `EchoOracle` (buffer-anchored, three-way
+/// echoed/masked/hidden, line-majority aggregated, gated on alt-screen + output
+/// liveness); when no oracle is injected it falls back to the byte-count inference
+/// below. The observable signals are:
 ///
 ///  1. **Echo inference** — printable characters the user types are, in a normal
 ///     (echoing) shell, streamed back in the output within a few milliseconds. At

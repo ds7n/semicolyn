@@ -46,7 +46,9 @@ implementation-planning. Written durably so work can resume after a context clea
   `OverlayManager`/`PredictionEngine` is already instantiated in
   `extern/mosh/src/frontend/iosclient.h` (L2's signal exists on-device, no getter yet).
 - Predictor is **local-only** today — no CloudKit sync yet (L8 gates that future).
-- **Next step:** invoke `writing-plans` for **Phase 1 only**.
+- **Phase 1 (L1 buffer echo + `EchoOracle` seam) IMPLEMENTED** — plan
+  `docs/superpowers/plans/2026-07-04-predictor-secret-exclusion-phase1-echo-oracle.md`.
+  **Next step:** invoke `writing-plans` for **Phase 2** (L3 paste + L4 context/leading-space).
 **Supersedes-in-part:** the shipped single-signal `PasswordEntryDetector`
 (PR #41) — kept and upgraded, not removed.
 **Grounded in:** `docs/superpowers/research/2026-07-04-echo-detection-investigation.md`
