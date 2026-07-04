@@ -47,7 +47,7 @@
 ///     for c in committed { engine.record(c.token, after: c.previous) }
 /// }
 /// ```
-public struct PasswordEntryDetector: Equatable, Sendable {
+public struct PasswordEntryDetector: Sendable {
     /// Printable characters typed on the current (uncommitted) line.
     private var typedThisLine = 0
     /// Printable characters of the current line observed echoed back in output.
@@ -59,6 +59,25 @@ public struct PasswordEntryDetector: Equatable, Sendable {
     private var outputTail = ""
     /// Max characters of output tail retained for prompt matching.
     private let tailCap = 256
+
+    /// The three-way per-keystroke echo verdict (spec L1).
+    public enum EchoClass: Equatable, Sendable { case echoed, masked, hidden }
+
+    /// The injected read-only grid view. Nil ⇒ fall back to byte-count inference.
+    private var oracle: EchoOracle?
+    /// Cursor cell recorded just before the pending keystroke was delivered.
+    private var preCursor: EchoCursor?
+    /// The scalar of the pending (delivered, not-yet-settled) keystroke.
+    private var pendingScalar: Unicode.Scalar?
+    /// Classification of the most recently settled keystroke (test-observable).
+    public private(set) var lastClass: EchoClass?
+    /// Count of positively-`echoed` printables on the current line (oracle path).
+    private var oracleEchoedThisLine = 0
+    /// Count of printables classified via the oracle on the current line.
+    private var oracleClassifiedThisLine = 0
+    /// Set once the oracle path has classified at least one keystroke this line,
+    /// so `shouldLearnCommittedLine` knows to trust the buffer tally over bytes.
+    private var oracleActiveThisLine = false
 
     /// Substrings (lowercased) that, appearing at the tail end of output, mark the
     /// following typed line as a password entry. Matched as a suffix (ignoring
@@ -109,6 +128,51 @@ public struct PasswordEntryDetector: Equatable, Sendable {
                 break
             }
         }
+    }
+
+    /// Inject (or clear with nil) the buffer oracle. Clearing reverts to the
+    /// byte-count echo inference for subsequent keystrokes.
+    public mutating func setOracle(_ oracle: EchoOracle?) {
+        self.oracle = oracle
+    }
+
+    /// Call BEFORE delivering a printable keystroke: snapshot the cursor cell the
+    /// echo would land in. A no-op if no oracle is set or the cursor is unreadable.
+    public mutating func beginKeystroke(scalar: Unicode.Scalar) {
+        guard let oracle else { preCursor = nil; pendingScalar = nil; return }
+        preCursor = oracle.cursor()
+        pendingScalar = scalar
+    }
+
+    /// Call AFTER the settle window: sample the echo cell + new cursor, classify
+    /// the pending keystroke, and fold it into the line tally. Fail-safe: any
+    /// unreadable signal classifies `hidden` (suppress).
+    public mutating func settleKeystroke() {
+        guard let oracle, let pre = preCursor, let scalar = pendingScalar else {
+            pendingScalar = nil
+            return
+        }
+        defer { preCursor = nil; pendingScalar = nil }
+        let cls = Self.classify(oracle: oracle, pre: pre, scalar: scalar)
+        lastClass = cls
+        oracleActiveThisLine = true
+        oracleClassifiedThisLine += 1
+        if cls == .echoed { oracleEchoedThisLine += 1 }
+    }
+
+    /// Pure three-way classifier: echoed (scalar at the pre-cell + cursor
+    /// advanced), masked (cursor advanced but cell holds a different glyph),
+    /// hidden (no advance, or any signal unreadable). Static so it is trivially
+    /// unit-testable and has no hidden state.
+    private static func classify(
+        oracle: EchoOracle, pre: EchoCursor, scalar: Unicode.Scalar
+    ) -> EchoClass {
+        guard let post = oracle.cursor() else { return .hidden }
+        let advanced = post.col > pre.col || post.row > pre.row
+        guard advanced else { return .hidden }
+        guard let cell = oracle.cell(row: pre.row, col: pre.col),
+              let shown = cell.scalar else { return .hidden }
+        return shown == scalar ? .echoed : .masked
     }
 
     /// The verdict for the line that just committed (Enter). `true` only when the

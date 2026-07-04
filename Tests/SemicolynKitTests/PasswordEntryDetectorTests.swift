@@ -170,4 +170,68 @@ final class PasswordEntryDetectorTests: XCTestCase {
         d.noteOutput(Array("abc".utf8))                  // echo the 3 survivors
         XCTAssertTrue(d.shouldLearnCommittedLine())
     }
+
+    // MARK: - L1 buffer-anchored echo (oracle-driven)
+
+    /// Drive one printable keystroke through the oracle path and return the
+    /// classification implied by the resulting tally. Cursor pre = (0,0);
+    /// after settle the oracle reports cursor advanced to (0,1) and the cell the
+    /// test scripts. Uses the *internal* tallies to assert the class precisely.
+    private func classifyOne(
+        typed: Unicode.Scalar,
+        preCursor: EchoCursor,
+        postCursor: EchoCursor?,
+        echoCell: EchoCell?,
+        alt: Bool = false
+    ) -> PasswordEntryDetector.EchoClass? {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = alt
+        oracle.nextCursor = preCursor
+        d.setOracle(oracle)
+        d.beginKeystroke(scalar: typed)          // snapshots preCursor
+        oracle.nextCursor = postCursor
+        oracle.cellAt = { r, c in
+            (r == preCursor.row && c == preCursor.col) ? echoCell : EchoCell(scalar: nil)
+        }
+        d.settleKeystroke()                      // samples + classifies
+        return d.lastClass
+    }
+
+    func testKeystrokeEchoedWhenScalarAtCellAndCursorAdvanced() {
+        let cls = classifyOne(
+            typed: "k",
+            preCursor: EchoCursor(row: 0, col: 0),
+            postCursor: EchoCursor(row: 0, col: 1),
+            echoCell: EchoCell(scalar: "k"))
+        XCTAssertEqual(cls, .echoed)
+    }
+
+    func testKeystrokeMaskedWhenConstantMaskCharDespiteAdvance() {
+        let cls = classifyOne(
+            typed: "s",
+            preCursor: EchoCursor(row: 0, col: 0),
+            postCursor: EchoCursor(row: 0, col: 1),
+            echoCell: EchoCell(scalar: "*"))     // cursor advanced but wrong glyph
+        XCTAssertEqual(cls, .masked)
+    }
+
+    func testKeystrokeHiddenWhenCursorDidNotAdvance() {
+        let cls = classifyOne(
+            typed: "h",
+            preCursor: EchoCursor(row: 0, col: 0),
+            postCursor: EchoCursor(row: 0, col: 0),   // no advance
+            echoCell: EchoCell(scalar: nil))
+        XCTAssertEqual(cls, .hidden)
+    }
+
+    func testKeystrokeHiddenWhenOracleCursorUnreadable() {
+        // Oracle drift: post-cursor nil → cannot confirm echo → hidden (suppress).
+        let cls = classifyOne(
+            typed: "x",
+            preCursor: EchoCursor(row: 0, col: 0),
+            postCursor: nil,
+            echoCell: EchoCell(scalar: "x"))
+        XCTAssertEqual(cls, .hidden)
+    }
 }
