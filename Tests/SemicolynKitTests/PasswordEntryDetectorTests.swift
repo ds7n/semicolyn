@@ -379,4 +379,31 @@ final class PasswordEntryDetectorTests: XCTestCase {
         }
         XCTAssertTrue(d.shouldLearnCommittedLine())
     }
+
+    // MARK: - L1 prompt-text corroboration
+
+    func testPromptPrecededLineSuppressedEvenIfOracleSaysEchoed() {
+        // Adversarial: a prompt that ECHOES the literal password (e.g. `read`
+        // without -s after a "Password:" prompt). The oracle sees clean echo, but
+        // the prompt tail forces non-echoed. Must NOT learn.
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("Password: ".utf8))
+        d.resetLine()                                  // classify the prompt tail
+        let oracle = ScriptedEchoOracle()
+        d.setOracle(oracle)
+        let s = Array("hunter2".unicodeScalars)
+        var col = 0
+        for (i, ch) in "hunter2".unicodeScalars.enumerated() {
+            let pre = EchoCursor(row: 0, col: col)
+            oracle.nextCursor = pre
+            d.beginKeystroke(scalar: ch)
+            d.noteInput(Array(String(ch).utf8))
+            d.noteOutput(Array(String(ch).utf8))       // literal echoed back
+            oracle.nextCursor = EchoCursor(row: 0, col: col + 1)
+            oracle.cellAt = { r, c in (r == 0 && c == pre.col) ? EchoCell(scalar: s[i]) : EchoCell(scalar: nil) }
+            d.settleKeystroke()
+            col += 1
+        }
+        XCTAssertFalse(d.shouldLearnCommittedLine())   // prompt corroboration wins
+    }
 }
