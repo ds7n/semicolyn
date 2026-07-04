@@ -16,8 +16,12 @@
 ///
 /// Over raw SSH the terminal runs in raw mode and **echo happens on the remote**:
 /// a password prompt disables `ECHO` in the *remote* PTY's termios, which is never
-/// signaled back over the wire (SwiftTerm exposes no echo/SRM flag; russh surfaces
-/// no termios-change event). So the only observable signals are:
+/// signaled back over the wire (SwiftTerm exposes no deterministic echo/SRM flag;
+/// russh surfaces no termios-change event). L1 therefore infers echo from the
+/// *rendered grid* via an injected `EchoOracle` (buffer-anchored, three-way
+/// echoed/masked/hidden, line-majority aggregated, gated on alt-screen + output
+/// liveness); when no oracle is injected it falls back to the byte-count inference
+/// below. The observable signals are:
 ///
 ///  1. **Echo inference** — printable characters the user types are, in a normal
 ///     (echoing) shell, streamed back in the output within a few milliseconds. At
@@ -47,7 +51,7 @@
 ///     for c in committed { engine.record(c.token, after: c.previous) }
 /// }
 /// ```
-public struct PasswordEntryDetector: Equatable, Sendable {
+public struct PasswordEntryDetector: Sendable {
     /// Printable characters typed on the current (uncommitted) line.
     private var typedThisLine = 0
     /// Printable characters of the current line observed echoed back in output.
@@ -59,6 +63,25 @@ public struct PasswordEntryDetector: Equatable, Sendable {
     private var outputTail = ""
     /// Max characters of output tail retained for prompt matching.
     private let tailCap = 256
+
+    /// The three-way per-keystroke echo verdict (spec L1).
+    public enum EchoClass: Equatable, Sendable { case echoed, masked, hidden }
+
+    /// The injected read-only grid view. Nil ⇒ fall back to byte-count inference.
+    private var oracle: EchoOracle?
+    /// Classification of the most recently settled keystroke (test-observable).
+    public private(set) var lastClass: EchoClass?
+    /// Count of positively-`echoed` printables on the current line (oracle path).
+    private var oracleEchoedThisLine = 0
+    /// Count of printables classified via the oracle on the current line.
+    private var oracleClassifiedThisLine = 0
+    /// Set once the oracle path has classified at least one keystroke this line,
+    /// so `shouldLearnCommittedLine` knows to trust the buffer tally over bytes.
+    private var oracleActiveThisLine = false
+    /// True once any output byte arrived while the current line was being typed.
+    /// Gates the oracle verdict: a "clean echo" reading during a total stall is
+    /// ambiguous, so an oracle line with no output is suppressed.
+    private var outputSeenThisLine = false
 
     /// Substrings (lowercased) that, appearing at the tail end of output, mark the
     /// following typed line as a password entry. Matched as a suffix (ignoring
@@ -78,6 +101,7 @@ public struct PasswordEntryDetector: Equatable, Sendable {
     /// Fold a chunk of REMOTE output. Updates the prompt-tail and consumes echoes
     /// of characters typed on the current line (echo inference).
     public mutating func noteOutput(_ bytes: [UInt8]) {
+        if !bytes.isEmpty { outputSeenThisLine = true }
         for b in bytes {
             // Count a printable output byte as an echo of a pending typed char,
             // up to the number typed. Masked prompts echo a constant char, which
@@ -111,6 +135,64 @@ public struct PasswordEntryDetector: Equatable, Sendable {
         }
     }
 
+    /// Inject (or clear with nil) the buffer oracle. Clearing reverts to the
+    /// byte-count echo inference for subsequent keystrokes.
+    public mutating func setOracle(_ oracle: EchoOracle?) {
+        self.oracle = oracle
+    }
+
+    /// The current cursor cell from the injected oracle, or nil if no oracle is
+    /// set / the cursor is unreadable. The caller snapshots this BEFORE delivering
+    /// a keystroke to use as that keystroke's echo anchor at settle time.
+    public func currentCursor() -> EchoCursor? {
+        oracle?.cursor()
+    }
+
+    /// Call AFTER the settle window with the batch's printable `scalars` (in order)
+    /// and `from` = the cursor cell snapshotted BEFORE those keystrokes were
+    /// delivered (this call's own anchor — NOT shared struct state, so concurrent
+    /// per-keystroke settles don't clobber each other). Reads the now-rendered
+    /// cumulative grid once and classifies EACH keystroke against its expected echo
+    /// cell (`from.col + i`), folding all into the line tally. Fail-safe: no oracle
+    /// / nil `from` / cursor did not advance / any unreadable cell ⇒ `.hidden`
+    /// (suppress). Empty `scalars` is a no-op.
+    public mutating func settleLine(scalars: [Unicode.Scalar], from start: EchoCursor?) {
+        guard let oracle, let start, !scalars.isEmpty else { return }
+        // Non-echoing prompt: if the cursor never advanced past the anchor, the
+        // keystrokes were swallowed — classify every one hidden.
+        let post = oracle.cursor()
+        let advanced = (post?.col ?? start.col) > start.col
+            || (post?.row ?? start.row) > start.row
+        for (i, scalar) in scalars.enumerated() {
+            let cls: EchoClass
+            if post == nil || !advanced {
+                cls = .hidden
+            } else {
+                // Keystroke i's echo cell is `start.col + i` on the anchor row.
+                // (Line-wrap within one call is a rare Phase-1 edge; a wrapped cell
+                // reads blank → hidden, biasing to suppress.)
+                cls = Self.classifyCell(oracle: oracle, row: start.row, col: start.col + i, scalar: scalar)
+            }
+            lastClass = cls
+            oracleActiveThisLine = true
+            oracleClassifiedThisLine += 1
+            if cls == .echoed { oracleEchoedThisLine += 1 }
+        }
+    }
+
+    /// Pure per-cell classifier: echoed (expected scalar rendered at the cell),
+    /// masked (a different non-nil glyph rendered — a mask like `*`), hidden (blank
+    /// cell or unreadable). No cursor-advance check here — the caller (`settleLine`)
+    /// gates the whole batch on cursor advance; per-cell we only compare glyphs.
+    private static func classifyCell(
+        oracle: EchoOracle, row: Int, col: Int, scalar: Unicode.Scalar
+    ) -> EchoClass {
+        guard let cell = oracle.cell(row: row, col: col), let shown = cell.scalar else {
+            return .hidden
+        }
+        return shown == scalar ? .echoed : .masked
+    }
+
     /// The verdict for the line that just committed (Enter). `true` only when the
     /// line's typed characters were positively confirmed echoed AND no password
     /// prompt preceded it. Fail-safe: an empty line, an unconfirmed line, or a
@@ -119,10 +201,21 @@ public struct PasswordEntryDetector: Equatable, Sendable {
     /// Call once, at the moment a line commits, BEFORE `resetLine`.
     public func shouldLearnCommittedLine() -> Bool {
         if promptSuppressedThisLine { return false }
+        // Oracle path: when the buffer check classified this line, trust the
+        // majority-echoed statistic (the far stronger signal per spec L1).
+        if oracleActiveThisLine {
+            if oracle?.isAlternateBuffer == true { return false }   // alt-screen ⇒ suppress
+            guard outputSeenThisLine else { return false }          // stall ⇒ ambiguous ⇒ suppress
+            guard oracleClassifiedThisLine > 0 else { return false }
+            // Strong majority required (> 50%). A tie or worse suppresses —
+            // exclusion wins ties.
+            return oracleEchoedThisLine * 2 > oracleClassifiedThisLine
+        }
+        // Byte-count fallback (no oracle set): positive-echo-required — the line's
+        // characters must have come back in output. A short slack (1 char) tolerates
+        // a trailing byte still in flight at commit without opening the door to a
+        // fully-silent password.
         guard typedThisLine > 0 else { return false }
-        // Positive-echo-required: the line's characters must have come back in
-        // output. A short slack (1 char) tolerates a trailing byte still in
-        // flight at commit without opening the door to a fully-silent password.
         return echoedThisLine + 1 >= typedThisLine
     }
 
@@ -130,6 +223,11 @@ public struct PasswordEntryDetector: Equatable, Sendable {
     /// control that clears the line). Re-evaluates whether the CURRENT output tail
     /// looks like a password prompt, so the next line inherits that suppression.
     public mutating func resetLine() {
+        oracleEchoedThisLine = 0
+        oracleClassifiedThisLine = 0
+        oracleActiveThisLine = false
+        outputSeenThisLine = false
+        lastClass = nil
         typedThisLine = 0
         echoedThisLine = 0
         promptSuppressedThisLine = tailLooksLikePasswordPrompt()
@@ -137,6 +235,11 @@ public struct PasswordEntryDetector: Equatable, Sendable {
 
     /// Full reset (host/session switch): clears the tail too.
     public mutating func reset() {
+        oracleEchoedThisLine = 0
+        oracleClassifiedThisLine = 0
+        oracleActiveThisLine = false
+        outputSeenThisLine = false
+        lastClass = nil
         typedThisLine = 0
         echoedThisLine = 0
         promptSuppressedThisLine = false
