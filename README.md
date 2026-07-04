@@ -14,8 +14,9 @@ credential handling with end-to-end-encrypted sync.
 > shell command into the next. The everyday punctuation of the command line,
 > reimagined for touch.
 
-**Status:** design complete; a connect-and-get-a-shell MVP builds for the iOS
-Simulator (not yet device-installable — needs Apple Developer signing). The
+**Status:** design complete; a connect-and-get-a-shell MVP (SSH + mosh, password
+and publickey auth) builds for the iOS Simulator and is now **on TestFlight** —
+the macOS CI runner archives, signs, and uploads a device-installable build. The
 protocol + logic tiers are built and Linux-tested; the app shell is built and
 validated by macOS CI.
 → **Status & what's next:** [TODO.md](TODO.md) ·
