@@ -127,10 +127,11 @@ public struct InputTokenTracker: Equatable, Sendable {
             return
         }
         // L4b: a denylisted secret value — drop, no `previous` advance (the next
-        // real token reaches back over the secret to `previous` for bigrams), but DO
-        // advance `secretCheckPrev` to prevent cascading drops on the next token.
+        // real token reaches back over the secret to `previous` for bigrams). Clear
+        // `secretCheckPrev` — a dropped secret is never a flag/header, so nil
+        // prevents the cascade without retaining the secret string in memory.
         if isSecretValueToken(current, precededBy: secretCheckPrev) {
-            secretCheckPrev = current
+            secretCheckPrev = nil
             current = ""
             return
         }
