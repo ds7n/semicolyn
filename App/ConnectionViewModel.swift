@@ -739,6 +739,18 @@ final class ConnectionViewModel: ObservableObject {
         // Ephemeral drop — nothing to persist; suggestions refresh on next input.
     }
 
+    /// Panic-purge: wipe all user-derived predictor state now (live engine + disk).
+    ///
+    /// Resets the in-memory engine immediately so no further typed input is recorded
+    /// under the old learned state, then deletes the on-disk file so the next launch
+    /// starts from the bundled seed only. A stale engine write-back between the
+    /// engine reset and the file deletion is the only edge — acceptable for v1 (the
+    /// file is re-deleted on next purge and the next launch loads empty).
+    func panicPurge() {
+        engine?.purgeLearned()
+        try? AppStores.shared.purgePredictorLearned()
+    }
+
     /// Build the session predictor unless incognito is on for this host.
     private func startPredictor(host: Host, defaults: Defaults) {
         guard !resolvePredictorIncognito(host: host, defaults: defaults) else {
