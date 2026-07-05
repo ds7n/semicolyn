@@ -137,4 +137,21 @@ final class RollingBigramVocabularyTests: XCTestCase {
         XCTAssertNil(RollingBigramVocabulary(deserializing: blob))
         XCTAssertNil(RollingBigramVocabulary(deserializing: []))
     }
+
+    // MARK: storeLiteral flag (Task 3)
+
+    func testBigramRecordCountOnlyWithholdsLiteral() {
+        var bigram = RollingBigramVocabulary()
+        bigram.record(previous: "login", next: "hunter2token", count: 2, storeLiteral: false)
+        // The successor is not completable after "login".
+        let after = bigram.candidates(after: "login", window: .days30, prefix: "hunter")
+        XCTAssertTrue(after.isEmpty, "count-only bigram successor must not surface as a completion")
+    }
+
+    func testBigramRecordWithLiteralCompletes() {
+        var bigram = RollingBigramVocabulary()
+        bigram.record(previous: "git", next: "commit", count: 2, storeLiteral: true)
+        let after = bigram.candidates(after: "git", window: .days30, prefix: "com")
+        XCTAssertEqual(after.map(\.token), ["commit"])
+    }
 }
