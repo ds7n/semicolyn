@@ -3,6 +3,17 @@
 import Foundation
 import SemicolynKit
 
+/// A live session whose in-memory predictor engine can be reset by a panic-purge.
+/// Kept minimal (one method) so `AppStores` holds only a weak, narrow reference to
+/// the active session rather than the whole view-model. `ConnectionViewModel`
+/// conforms; `AppStores.purgePredictorLearned()` calls it before the disk delete.
+@MainActor
+protocol PredictorPurgeable: AnyObject {
+    /// Reset the running predictor engine to empty (seed preserved) so no stale
+    /// learned state can be flushed back to disk after a purge.
+    func purgeLearnedEngine()
+}
+
 /// The app's composition root for the live storage stack: hosts via `HostStore`
 /// (encrypted records on disk), host keys via `HostKeyStore` (Keychain), and
 /// trust decisions via `HostKeyTrustEvaluator`. Singleton lifetime matches the app.
@@ -80,9 +91,21 @@ final class AppStores {
         LearnedStore(directory: baseDirectory.appendingPathComponent("predictor", isDirectory: true))
     }
 
-    /// Delete the persisted predictor learned store (panic-purge's disk half). The
-    /// bundled seed is separate and untouched. A missing file is not an error.
+    /// The live session whose in-memory predictor engine must also be reset by a
+    /// panic-purge. Weak so a torn-down session deregisters itself simply by
+    /// deallocating; nil when no session is active (purge is then disk-only). Set on
+    /// `startPredictor`, cleared on `teardown`.
+    weak var activePredictorSession: (any PredictorPurgeable)?
+
+    /// Panic-purge: wipe all user-derived predictor learned state. Resets the LIVE
+    /// in-memory engine first (if a session is active) so no stale state can be
+    /// flushed back, THEN deletes the on-disk store. Ordering matters: resetting the
+    /// engine before the delete closes the stale-write-back window that a disk-only
+    /// purge left open (a backgrounding session would otherwise re-flush the old
+    /// learned state via `flushPredictor`). The bundled seed is separate and
+    /// untouched; a missing file is not an error.
     func purgePredictorLearned() throws {
+        activePredictorSession?.purgeLearnedEngine()
         try predictorLearnedStore().delete()
     }
 
