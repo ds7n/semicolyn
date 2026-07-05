@@ -468,7 +468,13 @@ Each phase is independently shippable and reduces risk on its own:
 1. **L1 buffer-anchored echo + `EchoOracle` seam** — the biggest single upgrade to the
    already-shipped detector; SSH + mosh-fallback coverage.
 2. **L3 paste + L4 context/leading-space** — cheap deterministic gates; close the
-   pasted-secret gap the echo layers can't see.
+   pasted-secret gap the echo layers can't see. **IMPLEMENTED (Phase 2, plan
+   `docs/superpowers/plans/2026-07-05-predictor-secret-exclusion-phase2-paste-context.md`):**
+   L3 in `InputTokenTracker` (bracketed-paste state machine, fail-closed, drops
+   in-paste partials on close), L4a leading-space line opt-out (`lineOptedOut`,
+   gated in the App learn flow), L4b `SecretArgDenylist` applied in the tracker
+   (drop secret values, reach-back-over bigram via a split `previous`/`secretCheckPrev`
+   to avoid cascading drops). Next: Phase 3 (L5 pattern extension + L6 graduation).
 3. **L5 pattern extension + L6 frequency graduation** — the format-agnostic catch-all;
    L6 also unlocks forget-last-line.
 4. **L7 confidence storage + forget-last-line + panic-purge** — the non-recoverable tier
