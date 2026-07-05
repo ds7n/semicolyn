@@ -239,4 +239,35 @@ final class PredictorEngineTests: XCTestCase {
         e.record("deploy", after: "npm")             // only 1 context post-reset
         XCTAssertFalse(e.suggestions(forPrefix: "dep", after: nil).contains("deploy"))
     }
+
+    // MARK: - L7 confidence derivation + storeLiteral wiring
+
+    func testLowConfidenceTokenNeverCompletesButCounts() {
+        var engine = PredictorEngine(learned: .empty, seed: nil)
+        // Graduate a token low-confidence via 3 distinct contexts (default threshold 3),
+        // each with echoConfirmed:false so it graduates .low.
+        for prev in ["run", "make", "just"] {
+            engine.record("deploysecretxyz", count: 2, after: prev, echoConfirmed: false)
+        }
+        // It graduated (count is on disk) but has NO literal → never a completion.
+        XCTAssertTrue(engine.suggestions(forPrefix: "deploy").isEmpty,
+                      "low-confidence token must never surface as a literal completion")
+    }
+
+    func testHighConfidenceTokenCompletes() {
+        var engine = PredictorEngine(learned: .empty, seed: nil)
+        for prev in ["run", "make", "just"] {
+            engine.record("deployprod", count: 2, after: prev, echoConfirmed: true)
+        }
+        XCTAssertEqual(engine.suggestions(forPrefix: "deploy"), ["deployprod"])
+    }
+
+    func testOptedOutForcesLowConfidence() {
+        var engine = PredictorEngine(learned: .empty, seed: nil)
+        for prev in ["run", "make", "just"] {
+            engine.record("deployxyz", count: 2, after: prev, echoConfirmed: true, optedOut: true)
+        }
+        XCTAssertTrue(engine.suggestions(forPrefix: "deploy").isEmpty,
+                      "opted-out line forces low-confidence → no literal")
+    }
 }

@@ -68,6 +68,11 @@ public struct TokenFilter: Sendable {
         return false
     }
 
+    /// Entropy band below the hard exclusion threshold: tokens in this band are
+    /// near-random enough that L7 should graduate them low-confidence (count only,
+    /// no persisted literal). Auditable named constant for the security tier.
+    private static let softMargin = 0.75
+
     /// Soft L5 signal: true when `token` is NOT a hard-excluded secret but sits in an
     /// entropy band just below the hard threshold — near-random enough that L7 should
     /// graduate it low-confidence (count only, no persisted literal). Returns false
@@ -76,8 +81,7 @@ public struct TokenFilter: Sendable {
         guard let threshold = entropyThreshold,
               token.unicodeScalars.count >= entropyMinLength else { return false }
         let h = shannonEntropy(token)
-        let softMargin = 0.75
-        return h >= threshold - softMargin && h < threshold
+        return h >= threshold - Self.softMargin && h < threshold
     }
 }
 

@@ -46,15 +46,27 @@ public struct PredictorEngine {
     ///
     /// L6: tokens are deferred until they recur across N distinct contexts; see
     /// ``GraduationTier``.
-    public mutating func record(_ token: String, count: UInt32 = 1, after previous: String? = nil) {
+    ///
+    /// L7: `echoConfirmed` and `optedOut` thread through to ``LearnConfidence``.
+    /// A token with `.low` confidence graduates count-only (no stored literal) so it
+    /// never surfaces as a completion — the core secret-exclusion invariant.
+    public mutating func record(_ token: String, count: UInt32 = 1, after previous: String? = nil,
+                                echoConfirmed: Bool = true, optedOut: Bool = false) {
         guard !filter.excludes(token) else { return }
+        // L7: derive graduation confidence from all visible layers. High iff the
+        // echo oracle confirmed the character, the line was not marked opted-out,
+        // and the token is not in the soft entropy band (L5 near-miss).
+        let confidence: LearnConfidence =
+            (echoConfirmed && !optedOut && !filter.isPatternAdjacent(token)) ? .high : .low
         // L6: defer until the token has recurred across N distinct contexts. `admit`
         // returns the occurrences to persist now (empty while deferred; the full
         // backfill on graduation; just this one once already graduated).
-        for occ in graduation.admit(token: token, previous: previous, count: count, confidence: .high) {
-            learned.unigram.record(occ.token, count: occ.count)
+        for occ in graduation.admit(token: token, previous: previous, count: count, confidence: confidence) {
+            let storeLiteral = (occ.confidence == .high)
+            learned.unigram.record(occ.token, count: occ.count, storeLiteral: storeLiteral)
             if let prev = occ.previous, !filter.excludes(prev) {
-                learned.bigram.record(previous: prev, next: occ.token, count: occ.count)
+                learned.bigram.record(previous: prev, next: occ.token, count: occ.count,
+                                      storeLiteral: storeLiteral)
             }
         }
     }
