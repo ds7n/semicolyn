@@ -37,6 +37,14 @@ final class TmuxRuntime {
         knownProcesses: PromotionRegistry.bundledDefault.knownProcesses)
     /// Fired after a poll changed any pane's engaged context.
     var onContextsChanged: (() -> Void)?
+
+    /// DIAGNOSTIC (temporary, tmux blank-panes investigation): fired after every
+    /// `ingest` with a one-line summary of what the app currently sees — lifecycle,
+    /// whether an active window + visible layout exist (the guard that gates pane
+    /// rendering), window/pane counts, and total bytes received. Remove once the
+    /// blank-panes root cause is confirmed on device.
+    var onDiagnostic: ((String) -> Void)?
+    private var diagBytesTotal = 0
     /// In-flight context-poll submission ids awaiting their result block.
     private var contextPollIDs: Set<UInt64> = []
     /// The repeating poll task; cancelled on teardown via `stop()`.
@@ -68,6 +76,28 @@ final class TmuxRuntime {
             }
         }
         if out.lifecycleChanged, case .exited(let reason) = controller.lifecycle { onExit?(reason) }
+        emitDiagnostic(bytesReceived: bytes.count)
+    }
+
+    /// DIAGNOSTIC (temporary): publish what the renderer's guard sees right now.
+    private func emitDiagnostic(bytesReceived: Int) {
+        diagBytesTotal += bytesReceived
+        let s = controller.state
+        let life: String
+        switch controller.lifecycle {
+        case .idle: life = "idle"
+        case .attaching: life = "attaching"
+        case .attached: life = "attached"
+        case .exited: life = "exited"
+        }
+        let activeWin = s.activeWindow
+        let win = activeWin.flatMap { s.window($0) }
+        let hasLayout = win?.visibleLayout != nil
+        let paneCount = win?.visibleLayout?.panes.count ?? 0
+        onDiagnostic?(
+            "tmux: \(life) · sess=\(s.sessionName ?? "nil") · wins=\(s.windows.count) · "
+            + "active=\(activeWin.map(String.init(describing:)) ?? "nil") · "
+            + "layout=\(hasLayout ? "yes" : "NO") · panes=\(paneCount) · rx=\(diagBytesTotal)B")
     }
 
     /// Encode keystrokes as `send-keys` to the active pane and write to the channel.

@@ -394,6 +394,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 let view = panes[rect.pane] ?? {
                     let t = TerminalView(frame: .zero)
                     t.terminalDelegate = coordinator
+                    // Suppress SwiftTerm's built-in accessory bar — our `KeybarView`
+                    // is the single accessory row (see TerminalScreen.makeUIView).
+                    t.inputAccessoryView = nil
                     // Apply configured font so rendered pane matches the pinch baseline.
                     if let fontSize = coordinator?.settings.fontSize {
                         t.font = UIFont.monospacedSystemFont(ofSize: CGFloat(fontSize), weight: .regular)
