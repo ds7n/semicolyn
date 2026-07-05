@@ -62,7 +62,10 @@ struct SessionView: View {
                         // Client size is reported by the pane container's layout pass
                         // (bounds ÷ measured cell) via onTmuxResize — no coarse estimate.
                     }
-                    .ignoresSafeArea(.container, edges: .bottom)
+                    // NOTE: the terminal must respect the bottom safe area so the
+                    // keybar's `.safeAreaInset` below genuinely reserves space and the
+                    // terminal ends ABOVE the keybar (not under it). Only the keybar's
+                    // background extends into the home-indicator strip (see the inset).
                     .overlay(alignment: .top) {
                         if let reason = vm.degraded {
                             DegradedBanner(reason: reason) { vm.degraded = nil }
@@ -101,6 +104,9 @@ struct SessionView: View {
                             KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm,
                                        hardwareKeyboardConnected: hardwareKeyboard.isConnected)
                         }
+                        // Extend only the keybar's panel background into the
+                        // home-indicator strip; the keys stay within the safe area.
+                        .background(Color(theme.surface.panel).ignoresSafeArea(edges: .bottom))
                     }
                 } else {
                     TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
@@ -121,7 +127,8 @@ struct SessionView: View {
                                    osc52Allowed: vm.osc52Allowed,
                                    onTitle: { [weak vm] t in vm?.terminalTitle = t },
                                    onSSHLink: { [weak vm] url in vm?.presentSSHLink(url) })
-                        .ignoresSafeArea(.container, edges: .bottom)
+                        // Respect the bottom safe area so the keybar inset reserves
+                        // space and the terminal ends above it (see the tmux branch).
                         .overlay(alignment: .top) {
                             if let reason = vm.degraded {
                                 DegradedBanner(reason: reason) { vm.degraded = nil }
@@ -160,6 +167,9 @@ struct SessionView: View {
                                 KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm,
                                        hardwareKeyboardConnected: hardwareKeyboard.isConnected)
                             }
+                            // Extend only the keybar's panel background into the
+                            // home-indicator strip; the keys stay within the safe area.
+                            .background(Color(theme.surface.panel).ignoresSafeArea(edges: .bottom))
                         }
                 }
             } else if resolving {
