@@ -20,6 +20,15 @@ public struct InputTokenTracker: Equatable, Sendable {
     public private(set) var current: String = ""
     /// The token immediately before `current` on this line (for bigram lookup).
     public private(set) var previous: String?
+    /// True while inside a bracketed paste (`ESC[200~`…`ESC[201~`): tokens are
+    /// tracked for prefix context but never emitted/learned (L3).
+    public private(set) var withinPaste = false
+    /// Bytes captured after a bare `ESC`, pending a bracketed-paste match. Empty
+    /// when not mid-escape. Flushed back to normal handling on any deviation.
+    private var escapeBuffer: [UInt8] = []
+
+    private static let pasteEnter: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]  // ESC[200~
+    private static let pasteExit: [UInt8]  = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]  // ESC[201~
 
     public init() {}
 
@@ -27,36 +36,89 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// (newest last), in order, for the caller to learn.
     public mutating func observe(_ bytes: [UInt8]) -> [CommittedToken] {
         var committed: [CommittedToken] = []
-        for b in bytes {
-            switch b {
-            case 0x21...0x7e:               // printable, non-space → extend the token
-                current.unicodeScalars.append(UnicodeScalar(b))
-            case 0x20:                      // space → commit, keep the line
-                if !current.isEmpty {
-                    committed.append(CommittedToken(token: current, previous: previous))
-                    previous = current
-                    current = ""
-                }
-            case 0x0d, 0x0a:                // enter → commit, then new line
-                if !current.isEmpty {
-                    committed.append(CommittedToken(token: current, previous: previous))
-                }
-                current = ""
-                previous = nil
-            case 0x7f, 0x08:                // backspace → pop one char
-                if !current.isEmpty { current.removeLast() }
-            case 0x09:                      // tab → remote completion: drop the partial
-                current = ""
-            default:                        // ESC / control → reset line context
-                current = ""
-                previous = nil
-            }
-        }
+        for b in bytes { handleByte(b, into: &committed) }
         return committed
     }
 
+    /// Route one byte. When mid-escape (after a bare ESC) we buffer until the byte
+    /// stream either completes a paste marker (toggle `withinPaste`, consume it) or
+    /// deviates (flush: the ESC becomes a line-context reset, the deviating byte is
+    /// re-handled normally).
+    private mutating func handleByte(_ b: UInt8, into committed: inout [CommittedToken]) {
+        if !escapeBuffer.isEmpty {
+            escapeBuffer.append(b)
+            // Still a viable prefix of either marker? keep buffering.
+            if Self.pasteEnter.starts(with: escapeBuffer) || Self.pasteExit.starts(with: escapeBuffer) {
+                if escapeBuffer == Self.pasteEnter { withinPaste = true; escapeBuffer = [] }
+                else if escapeBuffer == Self.pasteExit {
+                    if withinPaste { current = "" }   // drop whatever accumulated inside the paste
+                    withinPaste = false
+                    escapeBuffer = []
+                }
+                return
+            }
+            // Deviation: this ESC sequence is not a paste marker. Treat the ESC as
+            // a normal line-context reset, then re-handle the buffered tail bytes
+            // (everything after the ESC) as ordinary input.
+            let tail = Array(escapeBuffer.dropFirst())   // drop the ESC itself
+            escapeBuffer = []
+            resetLineContext()                            // ESC ⇒ reset (as today)
+            for t in tail { handleByte(t, into: &committed) }
+            return
+        }
+        if b == 0x1B {                                    // ESC → start capturing
+            escapeBuffer = [b]
+            return
+        }
+        classify(b, into: &committed)
+    }
+
+    /// The original per-byte tokenizer, minus the ESC case (ESC is handled above).
+    private mutating func classify(_ b: UInt8, into committed: inout [CommittedToken]) {
+        switch b {
+        case 0x21...0x7e:               // printable, non-space → extend the token
+            current.unicodeScalars.append(UnicodeScalar(b))
+        case 0x20:                      // space → commit (unless within paste)
+            commitCurrent(into: &committed)
+        case 0x0d, 0x0a:                // enter → commit, then new line
+            commitCurrent(into: &committed)
+            current = ""
+            previous = nil
+        case 0x7f, 0x08:                // backspace → pop one char
+            if !current.isEmpty { current.removeLast() }
+        case 0x09:                      // tab → remote completion: drop the partial
+            current = ""
+        default:                        // other control → reset line context
+            resetLineContext()
+        }
+    }
+
+    /// Commit `current` as a token — UNLESS we're inside a paste, in which case the
+    /// token is dropped and does NOT advance `previous` (reach-back-over: a pasted
+    /// secret is invisible to both the learned stream and the bigram chain).
+    private mutating func commitCurrent(into committed: inout [CommittedToken]) {
+        guard !current.isEmpty else { return }
+        if withinPaste {
+            current = ""                // drop; do NOT touch `previous`
+            return
+        }
+        committed.append(CommittedToken(token: current, previous: previous))
+        previous = current
+        current = ""
+    }
+
+    /// ESC / unknown-control line reset (matches the pre-Phase-2 `default` case).
+    private mutating func resetLineContext() {
+        current = ""
+        previous = nil
+    }
+
     /// Clear all context (e.g. a context/host switch).
-    public mutating func reset() { current = ""; previous = nil }
+    public mutating func reset() {
+        current = ""; previous = nil
+        withinPaste = false
+        escapeBuffer = []
+    }
 }
 
 /// The chips to show for `current` given the engine's ranked `suggestions`: the

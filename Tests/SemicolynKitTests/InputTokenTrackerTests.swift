@@ -78,4 +78,53 @@ final class InputTokenTrackerTests: XCTestCase {
                        ["clangd"])          // exact current dropped
         XCTAssertEqual(predictorChips(current: "x", suggestions: []), [])
     }
+
+    // MARK: - L3 bracketed paste
+
+    /// Bracketed-paste enter/exit markers as raw bytes.
+    private let pasteOn: [UInt8]  = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]  // ESC[200~
+    private let pasteOff: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]  // ESC[201~
+
+    /// Feed a full byte sequence and collect every committed token's `.token`.
+    private func committedTokens(_ bytes: [UInt8]) -> [String] {
+        var t = InputTokenTracker()
+        return t.observe(bytes).map(\.token)
+    }
+
+    func testTokenTypedInsidePasteIsNotCommitted() {
+        // export TOKEN=<paste>ghp_secret</paste>\n  → the pasted value must not learn.
+        var input: [UInt8] = Array("export ".utf8)
+        input += pasteOn
+        input += Array("ghp_deadbeef".utf8)
+        input += pasteOff
+        input += [0x0d]
+        let tokens = committedTokens(input)
+        XCTAssertEqual(tokens, ["export"])            // only the pre-paste token
+        XCTAssertFalse(tokens.contains("ghp_deadbeef"))
+    }
+
+    func testTokensBeforeAndAfterPasteStillCommit() {
+        // a <paste>b</paste> c\n  → learn "a" and "c", never "b".
+        var input: [UInt8] = Array("a ".utf8)
+        input += pasteOn; input += Array("b".utf8); input += pasteOff
+        input += Array(" c".utf8); input += [0x0d]
+        XCTAssertEqual(committedTokens(input), ["a", "c"])
+    }
+
+    func testUnmatchedPasteOpenFailsClosed() {
+        // ESC[200~ with no close: everything after stays suppressed until reset.
+        var input: [UInt8] = pasteOn
+        input += Array("secretvalue".utf8)
+        input += [0x0d]                                // Enter commits the line…
+        XCTAssertEqual(committedTokens(input), [])     // …but nothing was learnable
+    }
+
+    func testUnmatchedPasteCloseIsIgnored() {
+        // A stray ESC[201~ with no open: a recognized (if redundant) exit marker is
+        // consumed harmlessly — it does not reset the line.
+        var input: [UInt8] = Array("ls".utf8)
+        input += pasteOff
+        input += Array(" -la".utf8); input += [0x0d]
+        XCTAssertEqual(committedTokens(input), ["ls", "-la"])
+    }
 }
