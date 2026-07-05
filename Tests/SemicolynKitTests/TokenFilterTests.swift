@@ -158,4 +158,31 @@ final class TokenFilterTests: XCTestCase {
         // "asia" as a plain word is lowercase — the ASIA prefix is case-sensitive.
         XCTAssertFalse(filter.excludes("asia-region"))
     }
+
+    // MARK: - L5 structural (JWT / PEM)
+
+    func testJwtExcluded() {
+        // Three base64url segments, first starts with the standard `eyJ` header.
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+        XCTAssertTrue(filter.excludes(jwt))
+    }
+
+    func testPemPrivateKeyHeaderExcluded() {
+        XCTAssertTrue(filter.excludes("-----BEGIN RSA PRIVATE KEY-----"))
+        XCTAssertTrue(filter.excludes("-----BEGIN OPENSSH PRIVATE KEY-----"))
+    }
+
+    func testNonJwtDottedTokenNotExcluded() {
+        // A dotted token that is NOT a JWT (doesn't start with eyJ, wrong shape)
+        // must not be excluded by the structural check — e.g. a hostname or version.
+        XCTAssertFalse(filter.excludes("example.com.au"))
+        XCTAssertFalse(filter.excludes("1.2.3"))
+    }
+
+    func testPublicPemHeaderNotExcluded() {
+        // A PUBLIC key / certificate header is not a secret — must NOT be excluded
+        // by the PEM check (only PRIVATE KEY headers are secret-bearing).
+        XCTAssertFalse(filter.excludes("-----BEGIN PUBLIC KEY-----"))
+        XCTAssertFalse(filter.excludes("-----BEGIN CERTIFICATE-----"))
+    }
 }

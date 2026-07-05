@@ -59,12 +59,40 @@ public struct TokenFilter: Sendable {
                 if !prefix.isEmpty, token.hasPrefix(prefix) { return true }
             }
         }
+        if isStructuredSecret(token) { return true }
         if let threshold = entropyThreshold,
            token.unicodeScalars.count >= entropyMinLength,
            shannonEntropy(token) >= threshold {
             return true
         }
         return false
+    }
+}
+
+/// True if `token` is a structurally-shaped secret that no fixed prefix catches:
+/// a JWT (three `.`-separated base64url segments, first beginning `eyJ`) or a PEM
+/// PRIVATE KEY header. Conservative: only PRIVATE (not PUBLIC/CERTIFICATE) PEM
+/// headers, and JWT requires the standard `eyJ` (`{"` base64url) leader so a plain
+/// dotted hostname/version does not match.
+func isStructuredSecret(_ token: String) -> Bool {
+    // JWT: eyJ… . … . …  (exactly three non-empty base64url segments).
+    if token.hasPrefix("eyJ") {
+        let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+        if segments.count == 3, segments.allSatisfy({ !$0.isEmpty && isBase64URL($0) }) {
+            return true
+        }
+    }
+    // PEM private key header (any key type: RSA / OPENSSH / EC / plain).
+    if token.hasPrefix("-----BEGIN") && token.contains("PRIVATE KEY") {
+        return true
+    }
+    return false
+}
+
+/// True if `s` contains only base64url characters (A–Z a–z 0–9 - _ =).
+private func isBase64URL(_ s: Substring) -> Bool {
+    s.allSatisfy { c in
+        c.isLetter || c.isNumber || c == "-" || c == "_" || c == "="
     }
 }
 
