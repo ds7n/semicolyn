@@ -127,4 +127,37 @@ final class InputTokenTrackerTests: XCTestCase {
         input += Array(" -la".utf8); input += [0x0d]
         XCTAssertEqual(committedTokens(input), ["ls", "-la"])
     }
+
+    // MARK: - L4a leading-space opt-out
+
+    /// Feed bytes and return the tracker's `lineOptedOut` after the feed.
+    private func optedOutAfter(_ bytes: [UInt8]) -> Bool {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes)
+        return t.lineOptedOut
+    }
+
+    func testLeadingSpaceOptsLineOut() {
+        // " secret command" — first byte is a space → line opted out.
+        XCTAssertTrue(optedOutAfter(Array(" secret cmd".utf8)))
+    }
+
+    func testNoLeadingSpaceDoesNotOptOut() {
+        XCTAssertFalse(optedOutAfter(Array("secret cmd".utf8)))
+    }
+
+    func testOptOutResetsOnNextLine() {
+        // Line 1 opts out (leading space); after Enter, line 2 has no leading space.
+        var t = InputTokenTracker()
+        _ = t.observe(Array(" hidden".utf8))
+        XCTAssertTrue(t.lineOptedOut)
+        _ = t.observe([0x0d])                     // Enter → new line
+        _ = t.observe(Array("visible".utf8))       // no leading space
+        XCTAssertFalse(t.lineOptedOut)
+    }
+
+    func testMidLineSpaceDoesNotOptOut() {
+        // A space that is NOT the first byte must not opt the line out.
+        XCTAssertFalse(optedOutAfter(Array("git commit".utf8)))
+    }
 }

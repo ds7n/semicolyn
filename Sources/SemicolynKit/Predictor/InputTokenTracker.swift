@@ -26,6 +26,12 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// Bytes captured after a bare `ESC`, pending a bracketed-paste match. Empty
     /// when not mid-escape. Flushed back to normal handling on any deviation.
     private var escapeBuffer: [UInt8] = []
+    /// True when the current line began with a space (`HISTCONTROL=ignorespace`
+    /// gesture): the WHOLE line is suppressed from learning (L4a). Reset each line.
+    public private(set) var lineOptedOut = false
+    /// Whether the first byte of the current line has been seen yet (to detect a
+    /// leading space exactly at line start).
+    private var sawLineStart = false
 
     private static let pasteEnter: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]  // ESC[200~
     private static let pasteExit: [UInt8]  = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]  // ESC[201~
@@ -75,6 +81,10 @@ public struct InputTokenTracker: Equatable, Sendable {
 
     /// The original per-byte tokenizer, minus the ESC case (ESC is handled above).
     private mutating func classify(_ b: UInt8, into committed: inout [CommittedToken]) {
+        if !sawLineStart {
+            sawLineStart = true
+            if b == 0x20 { lineOptedOut = true }
+        }
         switch b {
         case 0x21...0x7e:               // printable, non-space → extend the token
             current.unicodeScalars.append(UnicodeScalar(b))
@@ -84,6 +94,8 @@ public struct InputTokenTracker: Equatable, Sendable {
             commitCurrent(into: &committed)
             current = ""
             previous = nil
+            lineOptedOut = false
+            sawLineStart = false
         case 0x7f, 0x08:                // backspace → pop one char
             if !current.isEmpty { current.removeLast() }
         case 0x09:                      // tab → remote completion: drop the partial
@@ -111,6 +123,8 @@ public struct InputTokenTracker: Equatable, Sendable {
     private mutating func resetLineContext() {
         current = ""
         previous = nil
+        lineOptedOut = false
+        sawLineStart = false
     }
 
     /// Clear all context (e.g. a context/host switch).
@@ -118,6 +132,8 @@ public struct InputTokenTracker: Equatable, Sendable {
         current = ""; previous = nil
         withinPaste = false
         escapeBuffer = []
+        lineOptedOut = false
+        sawLineStart = false
     }
 }
 
