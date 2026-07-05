@@ -239,4 +239,89 @@ final class PredictorEngineTests: XCTestCase {
         e.record("deploy", after: "npm")             // only 1 context post-reset
         XCTAssertFalse(e.suggestions(forPrefix: "dep", after: nil).contains("deploy"))
     }
+
+    // MARK: - L7 confidence derivation + storeLiteral wiring
+
+    func testLowConfidenceTokenNeverCompletesButCounts() {
+        var engine = PredictorEngine(learned: .empty, seed: nil)
+        // Graduate a token low-confidence via 3 distinct contexts (default threshold 3),
+        // each with echoConfirmed:false so it graduates .low.
+        for prev in ["run", "make", "just"] {
+            engine.record("deploysecretxyz", count: 2, after: prev, echoConfirmed: false)
+        }
+        // It graduated (count is on disk) but has NO literal → never a completion.
+        XCTAssertTrue(engine.suggestions(forPrefix: "deploy").isEmpty,
+                      "low-confidence token must never surface as a literal completion")
+    }
+
+    func testHighConfidenceTokenCompletes() {
+        var engine = PredictorEngine(learned: .empty, seed: nil)
+        for prev in ["run", "make", "just"] {
+            engine.record("deployprod", count: 2, after: prev, echoConfirmed: true)
+        }
+        XCTAssertEqual(engine.suggestions(forPrefix: "deploy"), ["deployprod"])
+    }
+
+    func testOptedOutForcesLowConfidence() {
+        var engine = PredictorEngine(learned: .empty, seed: nil)
+        for prev in ["run", "make", "just"] {
+            engine.record("deployxyz", count: 2, after: prev, echoConfirmed: true, optedOut: true)
+        }
+        XCTAssertTrue(engine.suggestions(forPrefix: "deploy").isEmpty,
+                      "opted-out line forces low-confidence → no literal")
+    }
+
+    /// Positive control: mirrors `testHighConfidenceTokenCompletes` but with a
+    /// pattern-adjacent token, so the ONLY difference is the third signal
+    /// (`filter.isPatternAdjacent`). The token graduates (3 distinct contexts,
+    /// count ≥ floor), and `echoConfirmed:true`/`optedOut:false` are both correct —
+    /// the sole thing forcing `.low` is `isPatternAdjacent`. If that term were
+    /// dropped from the derivation, the literal would surface and this test would
+    /// FAIL, catching the regression.
+    func testPatternAdjacentForcesLowConfidence() {
+        // "aabbccddeeffgghhiijj": Shannon entropy ≈ 3.32 bits/char, which falls
+        // inside the soft band [threshold − softMargin, threshold) = [3.25, 4.0)
+        // when entropyThreshold:4.0 — so isPatternAdjacent == true, but
+        // excludes == false (not hard-excluded; it reaches the confidence step).
+        var engine = PredictorEngine(
+            learned: .empty, seed: nil,
+            filter: TokenFilter(entropyThreshold: 4.0, entropyMinLength: 16)
+        )
+        let token = "aabbccddeeffgghhiijj"
+        for prev in ["run", "make", "just"] {
+            engine.record(token, count: 2, after: prev, echoConfirmed: true, optedOut: false)
+        }
+        // The token is graduated (3 distinct contexts, count 2 ≥ confidenceFloor 2)
+        // but confidence is .low because isPatternAdjacent == true. No literal is
+        // stored, so suggestions must be empty.
+        XCTAssertTrue(engine.suggestions(forPrefix: "aabb").isEmpty,
+                      "isPatternAdjacent must force low-confidence even when echoConfirmed:true and optedOut:false — the third signal in the derivation")
+    }
+
+    // MARK: - Task 6: purgeLearned + forgetLastLine + beginLine
+
+    func testPurgeLearnedClearsUserStateKeepsSeed() {
+        // Seed provides "sshd"; learned provides "sshconfig".
+        var uni = Vocabulary(depth: 4, width: 1 << 14)
+        uni.record("sshd")
+        let seed = PredictorSeed(unigram: uni, bigram: BigramVocabulary())
+        var engine = PredictorEngine(learned: .empty, seed: seed)
+        for prev in ["a", "b", "c"] { engine.record("sshconfig", count: 2, after: prev, echoConfirmed: true) }
+        XCTAssertTrue(engine.suggestions(forPrefix: "ssh").contains("sshconfig"))  // precondition
+        engine.purgeLearned()
+        let after = engine.suggestions(forPrefix: "ssh")
+        XCTAssertFalse(after.contains("sshconfig"), "learned literal is gone after purge")
+        XCTAssertTrue(after.contains("sshd"), "bundled seed survives purge")
+    }
+
+    func testForgetLastLineOnEngineDropsPendingLine() {
+        var engine = PredictorEngine(learned: .empty, seed: nil)
+        engine.beginLine()
+        engine.record("hunter2pass", count: 1, after: "sudo", echoConfirmed: false)  // pending, not graduated
+        engine.forgetLastLine()
+        // Never graduated and now forgotten → still absent even after two more distinct contexts.
+        engine.record("hunter2pass", count: 1, after: "x", echoConfirmed: false)
+        engine.record("hunter2pass", count: 1, after: "y", echoConfirmed: false)
+        XCTAssertTrue(engine.suggestions(forPrefix: "hunter").isEmpty)
+    }
 }

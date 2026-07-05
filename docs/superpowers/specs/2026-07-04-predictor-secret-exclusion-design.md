@@ -281,6 +281,22 @@ learn — a minor, safe delay).
 
 ---
 
+## Phase 4 handoff notes (resume here — written 2026-07-05 after Phase 3 merged)
+
+**Status:** Phases 1–3 SHIPPED to `main` (PRs #43/#44/#45; merge commits `caacd42`/`6a48e3d`/`03dae46`). Full Kit suite 1008/0. Phase 4 = **L7 (non-recoverable confidence-tiered storage) + forget-last-line + panic-purge** — the next `writing-plans` slice. Plans so far: `docs/superpowers/plans/2026-07-0{4,5}-predictor-secret-exclusion-phase{1,2,3}-*.md`. Ledger convention: `.superpowers/sdd/progress.md` (git-ignored, one per phase).
+
+**Concerns to resolve during Phase 4 brainstorm/plan (carried over from the Phase 3 controller):**
+
+1. **L6→L7 confidence hand-off is UNBUILT.** Phase 3's `GraduationTier.admit(...) -> [GraduatedOccurrence]` (`Sources/SemicolynKit/Predictor/GraduationTier.swift`) currently carries only `(token, previous, count)` — **no confidence signal**. L7's whole design hinges on a token graduating as *high-* vs *low-confidence* (spec above). **Decision needed:** where does confidence originate? The layer verdicts (L1 echo class, L3 paste flag, L4b denylist, L5 pattern-adjacency) are computed in DIFFERENT places than the engine — L1 in `PasswordEntryDetector` (App-driven), L3/L4 in `InputTokenTracker`, L5 in `TokenFilter`, and the engine's `record` only sees `(token, count, previous)`. So a confidence field must be **plumbed from the capture site (`observePredictorInput` in `App/ConnectionViewModel.swift`) through `record` → `admit` → `GraduatedOccurrence`**. That's a signature change to `PredictorEngine.record` and `GraduationTier` — a cross-cutting design task that should be its OWN early Phase-4 task, decided with the user (options: a `Confidence` enum param on `record`; or a richer `CommittedToken` that already carries the per-line layer verdicts). Note the confidence for a *high-echo, low-recurrence* token vs a *stalled-echo* token differs — the exact mapping is a user decision.
+
+2. **Low-confidence storage split needs a real seam.** L7 says low-confidence tokens store "only the lossy aggregate (CMS/Bloom), never the literal in `PrefixIndex`." Today `RollingVocabulary` (`RollingVocabulary.swift`) writes BOTH the `PrefixIndex` (literal) and the `CountMinSketch` (lossy) together in `record`. L7 needs `record` to optionally SKIP the `PrefixIndex.insert` while still doing the sketch increment. Check whether `RollingVocabulary.record` can take a `storeLiteral: Bool` (or a two-method split) without breaking the existing `learnedSource`/rollover/serialize paths. This is the structural core of L7 and likely the hardest task.
+
+3. **Phase 4 has REAL App-tier UI** (unlike pure-Kit Phase 3) — forget-last-line is a keybar/quick-action, panic-purge is in Settings → predictor controls. So: (a) the macOS CI job GATES this phase again (it did not for Phase 3); (b) there's SwiftUI + `ConnectionViewModel`/`AppStores` wiring the per-task reviewers can't locally build — plan those as macOS-CI-verified tasks. Forget-last-line's Kit primitive is a `GraduationTier.forgetLastLine()` (drop the most-recent line's un-graduated tokens — needs the tier to track per-line grouping, which it does NOT today → a tier change). Panic-purge = delete `learned.sketch` + `graduation.reset()`, keep `SeedStore` (bundled) — mostly App/store wiring.
+
+4. **Process note for whoever resumes:** the **Docker socket is sandbox-blocked for subagents** — implementers must flag tooling errors (not misdiagnose them as code bugs); the CONTROLLER runs `swift test` via `dangerouslyDisableSandbox: true` for verification. Two Phase-3 implementer agents STALLED silently after writing correct files but failing to commit (stuck retrying the blocked Docker run) — watch for this: if an agent goes quiet, check `git log` + file mtimes; the work is often done-but-uncommitted, and a controller test-run + commit-on-its-behalf resolves it. Also: brief example-code that uses `Set(x)` requires the element type be `Hashable`, and engine suggestion tests must respect `confidenceFloor = 2` (a count-1 backfilled entry won't surface) — both bit Phase 3.
+
+---
+
 ## L7 — Non-recoverable storage (structural; "assume detection failed")
 
 L1–L6 are detection. L7 assumes detection **failed** on some token and asks: if a secret

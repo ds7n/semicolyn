@@ -185,4 +185,30 @@ final class TokenFilterTests: XCTestCase {
         XCTAssertFalse(filter.excludes("-----BEGIN PUBLIC KEY-----"))
         XCTAssertFalse(filter.excludes("-----BEGIN CERTIFICATE-----"))
     }
+
+    // MARK: - isPatternAdjacent (soft L5 signal)
+
+    func testPatternAdjacentFlagsSoftEntropyBand() {
+        let filter = TokenFilter(entropyThreshold: 4.0, entropyMinLength: 16)
+        // A 20-char token engineered to land in [3.25, 4.0): high but sub-threshold.
+        let token = "aabbccddeeffgghhiijj"  // 10 distinct pairs → H = log2(10) ≈ 3.32
+        XCTAssertFalse(filter.excludes(token), "precondition: not a hard-excluded secret")
+        XCTAssertTrue(filter.isPatternAdjacent(token), "soft-band token must be flagged low-confidence")
+    }
+
+    func testPatternAdjacentIgnoresLowEntropyToken() {
+        let filter = TokenFilter(entropyThreshold: 4.0, entropyMinLength: 16)
+        let token = "aaaaaaaaaaaaaaaaaaaa"  // H = 0 → well below the band
+        XCTAssertFalse(filter.isPatternAdjacent(token))
+    }
+
+    func testPatternAdjacentIgnoresShortToken() {
+        let filter = TokenFilter(entropyThreshold: 4.0, entropyMinLength: 16)
+        XCTAssertFalse(filter.isPatternAdjacent("abc123"), "below entropyMinLength — never flagged")
+    }
+
+    func testPatternAdjacentFalseWhenBackstopDisabled() {
+        let filter = TokenFilter(entropyThreshold: nil)
+        XCTAssertFalse(filter.isPatternAdjacent("aabbccddeeffgghhiijj"))
+    }
 }
