@@ -140,6 +140,10 @@ final class TokenFilterTests: XCTestCase {
     func testSlackTokensExcluded() {
         XCTAssertTrue(filter.excludes("xoxb-1234-5678-abcdefg"))
         XCTAssertTrue(filter.excludes("xoxp-1111-2222-zzz"))
+        // Cover the remaining Slack token prefixes (bot/app/user/refresh/socket).
+        XCTAssertTrue(filter.excludes("xoxa-2222-3333-yyy"))
+        XCTAssertTrue(filter.excludes("xoxr-4444-5555-www"))
+        XCTAssertTrue(filter.excludes("xoxs-6666-7777-vvv"))
     }
 
     func testGithubFineGrainedPatExcluded() {
