@@ -36,6 +36,12 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// True when the current line began with a space (`HISTCONTROL=ignorespace`
     /// gesture): the WHOLE line is suppressed from learning (L4a). Reset each line.
     public private(set) var lineOptedOut = false
+    /// The opt-out verdict of the MOST-RECENTLY-COMMITTED line (latched at its
+    /// Enter, before the per-line flags reset). The App reads this AFTER `observe`
+    /// so a leading-space line + its Enter arriving in ONE chunk (paste) is still
+    /// correctly suppressed — reading the live `lineOptedOut` before `observe`
+    /// misses that case. Overwritten at each Enter; cleared by `reset()`.
+    public private(set) var lastCommittedLineOptedOut = false
     /// Whether the first byte of the current line has been seen yet (to detect a
     /// leading space exactly at line start).
     private var sawLineStart = false
@@ -97,8 +103,9 @@ public struct InputTokenTracker: Equatable, Sendable {
             current.unicodeScalars.append(UnicodeScalar(b))
         case 0x20:                      // space → commit (unless within paste)
             commitCurrent(into: &committed)
-        case 0x0d, 0x0a:                // enter → commit, then new line
+        case 0x0d, 0x0a:                // enter → commit, latch the line's opt-out
             commitCurrent(into: &committed)
+            lastCommittedLineOptedOut = lineOptedOut   // latch BEFORE the reset below
             current = ""
             previous = nil
             secretCheckPrev = nil
@@ -156,6 +163,7 @@ public struct InputTokenTracker: Equatable, Sendable {
         withinPaste = false
         escapeBuffer = []
         lineOptedOut = false
+        lastCommittedLineOptedOut = false
         sawLineStart = false
     }
 }

@@ -187,4 +187,39 @@ final class InputTokenTrackerTests: XCTestCase {
     func testTrackerDropsUserPassAtHost() {
         XCTAssertEqual(committedTokens(Array("ssh alice:pw@host\r".utf8)), ["ssh"])
     }
+
+    // MARK: - L4a latched commit verdict (the paste / single-chunk case)
+
+    /// Feed bytes and return the latched last-committed-line opt-out.
+    private func latchedOptOutAfter(_ bytes: [UInt8]) -> Bool {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes)
+        return t.lastCommittedLineOptedOut
+    }
+
+    func testSingleChunkLeadingSpaceLineLatchesOptedOut() {
+        // " secret\r" as ONE chunk (the paste path the old App snapshot missed):
+        // the latched verdict after observe must be TRUE.
+        XCTAssertTrue(latchedOptOutAfter(Array(" secret\r".utf8)))
+    }
+
+    func testSingleChunkNormalLineLatchesNotOptedOut() {
+        XCTAssertFalse(latchedOptOutAfter(Array("ls -la\r".utf8)))
+    }
+
+    func testLatchReflectsLastLineInChunk() {
+        // Two lines in one chunk: line1 opted out, line2 not → latch holds line2's
+        // verdict (false). (Documents the v1 per-chunk coarseness.)
+        XCTAssertFalse(latchedOptOutAfter(Array(" a\rb\r".utf8)))
+        // And the reverse: last line opted out → latch true.
+        XCTAssertTrue(latchedOptOutAfter(Array("a\r b\r".utf8)))
+    }
+
+    func testLatchClearedByReset() {
+        var t = InputTokenTracker()
+        _ = t.observe(Array(" x\r".utf8))
+        XCTAssertTrue(t.lastCommittedLineOptedOut)
+        t.reset()
+        XCTAssertFalse(t.lastCommittedLineOptedOut)
+    }
 }
