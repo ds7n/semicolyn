@@ -30,6 +30,12 @@ public struct TokenFilter: Sendable {
         .hasPrefix("github_pat_"),                                   // GitHub fine-grained PATs
         .hasPrefix("sk-"),                                           // OpenAI API keys
         .hasPrefix("sk_"), .hasPrefix("pk_"),                        // Stripe secret / publishable keys
+        // L5 (Phase 3) — curated public credential-format prefixes.
+        .hasPrefix("AKIA"), .hasPrefix("ASIA"),                      // AWS access key IDs
+        .hasPrefix("AIza"),                                          // Google API keys
+        .hasPrefix("sk_live_"), .hasPrefix("rk_live_"),             // Stripe live keys (narrower than sk_)
+        .hasPrefix("xoxb-"), .hasPrefix("xoxa-"),                    // Slack bot / app tokens
+        .hasPrefix("xoxp-"), .hasPrefix("xoxr-"), .hasPrefix("xoxs-"), // Slack user/refresh/config tokens
     ]
 
     public init(patterns: [ExcludePattern] = TokenFilter.defaultPatterns,

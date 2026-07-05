@@ -120,4 +120,38 @@ final class TokenFilterTests: XCTestCase {
         XCTAssertFalse(learned("ghp_secrettoken12345"), "secret prefix must never be learned")
         XCTAssertFalse(learned("my_password_x"), "password token must never be learned")
     }
+
+    // MARK: - L5 added credential-format prefixes
+
+    func testAwsAccessKeyExcluded() {
+        XCTAssertTrue(filter.excludes("AKIAIOSFODNN7EXAMPLE"))
+        XCTAssertTrue(filter.excludes("ASIAIOSFODNN7EXAMPLE"))
+    }
+
+    func testGoogleApiKeyExcluded() {
+        XCTAssertTrue(filter.excludes("AIzaSyD-EXAMPLE_key_1234567890abcdefg"))
+    }
+
+    func testStripeLiveKeysExcluded() {
+        XCTAssertTrue(filter.excludes("sk_live_abc123DEF456"))
+        XCTAssertTrue(filter.excludes("rk_live_abc123DEF456"))
+    }
+
+    func testSlackTokensExcluded() {
+        XCTAssertTrue(filter.excludes("xoxb-1234-5678-abcdefg"))
+        XCTAssertTrue(filter.excludes("xoxp-1111-2222-zzz"))
+    }
+
+    func testGithubFineGrainedPatExcluded() {
+        // Already present via `github_pat_` in the shipped defaults — assert it stays.
+        XCTAssertTrue(filter.excludes("github_pat_11ABCDEFG_examplekeymaterial"))
+    }
+
+    func testBenignTokenNotExcludedByL5Prefixes() {
+        // A normal command/arg that shares no credential prefix must NOT be excluded.
+        XCTAssertFalse(filter.excludes("kubectl"))
+        XCTAssertFalse(filter.excludes("git"))
+        // "asia" as a plain word is lowercase — the ASIA prefix is case-sensitive.
+        XCTAssertFalse(filter.excludes("asia-region"))
+    }
 }
