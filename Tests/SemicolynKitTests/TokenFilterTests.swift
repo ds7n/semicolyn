@@ -120,4 +120,69 @@ final class TokenFilterTests: XCTestCase {
         XCTAssertFalse(learned("ghp_secrettoken12345"), "secret prefix must never be learned")
         XCTAssertFalse(learned("my_password_x"), "password token must never be learned")
     }
+
+    // MARK: - L5 added credential-format prefixes
+
+    func testAwsAccessKeyExcluded() {
+        XCTAssertTrue(filter.excludes("AKIAIOSFODNN7EXAMPLE"))
+        XCTAssertTrue(filter.excludes("ASIAIOSFODNN7EXAMPLE"))
+    }
+
+    func testGoogleApiKeyExcluded() {
+        XCTAssertTrue(filter.excludes("AIzaSyD-EXAMPLE_key_1234567890abcdefg"))
+    }
+
+    func testStripeLiveKeysExcluded() {
+        XCTAssertTrue(filter.excludes("sk_live_abc123DEF456"))
+        XCTAssertTrue(filter.excludes("rk_live_abc123DEF456"))
+    }
+
+    func testSlackTokensExcluded() {
+        XCTAssertTrue(filter.excludes("xoxb-1234-5678-abcdefg"))
+        XCTAssertTrue(filter.excludes("xoxp-1111-2222-zzz"))
+        // Cover the remaining Slack token prefixes (bot/app/user/refresh/socket).
+        XCTAssertTrue(filter.excludes("xoxa-2222-3333-yyy"))
+        XCTAssertTrue(filter.excludes("xoxr-4444-5555-www"))
+        XCTAssertTrue(filter.excludes("xoxs-6666-7777-vvv"))
+    }
+
+    func testGithubFineGrainedPatExcluded() {
+        // Already present via `github_pat_` in the shipped defaults — assert it stays.
+        XCTAssertTrue(filter.excludes("github_pat_11ABCDEFG_examplekeymaterial"))
+    }
+
+    func testBenignTokenNotExcludedByL5Prefixes() {
+        // A normal command/arg that shares no credential prefix must NOT be excluded.
+        XCTAssertFalse(filter.excludes("kubectl"))
+        XCTAssertFalse(filter.excludes("git"))
+        // "asia" as a plain word is lowercase — the ASIA prefix is case-sensitive.
+        XCTAssertFalse(filter.excludes("asia-region"))
+    }
+
+    // MARK: - L5 structural (JWT / PEM)
+
+    func testJwtExcluded() {
+        // Three base64url segments, first starts with the standard `eyJ` header.
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+        XCTAssertTrue(filter.excludes(jwt))
+    }
+
+    func testPemPrivateKeyHeaderExcluded() {
+        XCTAssertTrue(filter.excludes("-----BEGIN RSA PRIVATE KEY-----"))
+        XCTAssertTrue(filter.excludes("-----BEGIN OPENSSH PRIVATE KEY-----"))
+    }
+
+    func testNonJwtDottedTokenNotExcluded() {
+        // A dotted token that is NOT a JWT (doesn't start with eyJ, wrong shape)
+        // must not be excluded by the structural check — e.g. a hostname or version.
+        XCTAssertFalse(filter.excludes("example.com.au"))
+        XCTAssertFalse(filter.excludes("1.2.3"))
+    }
+
+    func testPublicPemHeaderNotExcluded() {
+        // A PUBLIC key / certificate header is not a secret — must NOT be excluded
+        // by the PEM check (only PRIVATE KEY headers are secret-bearing).
+        XCTAssertFalse(filter.excludes("-----BEGIN PUBLIC KEY-----"))
+        XCTAssertFalse(filter.excludes("-----BEGIN CERTIFICATE-----"))
+    }
 }
