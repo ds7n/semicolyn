@@ -6,14 +6,11 @@ import SwiftUI
 /// "forget everything it learned" reset. Wipes user-derived learned state only; the
 /// bundled seed suggestions (shipped app content, no secret) remain.
 ///
-/// Wiring note: this view calls `AppStores.shared.purgePredictorLearned()` directly
-/// for the disk wipe (Settings is reachable from the host list, with no live
-/// `ConnectionViewModel`). If it is ever presented over a live session, that
-/// session's engine is separately reset on next `startPredictor`/`teardown`; a
-/// stale in-memory engine writing back on a background task is the only edge —
-/// acceptable for v1 (the file is re-deleted on next purge and the next launch
-/// loads empty). Use `ConnectionViewModel.panicPurge()` from session UI if the live
-/// engine also needs immediate reset.
+/// Wiring note: this view calls `AppStores.shared.purgePredictorLearned()`, which
+/// resets the live session's in-memory engine (via the `activePredictorSession`
+/// registration) BEFORE deleting the on-disk store. So a purge is complete whether
+/// Settings is reached from the host list (no session) or mid-session — there is no
+/// stale-write-back window.
 struct PrivacySettingsView: View {
     @State private var confirming = false
     @State private var purged = false
