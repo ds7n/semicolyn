@@ -270,4 +270,31 @@ final class PredictorEngineTests: XCTestCase {
         XCTAssertTrue(engine.suggestions(forPrefix: "deploy").isEmpty,
                       "opted-out line forces low-confidence → no literal")
     }
+
+    /// Positive control: mirrors `testHighConfidenceTokenCompletes` but with a
+    /// pattern-adjacent token, so the ONLY difference is the third signal
+    /// (`filter.isPatternAdjacent`). The token graduates (3 distinct contexts,
+    /// count ≥ floor), and `echoConfirmed:true`/`optedOut:false` are both correct —
+    /// the sole thing forcing `.low` is `isPatternAdjacent`. If that term were
+    /// dropped from the derivation, the literal would surface and this test would
+    /// FAIL, catching the regression.
+    func testPatternAdjacentForcesLowConfidence() {
+        // "aabbccddeeffgghhiijj": Shannon entropy ≈ 3.32 bits/char, which falls
+        // inside the soft band [threshold − softMargin, threshold) = [3.25, 4.0)
+        // when entropyThreshold:4.0 — so isPatternAdjacent == true, but
+        // excludes == false (not hard-excluded; it reaches the confidence step).
+        var engine = PredictorEngine(
+            learned: .empty, seed: nil,
+            filter: TokenFilter(entropyThreshold: 4.0, entropyMinLength: 16)
+        )
+        let token = "aabbccddeeffgghhiijj"
+        for prev in ["run", "make", "just"] {
+            engine.record(token, count: 2, after: prev, echoConfirmed: true, optedOut: false)
+        }
+        // The token is graduated (3 distinct contexts, count 2 ≥ confidenceFloor 2)
+        // but confidence is .low because isPatternAdjacent == true. No literal is
+        // stored, so suggestions must be empty.
+        XCTAssertTrue(engine.suggestions(forPrefix: "aabb").isEmpty,
+                      "isPatternAdjacent must force low-confidence even when echoConfirmed:true and optedOut:false — the third signal in the derivation")
+    }
 }
