@@ -763,6 +763,9 @@ final class ConnectionViewModel: ObservableObject {
         }
         let anchor = scalars.isEmpty ? nil : passwordDetector.currentCursor()
         passwordDetector.noteInput(bytes)
+        // L4a: snapshot the line opt-out BEFORE the tracker processes a line-ending
+        // Enter (which clears it), so the deferred flush sees the right value.
+        let optedOut = tracker.lineOptedOut
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
         }
@@ -776,7 +779,8 @@ final class ConnectionViewModel: ObservableObject {
         for b in bytes where b == 0x0d || b == 0x0a {
             DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(10)) { [weak self] in
                 guard let self else { return }
-                if self.passwordDetector.shouldLearnCommittedLine() {
+                // Learn only if L1 confirms echo AND the line was not opted out (L4a).
+                if !optedOut, self.passwordDetector.shouldLearnCommittedLine() {
                     for c in self.pendingLineTokens { self.engine?.record(c.token, after: c.previous) }
                 }
                 self.pendingLineTokens.removeAll(keepingCapacity: true)
