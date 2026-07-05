@@ -46,6 +46,25 @@ public func secretValueIndexes(in tokens: [String]) -> Set<Int> {
     return drop
 }
 
+/// Incremental (per-token) view of the denylist, for the streaming tracker: is
+/// `token` a secret VALUE given the token immediately before it? Same rule set as
+/// `secretValueIndexes`, sliced to one token + its predecessor.
+public func isSecretValueToken(_ token: String, precededBy previous: String?) -> Bool {
+    // (b) `--flag=value` token embeds a secret.
+    if let eq = token.firstIndex(of: "=") {
+        let flagPart = String(token[token.startIndex..<eq]).lowercased()
+        if secretFlags.contains(flagPart) { return true }
+    }
+    // (c) `user:pass@host` connection string.
+    if isUserPassAtHost(token) { return true }
+    // (a)/(d) previous token is a secret flag or header → this token is the value.
+    if let prev = previous?.lowercased(),
+       secretFlags.contains(prev) || secretHeaders.contains(prev) {
+        return true
+    }
+    return false
+}
+
 /// True if `token` is a `user:pass@host` credential form (non-empty user, pass,
 /// host; the `:` precedes the `@`).
 private func isUserPassAtHost(_ token: String) -> Bool {

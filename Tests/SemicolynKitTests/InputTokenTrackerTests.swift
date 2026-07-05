@@ -160,4 +160,31 @@ final class InputTokenTrackerTests: XCTestCase {
         // A space that is NOT the first byte must not opt the line out.
         XCTAssertFalse(optedOutAfter(Array("git commit".utf8)))
     }
+
+    // MARK: - L4b denylist applied through the tracker
+
+    func testTrackerDropsSpaceSeparatedSecretValue() {
+        // "mysql -p hunter2\n" → learn mysql, -p ; never hunter2.
+        XCTAssertEqual(committedTokens(Array("mysql -p hunter2\r".utf8)), ["mysql", "-p"])
+    }
+
+    func testTrackerDropsEqualsJoinedSecretToken() {
+        XCTAssertEqual(committedTokens(Array("curl --token=ghp_x\r".utf8)), ["curl"])
+    }
+
+    func testTrackerReachBackOverSecretForBigram() {
+        // "curl --token SECRET --header\n": the token AFTER the dropped secret
+        // (--header) must chain to --token, NOT to SECRET.
+        var t = InputTokenTracker()
+        let committed = t.observe(Array("curl --token SECRET --header\r".utf8))
+        // SECRET is absent…
+        XCTAssertEqual(committed.map(\.token), ["curl", "--token", "--header"])
+        // …and --header's `previous` reaches back over SECRET to --token.
+        let header = committed.first { $0.token == "--header" }
+        XCTAssertEqual(header?.previous, "--token")
+    }
+
+    func testTrackerDropsUserPassAtHost() {
+        XCTAssertEqual(committedTokens(Array("ssh alice:pw@host\r".utf8)), ["ssh"])
+    }
 }

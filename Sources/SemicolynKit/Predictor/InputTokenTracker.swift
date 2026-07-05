@@ -18,8 +18,15 @@ public struct CommittedToken: Equatable, Sendable {
 public struct InputTokenTracker: Equatable, Sendable {
     /// The token currently being typed (since the last delimiter).
     public private(set) var current: String = ""
-    /// The token immediately before `current` on this line (for bigram lookup).
+    /// The last committed (non-dropped) token on this line — the bigram predecessor
+    /// recorded in `CommittedToken.previous` and surfaced for prefix-suggestion.
     public private(set) var previous: String?
+    /// The most-recently-seen token (including dropped secrets) used only for the
+    /// `isSecretValueToken` predicate. Advancing this past a dropped secret prevents
+    /// the token AFTER the secret from being cascadingly dropped. NOT advanced on
+    /// L3-paste drops (paste content is wholesale suppressed — reaching back over
+    /// the preceding real token is the desired behaviour there).
+    private var secretCheckPrev: String?
     /// True while inside a bracketed paste (`ESC[200~`…`ESC[201~`): tokens are
     /// tracked for prefix context but never emitted/learned (L3).
     public private(set) var withinPaste = false
@@ -94,6 +101,7 @@ public struct InputTokenTracker: Equatable, Sendable {
             commitCurrent(into: &committed)
             current = ""
             previous = nil
+            secretCheckPrev = nil
             lineOptedOut = false
             sawLineStart = false
         case 0x7f, 0x08:                // backspace → pop one char
@@ -105,17 +113,30 @@ public struct InputTokenTracker: Equatable, Sendable {
         }
     }
 
-    /// Commit `current` as a token — UNLESS we're inside a paste, in which case the
-    /// token is dropped and does NOT advance `previous` (reach-back-over: a pasted
-    /// secret is invisible to both the learned stream and the bigram chain).
+    /// Commit `current` as a token — UNLESS we're inside a paste (L3) or the token
+    /// is a denylisted secret value (L4b), in which case the token is dropped and
+    /// does NOT advance `previous` (reach-back-over: the dropped token is invisible
+    /// to the learned stream and bigram chain). L4b additionally advances
+    /// `secretCheckPrev` to the dropped secret so the token AFTER it is not
+    /// cascadingly dropped by the flag→value rule.
     private mutating func commitCurrent(into committed: inout [CommittedToken]) {
         guard !current.isEmpty else { return }
+        // L3: inside a paste — drop; do NOT touch `previous` or `secretCheckPrev`.
         if withinPaste {
-            current = ""                // drop; do NOT touch `previous`
+            current = ""
+            return
+        }
+        // L4b: a denylisted secret value — drop, no `previous` advance (the next
+        // real token reaches back over the secret to `previous` for bigrams), but DO
+        // advance `secretCheckPrev` to prevent cascading drops on the next token.
+        if isSecretValueToken(current, precededBy: secretCheckPrev) {
+            secretCheckPrev = current
+            current = ""
             return
         }
         committed.append(CommittedToken(token: current, previous: previous))
         previous = current
+        secretCheckPrev = current
         current = ""
     }
 
@@ -123,13 +144,14 @@ public struct InputTokenTracker: Equatable, Sendable {
     private mutating func resetLineContext() {
         current = ""
         previous = nil
+        secretCheckPrev = nil
         lineOptedOut = false
         sawLineStart = false
     }
 
     /// Clear all context (e.g. a context/host switch).
     public mutating func reset() {
-        current = ""; previous = nil
+        current = ""; previous = nil; secretCheckPrev = nil
         withinPaste = false
         escapeBuffer = []
         lineOptedOut = false

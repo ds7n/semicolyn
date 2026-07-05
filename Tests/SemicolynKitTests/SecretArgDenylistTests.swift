@@ -51,4 +51,13 @@ final class SecretArgDenylistTests: XCTestCase {
         XCTAssertEqual(surviving(["x", "-p", "a"]), ["x", "-p"])
         XCTAssertEqual(surviving(["x", "-P", "a"]), ["x", "-P"])
     }
+
+    func testIncrementalSecretValuePredicate() {
+        XCTAssertTrue(isSecretValueToken("hunter2", precededBy: "-p"))
+        XCTAssertTrue(isSecretValueToken("--token=x", precededBy: "curl"))
+        XCTAssertTrue(isSecretValueToken("alice:pw@host", precededBy: "ssh"))
+        XCTAssertTrue(isSecretValueToken("sekret", precededBy: "Authorization:"))
+        XCTAssertFalse(isSecretValueToken("commit", precededBy: "git"))
+        XCTAssertFalse(isSecretValueToken("--token", precededBy: "curl"))   // the flag itself is not a value
+    }
 }
