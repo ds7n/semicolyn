@@ -732,6 +732,13 @@ final class ConnectionViewModel: ObservableObject {
         try? learnedStore.save(engine.state)
     }
 
+    /// Forget the most-recently-typed line's un-graduated tokens (surgical L7 tool).
+    /// Surfaced by the predictor strip's eraser. No-op when the predictor is off.
+    func forgetLastLine() {
+        engine?.forgetLastLine()
+        // Ephemeral drop — nothing to persist; suggestions refresh on next input.
+    }
+
     /// Build the session predictor unless incognito is on for this host.
     private func startPredictor(host: Host, defaults: Defaults) {
         guard !resolvePredictorIncognito(host: host, defaults: defaults) else {
@@ -782,9 +789,15 @@ final class ConnectionViewModel: ObservableObject {
         for b in bytes where b == 0x0d || b == 0x0a {
             DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(10)) { [weak self] in
                 guard let self else { return }
-                // Learn only if L1 confirms echo AND the line was not opted out (L4a).
-                if !optedOut, self.passwordDetector.shouldLearnCommittedLine() {
-                    for c in self.pendingLineTokens { self.engine?.record(c.token, after: c.previous) }
+                let echoConfirmed = self.passwordDetector.shouldLearnCommittedLine()
+                // Learn only if L1 confirms echo AND the line was not opted out (L4a); the
+                // engine still folds echo/opt-out/L5 into the L7 confidence tier.
+                if !optedOut, echoConfirmed {
+                    self.engine?.beginLine()
+                    for c in self.pendingLineTokens {
+                        self.engine?.record(c.token, after: c.previous,
+                                            echoConfirmed: echoConfirmed, optedOut: optedOut)
+                    }
                 }
                 self.pendingLineTokens.removeAll(keepingCapacity: true)
                 self.passwordDetector.resetLine()
