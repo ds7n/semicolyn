@@ -51,7 +51,7 @@ public struct PredictorEngine {
         // L6: defer until the token has recurred across N distinct contexts. `admit`
         // returns the occurrences to persist now (empty while deferred; the full
         // backfill on graduation; just this one once already graduated).
-        for occ in graduation.admit(token: token, previous: previous, count: count) {
+        for occ in graduation.admit(token: token, previous: previous, count: count, confidence: .high) {
             learned.unigram.record(occ.token, count: occ.count)
             if let prev = occ.previous, !filter.excludes(prev) {
                 learned.bigram.record(previous: prev, next: occ.token, count: occ.count)

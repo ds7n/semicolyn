@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
+/// The privacy confidence a token graduates with — decides whether its literal is
+/// persisted (high) or only its lossy frequency count (low). L6 hands this to L7.
+public enum LearnConfidence: Sendable, Equatable { case high, low }
+
 /// One occurrence to persist into the learned store when a token graduates (or,
 /// post-graduation, passes straight through). Mirrors the `record(token, count,
 /// after: previous)` shape the engine already uses.
@@ -8,8 +12,9 @@ public struct GraduatedOccurrence: Equatable, Hashable, Sendable {
     public let token: String
     public let previous: String?
     public let count: UInt32
-    public init(token: String, previous: String?, count: UInt32) {
-        self.token = token; self.previous = previous; self.count = count
+    public let confidence: LearnConfidence
+    public init(token: String, previous: String?, count: UInt32, confidence: LearnConfidence) {
+        self.token = token; self.previous = previous; self.count = count; self.confidence = confidence
     }
 }
 
@@ -43,9 +48,12 @@ public struct GraduationTier: Equatable, Sendable {
     /// Admit one observed occurrence. Returns the occurrences to persist NOW: empty
     /// while the token is still deferred; on the graduating call, every accumulated
     /// occurrence (backfill); post-graduation, just this occurrence.
-    public mutating func admit(token: String, previous: String?, count: UInt32) -> [GraduatedOccurrence] {
+    /// The passed `confidence` is stamped onto every returned occurrence (backfill
+    /// and passthrough alike) so L7 knows how to persist it.
+    public mutating func admit(token: String, previous: String?, count: UInt32,
+                               confidence: LearnConfidence) -> [GraduatedOccurrence] {
         if graduated.contains(token) {
-            return [GraduatedOccurrence(token: token, previous: previous, count: count)]
+            return [GraduatedOccurrence(token: token, previous: previous, count: count, confidence: confidence)]
         }
         if pending[token] == nil {
             evictIfNeeded()
@@ -62,7 +70,9 @@ public struct GraduationTier: Equatable, Sendable {
         let graduates = contexts.count >= threshold || (contexts[nil] ?? 0) >= UInt32(threshold)
         guard graduates else { return [] }
         // Graduate: flush the backfill, promote, drop from pending.
-        let flushed = contexts.map { GraduatedOccurrence(token: token, previous: $0.key, count: $0.value) }
+        let flushed = contexts.map {
+            GraduatedOccurrence(token: token, previous: $0.key, count: $0.value, confidence: confidence)
+        }
         graduated.insert(token)
         pending[token] = nil
         pendingOrder.removeAll { $0 == token }

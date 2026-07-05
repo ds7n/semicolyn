@@ -11,23 +11,23 @@ final class GraduationTierTests: XCTestCase {
     func testBelowThresholdDefers() {
         var t = GraduationTier(threshold: 3)
         // Two distinct contexts (< 3) → nothing graduates yet.
-        XCTAssertEqual(t.admit(token: "deploy", previous: "git", count: 1), [])
-        XCTAssertEqual(t.admit(token: "deploy", previous: "make", count: 1), [])
+        XCTAssertEqual(t.admit(token: "deploy", previous: "git", count: 1, confidence: .high), [])
+        XCTAssertEqual(t.admit(token: "deploy", previous: "make", count: 1, confidence: .high), [])
     }
 
     func testGraduatesOnNthDistinctContextWithBackfill() {
         var t = GraduationTier(threshold: 3)
-        _ = t.admit(token: "deploy", previous: "git", count: 1)     // ctx 1
-        _ = t.admit(token: "deploy", previous: "make", count: 2)    // ctx 2
+        _ = t.admit(token: "deploy", previous: "git", count: 1, confidence: .high)     // ctx 1
+        _ = t.admit(token: "deploy", previous: "make", count: 2, confidence: .high)    // ctx 2
         // ctx 3 → graduate; backfill ALL accumulated occurrences (incl. this one).
-        let flushed = t.admit(token: "deploy", previous: "npm", count: 1)
+        let flushed = t.admit(token: "deploy", previous: "npm", count: 1, confidence: .high)
         // Order-independent: assert the SET of occurrences.
         XCTAssertEqual(
             Set(flushed),
             Set([
-                GraduatedOccurrence(token: "deploy", previous: "git", count: 1),
-                GraduatedOccurrence(token: "deploy", previous: "make", count: 2),
-                GraduatedOccurrence(token: "deploy", previous: "npm", count: 1),
+                GraduatedOccurrence(token: "deploy", previous: "git", count: 1, confidence: .high),
+                GraduatedOccurrence(token: "deploy", previous: "make", count: 2, confidence: .high),
+                GraduatedOccurrence(token: "deploy", previous: "npm", count: 1, confidence: .high),
             ]))
     }
 
@@ -37,11 +37,11 @@ final class GraduationTierTests: XCTestCase {
         // after "git" twice (5+3) then two more distinct contexts to graduate → the
         // "git" backfill entry must carry the accumulated count 8.
         var t = GraduationTier(threshold: 3)
-        _ = t.admit(token: "deploy", previous: "git", count: 5)
-        _ = t.admit(token: "deploy", previous: "git", count: 3)   // same ctx → count 8, still 1 distinct
-        _ = t.admit(token: "deploy", previous: "make", count: 1)  // ctx 2
-        let flushed = t.admit(token: "deploy", previous: "npm", count: 1)   // ctx 3 → graduate
-        XCTAssertTrue(flushed.contains(GraduatedOccurrence(token: "deploy", previous: "git", count: 8)))
+        _ = t.admit(token: "deploy", previous: "git", count: 5, confidence: .high)
+        _ = t.admit(token: "deploy", previous: "git", count: 3, confidence: .high)   // same ctx → count 8, still 1 distinct
+        _ = t.admit(token: "deploy", previous: "make", count: 1, confidence: .high)  // ctx 2
+        let flushed = t.admit(token: "deploy", previous: "npm", count: 1, confidence: .high)   // ctx 3 → graduate
+        XCTAssertTrue(flushed.contains(GraduatedOccurrence(token: "deploy", previous: "git", count: 8, confidence: .high)))
     }
 
     func testSameNonNilContextReplayedDoesNotGraduate() {
@@ -49,67 +49,85 @@ final class GraduationTierTests: XCTestCase {
         // The SAME (token, NON-nil previous) three times = ONE distinct context and
         // nilCount stays 0 → defer. A password re-typed at the same `sudo` prompt
         // never graduates — the core secret-protection guarantee of L6.
-        XCTAssertEqual(t.admit(token: "pw", previous: "sudo", count: 1), [])
-        XCTAssertEqual(t.admit(token: "pw", previous: "sudo", count: 1), [])
-        XCTAssertEqual(t.admit(token: "pw", previous: "sudo", count: 1), [])
+        XCTAssertEqual(t.admit(token: "pw", previous: "sudo", count: 1, confidence: .high), [])
+        XCTAssertEqual(t.admit(token: "pw", previous: "sudo", count: 1, confidence: .high), [])
+        XCTAssertEqual(t.admit(token: "pw", previous: "sudo", count: 1, confidence: .high), [])
     }
 
     func testRepeatedStartOfLineGraduatesViaNilCount() {
         var t = GraduationTier(threshold: 3)
         // A bare command typed repeatedly at the prompt (all previous=nil): the
         // nilCount reaches N on the 3rd → graduate (utility for reused commands).
-        XCTAssertEqual(t.admit(token: "ls", previous: nil, count: 1), [])   // nilCount 1
-        XCTAssertEqual(t.admit(token: "ls", previous: nil, count: 1), [])   // nilCount 2
-        let flushed = t.admit(token: "ls", previous: nil, count: 1)         // nilCount 3 → graduate
+        XCTAssertEqual(t.admit(token: "ls", previous: nil, count: 1, confidence: .high), [])   // nilCount 1
+        XCTAssertEqual(t.admit(token: "ls", previous: nil, count: 1, confidence: .high), [])   // nilCount 2
+        let flushed = t.admit(token: "ls", previous: nil, count: 1, confidence: .high)         // nilCount 3 → graduate
         // Backfill is the single accumulated nil context with count 3.
-        XCTAssertEqual(flushed, [GraduatedOccurrence(token: "ls", previous: nil, count: 3)])
+        XCTAssertEqual(flushed, [GraduatedOccurrence(token: "ls", previous: nil, count: 3, confidence: .high)])
     }
 
     func testTwoStartOfLineOccurrencesDoNotGraduate() {
         var t = GraduationTier(threshold: 3)
         // Boundary N−1: two nil occurrences is below the nilCount threshold.
-        XCTAssertEqual(t.admit(token: "ls", previous: nil, count: 1), [])
-        XCTAssertEqual(t.admit(token: "ls", previous: nil, count: 1), [])   // nilCount 2 < 3
+        XCTAssertEqual(t.admit(token: "ls", previous: nil, count: 1, confidence: .high), [])
+        XCTAssertEqual(t.admit(token: "ls", previous: nil, count: 1, confidence: .high), [])   // nilCount 2 < 3
     }
 
     func testNilPreviousIsOneDistinctContext() {
         var t = GraduationTier(threshold: 3)
-        _ = t.admit(token: "ls", previous: nil, count: 1)           // ctx nil
-        _ = t.admit(token: "ls", previous: "then", count: 1)        // ctx "then"
-        let flushed = t.admit(token: "ls", previous: "also", count: 1)   // ctx "also" → graduate
+        _ = t.admit(token: "ls", previous: nil, count: 1, confidence: .high)           // ctx nil
+        _ = t.admit(token: "ls", previous: "then", count: 1, confidence: .high)        // ctx "then"
+        let flushed = t.admit(token: "ls", previous: "also", count: 1, confidence: .high)   // ctx "also" → graduate
         XCTAssertEqual(flushed.count, 3)
-        XCTAssertTrue(flushed.contains(GraduatedOccurrence(token: "ls", previous: nil, count: 1)))
+        XCTAssertTrue(flushed.contains(GraduatedOccurrence(token: "ls", previous: nil, count: 1, confidence: .high)))
     }
 
     func testAlreadyGraduatedRecordsDirectly() {
         var t = GraduationTier(threshold: 3)
-        _ = t.admit(token: "deploy", previous: "git", count: 1)
-        _ = t.admit(token: "deploy", previous: "make", count: 1)
-        _ = t.admit(token: "deploy", previous: "npm", count: 1)     // graduates
+        _ = t.admit(token: "deploy", previous: "git", count: 1, confidence: .high)
+        _ = t.admit(token: "deploy", previous: "make", count: 1, confidence: .high)
+        _ = t.admit(token: "deploy", previous: "npm", count: 1, confidence: .high)     // graduates
         // Post-graduation: each occurrence passes straight through, no backfill.
         XCTAssertEqual(
-            t.admit(token: "deploy", previous: "yarn", count: 5),
-            [GraduatedOccurrence(token: "deploy", previous: "yarn", count: 5)])
+            t.admit(token: "deploy", previous: "yarn", count: 5, confidence: .high),
+            [GraduatedOccurrence(token: "deploy", previous: "yarn", count: 5, confidence: .high)])
     }
 
     func testResetClearsEphemeralState() {
         var t = GraduationTier(threshold: 3)
-        _ = t.admit(token: "deploy", previous: "git", count: 1)
-        _ = t.admit(token: "deploy", previous: "make", count: 1)
+        _ = t.admit(token: "deploy", previous: "git", count: 1, confidence: .high)
+        _ = t.admit(token: "deploy", previous: "make", count: 1, confidence: .high)
         t.reset()
         // After reset, prior contexts are gone — the third distinct context alone
         // does NOT graduate (count restarts).
-        XCTAssertEqual(t.admit(token: "deploy", previous: "npm", count: 1), [])
+        XCTAssertEqual(t.admit(token: "deploy", previous: "npm", count: 1, confidence: .high), [])
     }
 
     func testBoundEvictsOldestPendingToken() {
         var t = GraduationTier(threshold: 3, maxTracked: 2)
-        _ = t.admit(token: "a", previous: "x", count: 1)   // pending {a}
-        _ = t.admit(token: "b", previous: "x", count: 1)   // pending {a,b}
-        _ = t.admit(token: "c", previous: "x", count: 1)   // inserts c → evicts a (oldest)
+        _ = t.admit(token: "a", previous: "x", count: 1, confidence: .high)   // pending {a}
+        _ = t.admit(token: "b", previous: "x", count: 1, confidence: .high)   // pending {a,b}
+        _ = t.admit(token: "c", previous: "x", count: 1, confidence: .high)   // inserts c → evicts a (oldest)
         // "a" was evicted: its single prior context is gone, so re-admitting two more
         // distinct contexts for "a" is only 2 → still defers (proves eviction happened).
-        _ = t.admit(token: "a", previous: "y", count: 1)   // a: {y}
-        XCTAssertEqual(t.admit(token: "a", previous: "z", count: 1), [])  // a: {y,z} = 2 < 3
+        _ = t.admit(token: "a", previous: "y", count: 1, confidence: .high)   // a: {y}
+        XCTAssertEqual(t.admit(token: "a", previous: "z", count: 1, confidence: .high), [])  // a: {y,z} = 2 < 3
+    }
+
+    func testAdmitStampsConfidenceOnGraduation() {
+        var tier = GraduationTier(threshold: 3)
+        // Three distinct contexts → graduates; every backfilled occurrence carries .low.
+        _ = tier.admit(token: "deploy", previous: "run", count: 1, confidence: .low)
+        _ = tier.admit(token: "deploy", previous: "make", count: 1, confidence: .low)
+        let flushed = tier.admit(token: "deploy", previous: "just", count: 1, confidence: .low)
+        XCTAssertEqual(flushed.count, 3)
+        XCTAssertTrue(flushed.allSatisfy { $0.confidence == .low })
+        XCTAssertEqual(Set(flushed.map(\.previous)), ["run", "make", "just"])
+    }
+
+    func testAdmitPostGraduationPassesThroughConfidence() {
+        var tier = GraduationTier(threshold: 1)
+        _ = tier.admit(token: "ls", previous: nil, count: 1, confidence: .high)  // graduates now
+        let after = tier.admit(token: "ls", previous: "sudo", count: 1, confidence: .high)
+        XCTAssertEqual(after, [GraduatedOccurrence(token: "ls", previous: "sudo", count: 1, confidence: .high)])
     }
 }
