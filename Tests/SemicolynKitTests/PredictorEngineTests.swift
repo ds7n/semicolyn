@@ -297,4 +297,31 @@ final class PredictorEngineTests: XCTestCase {
         XCTAssertTrue(engine.suggestions(forPrefix: "aabb").isEmpty,
                       "isPatternAdjacent must force low-confidence even when echoConfirmed:true and optedOut:false — the third signal in the derivation")
     }
+
+    // MARK: - Task 6: purgeLearned + forgetLastLine + beginLine
+
+    func testPurgeLearnedClearsUserStateKeepsSeed() {
+        // Seed provides "sshd"; learned provides "sshconfig".
+        var uni = Vocabulary(depth: 4, width: 1 << 14)
+        uni.record("sshd")
+        let seed = PredictorSeed(unigram: uni, bigram: BigramVocabulary())
+        var engine = PredictorEngine(learned: .empty, seed: seed)
+        for prev in ["a", "b", "c"] { engine.record("sshconfig", count: 2, after: prev, echoConfirmed: true) }
+        XCTAssertTrue(engine.suggestions(forPrefix: "ssh").contains("sshconfig"))  // precondition
+        engine.purgeLearned()
+        let after = engine.suggestions(forPrefix: "ssh")
+        XCTAssertFalse(after.contains("sshconfig"), "learned literal is gone after purge")
+        XCTAssertTrue(after.contains("sshd"), "bundled seed survives purge")
+    }
+
+    func testForgetLastLineOnEngineDropsPendingLine() {
+        var engine = PredictorEngine(learned: .empty, seed: nil)
+        engine.beginLine()
+        engine.record("hunter2pass", count: 1, after: "sudo", echoConfirmed: false)  // pending, not graduated
+        engine.forgetLastLine()
+        // Never graduated and now forgotten → still absent even after two more distinct contexts.
+        engine.record("hunter2pass", count: 1, after: "x", echoConfirmed: false)
+        engine.record("hunter2pass", count: 1, after: "y", echoConfirmed: false)
+        XCTAssertTrue(engine.suggestions(forPrefix: "hunter").isEmpty)
+    }
 }

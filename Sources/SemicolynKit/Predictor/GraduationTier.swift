@@ -31,12 +31,22 @@ public struct GraduatedOccurrence: Equatable, Hashable, Sendable {
 /// `maxTracked` (oldest-pending eviction) so a long/hostile session can't grow it
 /// unboundedly; eviction only ever DELAYS learning (safe).
 public struct GraduationTier: Equatable, Sendable {
+    /// One recorded admit within the current line — the unit `forgetLastLine` reverses.
+    private struct LineEntry: Equatable, Sendable {
+        let token: String
+        let previous: String?
+        let count: UInt32
+    }
+
     /// Tokens that have crossed the threshold — record directly, no deferral.
     private var graduated: Set<String> = []
     /// Un-graduated tokens → their distinct `previous` contexts → accumulated count.
     private var pending: [String: [String?: UInt32]] = [:]
     /// Insertion order of pending token keys, for oldest-first eviction.
     private var pendingOrder: [String] = []
+    /// Tokens admitted since the last `beginLine()`, newest line only — the unit
+    /// `forgetLastLine()` reverses. Bounded implicitly by a line's token count.
+    private var lastLineTokens: [LineEntry] = []
     private let threshold: Int
     private let maxTracked: Int
 
@@ -61,6 +71,7 @@ public struct GraduationTier: Equatable, Sendable {
             pendingOrder.append(token)
         }
         pending[token]![previous, default: 0] += count
+        lastLineTokens.append(LineEntry(token: token, previous: previous, count: count))
 
         let contexts = pending[token]!
         // Combined predicate: ≥N distinct preceding tokens, OR ≥N start-of-line
@@ -79,6 +90,30 @@ public struct GraduationTier: Equatable, Sendable {
         return flushed
     }
 
+    /// Mark a line boundary. The App calls this at each Enter, before recording the
+    /// line's tokens, so `lastLineTokens` captures exactly this line's admits.
+    public mutating func beginLine() { lastLineTokens.removeAll(keepingCapacity: true) }
+
+    /// Reverse the current line's still-pending increments (surgical forget-last-line).
+    /// Graduated tokens are untouched by design — they are in the persistent store and
+    /// not surgically reachable; L7 confidence tiering means a low-confidence one has
+    /// no literal to leak. Panic-purge is the fallback for graduated state.
+    public mutating func forgetLastLine() {
+        for entry in lastLineTokens {
+            guard var contexts = pending[entry.token] else { continue }  // graduated/evicted → skip
+            let cur = contexts[entry.previous] ?? 0
+            let reduced = cur - min(cur, entry.count)
+            if reduced == 0 { contexts[entry.previous] = nil } else { contexts[entry.previous] = reduced }
+            if contexts.isEmpty {
+                pending[entry.token] = nil
+                pendingOrder.removeAll { $0 == entry.token }
+            } else {
+                pending[entry.token] = contexts
+            }
+        }
+        lastLineTokens.removeAll(keepingCapacity: true)
+    }
+
     /// Clear all ephemeral state (context/incognito/host switch). Graduated tokens
     /// are also forgotten — this is a session-scoped tier; the persistent store holds
     /// what already graduated.
@@ -86,6 +121,7 @@ public struct GraduationTier: Equatable, Sendable {
         graduated.removeAll()
         pending.removeAll()
         pendingOrder.removeAll()
+        lastLineTokens.removeAll()
     }
 
     /// Evict the oldest pending token if at capacity, to bound memory. Only delays

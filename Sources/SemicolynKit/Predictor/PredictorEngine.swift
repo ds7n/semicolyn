@@ -77,6 +77,21 @@ public struct PredictorEngine {
         graduation.reset()
     }
 
+    /// Mark an input-line boundary for surgical forget-last-line (App calls at Enter).
+    public mutating func beginLine() { graduation.beginLine() }
+
+    /// Drop the current line's still-pending (un-graduated) tokens — the "oops, I just
+    /// typed a secret" tool. A clean ephemeral delete: no CMS decrement, no index surgery.
+    public mutating func forgetLastLine() { graduation.forgetLastLine() }
+
+    /// Wipe all user-derived learned state (persistent learned axes + ephemeral output
+    /// + L6 tier). The bundled seed is a `let` and is untouched. Panic-purge's Kit half.
+    public mutating func purgeLearned() {
+        learned = .empty
+        output.clear()
+        graduation.reset()
+    }
+
     /// Harvest tokens from command `output` so they surface as completions. Each
     /// whitespace-delimited token is privacy-filtered (an excluded token is
     /// harvested nowhere) before entering the ephemeral store.

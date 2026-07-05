@@ -130,4 +130,32 @@ final class GraduationTierTests: XCTestCase {
         let after = tier.admit(token: "ls", previous: "sudo", count: 1, confidence: .high)
         XCTAssertEqual(after, [GraduatedOccurrence(token: "ls", previous: "sudo", count: 1, confidence: .high)])
     }
+
+    // MARK: - forget-last-line (Task 6)
+
+    func testForgetLastLineReversesPendingContribution() {
+        var tier = GraduationTier(threshold: 3)
+        tier.beginLine()
+        _ = tier.admit(token: "passw0rd", previous: "sudo", count: 1, confidence: .low)
+        _ = tier.admit(token: "passw0rd", previous: "sudo", count: 1, confidence: .low)
+        tier.forgetLastLine()   // reverse this line's pending increments
+        // The token's pending count is gone → it must start from scratch to graduate.
+        tier.beginLine()
+        let a = tier.admit(token: "passw0rd", previous: "a", count: 1, confidence: .low)
+        let b = tier.admit(token: "passw0rd", previous: "b", count: 1, confidence: .low)
+        let c = tier.admit(token: "passw0rd", previous: "c", count: 1, confidence: .low)
+        XCTAssertTrue(a.isEmpty && b.isEmpty)
+        XCTAssertEqual(c.count, 3, "3 fresh distinct contexts graduate; the forgotten ones did not persist")
+    }
+
+    func testForgetLastLineDoesNotTouchGraduatedToken() {
+        var tier = GraduationTier(threshold: 1)
+        tier.beginLine()
+        let flushed = tier.admit(token: "ls", previous: nil, count: 1, confidence: .high)  // graduates now
+        XCTAssertEqual(flushed.count, 1)
+        tier.forgetLastLine()
+        // Already graduated → still graduated; a further admit passes straight through.
+        let after = tier.admit(token: "ls", previous: "x", count: 1, confidence: .high)
+        XCTAssertEqual(after, [GraduatedOccurrence(token: "ls", previous: "x", count: 1, confidence: .high)])
+    }
 }
