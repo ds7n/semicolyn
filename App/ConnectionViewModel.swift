@@ -95,6 +95,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Set when tmux crashed mid-session and we dropped to a raw shell on the same
     /// connection. The crash banner persists until the user acts.
     @Published var crashBanner: CrashBannerState?
+    /// DIAGNOSTIC (temporary, tmux blank-panes investigation): the latest one-line
+    /// summary of what the tmux runtime sees on attach. Rendered as a small overlay
+    /// in the connected view. Remove with the rest of the diagnostic once root-caused.
+    @Published var tmuxDiag: String?
     /// PaneID → live SwiftTerm view, populated by TmuxPaneContainer as panes appear.
     private var paneViews: [PaneID: TerminalView] = [:]
     /// PaneID → its last-seen OSC 0/2 title, so the window title can follow the active
@@ -298,6 +302,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     func setTmuxClientSize(cols: Int, rows: Int) { tmux?.setClientSize(cols: cols, rows: rows) }
 
     // MARK: - Teardown
+
+    /// User-initiated disconnect (the connected-state Disconnect button). Tears the
+    /// session down and flips `state` to `.idle` so the view can dismiss back to the
+    /// host list. Flushes the predictor first (teardown already does), so learning
+    /// survives an explicit disconnect just like a backgrounded one.
+    func disconnect() {
+        teardown()
+        state = .idle
+    }
 
     /// Reset all connection and pane state. Call at the start of each connect
     /// attempt so no stale handles or buffered bytes carry over to the new session.
@@ -658,6 +671,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.refreshFnAutoEngage()
         }
         runtime.onExit = { [weak self] reason in self?.state = .failed(reason ?? "tmux session ended") }
+        // DIAGNOSTIC (temporary): surface what the runtime sees on attach so a blank
+        // pane grid on device is self-explaining. Remove with the rest of the diag.
+        runtime.onDiagnostic = { [weak self] summary in self?.tmuxDiag = summary }
         let sink = TerminalShellOutput()
         sink.onBytes = { [weak runtime] bytes in runtime?.ingest(bytes) }
         sink.onExit = { [weak self, weak runtime] exit in

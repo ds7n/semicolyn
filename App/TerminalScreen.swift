@@ -44,6 +44,10 @@ struct TerminalScreen: UIViewRepresentable {
     func makeUIView(context: Context) -> TerminalView {
         let terminal = TerminalView(frame: .zero)
         terminal.terminalDelegate = context.coordinator
+        // Suppress SwiftTerm's built-in keyboard accessory bar — our own `KeybarView`
+        // is the single accessory row (mounted via `safeAreaInset`). Leaving both
+        // shows two stacked bars above the keyboard.
+        terminal.inputAccessoryView = nil
 
         // Apply terminal rendering preferences from settings.
         let s = context.coordinator.settings
