@@ -766,6 +766,12 @@ final class ConnectionViewModel: ObservableObject {
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
         }
+        // L4a: the tracker latches the just-committed line's opt-out at its Enter,
+        // so this is correct even when a leading-space line and its Enter arrive in
+        // ONE chunk (paste). (Per-chunk coarseness matches L1's: a chunk with two
+        // full lines of mixed opt-out applies the last line's verdict — a known v1
+        // limit, not a realistic paste-a-secret case.)
+        let optedOut = tracker.lastCommittedLineOptedOut
         let deadline = DispatchTime.now() + .milliseconds(40)
         if !scalars.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
@@ -776,7 +782,8 @@ final class ConnectionViewModel: ObservableObject {
         for b in bytes where b == 0x0d || b == 0x0a {
             DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(10)) { [weak self] in
                 guard let self else { return }
-                if self.passwordDetector.shouldLearnCommittedLine() {
+                // Learn only if L1 confirms echo AND the line was not opted out (L4a).
+                if !optedOut, self.passwordDetector.shouldLearnCommittedLine() {
                     for c in self.pendingLineTokens { self.engine?.record(c.token, after: c.previous) }
                 }
                 self.pendingLineTokens.removeAll(keepingCapacity: true)
