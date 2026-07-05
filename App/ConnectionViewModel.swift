@@ -30,7 +30,7 @@ enum SessionSheet: Identifiable {
 /// control mode or degrade to a raw-PTY shell.
 /// Retains the live `Connection`, `ShellSession`, and optionally `TmuxRuntime`.
 @MainActor
-final class ConnectionViewModel: ObservableObject {
+final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     enum State: Equatable {
         case idle
         case connecting
@@ -326,6 +326,11 @@ final class ConnectionViewModel: ObservableObject {
         output.onBytes = nil
         output.onHarvestBytes = nil
         engine = nil
+        // Deregister from the active-purge slot (the VM may be reused on reconnect
+        // without deallocating, so the weak ref alone isn't enough).
+        if AppStores.shared.activePredictorSession === self {
+            AppStores.shared.activePredictorSession = nil
+        }
         tracker.reset()
         passwordDetector.reset()          // clear echo/prompt state across sessions
         pendingLineTokens.removeAll()     // drop any un-flushed line tokens
@@ -739,26 +744,43 @@ final class ConnectionViewModel: ObservableObject {
         // Ephemeral drop — nothing to persist; suggestions refresh on next input.
     }
 
-    /// Panic-purge: wipe all user-derived predictor state now (live engine + disk).
-    ///
-    /// Resets the in-memory engine immediately so no further typed input is recorded
-    /// under the old learned state, then deletes the on-disk file so the next launch
-    /// starts from the bundled seed only. A stale engine write-back between the
-    /// engine reset and the file deletion is the only edge — acceptable for v1 (the
-    /// file is re-deleted on next purge and the next launch loads empty).
-    func panicPurge() {
+    /// `PredictorPurgeable`: reset the running engine to empty (seed preserved).
+    /// Called by `AppStores.purgePredictorLearned()` when THIS session is the active
+    /// one, so a panic-purge triggered from Settings — even mid-session — clears the
+    /// in-memory learned state before the on-disk store is deleted. No-op when the
+    /// predictor is off (incognito).
+    func purgeLearnedEngine() {
         engine?.purgeLearned()
+    }
+
+    /// Panic-purge: wipe all user-derived predictor state now (live engine + disk).
+    /// Delegates to the store, which resets this session's engine (via the
+    /// `activePredictorSession` registration) before deleting the file, so there is
+    /// no stale-write-back window.
+    ///
+    /// Reserved as an in-session call site (e.g. a session-UI purge button); today
+    /// `PrivacySettingsView` drives the purge through `AppStores` directly and the
+    /// registration handles the live engine, so this convenience wrapper has no
+    /// caller yet.
+    func panicPurge() {
         try? AppStores.shared.purgePredictorLearned()
     }
 
     /// Build the session predictor unless incognito is on for this host.
     private func startPredictor(host: Host, defaults: Defaults) {
         guard !resolvePredictorIncognito(host: host, defaults: defaults) else {
-            engine = nil; return
+            engine = nil
+            // Incognito: no engine to reset, so don't claim the active-purge slot.
+            if AppStores.shared.activePredictorSession === self {
+                AppStores.shared.activePredictorSession = nil
+            }
+            return
         }
         let store = AppStores.shared.predictorLearnedStore()
         learnedStore = store
         engine = PredictorEngine(learned: store.load(), seed: AppStores.shared.predictorSeed())
+        // Register as the session a Settings-triggered panic-purge should reset.
+        AppStores.shared.activePredictorSession = self
     }
 
     /// Fold outgoing bytes into the token tracker, learn committed tokens (unless
