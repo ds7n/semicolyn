@@ -476,7 +476,20 @@ Each phase is independently shippable and reduces risk on its own:
    (drop secret values, reach-back-over bigram via a split `previous`/`secretCheckPrev`
    to avoid cascading drops). Next: Phase 3 (L5 pattern extension + L6 graduation).
 3. **L5 pattern extension + L6 frequency graduation** — the format-agnostic catch-all;
-   L6 also unlocks forget-last-line.
+   L6 also unlocks forget-last-line. **IMPLEMENTED (Phase 3, plan
+   `docs/superpowers/plans/2026-07-05-predictor-secret-exclusion-phase3-pattern-graduation.md`):**
+   L5 = curated credential-format prefixes (AWS/Google/Stripe/Slack) + structural
+   JWT/PEM-private detection in `TokenFilter`. L6 = `GraduationTier` (pure, ephemeral,
+   never-persisted) gating `PredictorEngine.record`: a token graduates only when
+   `distinctContexts ≥ 3` OR `nilCount ≥ 3` (nil-special refinement — repeated
+   start-of-line commands graduate via nil count for utility; a prompt-secret with a
+   non-nil preceding word needs 3 *distinct* contexts, so a once/few-typed password
+   never graduates), with count backfill and a bounded tier. **L6 reset is currently
+   engine-lifecycle-covered** — every context switch (`teardown`, incognito, host
+   switch) nils-and-recreates the engine, giving a fresh empty tier by construction;
+   `PredictorEngine.resetGraduation()` exists (unit-tested) as the reset primitive for
+   a future engine-preserving switch, but has no live App call site today, so **Phase 3
+   is entirely pure Kit (no App-tier change)**. Next: Phase 4 (L7 storage + forget tools).
 4. **L7 confidence storage + forget-last-line + panic-purge** — the non-recoverable tier
    and the user-facing forget tools.
 5. **L2 mosh prediction-engine signal** — the vendored-mosh patch; strict upgrade on the
