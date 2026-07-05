@@ -40,6 +40,8 @@ struct SessionView: View {
     @State private var resolving = true
     /// Set when the user confirms an ssh:// link tap; drives a nested session cover.
     @State private var quickConnectHost: IdentifiableHost?
+    /// Drives the "Disconnect from <host>?" confirmation dialog.
+    @State private var confirmingDisconnect = false
 
     var body: some View {
         Group {
@@ -182,6 +184,35 @@ struct SessionView: View {
             } else {
                 statusView
             }
+        }
+        // Connected-state Disconnect affordance: a small top-trailing control (the
+        // connected view has no nav bar). Confirms before tearing down so a session
+        // isn't lost by an accidental tap. Shown only while a live shell is up.
+        .overlay(alignment: .topTrailing) {
+            if case .shell = vm.state {
+                Button {
+                    confirmingDisconnect = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color(theme.text.secondary))
+                        .padding(8)
+                        .accessibilityLabel("Disconnect")
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4).padding(.trailing, 6)
+            }
+        }
+        .confirmationDialog("Disconnect from \(host.label)?",
+                            isPresented: $confirmingDisconnect, titleVisibility: .visible) {
+            Button("Disconnect", role: .destructive) { vm.disconnect() }
+            Button("Cancel", role: .cancel) {}
+        }
+        // When a disconnect (or a terminal failure the user acknowledges) flips the
+        // session out of the shell, leave the session screen back to the host list.
+        .onChange(of: vm.state) { _, newState in
+            if case .idle = newState { dismiss() }
         }
         // Host-key prompt sheet — mirrors ConnectView exactly.
         // `onDismiss` fails closed: if the sheet is dismissed without an explicit

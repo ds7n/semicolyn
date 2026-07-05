@@ -299,6 +299,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     // MARK: - Teardown
 
+    /// User-initiated disconnect (the connected-state Disconnect button). Tears the
+    /// session down and flips `state` to `.idle` so the view can dismiss back to the
+    /// host list. Flushes the predictor first (teardown already does), so learning
+    /// survives an explicit disconnect just like a backgrounded one.
+    func disconnect() {
+        teardown()
+        state = .idle
+    }
+
     /// Reset all connection and pane state. Call at the start of each connect
     /// attempt so no stale handles or buffered bytes carry over to the new session.
     private func teardown() {
