@@ -25,8 +25,8 @@ final class PredictorEngineTests: XCTestCase {
 
     func testLearnedUnigramSuggested() {
         var e = engine()
-        for _ in 0..<3 { e.record("claude") }
-        for _ in 0..<2 { e.record("crayon") }   // ≥ confidenceFloor so both qualify
+        for _ in 0..<4 { e.record("claude") }   // 4 nil → graduates; higher count
+        for _ in 0..<3 { e.record("crayon") }   // 3 nil → graduates; claude (4) strictly outranks crayon (3)
         XCTAssertEqual(e.suggestions(forPrefix: "c"), ["claude", "crayon"])
     }
 
@@ -37,7 +37,7 @@ final class PredictorEngineTests: XCTestCase {
 
     func testSeedlessEngineStillSuggestsFromLearned() {
         var e = engine()   // no seed
-        for _ in 0..<2 { e.record("deploy") }
+        for _ in 0..<3 { e.record("deploy") }   // ≥ 3 nil → graduates
         XCTAssertEqual(e.suggestions(forPrefix: "d"), ["deploy"])
     }
 
@@ -45,8 +45,12 @@ final class PredictorEngineTests: XCTestCase {
 
     func testLearnedNextTokenSuggested() {
         var e = engine()
+        // Graduate both tokens via 3 nil occurrences first; then the after-"git"
+        // records persist directly (already graduated). Relative ranking preserved.
+        for _ in 0..<3 { e.record("status") }
         for _ in 0..<3 { e.record("status", after: "git") }
-        for _ in 0..<2 { e.record("commit", after: "git") }   // ≥ floor
+        for _ in 0..<3 { e.record("commit") }
+        for _ in 0..<2 { e.record("commit", after: "git") }   // ≥ floor; commit < status
         XCTAssertEqual(e.suggestions(forPrefix: "", after: "git"), ["status", "commit"])
     }
 
@@ -57,8 +61,10 @@ final class PredictorEngineTests: XCTestCase {
 
     func testLearnedNextTokenOutranksSeed() {
         // User's git→commit (3, ≥ floor) should appear; seed git→status fills.
+        // Graduate commit via 3 nil first, then record 3× after "git".
         var e = engine(seed: sampleSeed())
-        for _ in 0..<3 { e.record("commit", after: "git") }
+        for _ in 0..<3 { e.record("commit") }       // graduate via nil count
+        for _ in 0..<3 { e.record("commit", after: "git") }   // now persists directly
         XCTAssertEqual(e.suggestions(forPrefix: "", after: "git"), ["commit", "status"])
     }
 
@@ -66,7 +72,7 @@ final class PredictorEngineTests: XCTestCase {
         // An empty `previous` (start of line) must query the unigram axis, not a
         // dead bigram axis that would return nothing.
         var e = engine()
-        for _ in 0..<2 { e.record("deploy") }
+        for _ in 0..<3 { e.record("deploy") }   // ≥ 3 nil → graduates
         XCTAssertEqual(e.suggestions(forPrefix: "d", after: ""), ["deploy"])
     }
 
@@ -82,6 +88,9 @@ final class PredictorEngineTests: XCTestCase {
     func testExcludedPreviousSuppressesAdjacencyButNotUnigram() {
         var e = engine()
         // previous is excluded ("secret-token"); next ("deploy") is fine.
+        // Graduate deploy via 3 nil first so the unigram assertion holds; then record
+        // the excluded-previous contexts (adjacency still suppressed by filter).
+        for _ in 0..<3 { e.record("deploy") }
         for _ in 0..<2 { e.record("deploy", after: "secret-token") }
         XCTAssertEqual(e.suggestions(forPrefix: "d"), ["deploy"],
                        "the non-excluded next token is still a valid unigram")
@@ -100,7 +109,7 @@ final class PredictorEngineTests: XCTestCase {
 
     func testRolloverPreservesInWindowSuggestions() {
         var e = engine()
-        for _ in 0..<2 { e.record("deploy") }
+        for _ in 0..<3 { e.record("deploy") }   // ≥ 3 nil → graduates
         e.rollover()
         XCTAssertEqual(e.suggestions(forPrefix: "d"), ["deploy"],
                        "sealed-day learning still suggests within the window")
@@ -108,6 +117,8 @@ final class PredictorEngineTests: XCTestCase {
 
     func testStateExposesLearnedForPersistence() {
         var e = engine()
+        // Graduate "status" via 3 nil first so the git→status bigram persists into state.
+        for _ in 0..<3 { e.record("status") }
         e.record("status", after: "git")
         let state = e.state
         // The exposed state round-trips through the rolling stores' own query path.
@@ -133,7 +144,7 @@ final class PredictorEngineTests: XCTestCase {
 
     func testHarvestedAndLearnedMergeDeduped() {
         var e = engine(config: SuggestionConfig(topK: 3))
-        for _ in 0..<2 { e.record("stage") }
+        for _ in 0..<3 { e.record("stage") }   // ≥ 3 nil → graduates
         e.harvest(output: "stash-pop")
         let s = e.suggestions(forPrefix: "st")
         XCTAssertEqual(s, ["stash-pop", "stage"], "harvested leads, learned fills, no dup")
@@ -168,5 +179,64 @@ final class PredictorEngineTests: XCTestCase {
         XCTAssertEqual(e.suggestions(forPrefix: "eph"), ["ephemeral.tmp"])
         e.clearHarvest()
         XCTAssertEqual(e.suggestions(forPrefix: "eph"), [])
+    }
+
+    // MARK: - L6 frequency graduation through the engine
+
+    /// Build a seedless engine on an empty learned state.
+    private func freshEngine() -> PredictorEngine {
+        PredictorEngine(learned: .empty, seed: nil)
+    }
+
+    func testTokenNotLearnedBeforeThreeDistinctContexts() {
+        var e = freshEngine()
+        e.record("hunter2", after: "sudo")           // ctx 1 (one-off password)
+        // A single-context token must NOT be suggestable from the learned store.
+        // Prefix "hunter" should yield nothing learned (no seed, no harvest).
+        XCTAssertFalse(e.suggestions(forPrefix: "hunter", after: nil).contains("hunter2"))
+        XCTAssertFalse(e.suggestions(forPrefix: "hunter", after: "sudo").contains("hunter2"))
+    }
+
+    func testTokenLearnedAfterThreeDistinctContexts() {
+        var e = freshEngine()
+        e.record("deploy", after: "git")             // ctx 1
+        e.record("deploy", after: "make")            // ctx 2
+        e.record("deploy", after: "npm")             // ctx 3 → graduates
+        // Now "deploy" is in the learned unigram store and suggestable.
+        XCTAssertTrue(e.suggestions(forPrefix: "dep", after: nil).contains("deploy"))
+    }
+
+    func testGraduationBackfillsBigramContexts() {
+        var e = freshEngine()
+        // Give the "git" context count 2 so the backfilled bigram clears the
+        // confidenceFloor (default 2); the two other distinct contexts still drive
+        // graduation (3 distinct contexts: git, make, npm).
+        e.record("deploy", after: "git")             // ctx "git" (count 1)
+        e.record("deploy", after: "git")             // ctx "git" (count 2, still 1 distinct)
+        e.record("deploy", after: "make")            // ctx "make" (2 distinct)
+        e.record("deploy", after: "npm")             // ctx "npm" (3 distinct) → graduates, backfills all
+        // A backfilled bigram context at/above the floor is suggestable: after
+        // "git" (count 2), "deploy" ranks.
+        XCTAssertTrue(e.suggestions(forPrefix: "dep", after: "git").contains("deploy"))
+    }
+
+    func testFilterExcludedTokenNeverEntersTierOrStore() {
+        var e = freshEngine()
+        // ghp_ is L5-excluded → filtered at the top of record, never graduates even
+        // across many distinct contexts.
+        e.record("ghp_secretA", after: "a")
+        e.record("ghp_secretA", after: "b")
+        e.record("ghp_secretA", after: "c")
+        e.record("ghp_secretA", after: "d")
+        XCTAssertFalse(e.suggestions(forPrefix: "ghp", after: nil).contains("ghp_secretA"))
+    }
+
+    func testResetGraduationClearsDeferredCounts() {
+        var e = freshEngine()
+        e.record("deploy", after: "git")
+        e.record("deploy", after: "make")
+        e.resetGraduation()
+        e.record("deploy", after: "npm")             // only 1 context post-reset
+        XCTAssertFalse(e.suggestions(forPrefix: "dep", after: nil).contains("deploy"))
     }
 }

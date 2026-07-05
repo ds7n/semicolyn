@@ -30,27 +30,39 @@ public struct PredictorEngine {
         self.window = window
     }
 
+    /// L6 frequency-graduation tier — ephemeral, never persisted (not part of
+    /// `LearnedState`). Defers learning until a token recurs across N distinct
+    /// contexts, so a once-typed secret never enters the suggestable store.
+    private var graduation = GraduationTier()
+
     /// The current learned state, for the app to flush via ``LearnedStore``.
     public var state: LearnedState { learned }
-
-    // TODO(predictor): leading-space opt-out. Let users run a command without it
-    // being learned by prefixing the line with a space — the `HISTCONTROL=ignorespace`
-    // convention. Gate this UPSTREAM at input harvest (per command line, where the
-    // leading space and line boundary are observable), not here at the per-token API;
-    // the command still executes, it just isn't recorded. Decide whether to also
-    // suppress `harvest(output:)` for the ignored command. See predictor settings UX.
 
     /// Learn `count` occurrences of `token`, optionally as the successor of
     /// `previous`. Write-time privacy is applied here, once: an excluded `token` is
     /// learned nowhere; an excluded `previous` suppresses only the adjacency (the
     /// non-excluded `token` is still a unigram). The data simply isn't recorded, so
     /// reads never need to filter.
+    ///
+    /// L6: tokens are deferred until they recur across N distinct contexts; see
+    /// ``GraduationTier``.
     public mutating func record(_ token: String, count: UInt32 = 1, after previous: String? = nil) {
         guard !filter.excludes(token) else { return }
-        learned.unigram.record(token, count: count)
-        if let previous, !filter.excludes(previous) {
-            learned.bigram.record(previous: previous, next: token, count: count)
+        // L6: defer until the token has recurred across N distinct contexts. `admit`
+        // returns the occurrences to persist now (empty while deferred; the full
+        // backfill on graduation; just this one once already graduated).
+        for occ in graduation.admit(token: token, previous: previous, count: count) {
+            learned.unigram.record(occ.token, count: occ.count)
+            if let prev = occ.previous, !filter.excludes(prev) {
+                learned.bigram.record(previous: prev, next: occ.token, count: occ.count)
+            }
         }
+    }
+
+    /// Clear the ephemeral graduation tier (context/host switch / incognito). The
+    /// persistent learned store is untouched — only un-graduated deferrals are lost.
+    public mutating func resetGraduation() {
+        graduation.reset()
     }
 
     /// Harvest tokens from command `output` so they surface as completions. Each
