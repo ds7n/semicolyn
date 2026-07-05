@@ -176,4 +176,9 @@ final class TmuxCommandTests: XCTestCase {
         XCTAssertFalse(TmuxCommand.listPaneCommands().contains("\n"))
         XCTAssertFalse(TmuxCommand.listPaneCommands().contains("\r"))
     }
+
+    func testListWindowsForLayoutCommand() {
+        XCTAssertEqual(TmuxCommand.listWindowsForLayout(),
+                       "list-windows -F \"#{window_id} #{window_active} #{window_layout}\"")
+    }
 }
