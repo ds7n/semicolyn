@@ -763,12 +763,15 @@ final class ConnectionViewModel: ObservableObject {
         }
         let anchor = scalars.isEmpty ? nil : passwordDetector.currentCursor()
         passwordDetector.noteInput(bytes)
-        // L4a: snapshot the line opt-out BEFORE the tracker processes a line-ending
-        // Enter (which clears it), so the deferred flush sees the right value.
-        let optedOut = tracker.lineOptedOut
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
         }
+        // L4a: the tracker latches the just-committed line's opt-out at its Enter,
+        // so this is correct even when a leading-space line and its Enter arrive in
+        // ONE chunk (paste). (Per-chunk coarseness matches L1's: a chunk with two
+        // full lines of mixed opt-out applies the last line's verdict — a known v1
+        // limit, not a realistic paste-a-secret case.)
+        let optedOut = tracker.lastCommittedLineOptedOut
         let deadline = DispatchTime.now() + .milliseconds(40)
         if !scalars.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
