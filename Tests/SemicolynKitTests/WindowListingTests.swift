@@ -32,17 +32,47 @@ final class WindowListingTests: XCTestCase {
         XCTAssertEqual(parsed.map(\.id), [WindowID(raw: 2)])
     }
 
+    func testParseSkipsRowWithUnparseableLayout() {
+        // A row with a valid @N token and valid active flag but an unparseable layout
+        // string must be skipped. "not-a-valid-layout" has no comma so PaneLayout.parse
+        // returns nil at the first-comma guard.
+        XCTAssertNil(PaneLayout.parse("not-a-valid-layout"),
+                     "Precondition: layout string with no comma must parse as nil")
+        let rows = ["@9 1 not-a-valid-layout", "@2 1 abcd,80x24,0,0,0"]
+        let parsed = parseWindowListing(rows)
+        XCTAssertEqual(parsed.map(\.id), [WindowID(raw: 2)],
+                       "Bad-layout row must be skipped; only the valid row survives")
+    }
+
     func testWindowListingEventsSynthesizesAddLayoutAndActive() {
-        let win = ParsedWindow(id: WindowID(raw: 3), active: true,
-                               layout: PaneLayout.parse("abcd,80x24,0,0,0")!)
+        let layout = PaneLayout.parse("abcd,80x24,0,0,0")!
+        let win = ParsedWindow(id: WindowID(raw: 3), active: true, layout: layout)
         let events = windowListingEvents([win], sessionID: SessionID(raw: 0))
-        // A window-add + a layout-change for the window, and a session-window-changed
-        // to the active one.
+
+        // Exactly 3 events for one window: windowAdd + layoutChange + sessionWindowChanged.
+        XCTAssertEqual(events.count, 3,
+                       "Expected exactly 3 events for a single active window")
+
+        // windowAdd for the window.
         XCTAssertTrue(events.contains(.windowAdd(WindowID(raw: 3))))
-        XCTAssertTrue(events.contains(where: {
-            if case let .layoutChange(w, _, _, _) = $0 { return w == WindowID(raw: 3) }
+
+        // layoutChange carries layout == visible == the window's layout and flags == "".
+        let layoutChangeEvent = events.first(where: {
+            if case .layoutChange(WindowID(raw: 3), _, _, _) = $0 { return true }
             return false
-        }))
+        })
+        XCTAssertNotNil(layoutChangeEvent, "Expected a layoutChange event for @3")
+        if case let .layoutChange(wid, evtLayout, evtVisible, evtFlags) = layoutChangeEvent! {
+            XCTAssertEqual(wid, WindowID(raw: 3))
+            XCTAssertEqual(evtLayout, layout,
+                           "layoutChange.layout must equal the window's PaneLayout")
+            XCTAssertEqual(evtVisible, layout,
+                           "layoutChange.visible must equal the window's PaneLayout")
+            XCTAssertEqual(evtFlags, "",
+                           "layoutChange.flags must be empty string")
+        }
+
+        // sessionWindowChanged to the active window.
         XCTAssertTrue(events.contains(.sessionWindowChanged(SessionID(raw: 0), active: WindowID(raw: 3))))
     }
 }
