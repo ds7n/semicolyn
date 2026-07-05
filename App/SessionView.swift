@@ -209,6 +209,19 @@ struct SessionView: View {
             Button("Disconnect", role: .destructive) { vm.disconnect() }
             Button("Cancel", role: .cancel) {}
         }
+        // DIAGNOSTIC (temporary): show what the tmux runtime sees on attach, in ANY
+        // connected sub-branch (tmux OR the raw fallback), so a blank pane grid is
+        // self-explaining on device. Remove with the rest of the diagnostic.
+        .overlay(alignment: .top) {
+            if case .shell = vm.state, let diag = vm.tmuxDiag {
+                Text(diag)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.yellow)
+                    .padding(4)
+                    .background(Color.black.opacity(0.75))
+                    .padding(.top, 2)
+            }
+        }
         // When a disconnect (or a terminal failure the user acknowledges) flips the
         // session out of the shell, leave the session screen back to the host list.
         .onChange(of: vm.state) { _, newState in
