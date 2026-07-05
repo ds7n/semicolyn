@@ -31,6 +31,19 @@ final class GraduationTierTests: XCTestCase {
             ]))
     }
 
+    func testCountAccumulatesOnRepeatedNonNilContext() {
+        // A distinct non-nil context repeated accumulates its count (same code path
+        // as the nil accumulation, exercised here on the non-nil branch): "deploy"
+        // after "git" twice (5+3) then two more distinct contexts to graduate → the
+        // "git" backfill entry must carry the accumulated count 8.
+        var t = GraduationTier(threshold: 3)
+        _ = t.admit(token: "deploy", previous: "git", count: 5)
+        _ = t.admit(token: "deploy", previous: "git", count: 3)   // same ctx → count 8, still 1 distinct
+        _ = t.admit(token: "deploy", previous: "make", count: 1)  // ctx 2
+        let flushed = t.admit(token: "deploy", previous: "npm", count: 1)   // ctx 3 → graduate
+        XCTAssertTrue(flushed.contains(GraduatedOccurrence(token: "deploy", previous: "git", count: 8)))
+    }
+
     func testSameNonNilContextReplayedDoesNotGraduate() {
         var t = GraduationTier(threshold: 3)
         // The SAME (token, NON-nil previous) three times = ONE distinct context and
