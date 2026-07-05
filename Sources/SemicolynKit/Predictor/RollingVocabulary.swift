@@ -60,11 +60,13 @@ public struct RollingVocabulary: Equatable, Sendable {
         dailies = []
     }
 
-    /// Learn `count` occurrences of `token` into today's sketch. Ignored for an
-    /// empty token or zero count.
-    public mutating func record(_ token: String, count: UInt32 = 1) {
+    /// Learn `count` occurrences of `token` into today's sketch. When `storeLiteral`
+    /// is false (L7 low-confidence) the literal is withheld from the prefix index —
+    /// the count still contributes to frequency, but the token can never be surfaced
+    /// as a completion or reconstructed from disk. Ignored for empty token / zero count.
+    public mutating func record(_ token: String, count: UInt32 = 1, storeLiteral: Bool = true) {
         guard !token.isEmpty, count > 0 else { return }
-        index.insert(token)
+        if storeLiteral { index.insert(token) }
         today.add(token, count: count)
     }
 

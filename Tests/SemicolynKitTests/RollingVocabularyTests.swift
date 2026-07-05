@@ -141,6 +141,26 @@ final class RollingVocabularyTests: XCTestCase {
         XCTAssertNil(RollingVocabulary(deserializing: []))
     }
 
+    // MARK: storeLiteral split (L7 count-only)
+
+    func testRecordCountOnlyWithholdsLiteralFromIndex() {
+        var vocab = RollingVocabulary()
+        vocab.record("aws_secret_key_value", count: 2, storeLiteral: false)
+        // The count is present (frequency contributes)…
+        let source = vocab.learnedSource(window: .days30)
+        // …but the literal is NOT completable: prefix search returns nothing for it.
+        let matches = source.candidates(forPrefix: "aws_")
+        XCTAssertTrue(matches.isEmpty, "count-only token must never surface as a completion")
+    }
+
+    func testRecordWithLiteralStillCompletes() {
+        var vocab = RollingVocabulary()
+        vocab.record("awsconsole", count: 2, storeLiteral: true)
+        let matches = vocab.learnedSource(window: .days30).candidates(forPrefix: "aws")
+        XCTAssertEqual(matches.map(\.token), ["awsconsole"])
+        XCTAssertEqual(matches.first?.count, 2)
+    }
+
     func testDailyCountRetentionBoundary() {
         // BVA on the retention horizon (90): a hand-assembled blob with 90 dailies
         // is valid; 91 — more than any real pruned state holds — is rejected.

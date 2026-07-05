@@ -80,6 +80,12 @@ final class AppStores {
         LearnedStore(directory: baseDirectory.appendingPathComponent("predictor", isDirectory: true))
     }
 
+    /// Delete the persisted predictor learned store (panic-purge's disk half). The
+    /// bundled seed is separate and untouched. A missing file is not an error.
+    func purgePredictorLearned() throws {
+        try predictorLearnedStore().delete()
+    }
+
     /// The bundled/installed predictor seed, or nil if none is installed yet.
     func predictorSeed() -> PredictorSeed? {
         SeedStore(directory: baseDirectory.appendingPathComponent("predictor", isDirectory: true)).loadSeed()

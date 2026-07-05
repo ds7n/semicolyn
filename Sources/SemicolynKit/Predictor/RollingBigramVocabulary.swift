@@ -23,10 +23,11 @@ public struct RollingBigramVocabulary: Equatable, Sendable {
     /// Learn `count` occurrences of `next` following `previous` into today's
     /// sketch. Ignored when the pair is unrecordable
     /// (see ``BigramVocabulary/compositeKey(previous:next:)``) or `count` is zero.
-    public mutating func record(previous: String, next: String, count: UInt32 = 1) {
+    public mutating func record(previous: String, next: String, count: UInt32 = 1,
+                            storeLiteral: Bool = true) {
         guard count > 0,
               let key = BigramVocabulary.compositeKey(previous: previous, next: next) else { return }
-        rolling.record(key, count: count)
+        rolling.record(key, count: count, storeLiteral: storeLiteral)
     }
 
     /// Seal today into the rolling pre-aggregates and start a fresh day —

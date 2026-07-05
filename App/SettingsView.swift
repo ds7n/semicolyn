@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
 
-/// Top-level Settings, presented as a sheet from the host list. v1 surfaces one
-/// row — Appearance; it is the anchor for the future Settings tree (Security, App
-/// preferences, About & Help — see the settings-sub-screens spec).
+/// Top-level Settings, presented as a sheet from the host list. v1 surfaces two
+/// rows — Appearance and Privacy; it is the anchor for the future Settings tree
+/// (Security, App preferences, About & Help — see the settings-sub-screens spec).
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -15,6 +15,11 @@ struct SettingsView: View {
                     ThemePickerView()
                 } label: {
                     Label("Appearance", systemImage: "paintpalette")
+                }
+                NavigationLink {
+                    PrivacySettingsView()
+                } label: {
+                    Label("Privacy", systemImage: "hand.raised")
                 }
             }
             .navigationTitle("Settings")

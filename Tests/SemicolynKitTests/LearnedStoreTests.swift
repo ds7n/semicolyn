@@ -112,4 +112,26 @@ final class LearnedStoreTests: XCTestCase {
         loaded.unigram.rollover()                  // still works post-load
         XCTAssertEqual(uniCount(loaded, "git"), 5, "rollover must preserve in-window counts")
     }
+
+    // MARK: - Task 6: delete
+
+    func testDeleteThenLoadReturnsEmpty() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("phase4-del-\(UUID().uuidString)")
+        let store = LearnedStore(directory: dir)
+        var state = LearnedState.empty
+        state.unigram.record("persisted", count: 3)
+        try store.save(state)
+        XCTAssertFalse(store.load().unigram.learnedSource(window: .days30)
+            .candidates(forPrefix: "persist").isEmpty)  // precondition: saved
+        try store.delete()
+        XCTAssertTrue(store.load().unigram.learnedSource(window: .days30)
+            .candidates(forPrefix: "persist").isEmpty, "delete removes the persisted store")
+    }
+
+    func testDeleteMissingFileDoesNotThrow() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("phase4-nofile-\(UUID().uuidString)")
+        XCTAssertNoThrow(try LearnedStore(directory: dir).delete())  // idempotent
+    }
 }

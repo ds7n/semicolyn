@@ -81,4 +81,14 @@ public struct LearnedStore {
               let bigram = RollingBigramVocabulary(deserializing: bigramBlob) else { return .empty }
         return LearnedState(unigram: unigram, bigram: bigram)
     }
+
+    /// Delete the persisted learned store. Idempotent: a missing file is not an error
+    /// (panic-purge on a never-saved store must not throw). Other I/O errors propagate.
+    public func delete() throws {
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            return
+        }
+    }
 }
