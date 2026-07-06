@@ -7,7 +7,7 @@ import Foundation
 /// pinned seed, and the seed-deferring ranker. Holds no I/O — the app loads its
 /// inputs from ``SeedStore`` / ``LearnedStore`` and flushes `state` back. See
 /// `2026-06-21-predictor-engine-design`.
-public struct PredictorEngine {
+public struct PredictorEngine: Sendable {
     private var learned: LearnedState
     private let seed: PredictorSeed?
     /// Ephemeral output-token context (not persisted); leads suggestions.
