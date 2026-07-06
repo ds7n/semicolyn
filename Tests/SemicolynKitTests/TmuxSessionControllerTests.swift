@@ -164,6 +164,37 @@ final class TmuxSessionControllerTests: XCTestCase {
         XCTAssertFalse(out.lifecycleChanged)
     }
 
+    // MARK: attach-prime commands
+
+    func testFeedEmitsPrimeCommandsOnAttachEdgeOnce() {
+        let c = TmuxSessionController()
+        _ = c.start(sessionName: "semicolyn-a3f7c2e9")
+        // Before attach: a spontaneous result block arrives — no prime yet.
+        let pre = c.feed(bytes("%begin 1 0 1\n%end 1 0 1\n"))
+        XCTAssertTrue(pre.attachedPrimeCommands.isEmpty)
+        // The %session-changed that flips .attaching → .attached.
+        let atEdge = c.feed(bytes("%session-changed $7 semicolyn-a3f7c2e9\n"))
+        XCTAssertEqual(atEdge.attachedPrimeCommands,
+                       ["refresh-client -C 80x24",
+                        TmuxCommand.listWindowsForLayout()])
+        // A later feed does NOT re-emit the prime.
+        let after = c.feed(bytes("%window-add @0\n"))
+        XCTAssertTrue(after.attachedPrimeCommands.isEmpty)
+    }
+
+    // MARK: applyEvents
+
+    func testApplyEventsPopulatesWindowsAndLayout() {
+        let c = TmuxSessionController()
+        let win = ParsedWindow(id: WindowID(raw: 0), active: true,
+                               layout: PaneLayout.parse("abcd,80x24,0,0,0")!)
+        let changed = c.applyEvents(windowListingEvents([win], sessionID: SessionID(raw: 0)))
+        XCTAssertTrue(changed)
+        XCTAssertEqual(c.state.windows.count, 1)
+        XCTAssertEqual(c.state.activeWindow, WindowID(raw: 0))
+        XCTAssertNotNil(c.state.window(WindowID(raw: 0))?.visibleLayout)
+    }
+
     // MARK: helpers
 
     private func attachedController() -> TmuxSessionController {

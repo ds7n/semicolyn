@@ -38,12 +38,18 @@ public struct TmuxControllerOutput: Equatable, Sendable {
     public var resolved: [ResolvedCommand]
     /// Pane output decoded during this feed, in arrival order. Empty when none.
     public var paneOutput: [PaneOutputChunk]
+    /// Commands the runtime must send because this feed crossed
+    /// `.attaching → .attached`. Empty except on that one edge — fires once.
+    /// See the attach-layout-prime design.
+    public var attachedPrimeCommands: [String]
     public init(lifecycleChanged: Bool, stateChanged: Bool,
-                resolved: [ResolvedCommand], paneOutput: [PaneOutputChunk]) {
+                resolved: [ResolvedCommand], paneOutput: [PaneOutputChunk],
+                attachedPrimeCommands: [String] = []) {
         self.lifecycleChanged = lifecycleChanged
         self.stateChanged = stateChanged
         self.resolved = resolved
         self.paneOutput = paneOutput
+        self.attachedPrimeCommands = attachedPrimeCommands
     }
 }
 
@@ -121,12 +127,28 @@ public final class TmuxSessionController {
             state.apply(event)
         }
 
+        let justAttached = beforeLifecycle == .attaching && lifecycle == .attached
+        let prime = justAttached
+            ? ["refresh-client -C 80x24", TmuxCommand.listWindowsForLayout()]
+            : []
+
         return TmuxControllerOutput(
             lifecycleChanged: lifecycle != beforeLifecycle,
             stateChanged: state != beforeState,
             resolved: resolved,
-            paneOutput: paneOutput
+            paneOutput: paneOutput,
+            attachedPrimeCommands: prime
         )
+    }
+
+    /// Apply externally-synthesized events (e.g. from a `list-windows` reply parsed
+    /// by ``windowListingEvents(_:sessionID:)``) through the same `state.apply(_:)`
+    /// path `feed` uses. Returns true if any changed structural state. Used by the
+    /// runtime to populate windows when tmux emitted none on attach.
+    public func applyEvents(_ events: [ControlModeEvent]) -> Bool {
+        let before = state
+        for event in events { state.apply(event) }
+        return state != before
     }
 
     /// Advance the lifecycle for a non-result event: first `%session-changed`

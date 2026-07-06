@@ -98,6 +98,14 @@ public enum TmuxCommand {
         "list-panes -a -F \"#{pane_id} #{pane_current_command}\""
     }
 
+    /// `list-windows` formatted for attach-time layout discovery: each row is
+    /// `<window_id> <window_active> <window_layout>` (e.g. `@0 1 abcd,80x24,0,0,0`).
+    /// Parsed by ``parseWindowListing(_:)`` when `-CC` attaches to a session that
+    /// emitted no spontaneous `%window-add`/`%layout-change`.
+    public static func listWindowsForLayout() -> String {
+        "list-windows -F \"#{window_id} #{window_active} #{window_layout}\""
+    }
+
     /// Kill the session named `name`. Validates against the session-name charset
     /// `[A-Za-z0-9_-]` (`isValidTmuxSessionName`) and returns nil for anything else.
     /// Names are user-choosable (the configurable-session-name feature), so an
