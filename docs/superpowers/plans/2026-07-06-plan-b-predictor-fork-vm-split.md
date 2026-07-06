@@ -312,12 +312,25 @@ Verification (controller-coordinated, not local): macOS CI compiles `App`; on-de
       func record(_ tokens: [CommittedToken], echoConfirmed: Bool, optedOut: Bool)
       func suggestions(forPrefix prefix: String, after previous: String?) -> [String]
       func beginLine()
-      func snapshotState() -> LearnedState          // for persistence/purge
+      func harvest(output: String)                  // vocab accretion from terminal output
+      func snapshotState() -> LearnedState          // for persistence
       func purgeLearned()
       func forgetLastLine()
   }
   ```
-  The actor OWNS the `PredictorEngine` value (moved off `ConnectionViewModel`). The heavy consume (`record`, vocab update) and the `suggestions` computation run on the actor's executor, off the main actor. The `ConnectionViewModel` `await`s `suggestions(...)` then publishes on main. The grid-reading echo oracle (`passwordDetector`) stays on `ConnectionViewModel` (main actor) — the actor never touches the grid.
+  The actor OWNS the `PredictorEngine` value (moved off `ConnectionViewModel`). The heavy consume (`record`, vocab update, `harvest`) and the `suggestions` computation run on the actor's executor, off the main actor. The `ConnectionViewModel` `await`s `suggestions(...)` then publishes on main. The grid-reading echo oracle (`passwordDetector`) stays on `ConnectionViewModel` (main actor) — the actor never touches the grid.
+
+  **The engine has SIX call sites in `ConnectionViewModel`, ALL inside `[weak self]` closures on the `@MainActor` VM — every one becomes an `await` hop wrapped in `Task {}` (the closures are synchronous):**
+  1. `output.onHarvestBytes` (raw-shell, ~line 466): `self.engine?.harvest(output:)` → `Task { await self.predictor?.harvest(output:) }`
+  2. `runtime.onPaneBytes` (tmux pane, ~line 648): same `harvest` conversion
+  3. learn branch in `observePredictorInput` (~847-850): `engine?.beginLine()` + `engine?.record(...)` loop → one `Task { await predictor?.beginLine(); await predictor?.record(pendingLineTokens, echoConfirmed:optedOut:) }`
+  4. `refreshPredictorSuggestions` (~861): `engine.suggestions(...)` → `await predictor.suggestions(...)` (Step 2 code below)
+  5. `flushPredictorLearning` persist (~755-756): `guard let engine …; learnedStore.save(engine.state)` → `Task { guard let predictor …; let s = await predictor.snapshotState(); try? learnedStore.save(s) }`
+  6. purge/forget (~762, ~772): `engine?.forgetLastLine()` → `Task { await predictor?.forgetLastLine() }`; `engine?.purgeLearned()` → `Task { await predictor?.purgeLearned() }`
+
+  Plus init/teardown: `engine = nil` (~344, ~791) → `predictor = nil`; `engine = PredictorEngine(...)` (~800) → `predictor = PredictorActor(engine: PredictorEngine(...))`.
+
+  **`harvest` ordering note:** harvest fires per output chunk (high frequency). Each `Task { await … }` enqueues onto the actor's serial mailbox, preserving submission order; harvest is vocabulary accretion (order-insensitive across chunks), so the `Task` wrapping is safe. The learn branch (site 3) MUST keep `beginLine` before `record` in the SAME `Task` so they stay adjacent in the mailbox.
 
 - [ ] **Step 1: Create the actor**
 
@@ -354,6 +367,8 @@ actor PredictorActor {
         engine.suggestions(forPrefix: prefix, after: previous)
     }
 
+    func harvest(output: String) { engine.harvest(output: output) }
+
     func snapshotState() -> LearnedState { engine.state }
     func purgeLearned() { engine.purgeLearned() }
     func forgetLastLine() { engine.forgetLastLine() }
@@ -362,7 +377,25 @@ actor PredictorActor {
 
 - [ ] **Step 2: Route `ConnectionViewModel` through the actor**
 
-In `ConnectionViewModel`: replace the stored `private var engine: PredictorEngine?` with `private var predictor: PredictorActor?`. In `observePredictorInput`, the newline branch's `engine.beginLine()` + `engine.record(...)` loop becomes an `await predictor.record(pendingLineTokens, echoConfirmed:optedOut:)` (wrapped in a `Task`, since the surrounding `asyncAfter` closure is main-actor sync — hop into a `Task { await ... }`). `refreshPredictorSuggestions` becomes:
+Replace `private var engine: PredictorEngine?` with `private var predictor: PredictorActor?`. Convert ALL SIX call sites (enumerated in the Interfaces block) plus init/teardown. Exact conversions:
+
+- **init (~800):** `engine = PredictorEngine(learned: store.load(), seed: AppStores.shared.predictorSeed())` → `predictor = PredictorActor(engine: PredictorEngine(learned: store.load(), seed: AppStores.shared.predictorSeed()))`
+- **teardown (~344, ~791):** `engine = nil` → `predictor = nil`
+- **guard (~816):** `guard engine != nil else { return }` → `guard predictor != nil else { return }`
+- **harvest sites (~466, ~648):** `self.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))` → `let text = String(decoding: bytes, as: UTF8.self); Task { await self.predictor?.harvest(output: text) }`
+- **learn branch (~847-850):** replace the `self.engine?.beginLine()` + `for c in self.pendingLineTokens { self.engine?.record(...) }` loop with:
+  ```swift
+                    let toLearn = self.pendingLineTokens
+                    Task { [predictor = self.predictor] in
+                        await predictor?.beginLine()
+                        await predictor?.record(toLearn, echoConfirmed: echoConfirmed, optedOut: optedOut)
+                    }
+  ```
+- **persist (~755-756):** `guard let engine, let learnedStore else { return }; try? learnedStore.save(engine.state)` → `guard let predictor, let learnedStore else { return }; Task { let s = await predictor.snapshotState(); try? learnedStore.save(s) }`
+- **forget (~762):** `engine?.forgetLastLine()` → `Task { [predictor] in await predictor?.forgetLastLine() }`
+- **purge (~772):** `engine?.purgeLearned()` → `Task { [predictor] in await predictor?.purgeLearned() }`
+
+`refreshPredictorSuggestions` (site 4) becomes:
 
 ```swift
     private func refreshPredictorSuggestions() {
