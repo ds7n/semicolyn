@@ -47,6 +47,8 @@ final class TmuxRuntime {
     private var diagBytesTotal = 0
     /// In-flight context-poll submission ids awaiting their result block.
     private var contextPollIDs: Set<UInt64> = []
+    /// In-flight `list-windows` (attach-prime) submission ids awaiting their reply.
+    private var primeWindowIDs: Set<UInt64> = []
     /// The repeating poll task; cancelled on teardown via `stop()`.
     private var pollTask: Task<Void, Never>?
 
@@ -67,11 +69,30 @@ final class TmuxRuntime {
         let out = controller.feed(bytes)
         for chunk in out.paneOutput { onPaneBytes?(chunk.pane, chunk.data) }
         if out.stateChanged { onStateChanged?(controller.state) }
-        for resolved in out.resolved where contextPollIDs.remove(resolved.id) != nil {
-            if case .ok(let lines) = resolved.outcome {
-                let now = ProcessInfo.processInfo.systemUptime
-                if !contextStore.observe(parsePaneCommandListing(lines), at: now).isEmpty {
-                    onContextsChanged?()
+        // Attach-prime: on the .attaching→.attached edge the controller asks us to
+        // discover the current windows (tmux emits none spontaneously on attach to
+        // an existing session — the blank-panes bug). Send refresh-client (a nudge)
+        // + a tracked list-windows whose reply we parse below.
+        for cmd in out.attachedPrimeCommands {
+            if cmd == TmuxCommand.listWindowsForLayout() {
+                if let id = writeTracked(cmd) { primeWindowIDs.insert(id) }
+            } else {
+                write(cmd)
+            }
+        }
+        for resolved in out.resolved {
+            if contextPollIDs.remove(resolved.id) != nil {
+                if case .ok(let lines) = resolved.outcome {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    if !contextStore.observe(parsePaneCommandListing(lines), at: now).isEmpty {
+                        onContextsChanged?()
+                    }
+                }
+            } else if primeWindowIDs.remove(resolved.id) != nil {
+                if case .ok(let lines) = resolved.outcome {
+                    let events = windowListingEvents(parseWindowListing(lines),
+                                                     sessionID: controller.state.sessionID ?? SessionID(raw: 0))
+                    if controller.applyEvents(events) { onStateChanged?(controller.state) }
                 }
             }
         }
