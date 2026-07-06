@@ -61,6 +61,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Nil when the predictor is disabled for this session (incognito).
     private var predictor: PredictorActor?
     private var tracker = InputTokenTracker()
+    /// Trailing-debounce so a typing burst recomputes suggestions once, not per
+    /// keystroke (Plan B). The 40ms quiet window matches the L1 echo-settle hop.
+    private var refreshCoalescer = SuggestionRefreshCoalescer(quietWindow: 0.04)
     private var learnedStore: LearnedStore?
     /// Write-time gate keeping typed secrets out of the learned vocabulary
     /// (`observePredictorInput`). See `PasswordEntryDetector`. Lazily wires the
@@ -835,8 +838,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let deadline = DispatchTime.now() + .milliseconds(40)
         if !scalars.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
+                // Grid-read echo settle stays on the main actor; the suggestion
+                // recompute is handled by the coalesced trailing check below.
                 self?.passwordDetector.settleLine(scalars: scalars, from: anchor)
-                self?.refreshPredictorSuggestions()
             }
         }
         for b in bytes where b == 0x0d || b == 0x0a {
@@ -856,7 +860,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self.passwordDetector.resetLine()
             }
         }
-        refreshPredictorSuggestions()
+        // Coalesce: a typing burst recomputes suggestions once, not per keystroke.
+        // Record this request, then check `quietWindow` later — recompute only if no
+        // newer keystroke arrived in the meantime (trailing debounce). Scheduled just
+        // AFTER the 40ms echo-settle hop so the recompute reflects post-settle state.
+        refreshCoalescer.requestRefresh(at: Date().timeIntervalSinceReferenceDate)
+        DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(5)) { [weak self] in
+            guard let self else { return }
+            if self.refreshCoalescer.isDue(at: Date().timeIntervalSinceReferenceDate) {
+                self.refreshPredictorSuggestions()
+            }
+        }
     }
 
     private func refreshPredictorSuggestions() {
