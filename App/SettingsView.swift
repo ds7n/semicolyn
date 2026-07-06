@@ -21,6 +21,11 @@ struct SettingsView: View {
                 } label: {
                     Label("Privacy", systemImage: "hand.raised")
                 }
+                NavigationLink {
+                    DiagnosticsSettingsView()
+                } label: {
+                    Label("Diagnostics", systemImage: "ladybug")
+                }
             }
             .navigationTitle("Settings")
             .toolbar {
