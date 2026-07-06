@@ -195,6 +195,20 @@ final class TmuxSessionControllerTests: XCTestCase {
         XCTAssertNotNil(c.state.window(WindowID(raw: 0))?.visibleLayout)
     }
 
+    /// Reattach regression: the attach-time layout prime must set each window's
+    /// ACTIVE PANE (from its layout), not just the layout. Without it `activePane`
+    /// is nil, so `TmuxRuntime.sendInput` drops every keystroke (send-keys has no
+    /// target) — the "reattach, terminal renders, but typing does nothing" bug.
+    /// Layout "abcd,80x24,0,0,0" → single leaf PaneID(raw: 0).
+    func testApplyEventsSetsActivePaneFromLayout() {
+        let c = TmuxSessionController()
+        let win = ParsedWindow(id: WindowID(raw: 0), active: true,
+                               layout: PaneLayout.parse("abcd,80x24,0,0,0")!)
+        _ = c.applyEvents(windowListingEvents([win], sessionID: SessionID(raw: 0)))
+        XCTAssertEqual(c.state.window(WindowID(raw: 0))?.activePane, PaneID(raw: 0),
+                       "Reattach prime must set the active window's activePane to its layout's pane")
+    }
+
     // MARK: helpers
 
     private func attachedController() -> TmuxSessionController {

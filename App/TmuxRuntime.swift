@@ -67,6 +67,10 @@ final class TmuxRuntime {
     /// Feed raw channel bytes: fan pane output out by id, then publish state.
     func ingest(_ bytes: [UInt8]) {
         let out = controller.feed(bytes)
+        // Raw preview (control-mode is line text) so a `%error`/`can't find pane`
+        // reply to send-keys is visible. Printable ASCII only, capped.
+        let preview = String(decoding: bytes.prefix(80).map { (0x20...0x7e).contains($0) ? $0 : 0x2e }, as: UTF8.self)
+        DebugLog.shared.log("tmux rx[\(bytes.count)B] paneOut=\(out.paneOutput.count) resolved=\(out.resolved.count): \(preview)")
         for chunk in out.paneOutput { onPaneBytes?(chunk.pane, chunk.data) }
         if out.stateChanged { onStateChanged?(controller.state) }
         // Attach-prime: on the .attaching→.attached edge the controller asks us to
@@ -75,8 +79,10 @@ final class TmuxRuntime {
         // + a tracked list-windows whose reply we parse below.
         for cmd in out.attachedPrimeCommands {
             if cmd == TmuxCommand.listWindowsForLayout() {
-                if let id = writeTracked(cmd) { primeWindowIDs.insert(id) }
+                if let id = writeTracked(cmd) { primeWindowIDs.insert(id); DebugLog.shared.log("tmux prime: sent list-windows (req \(id))") }
+                else { DebugLog.shared.log("tmux prime: list-windows writeTracked returned NIL") }
             } else {
+                DebugLog.shared.log("tmux prime: sent \(cmd.prefix(40))")
                 write(cmd)
             }
         }
@@ -90,9 +96,14 @@ final class TmuxRuntime {
                 }
             } else if primeWindowIDs.remove(resolved.id) != nil {
                 if case .ok(let lines) = resolved.outcome {
-                    let events = windowListingEvents(parseWindowListing(lines),
+                    let parsed = parseWindowListing(lines)
+                    let events = windowListingEvents(parsed,
                                                      sessionID: controller.state.sessionID ?? SessionID(raw: 0))
-                    if controller.applyEvents(events) { onStateChanged?(controller.state) }
+                    let applied = controller.applyEvents(events)
+                    DebugLog.shared.log("tmux prime REPLY: lines=\(lines.count) parsedWindows=\(parsed.count) events=\(events.count) applied=\(applied) → wins now \(controller.state.windows.count)")
+                    if applied { onStateChanged?(controller.state) }
+                } else {
+                    DebugLog.shared.log("tmux prime REPLY: NOT .ok (list-windows errored)")
                 }
             }
         }
@@ -123,8 +134,12 @@ final class TmuxRuntime {
 
     /// Encode keystrokes as `send-keys` to the active pane and write to the channel.
     func sendInput(_ bytes: [UInt8]) {
-        guard let pane = activePane,
-              let line = TmuxCommand.sendKeys(target: pane, bytes: bytes) else { return }
+        guard let pane = activePane else {
+            DebugLog.shared.log("sendInput: NO activePane — dropping \(bytes.count)B")
+            return
+        }
+        guard let line = TmuxCommand.sendKeys(target: pane, bytes: bytes) else { return }
+        DebugLog.shared.log("send-keys → \(line)")
         write(line)
     }
 

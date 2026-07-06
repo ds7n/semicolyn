@@ -14,8 +14,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
     let register: (PaneID, TerminalView) -> Void
     /// Called when a pane disappears, so the VM drops its handle.
     let unregister: (PaneID) -> Void
-    /// Active-pane keystrokes/paste bytes → remote.
+    /// Active-pane keystrokes/paste bytes typed on the keyboard → remote, routed so
+    /// an armed keybar Ctrl/Alt/Shift applies (via `vm.terminalKeyboardInput`).
     let send: ([UInt8]) -> Void
+    /// Synthesized bytes (cursor-placement arrows) → remote RAW, bypassing the
+    /// armed-modifier routing (an armed Ctrl must not mangle a cursor-drag arrow).
+    var cursorSend: ([UInt8]) -> Void
     let theme: Theme
     /// Terminal rendering preferences (font, cursor, scrollback). Defaults from
     /// `AppStores.shared.terminalSettings.settings` at the call site.
@@ -31,7 +35,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
     var onSSHLink: ((URL) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
-        let c = Coordinator(send: send, theme: theme, settings: settings, osc52Allowed: osc52Allowed, onTitle: onTitle)
+        let c = Coordinator(send: send, cursorSend: cursorSend, theme: theme, settings: settings, osc52Allowed: osc52Allowed, onTitle: onTitle)
         c.onTmuxResize = onTmuxResize
         c.onSSHLink = onSSHLink
         return c
@@ -69,6 +73,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
     /// Bridges SwiftTerm input from whichever pane is active to the VM.
     final class Coordinator: NSObject, TerminalViewDelegate {
         private let send: ([UInt8]) -> Void
+        /// Raw send for synthesized cursor-drag arrows (bypasses armed modifiers).
+        private let cursorSend: ([UInt8]) -> Void
         /// Per-pane bell state machines keyed by the TerminalView identity.
         /// Using ObjectIdentifier allows weak-ref-free keying without PaneID exposure here.
         private var bellMachines: [ObjectIdentifier: BellStateMachine] = [:]
@@ -116,9 +122,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// to each pane `TerminalView` at creation time.
         let settings: TerminalSettings
 
-        init(send: @escaping ([UInt8]) -> Void, theme: Theme, settings: TerminalSettings,
+        init(send: @escaping ([UInt8]) -> Void, cursorSend: @escaping ([UInt8]) -> Void,
+             theme: Theme, settings: TerminalSettings,
              osc52Allowed: Bool = true, onTitle: ((TerminalView, String) -> Void)? = nil) {
             self.send = send
+            self.cursorSend = cursorSend
             self.settings = settings
             self.baseFontSize = settings.fontSize
             self.bellHaloColor = UIColor(Color(theme.bell.edge))
@@ -159,7 +167,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             pinchRecognizers[key] = pinch
 
             // Install cursor-placement drag (halo + halo-gated pan); enabled per-pane in apply().
-            let drag = CursorDragController(view: view, send: send)
+            let drag = CursorDragController(view: view, send: cursorSend)
             drag.configure(color: cursorHaloColor)
             drag.active = false
             drag.install()
@@ -391,7 +399,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
             // Create/position each pane; border the active one.
             for rect in rects {
+                let existed = panes[rect.pane] != nil
                 let view = panes[rect.pane] ?? {
+                    DebugLog.shared.log("pane \(rect.pane) CREATE TerminalView (reattach makes a fresh view)")
                     let t = TerminalView(frame: .zero)
                     t.terminalDelegate = coordinator
                     // Suppress SwiftTerm's built-in accessory bar — our `KeybarView`
@@ -410,7 +420,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 if isActive {
                     view.layer.borderColor = activeBorderColor.cgColor
                     view.layer.borderWidth = 1.5
-                    if !view.isFirstResponder { view.becomeFirstResponder() }
+                    if !view.isFirstResponder {
+                        let ok = view.becomeFirstResponder()
+                        DebugLog.shared.log("pane \(rect.pane) ACTIVE existed=\(existed) inWindow=\(view.window != nil) becomeFirstResponder→\(ok) isFR=\(view.isFirstResponder)")
+                    } else {
+                        DebugLog.shared.log("pane \(rect.pane) ACTIVE already firstResponder")
+                    }
                 } else {
                     view.layer.borderColor = inactiveBorderColor.cgColor
                     view.layer.borderWidth = 0.5

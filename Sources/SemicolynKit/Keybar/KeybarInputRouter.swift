@@ -46,6 +46,27 @@ public final class KeybarInputRouter {
         send(bytes)
     }
 
+    /// Bytes typed on the terminal keyboard (SwiftTerm delegate). When a keybar
+    /// modifier is armed and the input is exactly one printable ASCII byte
+    /// (0x20–0x7e), re-encode it through the armed modifiers (e.g. armed Ctrl + 'a'
+    /// → 0x01) and consume one-shot arms — so the keybar's Ctrl/Alt/Shift apply to
+    /// real keyboard keys, not just keys pressed on the keybar. Anything else
+    /// (multi-byte sequences: arrows, paste, already-encoded control bytes) passes
+    /// through untouched and does not consume the arm.
+    public func keyboardInput(_ bytes: [UInt8]) {
+        guard state.hasArmedModifier,
+              bytes.count == 1, let b = bytes.first, (0x20...0x7e).contains(b),
+              let scalar = Unicode.Scalar(UInt32(b)) else {
+            send(bytes)
+            return
+        }
+        let encoded = encodeKey(.char(Character(scalar)), modifiers: state.current(),
+                                applicationCursorKeys: applicationCursorKeys())
+        send(encoded)
+        state.consumeAfterKeystroke()
+        onModifierChange?()
+    }
+
     private func fire(_ key: KeyInput) {
         let bytes = encodeKey(key, modifiers: state.current(),
                               applicationCursorKeys: applicationCursorKeys())

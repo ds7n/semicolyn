@@ -16,6 +16,49 @@ final class KeybarInputRouterTests: XCTestCase {
         return (router, spy)
     }
 
+    // MARK: keyboardInput — armed keybar modifiers applied to chars typed on the
+    // SwiftTerm/iOS keyboard (device bug: armed Ctrl then typing 'a' sent plain 'a').
+
+    func testKeyboardInputAppliesArmedCtrlToSingleChar() {
+        let (r, spy) = make()
+        r.tapCtrl()
+        r.keyboardInput([0x61])                          // user types 'a' on the keyboard
+        XCTAssertEqual(spy.sent, [[0x01]], "armed Ctrl must turn 'a' into 0x01")
+    }
+
+    func testKeyboardInputConsumesArmAfterOneChar() {
+        let (r, spy) = make()
+        r.tapCtrl()
+        r.keyboardInput([0x61])                          // Ctrl+A → 0x01
+        r.keyboardInput([0x62])                          // next char plain 'b'
+        XCTAssertEqual(spy.sent, [[0x01], [0x62]], "one-shot Ctrl clears after one keyboard char")
+    }
+
+    func testKeyboardInputPassesThroughWhenNoModifierArmed() {
+        let (r, spy) = make()
+        r.keyboardInput([0x61])                          // no modifier → raw
+        XCTAssertEqual(spy.sent, [[0x61]])
+    }
+
+    func testKeyboardInputPassesMultiByteSequenceUntouchedEvenWhenArmed() {
+        let (r, spy) = make()
+        r.tapCtrl()
+        // An escape sequence (e.g. an arrow already encoded by SwiftTerm) must NOT be
+        // re-encoded; it passes through and does NOT consume the arm.
+        r.keyboardInput([0x1b, 0x5b, 0x41])              // ESC [ A
+        XCTAssertEqual(spy.sent, [[0x1b, 0x5b, 0x41]])
+        // Arm still active for the next single char.
+        r.keyboardInput([0x61])
+        XCTAssertEqual(spy.sent.last, [0x01], "arm survived the multi-byte passthrough")
+    }
+
+    func testKeyboardInputLockedCtrlAppliesToMultipleKeyboardChars() {
+        let (r, spy) = make()
+        r.doubleTapCtrl()
+        r.keyboardInput([0x78]); r.keyboardInput([0x73])  // Ctrl+X, Ctrl+S — lock persists
+        XCTAssertEqual(spy.sent, [[0x18], [0x13]])
+    }
+
     func testArmedCtrlAppliesToNextSymbolThenClears() {
         let (r, spy) = make()
         r.tapCtrl()
