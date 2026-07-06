@@ -13,6 +13,8 @@ struct TerminalScreen: UIViewRepresentable {
     /// Called with raw keystroke/paste bytes. In tmux mode this routes through
     /// `TmuxRuntime.sendInput`; in raw-PTY mode it writes directly to the channel.
     let send: ([UInt8]) -> Void
+    /// Raw send for synthesized cursor-drag arrows (bypasses armed-modifier routing).
+    var cursorSend: ([UInt8]) -> Void
     let output: TerminalShellOutput
     /// The live session is retained here for resize notifications only.
     let session: ShellSession?
@@ -75,7 +77,7 @@ struct TerminalScreen: UIViewRepresentable {
         terminal.addGestureRecognizer(pinch)
 
         // Install cursor-placement drag (faint halo + halo-gated pan synthesizing arrow keys).
-        let cursorDrag = CursorDragController(view: terminal, send: send)
+        let cursorDrag = CursorDragController(view: terminal, send: cursorSend)
         cursorDrag.configure(color: UIColor(Color(theme.accent.primary)))
         cursorDrag.install()
         context.coordinator.cursorDrag = cursorDrag

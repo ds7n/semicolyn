@@ -49,12 +49,17 @@ final class WindowListingTests: XCTestCase {
         let win = ParsedWindow(id: WindowID(raw: 3), active: true, layout: layout)
         let events = windowListingEvents([win], sessionID: SessionID(raw: 0))
 
-        // Exactly 3 events for one window: windowAdd + layoutChange + sessionWindowChanged.
-        XCTAssertEqual(events.count, 3,
-                       "Expected exactly 3 events for a single active window")
+        // Exactly 4 events for one active window: windowAdd + layoutChange +
+        // windowPaneChanged (active pane from layout) + sessionWindowChanged.
+        XCTAssertEqual(events.count, 4,
+                       "Expected exactly 4 events for a single active window")
 
         // windowAdd for the window.
         XCTAssertTrue(events.contains(.windowAdd(WindowID(raw: 3))))
+
+        // windowPaneChanged sets the active pane from the layout (single leaf → PaneID 0).
+        XCTAssertTrue(events.contains(.windowPaneChanged(WindowID(raw: 3), active: PaneID(raw: 0))),
+                      "Expected a windowPaneChanged setting the active pane from the layout")
 
         // layoutChange carries layout == visible == the window's layout and flags == "".
         let layoutChangeEvent = events.first(where: {

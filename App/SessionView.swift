@@ -42,6 +42,10 @@ struct SessionView: View {
     @State private var quickConnectHost: IdentifiableHost?
     /// Drives the "Disconnect from <host>?" confirmation dialog.
     @State private var confirmingDisconnect = false
+    /// Whether the debug log panel is enabled (Settings → Diagnostics; off by default).
+    @AppStorage(DiagnosticsSettingsView.showDebugPanelKey) private var diagnosticsPanelEnabled = false
+    /// Transient: whether the panel is currently expanded (only meaningful when enabled).
+    @State private var showDebugPanel = false
 
     var body: some View {
         Group {
@@ -54,7 +58,8 @@ struct SessionView: View {
                             state: tmuxState,
                             register: { vm.registerPane($0, $1) },
                             unregister: { vm.unregisterPane($0) },
-                            send: { vm.sendTerminalInput($0) },
+                            send: { vm.terminalKeyboardInput($0) },
+                            cursorSend: { vm.sendTerminalInput($0) },
                             theme: theme,
                             settings: AppStores.shared.terminalSettings.settings,
                             osc52Allowed: vm.osc52Allowed,
@@ -111,7 +116,8 @@ struct SessionView: View {
                         .background(Color(theme.surface.panel).ignoresSafeArea(edges: .bottom))
                     }
                 } else {
-                    TerminalScreen(send: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
+                    TerminalScreen(send: { [weak vm] bytes in vm?.terminalKeyboardInput(bytes) },
+                                   cursorSend: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
                                    output: vm.output,
                                    session: vm.session,
                                    // Mosh has no ShellSession, so its debounced resize routes
@@ -209,17 +215,26 @@ struct SessionView: View {
             Button("Disconnect", role: .destructive) { vm.disconnect() }
             Button("Cancel", role: .cancel) {}
         }
-        // DIAGNOSTIC (temporary): show what the tmux runtime sees on attach, in ANY
-        // connected sub-branch (tmux OR the raw fallback), so a blank pane grid is
-        // self-explaining on device. Remove with the rest of the diagnostic.
+        // DIAGNOSTIC: a 🐞 toggle (top-leading) opens a scrollable debug log panel
+        // with Copy/Clear, capturing the connection/tmux/input-routing trace. Gated
+        // behind Settings → Diagnostics → "Show debug log panel" (off by default).
+        .overlay(alignment: .topLeading) {
+            if case .shell = vm.state, diagnosticsPanelEnabled {
+                Button { showDebugPanel.toggle() } label: {
+                    Image(systemName: "ladybug.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.green)
+                        .padding(6)
+                        .background(Color.black.opacity(0.6), in: Circle())
+                }
+                .padding(.leading, 6).padding(.top, 2)
+            }
+        }
         .overlay(alignment: .top) {
-            if case .shell = vm.state, let diag = vm.tmuxDiag {
-                Text(diag)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.yellow)
-                    .padding(4)
-                    .background(Color.black.opacity(0.75))
-                    .padding(.top, 2)
+            if showDebugPanel {
+                DebugLogPanel(onClose: { showDebugPanel = false })
+                    .padding(.top, 40)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         // When a disconnect (or a terminal failure the user acknowledges) flips the

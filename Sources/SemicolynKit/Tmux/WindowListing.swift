@@ -39,6 +39,14 @@ public func windowListingEvents(_ windows: [ParsedWindow], sessionID: SessionID)
     for w in windows {
         events.append(.windowAdd(w.id))
         events.append(.layoutChange(w.id, layout: w.layout, visible: w.layout, flags: ""))
+        // Set the window's active pane from its layout. `list-windows` (unlike a live
+        // `%window-pane-changed`) carries no active-pane marker, so we default to the
+        // layout's first leaf. Without this `activePane` stays nil and
+        // `TmuxRuntime.sendInput` drops every keystroke on a reattached session
+        // (send-keys has no target). tmux corrects it via a real event on next focus.
+        if let firstPane = w.layout.panes.first?.pane {
+            events.append(.windowPaneChanged(w.id, active: firstPane))
+        }
         if w.active { active = w.id }
     }
     if let active { events.append(.sessionWindowChanged(sessionID, active: active)) }
