@@ -56,11 +56,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Per-pane engaged context (process name) for the keybar (Phase 4). Empty in
     /// raw-PTY mode. Re-derived from the runtime whenever a poll changes a pane.
     @Published private(set) var paneContexts: [PaneID: String] = [:]
-    /// Top-K predictor chips for the current input token (empty → strip hidden).
-    @Published private(set) var predictorSuggestions: [String] = []
+    /// Predictor-strip suggestion state, split into its own observable slice so a
+    /// suggestion recompute invalidates only the predictor-strip views (Plan B §B1).
+    let predictorVM = PredictorViewModel()
     /// Nil when the predictor is disabled for this session (incognito).
-    private var engine: PredictorEngine?
+    private var predictor: PredictorActor?
     private var tracker = InputTokenTracker()
+    /// Trailing-debounce so a typing burst recomputes suggestions once, not per
+    /// keystroke (Plan B). The 40ms quiet window matches the L1 echo-settle hop.
+    private var refreshCoalescer = SuggestionRefreshCoalescer(quietWindow: 0.04)
     private var learnedStore: LearnedStore?
     /// Write-time gate keeping typed secrets out of the learned vocabulary
     /// (`observePredictorInput`). See `PasswordEntryDetector`. Lazily wires the
@@ -177,7 +181,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Route terminal keystrokes: through tmux `send-keys` when control mode is
     /// attached, else straight to the raw-PTY channel.
     func sendTerminalInput(_ bytes: [UInt8]) {
-        observePredictorInput(bytes)
+        // The keystroke is sacred: write to the transport BEFORE any predictor work,
+        // so send latency is independent of predictor cost (Plan B). The signpost
+        // interval brackets only the write, so Instruments can confirm that.
+        let signpost = PerfSignposts.input.beginInterval("send")
         if let moshSession {
             moshSession.writeInput(Data(bytes))
         } else if let tmux {
@@ -185,6 +192,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         } else {
             rawWriter?.enqueue(bytes)
         }
+        PerfSignposts.input.endInterval("send", signpost)
+        observePredictorInput(bytes)
     }
 
     /// DECCKM (application-cursor-keys) state of the active pane's terminal, or
@@ -335,11 +344,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         renderablePanes.removeAll()
         flushPredictor()
         // Drop the render + harvest closures so late bytes from the old session
-        // can't feed a torn-down terminal view or a cleared engine. Both are
+        // can't feed a torn-down terminal view or a cleared predictor. Both are
         // re-installed when the next shell opens.
         output.onBytes = nil
         output.onHarvestBytes = nil
-        engine = nil
+        predictor = nil
         // Deregister from the active-purge slot (the VM may be reused on reconnect
         // without deallocating, so the weak ref alone isn't enough).
         if AppStores.shared.activePredictorSession === self {
@@ -348,7 +357,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tracker.reset()
         passwordDetector.reset()          // clear echo/prompt state across sessions
         pendingLineTokens.removeAll()     // drop any un-flushed line tokens
-        predictorSuggestions = []
+        predictorVM.setSuggestions([])
     }
 
     // MARK: - Auth
@@ -461,7 +470,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // Feed the output stream to the password gate (echo inference +
             // prompt-text) so it can classify the next typed line.
             self.passwordDetector.noteOutput(bytes)
-            self.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
+            let harvestText = String(decoding: bytes, as: UTF8.self)
+            Task { [predictor = self.predictor] in await predictor?.harvest(output: harvestText) }
         }
         state = .shell
     }
@@ -643,7 +653,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // Harvest pane output for the predictor — visible panes only (a live
             // view or pending registration), not filtered by active pane.
             self.passwordDetector.noteOutput(bytes)
-            self.engine?.harvest(output: String(decoding: bytes, as: UTF8.self))
+            let harvestText = String(decoding: bytes, as: UTF8.self)
+            Task { [predictor = self.predictor] in await predictor?.harvest(output: harvestText) }
         }
         runtime.onStateChanged = { [weak self] state in
             guard let self else { return }
@@ -748,16 +759,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// safe to call repeatedly; a no-op when the predictor is disabled (incognito)
     /// or no learned store is attached. Called from `teardown()` and on
     /// app-background (`scenePhase`) so learning survives a backgrounded or killed
-    /// app — previously only a clean teardown flushed.
+    /// app — previously only a clean teardown flushed. The snapshot+save now runs on
+    /// a detached `Task` (the engine lives behind `PredictorActor`); the actor
+    /// reference is captured before any subsequent `predictor = nil`, so the flush
+    /// completes against the correct engine even as teardown proceeds.
     func flushPredictor() {
-        guard let engine, let learnedStore else { return }
-        try? learnedStore.save(engine.state)
+        guard let predictor, let learnedStore else { return }
+        Task { let s = await predictor.snapshotState(); try? learnedStore.save(s) }
     }
 
     /// Forget the most-recently-typed line's un-graduated tokens (surgical L7 tool).
     /// Surfaced by the predictor strip's eraser. No-op when the predictor is off.
     func forgetLastLine() {
-        engine?.forgetLastLine()
+        Task { [predictor] in await predictor?.forgetLastLine() }
         // Ephemeral drop — nothing to persist; suggestions refresh on next input.
     }
 
@@ -767,7 +781,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// in-memory learned state before the on-disk store is deleted. No-op when the
     /// predictor is off (incognito).
     func purgeLearnedEngine() {
-        engine?.purgeLearned()
+        Task { [predictor] in await predictor?.purgeLearned() }
     }
 
     /// Panic-purge: wipe all user-derived predictor state now (live engine + disk).
@@ -786,7 +800,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Build the session predictor unless incognito is on for this host.
     private func startPredictor(host: Host, defaults: Defaults) {
         guard !resolvePredictorIncognito(host: host, defaults: defaults) else {
-            engine = nil
+            predictor = nil
             // Incognito: no engine to reset, so don't claim the active-purge slot.
             if AppStores.shared.activePredictorSession === self {
                 AppStores.shared.activePredictorSession = nil
@@ -795,7 +809,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         let store = AppStores.shared.predictorLearnedStore()
         learnedStore = store
-        engine = PredictorEngine(learned: store.load(), seed: AppStores.shared.predictorSeed())
+        predictor = PredictorActor(engine: PredictorEngine(learned: store.load(), seed: AppStores.shared.predictorSeed()))
         // Register as the session a Settings-triggered panic-purge should reset.
         AppStores.shared.activePredictorSession = self
     }
@@ -811,14 +825,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// passwords (sudo / ssh / passphrase prompts) out of the synced vocabulary;
     /// the token filter alone can't catch a short low-entropy password.
     private func observePredictorInput(_ bytes: [UInt8]) {
-        guard engine != nil else { return }
+        guard predictor != nil else { return }
         // L1: snapshot the pre-delivery cursor as THIS call's echo anchor, then
         // after a bounded window classify this call's keystrokes against the grid.
         // The anchor is captured per-call (not shared state), so concurrent
         // per-keystroke settles never clobber each other.
-        let scalars: [Unicode.Scalar] = bytes.compactMap { b in
-            ((0x21...0x7e).contains(b) || b == 0x20) ? Unicode.Scalar(UInt32(b)) : nil
-        }
+        let scalars = predictorScalars(bytes)
         let anchor = scalars.isEmpty ? nil : passwordDetector.currentCursor()
         passwordDetector.noteInput(bytes)
         for committed in tracker.observe(bytes) {
@@ -833,8 +845,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let deadline = DispatchTime.now() + .milliseconds(40)
         if !scalars.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
+                // Grid-read echo settle stays on the main actor; the suggestion
+                // recompute is handled by the coalesced trailing check below.
                 self?.passwordDetector.settleLine(scalars: scalars, from: anchor)
-                self?.refreshPredictorSuggestions()
             }
         }
         for b in bytes where b == 0x0d || b == 0x0a {
@@ -844,23 +857,37 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // Learn only if L1 confirms echo AND the line was not opted out (L4a); the
                 // engine still folds echo/opt-out/L5 into the L7 confidence tier.
                 if !optedOut, echoConfirmed {
-                    self.engine?.beginLine()
-                    for c in self.pendingLineTokens {
-                        self.engine?.record(c.token, after: c.previous,
-                                            echoConfirmed: echoConfirmed, optedOut: optedOut)
+                    let toLearn = self.pendingLineTokens
+                    Task { [predictor = self.predictor] in
+                        await predictor?.beginLine()
+                        await predictor?.record(toLearn, echoConfirmed: echoConfirmed, optedOut: optedOut)
                     }
                 }
                 self.pendingLineTokens.removeAll(keepingCapacity: true)
                 self.passwordDetector.resetLine()
             }
         }
-        refreshPredictorSuggestions()
+        // Coalesce: a typing burst recomputes suggestions once, not per keystroke.
+        // Record this request, then check `quietWindow` later — recompute only if no
+        // newer keystroke arrived in the meantime (trailing debounce). Scheduled just
+        // AFTER the 40ms echo-settle hop so the recompute reflects post-settle state.
+        refreshCoalescer.requestRefresh(at: Date().timeIntervalSinceReferenceDate)
+        DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(5)) { [weak self] in
+            guard let self else { return }
+            if self.refreshCoalescer.isDue(at: Date().timeIntervalSinceReferenceDate) {
+                self.refreshPredictorSuggestions()
+            }
+        }
     }
 
     private func refreshPredictorSuggestions() {
-        guard let engine else { predictorSuggestions = []; return }
-        let raw = engine.suggestions(forPrefix: tracker.current, after: tracker.previous)
-        predictorSuggestions = predictorChips(current: tracker.current, suggestions: raw)
+        guard let predictor else { predictorVM.setSuggestions([]); return }
+        let prefix = tracker.current, prev = tracker.previous
+        Task { [weak self] in
+            let raw = await predictor.suggestions(forPrefix: prefix, after: prev)
+            let chips = predictorChips(current: prefix, suggestions: raw)
+            await MainActor.run { self?.predictorVM.setSuggestions(chips) }
+        }
     }
 
     /// Accept a chip: send only the missing suffix so the existing input is kept
