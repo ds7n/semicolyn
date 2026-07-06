@@ -141,6 +141,16 @@ public final class TmuxSessionController {
         )
     }
 
+    /// Apply externally-synthesized events (e.g. from a `list-windows` reply parsed
+    /// by ``windowListingEvents(_:sessionID:)``) through the same `state.apply(_:)`
+    /// path `feed` uses. Returns true if any changed structural state. Used by the
+    /// runtime to populate windows when tmux emitted none on attach.
+    public func applyEvents(_ events: [ControlModeEvent]) -> Bool {
+        let before = state
+        for event in events { state.apply(event) }
+        return state != before
+    }
+
     /// Advance the lifecycle for a non-result event: first `%session-changed`
     /// confirms attach; `%exit` is terminal.
     private func advanceLifecycle(for event: ControlModeEvent) {

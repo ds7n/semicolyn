@@ -182,6 +182,19 @@ final class TmuxSessionControllerTests: XCTestCase {
         XCTAssertTrue(after.attachedPrimeCommands.isEmpty)
     }
 
+    // MARK: applyEvents
+
+    func testApplyEventsPopulatesWindowsAndLayout() {
+        let c = TmuxSessionController()
+        let win = ParsedWindow(id: WindowID(raw: 0), active: true,
+                               layout: PaneLayout.parse("abcd,80x24,0,0,0")!)
+        let changed = c.applyEvents(windowListingEvents([win], sessionID: SessionID(raw: 0)))
+        XCTAssertTrue(changed)
+        XCTAssertEqual(c.state.windows.count, 1)
+        XCTAssertEqual(c.state.activeWindow, WindowID(raw: 0))
+        XCTAssertNotNil(c.state.window(WindowID(raw: 0))?.visibleLayout)
+    }
+
     // MARK: helpers
 
     private func attachedController() -> TmuxSessionController {
