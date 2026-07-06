@@ -21,6 +21,27 @@ final class PredictorEngineTests: XCTestCase {
         return PredictorSeed(unigram: uni, bigram: bi)
     }
 
+    // MARK: harvest (output → suggestable tokens)
+
+    /// Regression (device bug): a colored prompt line harvested from output must
+    /// contribute the visible WORD, never the SGR escape codes around it. Before the
+    /// fix the raw split fused `\u{1b}[38;2;…m` onto `djmyers`, so escape codes
+    /// leaked into suggestions.
+    func testHarvestStripsEscapeCodesFromColoredOutput() {
+        var e = engine()
+        e.harvest(output: "\u{1b}[38;2;122;162;247mdjmyers\u{1b}[0m@host")
+        // The visible text is suggestable with the color codes gone. The reset
+        // `\u{1b}[0m` between `djmyers` and `@host` is stripped, so they fuse into
+        // one contiguous token (correct — no whitespace ever separated them).
+        XCTAssertEqual(e.suggestions(forPrefix: "djm"), ["djmyers@host"])
+        // Crucially, nothing beginning with an escape or its SGR numeric params is
+        // suggestable — the escape codes never entered the vocabulary.
+        XCTAssertTrue(e.suggestions(forPrefix: "\u{1b}").isEmpty,
+                      "No suggestion may start with an ESC byte")
+        XCTAssertTrue(e.suggestions(forPrefix: "38").isEmpty,
+                      "SGR numeric params must not become suggestable tokens")
+    }
+
     // MARK: unigram
 
     func testLearnedUnigramSuggested() {

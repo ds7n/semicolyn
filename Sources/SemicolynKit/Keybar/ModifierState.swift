@@ -37,6 +37,11 @@ public struct ModifierState: Equatable, Sendable {
         KeyModifiers(control: ctrl != .off, option: altArmed, shift: shiftArmed)
     }
 
+    /// True when any modifier is armed or locked — i.e. a plain character typed on
+    /// the terminal keyboard should be re-encoded through `encodeKey` rather than
+    /// sent raw.
+    public var hasArmedModifier: Bool { ctrl != .off || altArmed || shiftArmed }
+
     /// Clear one-shot arms after a keystroke fires; a Ctrl lock persists.
     public mutating func consumeAfterKeystroke() {
         if ctrl == .armed { ctrl = .off }
