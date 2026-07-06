@@ -245,11 +245,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     func selectPrevWindow() { stepWindow(-1) }
 
     private func stepWindow(_ delta: Int) {
-        guard let state = tmuxState, state.windows.count > 1,
+        guard let state = tmuxState,
               let active = state.activeWindow,
-              let idx = state.windows.firstIndex(where: { $0.id == active }) else { return }
-        let next = state.windows[(idx + delta + state.windows.count) % state.windows.count]
-        selectWindow(next.id)
+              let idx = state.windows.firstIndex(where: { $0.id == active }),
+              let next = stepIndex(current: idx, delta: delta, count: state.windows.count)
+        else { return }
+        selectWindow(state.windows[next].id)
     }
 
     // MARK: - Hardware-keyboard commands (Phase 4e)
