@@ -177,7 +177,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Route terminal keystrokes: through tmux `send-keys` when control mode is
     /// attached, else straight to the raw-PTY channel.
     func sendTerminalInput(_ bytes: [UInt8]) {
-        observePredictorInput(bytes)
+        // The keystroke is sacred: write to the transport BEFORE any predictor work,
+        // so send latency is independent of predictor cost (Plan B).
         if let moshSession {
             moshSession.writeInput(Data(bytes))
         } else if let tmux {
@@ -185,6 +186,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         } else {
             rawWriter?.enqueue(bytes)
         }
+        observePredictorInput(bytes)
     }
 
     /// DECCKM (application-cursor-keys) state of the active pane's terminal, or
@@ -816,9 +818,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // after a bounded window classify this call's keystrokes against the grid.
         // The anchor is captured per-call (not shared state), so concurrent
         // per-keystroke settles never clobber each other.
-        let scalars: [Unicode.Scalar] = bytes.compactMap { b in
-            ((0x21...0x7e).contains(b) || b == 0x20) ? Unicode.Scalar(UInt32(b)) : nil
-        }
+        let scalars = predictorScalars(bytes)
         let anchor = scalars.isEmpty ? nil : passwordDetector.currentCursor()
         passwordDetector.noteInput(bytes)
         for committed in tracker.observe(bytes) {
