@@ -8,7 +8,7 @@ import Foundation
 /// new output pushes old output out — which models "short-lived" deterministically
 /// without a clock. Ephemeral: never persisted. A ``CandidateSource`` whose
 /// natural ranking is recency. See `2026-06-21-predictor-output-harvesting-design`.
-public struct OutputHarvest: CandidateSource {
+public struct OutputHarvest: CandidateSource, Sendable {
     private var order: [String]   // distinct tokens, oldest → newest
     private let capacity: Int
 

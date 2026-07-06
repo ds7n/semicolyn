@@ -102,7 +102,7 @@ struct SessionView: View {
                     .animation(.easeInOut, value: vm.crashBanner)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         VStack(spacing: 0) {
-                            PredictorStripView(vm: vm)
+                            PredictorStripView(vm: vm, predictorVM: vm.predictorVM)
                             KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm,
                                        hardwareKeyboardConnected: hardwareKeyboard.isConnected)
                         }
@@ -165,7 +165,7 @@ struct SessionView: View {
                         .animation(.easeInOut, value: vm.crashBanner)
                         .safeAreaInset(edge: .bottom, spacing: 0) {
                             VStack(spacing: 0) {
-                                PredictorStripView(vm: vm)
+                                PredictorStripView(vm: vm, predictorVM: vm.predictorVM)
                                 KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm,
                                        hardwareKeyboardConnected: hardwareKeyboard.isConnected)
                             }
