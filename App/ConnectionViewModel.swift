@@ -759,7 +759,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// safe to call repeatedly; a no-op when the predictor is disabled (incognito)
     /// or no learned store is attached. Called from `teardown()` and on
     /// app-background (`scenePhase`) so learning survives a backgrounded or killed
-    /// app — previously only a clean teardown flushed.
+    /// app — previously only a clean teardown flushed. The snapshot+save now runs on
+    /// a detached `Task` (the engine lives behind `PredictorActor`); the actor
+    /// reference is captured before any subsequent `predictor = nil`, so the flush
+    /// completes against the correct engine even as teardown proceeds.
     func flushPredictor() {
         guard let predictor, let learnedStore else { return }
         Task { let s = await predictor.snapshotState(); try? learnedStore.save(s) }
