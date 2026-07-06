@@ -6,18 +6,22 @@ import SwiftUI
 /// keybar (predictor spec §"Suggestion surface"). Hidden when there are no
 /// suggestions; slides in/out; never reflows the keybar.
 struct PredictorStripView: View {
-    @ObservedObject var vm: ConnectionViewModel
+    /// Actions (accept a chip, forget the last line) still route through the VM;
+    /// only the observed *suggestion state* comes from the split-out slice, so a
+    /// suggestion tick re-renders this strip alone (Plan B §B1).
+    let vm: ConnectionViewModel
+    @ObservedObject var predictorVM: PredictorViewModel
     @Environment(\.theme) private var theme
 
     @State private var showForgetToast = false
 
     var body: some View {
         Group {
-            if !vm.predictorSuggestions.isEmpty {
+            if !predictorVM.suggestions.isEmpty {
                 HStack(spacing: 0) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
-                            ForEach(vm.predictorSuggestions, id: \.self) { s in
+                            ForEach(predictorVM.suggestions, id: \.self) { s in
                                 Text(s)
                                     .font(.system(.caption, design: .monospaced))
                                     .foregroundStyle(Color(theme.predictor.suggestionText))
@@ -65,6 +69,6 @@ struct PredictorStripView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.15, dampingFraction: 0.9), value: vm.predictorSuggestions)
+        .animation(.spring(response: 0.15, dampingFraction: 0.9), value: predictorVM.suggestions)
     }
 }
