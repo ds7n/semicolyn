@@ -881,9 +881,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let prefix = tracker.current, prev = tracker.previous
         Task { [weak self] in
             let raw = await predictor.suggestions(forPrefix: prefix, after: prev)
-            await MainActor.run {
-                self?.predictorSuggestions = self?.predictorChips(current: prefix, suggestions: raw) ?? []
-            }
+            let chips = predictorChips(current: prefix, suggestions: raw)
+            await MainActor.run { self?.predictorSuggestions = chips }
         }
     }
 
