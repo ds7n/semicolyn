@@ -1,7 +1,5 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
-import Foundation
-
 /// Trailing-debounce policy for suggestion recomputation. Each keystroke calls
 /// `requestRefresh(at:)`; a check scheduled `quietWindow` later recomputes only if
 /// `isDue(at:)` — i.e. no newer request arrived — so a typing burst collapses to a
