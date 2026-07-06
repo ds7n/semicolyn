@@ -164,6 +164,24 @@ final class TmuxSessionControllerTests: XCTestCase {
         XCTAssertFalse(out.lifecycleChanged)
     }
 
+    // MARK: attach-prime commands
+
+    func testFeedEmitsPrimeCommandsOnAttachEdgeOnce() {
+        let c = TmuxSessionController()
+        _ = c.start(sessionName: "semicolyn-a3f7c2e9")
+        // Before attach: a spontaneous result block arrives — no prime yet.
+        let pre = c.feed(bytes("%begin 1 0 1\n%end 1 0 1\n"))
+        XCTAssertTrue(pre.attachedPrimeCommands.isEmpty)
+        // The %session-changed that flips .attaching → .attached.
+        let atEdge = c.feed(bytes("%session-changed $7 semicolyn-a3f7c2e9\n"))
+        XCTAssertEqual(atEdge.attachedPrimeCommands,
+                       ["refresh-client -C 80x24",
+                        TmuxCommand.listWindowsForLayout()])
+        // A later feed does NOT re-emit the prime.
+        let after = c.feed(bytes("%window-add @0\n"))
+        XCTAssertTrue(after.attachedPrimeCommands.isEmpty)
+    }
+
     // MARK: helpers
 
     private func attachedController() -> TmuxSessionController {
