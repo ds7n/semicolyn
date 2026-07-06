@@ -181,7 +181,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// attached, else straight to the raw-PTY channel.
     func sendTerminalInput(_ bytes: [UInt8]) {
         // The keystroke is sacred: write to the transport BEFORE any predictor work,
-        // so send latency is independent of predictor cost (Plan B).
+        // so send latency is independent of predictor cost (Plan B). The signpost
+        // interval brackets only the write, so Instruments can confirm that.
+        let signpost = PerfSignposts.input.beginInterval("send")
         if let moshSession {
             moshSession.writeInput(Data(bytes))
         } else if let tmux {
@@ -189,6 +191,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         } else {
             rawWriter?.enqueue(bytes)
         }
+        PerfSignposts.input.endInterval("send", signpost)
         observePredictorInput(bytes)
     }
 
