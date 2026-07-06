@@ -96,7 +96,10 @@ public struct PredictorEngine: Sendable {
     /// whitespace-delimited token is privacy-filtered (an excluded token is
     /// harvested nowhere) before entering the ephemeral store.
     public mutating func harvest(output: String) {
-        let tokens = output
+        // Strip ANSI/CSI/OSC escapes first so color codes and cursor moves never
+        // become suggestable tokens (they have no interior whitespace, so a raw
+        // split would fuse `\u{1b}[…m` onto the following word).
+        let tokens = stripANSI(output)
             .split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r" })
             .map(String.init)
             .filter { !filter.excludes($0) }
