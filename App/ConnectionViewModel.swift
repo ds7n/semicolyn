@@ -56,8 +56,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Per-pane engaged context (process name) for the keybar (Phase 4). Empty in
     /// raw-PTY mode. Re-derived from the runtime whenever a poll changes a pane.
     @Published private(set) var paneContexts: [PaneID: String] = [:]
-    /// Top-K predictor chips for the current input token (empty → strip hidden).
-    @Published private(set) var predictorSuggestions: [String] = []
+    /// Predictor-strip suggestion state, split into its own observable slice so a
+    /// suggestion recompute invalidates only the predictor-strip views (Plan B §B1).
+    let predictorVM = PredictorViewModel()
     /// Nil when the predictor is disabled for this session (incognito).
     private var predictor: PredictorActor?
     private var tracker = InputTokenTracker()
@@ -356,7 +357,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tracker.reset()
         passwordDetector.reset()          // clear echo/prompt state across sessions
         pendingLineTokens.removeAll()     // drop any un-flushed line tokens
-        predictorSuggestions = []
+        predictorVM.setSuggestions([])
     }
 
     // MARK: - Auth
@@ -877,12 +878,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     }
 
     private func refreshPredictorSuggestions() {
-        guard let predictor else { predictorSuggestions = []; return }
+        guard let predictor else { predictorVM.setSuggestions([]); return }
         let prefix = tracker.current, prev = tracker.previous
         Task { [weak self] in
             let raw = await predictor.suggestions(forPrefix: prefix, after: prev)
             let chips = predictorChips(current: prefix, suggestions: raw)
-            await MainActor.run { self?.predictorSuggestions = chips }
+            await MainActor.run { self?.predictorVM.setSuggestions(chips) }
         }
     }
 
