@@ -343,7 +343,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         renderablePanes.removeAll()
         flushPredictor()
         // Drop the render + harvest closures so late bytes from the old session
-        // can't feed a torn-down terminal view or a cleared engine. Both are
+        // can't feed a torn-down terminal view or a cleared predictor. Both are
         // re-installed when the next shell opens.
         output.onBytes = nil
         output.onHarvestBytes = nil
