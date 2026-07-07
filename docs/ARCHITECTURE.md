@@ -50,7 +50,7 @@ Every v1 subsystem has a locked spec under [`docs/superpowers/specs/`](superpowe
 
 **Input — keybar & keyboard** — `keybar-customization` (layout / gesture ownership) · `function-keys` (Fn / caps-lock SM) · `external-keyboard`.
 
-**On-device predictor** — `predictor-design` is the overview; **16 component specs** (`predictor-core-sketches`, `-prefix-ranking`, `-bigram-next-token`, `-candidate-aggregate`, `-daily-rollover`, `-bigram-rollover`, `-seed-deference`/`-seed-ingestion`/`-seed-runtime-load`, `-fig-ingestion`, `-output-harvesting`, `-privacy-filter`, `-learned-store`, `-engine`, `-rolling-serialization`, `-vocab-serialization`) cover the CMS+Bloom vocabulary, ranking, rollover, ingestion, and privacy.
+**On-device predictor** — `predictor-design` is the overview; **16 component specs** (`predictor-core-sketches`, `-prefix-ranking`, `-bigram-next-token`, `-candidate-aggregate`, `-daily-rollover`, `-bigram-rollover`, `-seed-deference`/`-seed-ingestion`/`-seed-runtime-load`, `-fig-ingestion`, `-output-harvesting`, `-privacy-filter`, `-learned-store`, `-engine`, `-rolling-serialization`, `-vocab-serialization`) cover the CMS+Bloom vocabulary, ranking, rollover, ingestion, and privacy. Suggestion-surface hygiene (min-prefix gate, typed-echo-only harvest, chip clearing) is `2026-07-07-predictor-suggestion-hygiene-design`.
 
 **Data, host model & sync** — `host-config-model` (schema, resolution, storage backbone) · `identities-keys-management` · `icloud-sync-scope` (what syncs vs stays local).
 
