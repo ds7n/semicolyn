@@ -76,17 +76,13 @@ struct TerminalScreen: UIViewRepresentable {
         )
         terminal.addGestureRecognizer(pinch)
 
-        // Install cursor-placement drag (faint halo + halo-gated pan synthesizing arrow keys).
+        // Install cursor-placement drag (tap = reposition, pan = scrub, no halo).
         let cursorDrag = CursorDragController(view: terminal, send: cursorSend)
-        cursorDrag.configure(color: UIColor(Color(theme.accent.primary)))
-        cursorDrag.install()
         context.coordinator.cursorDrag = cursorDrag
 
         // Render PTY output as it arrives (already hopped to main in the bridge).
-        let coord = context.coordinator
-        output.onBytes = { [weak terminal, weak coord] bytes in
+        output.onBytes = { [weak terminal] bytes in
             terminal?.feed(byteArray: bytes[...])
-            coord?.cursorDrag?.refresh()   // keep the halo on the cursor as output moves it
         }
         return terminal
     }
@@ -105,9 +101,6 @@ struct TerminalScreen: UIViewRepresentable {
         context.coordinator.halo.configure(color: UIColor(Color(theme.bell.edge)))
         // Recolor the live terminal when the theme changes.
         applyPalette(theme.terminalPalette(), to: uiView)
-        // Keep the cursor-placement halo recolored + positioned on the live cursor.
-        context.coordinator.cursorDrag?.configure(color: UIColor(Color(theme.accent.primary)))
-        context.coordinator.cursorDrag?.refresh()
         // Update mouse-active dot visibility and selection gesture state.
         context.coordinator.updateMouseDot(from: uiView)
     }
@@ -143,7 +136,7 @@ struct TerminalScreen: UIViewRepresentable {
         /// Baseline font size for pinch-zoom; updated when a pinch gesture ends.
         /// Persists for the window's lifetime only (not stored to the host — v1.5+).
         var baseSize: Double
-        /// Cursor-placement drag (halo + pan → synthesized arrow keys); installed in makeUIView.
+        /// Cursor-placement drag (tap + pan → synthesized arrow keys); installed in makeUIView.
         var cursorDrag: CursorDragController?
         /// True once we have claimed keyboard focus for this terminal. We claim it a
         /// single time (on the first `updateUIView` after the view is in a window, so
