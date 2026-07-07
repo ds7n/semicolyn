@@ -88,10 +88,10 @@ struct SessionView: View {
                         if let reason = vm.moshFallback {
                             MoshFallbackBanner(reason: reason) { vm.moshFallback = nil }
                                 .transition(.move(edge: .top).combined(with: .opacity))
-                                .task {
-                                    try? await Task.sleep(nanoseconds: 4_000_000_000)
-                                    vm.moshFallback = nil
-                                }
+                                // Persist until the user dismisses (tap). No auto-dismiss:
+                                // it carries the real mosh failure reason, which the user
+                                // needs time to read, and the 4s timer used to cancel early
+                                // when attachSSHShell replaced this view (the "brief flash").
                         }
                     }
                     .animation(.easeInOut, value: vm.moshFallback)

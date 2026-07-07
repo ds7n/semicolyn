@@ -651,7 +651,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 case .fallbackSSH:
                     self.moshSession?.stop()
                     self.moshSession = nil
-                    self.moshFallback = "Mosh connection failed — using SSH"
+                    // Surface the REAL reason captured from mosh's stderr (e.g.
+                    // "Mosh failed: Crypto: … — using SSH") when we have it; the bridge
+                    // falls back to a generic string only when nothing was captured.
+                    self.moshFallback = reason ?? "Mosh connection failed — using SSH"
                     DebugLog.shared.log("mosh: exit fallbackSSH (elapsed=\(String(format: "%.2f", elapsed))s) → SSH fallback")
                     Task { [weak self] in
                         guard let self else { return }
