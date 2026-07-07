@@ -244,9 +244,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // (cursor-centric spec; supersedes the old halo's "never suspend"
                 // decision — the tap affordance means a tap in a mouse app should click).
                 cursorDrags[key]?.suppressed = mouseActive
-                if let gr = selectionLongPresses[key] {
-                    gr.isEnabled = !mouseActive
-                }
+                // (SwiftTerm owns the selection long-press; `selectionLongPresses` was
+                // never wired — stale phase-4 TODO — so there's nothing to toggle here.)
             }
         }
 

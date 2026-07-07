@@ -234,8 +234,9 @@ struct TerminalScreen: UIViewRepresentable {
             // Suspend the tap/pan cursor gestures in a mouse-reporting pane so taps and
             // drags forward as SGR mouse events instead of synthesizing arrows
             // (cursor-centric spec; supersedes the old halo's "never suspend" decision).
+            // NOTE: SwiftTerm owns the selection long-press; our `selectionLongPress`
+            // property was never wired (stale phase-4 TODO), so we don't toggle it here.
             cursorDrag?.suppressed = mouseActive
-            selectionLongPress?.isEnabled = !mouseActive
         }
 
         // Visual bell: pulse halo + optional haptic (throttled by BellStateMachine).

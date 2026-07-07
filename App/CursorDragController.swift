@@ -69,6 +69,13 @@ final class CursorDragController: NSObject, UIGestureRecognizerDelegate {
         let term = view.getTerminal()
         let (cw, ch) = cellSize(of: view)
         guard cw > 0, ch > 0 else { return }
+        // The tap converts a VIEWPORT pixel to a cell, but the live cursor row
+        // (buffer.y) is only viewport-relative when NOT scrolled into scrollback. If
+        // the live cursor is scrolled off the visible viewport, `toRow - buffer.y`
+        // spans two coordinate spaces → a bogus cross-row arrow run. Bail in that case
+        // (mirrors the removed halo's `isOffscreen` guard). Same-viewport taps are fine.
+        let visibleRows = Int(Double(view.bounds.height) / ch)
+        guard visibleRows > 0, term.buffer.y >= 0, term.buffer.y < visibleRows else { return }
         let pt = g.location(in: view)
         let toCol = Int((Double(pt.x) / cw).rounded(.down))
         let toRow = Int((Double(pt.y) / ch).rounded(.down))
@@ -117,11 +124,14 @@ final class CursorDragController: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: arbitration
 
-    // Let the tap/pan coexist with SwiftTerm's own recognizers (scroll, the selection
-    // long-press). Returning true here lets the long-press and our pan both be
-    // recognized; UIKit resolves tap-vs-pan and the long-press cancels on early move.
+    // Coexist with SwiftTerm's scroll + the tap, but NOT with a long-press: a
+    // hold-then-drag must select (loupe + handles), not simultaneously scrub the
+    // cursor. Yielding the pan to any long-press keeps "hold still → select, move →
+    // scrub" mutually exclusive (spec's arbitration; the spec flagged simultaneity as
+    // the field-test risk).
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        if other is UILongPressGestureRecognizer { return false }
         return true
     }
 }
