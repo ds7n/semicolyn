@@ -232,10 +232,44 @@ static void *reader_thread_main(void *ctx) {
     // resize and read here by mosh's handler — the tearing risk on two u16 fields is
     // benign (a resize is idempotent and re-sent), and passing &_winsize matches the
     // vendored contract. We take &_winsize directly as the vendored API requires.
+    // DIAGNOSTIC: capture what mosh writes to stderr during the run. The vendored
+    // bridge (moshiosbridge.cc) prints the caught Network/Crypto/std exception —
+    // the REAL reason a session failed — to stderr, which otherwise vanishes into
+    // the device console. Redirect fd 2 into a pipe around the mosh_main call (this
+    // thread only sees the failure path; the happy path prints nothing), then use
+    // the captured text as the onEnd reason so a device trace names the cause.
+    // Scoped: the original fd 2 is restored immediately after the call.
+    int errPipe[2] = { -1, -1 };
+    int savedStderr = -1;
+    if (pipe(errPipe) == 0) {
+        // Non-blocking read end so draining a quiet/failed run never hangs.
+        fcntl(errPipe[0], F_SETFL, O_NONBLOCK);
+        savedStderr = dup(STDERR_FILENO);
+        dup2(errPipe[1], STDERR_FILENO);
+        close(errPipe[1]);
+    }
+
     char emptyState = 0;
     int rc = mosh_main(fin, fout, &_winsize, mosh_state_noop, (__bridge void *)self,
                        _ip.UTF8String, _port.UTF8String, _key.UTF8String, _predict.UTF8String,
                        &emptyState, 0, _predict.UTF8String);
+
+    // Restore the real stderr, then drain whatever mosh printed into a bounded buffer.
+    NSString *capturedErr = nil;
+    if (savedStderr >= 0) {
+        fflush(stderr);
+        dup2(savedStderr, STDERR_FILENO);
+        close(savedStderr);
+        char buf[512];
+        ssize_t n = read(errPipe[0], buf, sizeof(buf) - 1);
+        if (n > 0) {
+            buf[n] = '\0';
+            // Trim trailing CR/LF so the reason is a single clean line.
+            while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) { buf[--n] = '\0'; }
+            if (n > 0) { capturedErr = [NSString stringWithUTF8String:buf]; }
+        }
+    }
+    if (errPipe[0] >= 0) { close(errPipe[0]); }
 
     // The mosh thread is the SOLE owner of the mosh-side fds: fclose each exactly
     // once (fclose closes the underlying _inPipe[0]/_outPipe[1] fd). -stop never
@@ -253,7 +287,15 @@ static void *reader_thread_main(void *ctx) {
     fclose(fin);
     fclose(fout);   // closing the output write end makes the reader see EOF
 
-    [self fireEnd:(rc == 0 ? nil : @"Mosh connection failed — using SSH")];
+    // On failure, surface the captured mosh error (the real cause) if we got one;
+    // otherwise the generic fallback string. On success (rc == 0), reason stays nil.
+    NSString *endReason = nil;
+    if (rc != 0) {
+        endReason = capturedErr.length > 0
+            ? [NSString stringWithFormat:@"Mosh failed: %@ — using SSH", capturedErr]
+            : @"Mosh connection failed — using SSH";
+    }
+    [self fireEnd:endReason];
     return NULL;
 }
 
