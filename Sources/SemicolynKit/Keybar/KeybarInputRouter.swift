@@ -23,10 +23,9 @@ public final class KeybarInputRouter {
     public var onModifierChange: (() -> Void)?
 
     // Modifier gestures (no keystroke emitted).
-    public func tapCtrl()       { state.tapCtrl(); onModifierChange?() }
-    public func doubleTapCtrl() { state.lockCtrl(); onModifierChange?() }
-    public func armAlt()        { state.armAlt(); onModifierChange?() }
-    public func armShift()      { state.armShift(); onModifierChange?() }
+    public func tapCtrl()  { state.tapCtrl(); onModifierChange?() }
+    public func armAlt()   { state.armAlt(); onModifierChange?() }
+    public func armShift() { state.armShift(); onModifierChange?() }
 
     // Keystroke gestures.
     public func tapSymbol(_ c: Character) { fire(.char(c)) }

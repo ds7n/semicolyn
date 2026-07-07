@@ -19,21 +19,24 @@ public struct FnState: Equatable, Sendable {
     /// True when F-keys should be shown (Armed or Locked).
     public var engaged: Bool { mode != .off }
 
-    /// Single tap: off→armed, armed→locked, locked→off. Turning a locked Fn off
-    /// while a context auto-engaged it sets the per-episode override.
+    /// Single tap: off→armed, armed→locked, locked→off. The `armed→locked` step is
+    /// a manual re-lock, so it clears any standing per-episode override (spec §4:
+    /// "userOverride resets when the user manually re-locks Fn"). Turning a locked
+    /// Fn off while a context auto-engaged it sets the override.
+    ///
+    /// The former `doubleTap()` (manual lock in one gesture) was removed with the
+    /// keybar double-tap recognizer; the tap cycle is now the only manual path to
+    /// lock, so its `armed→locked` step carries the override-clearing semantics.
     public mutating func tap() {
         switch mode {
         case .off:    mode = .armed
-        case .armed:  mode = .locked; autoLocked = false      // manual lock via 2nd tap
+        case .armed:  mode = .locked; autoLocked = false; userOverride = false   // manual lock
         case .locked:
             mode = .off
             if autoActive && autoLocked { userOverride = true }
             autoLocked = false
         }
     }
-
-    /// Double tap: manual lock. Clears any standing override.
-    public mutating func doubleTap() { mode = .locked; userOverride = false; autoLocked = false }
 
     /// An F-key fired: clears a one-shot arm; a lock persists.
     public mutating func fireFKey() { if mode == .armed { mode = .off } }

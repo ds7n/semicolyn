@@ -12,16 +12,11 @@ final class FnStateTests: XCTestCase {
         f.tap(); XCTAssertEqual(f.mode, .off)
     }
 
-    func testDoubleTapLocks() {
-        var f = FnState()
-        f.doubleTap(); XCTAssertEqual(f.mode, .locked)
-    }
-
     func testFireFKeyClearsArmedButNotLocked() {
         var f = FnState()
         f.tap()                      // armed
         f.fireFKey(); XCTAssertEqual(f.mode, .off)
-        f.doubleTap()                // locked
+        f.tap(); f.tap()             // armed → locked (manual lock via tap-cycle)
         f.fireFKey(); XCTAssertEqual(f.mode, .locked)  // firing does not exit lock
     }
 
@@ -46,8 +41,8 @@ final class FnStateTests: XCTestCase {
 
     func testManualRelockClearsOverride() {
         var f = FnState()
-        f.autoEngage(); f.tap()        // override set
-        f.doubleTap()                  // manual re-lock clears override
+        f.autoEngage(); f.tap()        // auto-locked, then user taps off → override set
+        f.tap(); f.tap()               // off→armed→locked: manual re-lock clears override
         XCTAssertEqual(f.mode, .locked)
         f.tap()                        // off again — but override was cleared by the relock...
         f.autoEngage()                 // ...so a fresh autoEngage re-locks
@@ -67,7 +62,8 @@ final class FnStateTests: XCTestCase {
         XCTAssertEqual(f.mode, .armed)
         f.autoDisengage()                // routine poll, no auto-episode active
         XCTAssertEqual(f.mode, .armed)   // must NOT be cleared
-        f.doubleTap()                    // user manually locks
+        f.tap()                          // armed → locked (user manually locks)
+        XCTAssertEqual(f.mode, .locked)
         f.autoDisengage()                // poll again
         XCTAssertEqual(f.mode, .locked)  // manual lock survives
     }
