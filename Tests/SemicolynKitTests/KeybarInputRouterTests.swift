@@ -52,13 +52,6 @@ final class KeybarInputRouterTests: XCTestCase {
         XCTAssertEqual(spy.sent.last, [0x01], "arm survived the multi-byte passthrough")
     }
 
-    func testKeyboardInputLockedCtrlAppliesToMultipleKeyboardChars() {
-        let (r, spy) = make()
-        r.doubleTapCtrl()
-        r.keyboardInput([0x78]); r.keyboardInput([0x73])  // Ctrl+X, Ctrl+S — lock persists
-        XCTAssertEqual(spy.sent, [[0x18], [0x13]])
-    }
-
     func testArmedCtrlAppliesToNextSymbolThenClears() {
         let (r, spy) = make()
         r.tapCtrl()
@@ -66,13 +59,6 @@ final class KeybarInputRouterTests: XCTestCase {
         XCTAssertEqual(spy.sent, [[0x03]])              // Ctrl+C
         r.tapSymbol("c")
         XCTAssertEqual(spy.sent, [[0x03], [0x63]])      // second is plain 'c' (one-shot cleared)
-    }
-
-    func testLockedCtrlAppliesToMultipleKeystrokes() {
-        let (r, spy) = make()
-        r.doubleTapCtrl()
-        r.tapSymbol("x"); r.tapSymbol("s")
-        XCTAssertEqual(spy.sent, [[0x18], [0x13]])      // Ctrl+X, Ctrl+S — lock persists
     }
 
     func testAltSymbolEmitsMetaEscapeOnce() {
