@@ -486,18 +486,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
         tmuxState = nil   // raw mode: single-terminal path
-        // Harvest raw-shell output for the predictor through the dedicated harvest
-        // slot. `TerminalScreen.makeUIView` installs its render closure into
-        // `output.onBytes`; using `onHarvestBytes` lets both fire from `onOutput`
-        // (previously the render closure clobbered this and degraded-mode output
-        // never trained the predictor).
         output.onHarvestBytes = { [weak self] bytes in
             guard let self else { return }
-            // Feed the output stream to the password gate (echo inference +
-            // prompt-text) so it can classify the next typed line.
+            // Feed output to the password-prompt gate only. We deliberately no longer
+            // harvest free terminal output as suggestion candidates — that pulled the
+            // shell prompt (Starship) into suggestions. Suggestions now source from
+            // typed-command echo (record) + seed only. (predictor-suggestion-hygiene spec, Fix 1.)
             self.passwordDetector.noteOutput(bytes)
-            let harvestText = String(decoding: bytes, as: UTF8.self)
-            Task { [predictor = self.predictor] in await predictor?.harvest(output: harvestText) }
         }
         DebugLog.shared.log("openRawShell: shell opened, state=.shell")
         state = .shell
@@ -697,11 +692,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // buffering, and don't harvest output the user can't see.
                 return
             }
-            // Harvest pane output for the predictor — visible panes only (a live
-            // view or pending registration), not filtered by active pane.
+            // Feed output to the password-prompt gate only. We deliberately no longer
+            // harvest free terminal output as suggestion candidates — that pulled the
+            // shell prompt (Starship) into suggestions. Suggestions now source from
+            // typed-command echo (record) + seed only. (predictor-suggestion-hygiene spec, Fix 1.)
             self.passwordDetector.noteOutput(bytes)
-            let harvestText = String(decoding: bytes, as: UTF8.self)
-            Task { [predictor = self.predictor] in await predictor?.harvest(output: harvestText) }
         }
         runtime.onStateChanged = { [weak self] state in
             guard let self else { return }

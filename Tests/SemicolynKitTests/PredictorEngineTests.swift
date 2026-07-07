@@ -354,6 +354,21 @@ final class PredictorEngineTests: XCTestCase {
         XCTAssertEqual(e.suggestions(forPrefix: "", after: "git"), ["status"])
     }
 
+    // MARK: - Bug 2 guard: un-recorded tokens must never surface
+
+    // Bug 2 (leak guard): a token that was neither typed/learned nor seeded must never
+    // be suggested. After Fix 1 the App stops feeding output to `harvest`, so the only
+    // way a token reaches suggestions is via `record` (typed) or the seed. This pins
+    // that a never-recorded token is absent — a regression here would mean output is
+    // leaking back into candidates.
+    func testUnrecordedTokenIsNotSuggested() {
+        var e = engine(config: SuggestionConfig(topK: 3))
+        for _ in 0..<3 { e.record("git") }   // graduate the only recorded token (String API)
+        // "gitprompt" was never recorded; a 2-char prefix that would match it must only
+        // surface the recorded "git", never an un-recorded token.
+        XCTAssertEqual(e.suggestions(forPrefix: "gi"), ["git"])
+    }
+
     // MARK: - Task 6: purgeLearned + forgetLastLine + beginLine
 
     func testPurgeLearnedClearsUserStateKeepsSeed() {
