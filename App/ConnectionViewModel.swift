@@ -909,6 +909,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             }
         }
         for b in bytes where b == 0x0d || b == 0x0a {
+            predictorVM.setSuggestions([])   // line committed → clear stale chips immediately
             DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(10)) { [weak self] in
                 guard let self else { return }
                 let echoConfirmed = self.passwordDetector.shouldLearnCommittedLine()
@@ -929,11 +930,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // Record this request, then check `quietWindow` later — recompute only if no
         // newer keystroke arrived in the meantime (trailing debounce). Scheduled just
         // AFTER the 40ms echo-settle hop so the recompute reflects post-settle state.
-        refreshCoalescer.requestRefresh(at: Date().timeIntervalSinceReferenceDate)
-        DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(5)) { [weak self] in
-            guard let self else { return }
-            if self.refreshCoalescer.isDue(at: Date().timeIntervalSinceReferenceDate) {
-                self.refreshPredictorSuggestions()
+        // Only recompute suggestions for chunks that carried printable input. An
+        // Enter/control-only chunk (empty scalars) must not trigger a refresh — the
+        // prefix just reset to empty and a refresh would surface stale/empty results.
+        if !scalars.isEmpty {
+            refreshCoalescer.requestRefresh(at: Date().timeIntervalSinceReferenceDate)
+            DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(5)) { [weak self] in
+                guard let self else { return }
+                if self.refreshCoalescer.isDue(at: Date().timeIntervalSinceReferenceDate) {
+                    self.refreshPredictorSuggestions()
+                }
             }
         }
     }
@@ -941,6 +947,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private func refreshPredictorSuggestions() {
         guard let predictor else { predictorVM.setSuggestions([]); return }
         let prefix = tracker.current, prev = tracker.previous
+        // Mirror the engine's conditional min-prefix floor so a short from-scratch prefix
+        // clears chips instead of leaving stale ones up. The bigram path (a usable
+        // `prev`) is exempt — next-token suggestions are valid with an empty prefix.
+        // NOTE: literal `2` must stay in sync with SuggestionConfig.minPrefix (currently 2).
+        // A future task can plumb the config value through; out of scope here.
+        let hasUsablePrevious = (prev?.isEmpty == false)
+        if !hasUsablePrevious, prefix.count < 2 { predictorVM.setSuggestions([]); return }
         Task { [weak self] in
             let raw = await predictor.suggestions(forPrefix: prefix, after: prev)
             let chips = predictorChips(current: prefix, suggestions: raw)
