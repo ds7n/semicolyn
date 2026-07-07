@@ -12,11 +12,17 @@ public struct SuggestionConfig: Equatable, Sendable {
     public var confidenceFloor: UInt32
     /// Thumb-on-the-scale multiplier applied to seed counts when blending.
     public var seedWeight: Double
+    /// Minimum input-prefix length before any suggestion is offered. Below this,
+    /// `PredictorEngine.suggestions` returns `[]` (no suggestions on empty/1-char
+    /// input; also suppresses the post-Enter empty-prefix refresh).
+    public var minPrefix: Int
 
-    public init(topK: Int = 3, confidenceFloor: UInt32 = 2, seedWeight: Double = 0.5) {
+    public init(topK: Int = 3, confidenceFloor: UInt32 = 2, seedWeight: Double = 0.5,
+                minPrefix: Int = 2) {
         self.topK = topK
         self.confidenceFloor = confidenceFloor
         self.seedWeight = seedWeight
+        self.minPrefix = minPrefix
     }
 }
 

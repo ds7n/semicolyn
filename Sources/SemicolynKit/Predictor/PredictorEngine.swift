@@ -118,6 +118,11 @@ public struct PredictorEngine: Sendable {
     /// Duplicates collapse to their first (harvested) position; a missing seed
     /// yields learned-only results.
     public func suggestions(forPrefix prefix: String, after previous: String? = nil) -> [String] {
+        // Min-prefix floor on the FROM-SCRATCH path only. A usable `previous` means the
+        // caller wants next-token (bigram) suggestions, which are valid with an empty
+        // word-prefix; only the no-preceding-token case needs typed input (bugs 3/4).
+        let hasUsablePrevious = (previous?.isEmpty == false)
+        guard hasUsablePrevious || prefix.count >= config.minPrefix else { return [] }
         guard config.topK > 0 else { return [] }   // harvest path isn't otherwise capped
         let learnedSource: any CandidateSource
         let seedSource: any CandidateSource
