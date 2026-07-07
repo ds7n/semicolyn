@@ -24,7 +24,6 @@ final class CursorDragController: NSObject, UIGestureRecognizerDelegate {
     private var tap: UITapGestureRecognizer?
     private var pan: UIPanGestureRecognizer?
     private var lastPoint: CGPoint = .zero
-    private var emittedAny = false
 
     init(view: TerminalView, send: @escaping ([UInt8]) -> Void) {
         self.view = view
@@ -41,6 +40,9 @@ final class CursorDragController: NSObject, UIGestureRecognizerDelegate {
         tap = t
         let p = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         p.delegate = self
+        // Single-finger scrub only: a two-finger swipe stays a scroll, not a cursor
+        // drag (matches the old controller; avoids fighting the terminal's scroll).
+        p.maximumNumberOfTouches = 1
         view.addGestureRecognizer(p)
         pan = p
     }
@@ -81,7 +83,7 @@ final class CursorDragController: NSObject, UIGestureRecognizerDelegate {
         guard active, !suppressed, let view else { return }
         switch g.state {
         case .began:
-            engine.begin(); emittedAny = false; lastPoint = g.location(in: view)
+            engine.begin(); lastPoint = g.location(in: view)
         case .changed:
             let pt = g.location(in: view)
             let delta = (dx: Double(pt.x - lastPoint.x), dy: Double(pt.y - lastPoint.y))
@@ -104,7 +106,6 @@ final class CursorDragController: NSObject, UIGestureRecognizerDelegate {
 
     private func emitRuns(_ runs: [ArrowRun]) {
         guard !runs.isEmpty, let view else { return }
-        emittedAny = true
         let app = view.getTerminal().applicationCursor
         var bytes: [UInt8] = []
         for run in runs {
