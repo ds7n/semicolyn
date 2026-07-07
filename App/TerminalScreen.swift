@@ -77,7 +77,11 @@ struct TerminalScreen: UIViewRepresentable {
         terminal.addGestureRecognizer(pinch)
 
         // Install cursor-placement drag (tap = reposition, pan = scrub, no halo).
+        // The single-terminal path (raw SSH / mosh) is always THE focused terminal,
+        // so activate its gestures unconditionally. (The tmux multi-pane path gates
+        // `active` per focused pane via setCursorDragActive; here there's one pane.)
         let cursorDrag = CursorDragController(view: terminal, send: cursorSend)
+        cursorDrag.active = true
         context.coordinator.cursorDrag = cursorDrag
 
         // Render PTY output as it arrives (already hopped to main in the bridge).
@@ -227,16 +231,11 @@ struct TerminalScreen: UIViewRepresentable {
         func updateMouseDot(from terminalView: TerminalView) {
             let mouseActive = terminalView.getTerminal().mouseMode != .off
             mouseDot.isHidden = !mouseActive
-            if let gr = selectionLongPress {
-                if mouseActive {
-                    gr.isEnabled = false
-                    // Cursor placement is deliberately NOT suspended under mouse-mode — it
-                    // synthesizes arrow keys, not mouse events (locked design). Selection-handle
-                    // suppression is wired on the Simulator pass (no public SwiftTerm signal yet).
-                } else {
-                    gr.isEnabled = true
-                }
-            }
+            // Suspend the tap/pan cursor gestures in a mouse-reporting pane so taps and
+            // drags forward as SGR mouse events instead of synthesizing arrows
+            // (cursor-centric spec; supersedes the old halo's "never suspend" decision).
+            cursorDrag?.suppressed = mouseActive
+            selectionLongPress?.isEnabled = !mouseActive
         }
 
         // Visual bell: pulse halo + optional haptic (throttled by BellStateMachine).

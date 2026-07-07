@@ -239,15 +239,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 let key = ObjectIdentifier(view)
                 let mouseActive = view.getTerminal().mouseMode != .off
                 mouseDots[key]?.isHidden = !mouseActive
+                // Suspend the tap/pan cursor gestures in a mouse-reporting pane so taps
+                // and drags forward as SGR mouse events instead of synthesizing arrows
+                // (cursor-centric spec; supersedes the old halo's "never suspend"
+                // decision — the tap affordance means a tap in a mouse app should click).
+                cursorDrags[key]?.suppressed = mouseActive
                 if let gr = selectionLongPresses[key] {
-                    if mouseActive {
-                        gr.isEnabled = false
-                        // Cursor placement is deliberately NOT suspended under mouse-mode — it
-                        // synthesizes arrow keys, not mouse events (locked design). Selection-handle
-                        // suppression is wired on the Simulator pass (no public SwiftTerm signal yet).
-                    } else {
-                        gr.isEnabled = true
-                    }
+                    gr.isEnabled = !mouseActive
                 }
             }
         }
