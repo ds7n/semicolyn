@@ -599,38 +599,45 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 DebugLog.shared.log("mosh: onFirstFrame — UDP handshake up, frames flowing")
                 self?.moshFirstFrameSeen = true
             }
+            // Stamp the start time BEFORE the onEnd closure literal so the closure can
+            // capture it (Swift resolves captures at declaration order, not runtime).
+            // The session can't fire onEnd before sess.start() below, so this is the
+            // true session-start instant. Monotonic clock (systemUptime).
+            let moshStartedAt = ProcessInfo.processInfo.systemUptime
             sess.onEnd = { [weak self] reason in
                 guard let self else { return }
                 DebugLog.shared.log("mosh: onEnd firstFrameSeen=\(self.moshFirstFrameSeen) reason=\(reason ?? "nil")")
-                if self.moshFirstFrameSeen {
-                    // Post-first-frame exit (session/server death, clean or not).
-                    // Tear the dead Mosh session down FIRST: sendTerminalInput checks
-                    // `moshSession` before tmux/raw, so a lingering non-nil session
-                    // would swallow every keystroke into the dead input pipe (EPIPE,
-                    // silently dropped) after the user reattaches tmux via the banner.
-                    // stop() is idempotent and joins the already-exiting mosh thread.
+                let elapsed = ProcessInfo.processInfo.systemUptime - moshStartedAt
+                switch moshExitDecision(reason: reason, elapsed: elapsed) {
+                case .crashBanner:
                     self.moshSession?.stop()
                     self.moshSession = nil
                     self.moshFirstFrameSeen = false
-                    // Then reuse the mid-session crash banner — the same state tmux uses.
-                    DebugLog.shared.log("mosh: post-first-frame exit → crash banner")
+                    DebugLog.shared.log("mosh: exit crashBanner (elapsed=\(String(format: "%.2f", elapsed))s) → crash banner")
                     self.crashBanner = .tmuxEnded
                     return
-                }
-                // Pre-first-frame exit: the UDP handshake never completed (blocked
-                // firewall / crypto mismatch). Fall back to SSH on the SAME retained
-                // connection with a banner, instead of dead-ending the whole connect.
-                self.moshSession?.stop()
-                self.moshSession = nil
-                self.moshFallback = "Mosh UDP unreachable (check firewall) — using SSH"
-                DebugLog.shared.log("mosh: pre-first-frame exit (UDP blocked) → SSH fallback")
-                Task { [weak self] in
-                    guard let self else { return }
-                    do {
-                        try await self.attachSSHShell(conn: conn, host: host, defaults: defaults)
-                    } catch {
-                        DebugLog.shared.log("mosh: SSH fallback THREW \(String(describing: error)) → .failed")
-                        self.state = .failed(String(describing: error))
+                case .ended:
+                    // Clean exit (rc == 0). v1: surface via the same session-ended state
+                    // as a clean tmux exit (no alarming "crashed" copy needed).
+                    self.moshSession?.stop()
+                    self.moshSession = nil
+                    self.moshFirstFrameSeen = false
+                    DebugLog.shared.log("mosh: exit ended (clean, elapsed=\(String(format: "%.2f", elapsed))s) → session ended")
+                    self.crashBanner = .tmuxEnded
+                    return
+                case .fallbackSSH:
+                    self.moshSession?.stop()
+                    self.moshSession = nil
+                    self.moshFallback = "Mosh connection failed — using SSH"
+                    DebugLog.shared.log("mosh: exit fallbackSSH (elapsed=\(String(format: "%.2f", elapsed))s) → SSH fallback")
+                    Task { [weak self] in
+                        guard let self else { return }
+                        do {
+                            try await self.attachSSHShell(conn: conn, host: host, defaults: defaults)
+                        } catch {
+                            DebugLog.shared.log("mosh: SSH fallback THREW \(String(describing: error)) → .failed")
+                            self.state = .failed(String(describing: error))
+                        }
                     }
                 }
             }
