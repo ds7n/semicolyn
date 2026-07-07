@@ -189,21 +189,22 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Route terminal keystrokes: through tmux `send-keys` when control mode is
     /// attached, else straight to the raw-PTY channel.
     func sendTerminalInput(_ bytes: [UInt8]) {
-        // The keystroke is sacred: write to the transport BEFORE any predictor work,
-        // so send latency is independent of predictor cost (Plan B). The signpost
-        // interval brackets only the write, so Instruments can confirm that.
+        // ── SACRED PATH ─────────────────────────────────────────────────────────
+        // The transport write is the FIRST thing that happens — nothing (not even a
+        // string interpolation) runs ahead of it. Do NOT add work above this block.
         let signpost = PerfSignposts.input.beginInterval("send")
         if let moshSession {
-            DebugLog.shared.log("input[\(bytes.count)B] → MOSH")
             moshSession.writeInput(Data(bytes))
         } else if let tmux {
-            DebugLog.shared.log("input[\(bytes.count)B] → TMUX send-keys")
             tmux.sendInput(bytes)
         } else {
-            DebugLog.shared.log("input[\(bytes.count)B] → RAW writer\(rawWriter == nil ? " (NIL!)" : "")")
             rawWriter?.enqueue(bytes)
         }
         PerfSignposts.input.endInterval("send", signpost)
+        // ── after the write: diagnostics (gated no-op) + forked observation ───────
+        // `log` is an @autoclosure that is a no-op unless diagnostics is enabled, so
+        // this string is not even built in normal use.
+        DebugLog.shared.log("input[\(bytes.count)B] → \(moshSession != nil ? "MOSH" : (tmux != nil ? "TMUX" : "RAW"))")
         observePredictorInput(bytes)
     }
 
