@@ -173,8 +173,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     // MARK: - Input routing
 
-    func fnTap()       { fnState.tap() }
-    func fnDoubleTap() { fnState.doubleTap() }
+    func fnTap() { fnState.tap() }
     /// Send an F-key and clear a one-shot Fn arm.
     func fnTapFKey(_ n: Int) { keybar.tapFKey(n); fnState.fireFKey() }
 
