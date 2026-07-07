@@ -123,6 +123,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// UDP handshake completed). Gates `onEnd`: a pre-first-frame exit falls back to
     /// SSH on the retained connection; a post-first-frame exit is a mid-session crash.
     private var moshFirstFrameSeen = false
+    /// First-frame watchdog: fires an SSH fallback if the Mosh loop signals no life
+    /// (no onFirstFrame, no onEnd) within the window. Cancelled by either callback.
+    private var moshWatchdog: Task<Void, Never>?
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -338,6 +341,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Reset all connection and pane state. Call at the start of each connect
     /// attempt so no stale handles or buffered bytes carry over to the new session.
     private func teardown() {
+        moshWatchdog?.cancel(); moshWatchdog = nil
         moshSession?.stop()
         moshSession = nil
         moshFirstFrameSeen = false
@@ -594,10 +598,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self?.output.onOutput(data: data)
             }
             sess.onFirstFrame = { [weak self] in
-                // Frames are flowing: the UDP path is up. From here on, loop exits are
-                // mid-session events, not handshake failures.
                 DebugLog.shared.log("mosh: onFirstFrame — UDP handshake up, frames flowing")
                 self?.moshFirstFrameSeen = true
+                self?.moshWatchdog?.cancel(); self?.moshWatchdog = nil
+                DebugLog.shared.log("mosh: watchdog cancelled (onFirstFrame)")
             }
             // Stamp the start time BEFORE the onEnd closure literal so the closure can
             // capture it (Swift resolves captures at declaration order, not runtime).
@@ -606,6 +610,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             let moshStartedAt = ProcessInfo.processInfo.systemUptime
             sess.onEnd = { [weak self] reason in
                 guard let self else { return }
+                self.moshWatchdog?.cancel(); self.moshWatchdog = nil
                 DebugLog.shared.log("mosh: onEnd firstFrameSeen=\(self.moshFirstFrameSeen) reason=\(reason ?? "nil")")
                 let elapsed = ProcessInfo.processInfo.systemUptime - moshStartedAt
                 switch moshExitDecision(reason: reason, elapsed: elapsed) {
@@ -646,6 +651,22 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             moshSession = sess
             connection = conn
             tmuxState = nil
+            moshWatchdog = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 10_000_000_000)   // 10s watchdog window
+                guard !Task.isCancelled, let self else { return }
+                // No onFirstFrame/onEnd cancelled us → the loop signalled no life.
+                guard case .fallbackSSH = moshWatchdogAction(sawAnyCallback: false) else { return }
+                DebugLog.shared.log("mosh: watchdog fired (no frame/exit in 10s) → SSH fallback")
+                self.moshSession?.stop()
+                self.moshSession = nil
+                self.moshFallback = "Mosh didn't connect — using SSH"
+                do {
+                    try await self.attachSSHShell(conn: conn, host: host, defaults: defaults)
+                } catch {
+                    DebugLog.shared.log("mosh: watchdog SSH fallback THREW \(String(describing: error)) → .failed")
+                    self.state = .failed(String(describing: error))
+                }
+            }
             state = .shell
             return true
         case let .fallback(reason):
