@@ -14,24 +14,6 @@ final class ModifierStateTests: XCTestCase {
         XCTAssertEqual(m.current(), KeyModifiers())
     }
 
-    func testDoubleTapLocksCtrlAndPersistsAcrossKeystrokes() {
-        var m = ModifierState()
-        m.lockCtrl()
-        XCTAssertEqual(m.ctrl, .locked)
-        m.consumeAfterKeystroke()
-        XCTAssertEqual(m.ctrl, .locked)            // lock persists
-        m.consumeAfterKeystroke()
-        XCTAssertEqual(m.ctrl, .locked)
-        XCTAssertEqual(m.current(), KeyModifiers(control: true))
-    }
-
-    func testTapWhileLockedUnlocks() {
-        var m = ModifierState()
-        m.lockCtrl()
-        m.tapCtrl()
-        XCTAssertEqual(m.ctrl, .off)
-    }
-
     func testTapWhileArmedTogglesOff() {
         var m = ModifierState()
         m.tapCtrl(); m.tapCtrl()
@@ -50,11 +32,11 @@ final class ModifierStateTests: XCTestCase {
         XCTAssertFalse(m.current().shift)
     }
 
-    func testCombinedCtrlLockedPlusAltOneShot() {
+    func testCombinedCtrlPlusAltBothOneShotClearOnConsume() {
         var m = ModifierState()
-        m.lockCtrl(); m.armAlt()
+        m.tapCtrl(); m.armAlt()
         XCTAssertEqual(m.current(), KeyModifiers(control: true, option: true))
         m.consumeAfterKeystroke()
-        XCTAssertEqual(m.current(), KeyModifiers(control: true))  // ctrl locked stays, alt gone
+        XCTAssertEqual(m.current(), KeyModifiers())  // both one-shot: cleared together
     }
 }

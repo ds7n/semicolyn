@@ -4,6 +4,12 @@
 **Status:** Locked direction, ready for implementation plan
 **Scope:** Surfacing F1–F12 on a keyboard that has none, without polluting the keybar for users who never need them
 
+> **Amendment 2026-07-07 (input-latency fix):** the **double-tap** gesture was removed from both the Ctrl modifier slot and the Fn slot. A `count: 2` tap recognizer sitting next to the `count: 1` tap forced SwiftUI to wait out the system double-tap window before firing the single-tap, so touching Ctrl/Fn felt laggy (~0.5s) on device. Consequences:
+> - **Ctrl loses its lock entirely** — it is now pure one-shot (tap = arm, tap again = off). The Emacs-chord rationale below (§"Companion change") is retired; niche enough to not justify the latency cost on every Ctrl tap.
+> - **Fn keeps its Locked state** (auto-engage still depends on it, §4) but the *manual* path to lock is now the single-tap **cycle** `off → armed → locked → off` — the second tap locks. There is no manual-double-tap-to-lock anymore. The `armed → locked` step carries the "manual re-lock clears the per-episode override" semantics that the old `doubleTap()` held.
+>
+> The state tables below still describe the reachable states correctly; only the *gesture* to reach Locked changed (double-tap → second tap of the cycle), and Ctrl's Locked row no longer applies.
+
 ---
 
 ## North star
