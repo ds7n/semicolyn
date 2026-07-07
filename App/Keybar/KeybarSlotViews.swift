@@ -41,25 +41,25 @@ struct TabSlotView: View {
     }
 }
 
-/// Modifier slot: tap=arm Ctrl, double-tap=lock Ctrl, swipe-up=Alt, swipe-down=Shift.
+/// Modifier slot: tap=arm Ctrl (one-shot), swipe-up=Alt, swipe-down=Shift.
+/// A single tap recognizer — no double-tap sibling — so the arm fires the instant
+/// the finger lifts (a `count:2` sibling forced SwiftUI to wait out the
+/// double-tap window first, which felt laggy).
 struct ModifierSlotView: View {
     let ctrl: CtrlState
     let vm: ConnectionViewModel
     @Environment(\.theme) private var theme
     private var bg: Color {
         switch ctrl {
-        case .locked: return Color(theme.keybar.slotBgLocked)
-        case .armed:  return Color(theme.keybar.slotBgArmed)
-        case .off:    return Color(theme.keybar.slotBg)
+        case .armed: return Color(theme.keybar.slotBgArmed)
+        case .off:   return Color(theme.keybar.slotBg)
         }
     }
     var body: some View {
         SlotChrome(bg: bg) {
             Text("⌃").foregroundStyle(Color(theme.text.primary))
         }
-        // Double-tap must be registered before single-tap so it wins the gesture.
-        .onTapGesture(count: 2) { vm.keybar.doubleTapCtrl() }
-        .onTapGesture(count: 1) { vm.keybar.tapCtrl() }
+        .onTapGesture { vm.keybar.tapCtrl() }
         .gesture(DragGesture(minimumDistance: 12).onEnded { g in
             if g.translation.height < -12 { vm.keybar.armAlt() }
             else if g.translation.height > 12 { vm.keybar.armShift() }

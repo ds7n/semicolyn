@@ -18,21 +18,33 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
     }
 
     func verify(info: HostKeyInfo) async -> Bool {
-        let decision = (try? trust.evaluate(hostID: hostID, algorithm: info.keyType,
-                                            fingerprint: info.fingerprint)) ?? .firstTrust
+        let evaluated = try? trust.evaluate(hostID: hostID, algorithm: info.keyType,
+                                            fingerprint: info.fingerprint)
+        // DebugLog is @MainActor; verify() is non-isolated async, so these hops need
+        // `await`. Fine here — host-key verify runs once per connect, not on any hot
+        // path, so the main-actor hop cost is irrelevant.
+        if evaluated == nil {
+            await DebugLog.shared.log("hostkey: trust.evaluate THREW → defaulting to firstTrust")
+        }
+        let decision = evaluated ?? .firstTrust
         switch decision {
         case .trusted:
+            await DebugLog.shared.log("hostkey: TRUSTED (\(info.keyType)) → accept, no prompt")
             return true
         case .firstTrust:
+            await DebugLog.shared.log("hostkey: firstTrust (\(info.keyType)) → prompting user")
             let ok = await present(.firstTrust(hostLabel: info.hostLabel, keyType: info.keyType,
                                                offered: info.fingerprint))
+            await DebugLog.shared.log("hostkey: firstTrust → user \(ok ? "ACCEPTED (storing trust)" : "REJECTED")")
             if ok { try? trust.trust(hostID: hostID, algorithm: info.keyType,
                                      fingerprint: info.fingerprint, at: Date()) }
             return ok
         case .mismatch(let stored):
+            await DebugLog.shared.log("hostkey: MISMATCH (\(info.keyType)) — stored key differs → prompting user")
             let ok = await present(.mismatch(hostLabel: info.hostLabel, keyType: info.keyType,
                                              stored: stored.first?.fingerprint ?? "",
                                              offered: info.fingerprint))
+            await DebugLog.shared.log("hostkey: mismatch → user \(ok ? "ACCEPTED (replacing trust)" : "REJECTED")")
             if ok { try? trust.replace(hostID: hostID, algorithm: info.keyType,
                                        fingerprint: info.fingerprint, at: Date()) }
             return ok

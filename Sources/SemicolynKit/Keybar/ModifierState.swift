@@ -1,12 +1,15 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-/// Ctrl arming state (function-keys spec: tap=arm one-shot, double-tap=lock).
-public enum CtrlState: Equatable, Sendable { case off, armed, locked }
+/// Ctrl arming state (function-keys spec, amended: tap=arm one-shot). The former
+/// `.locked` state and its double-tap gesture were removed — the double-tap
+/// recognizer forced SwiftUI to wait out the double-tap window before firing the
+/// single-tap arm, which made touching Ctrl feel laggy (~0.5s). Ctrl is one-shot
+/// only now; Alt/Shift already were.
+public enum CtrlState: Equatable, Sendable { case off, armed }
 
-/// The keybar's modifier arming state machine. Ctrl supports lock (Emacs-style
-/// chord sequences); Alt and Shift are one-shot only (function-keys spec
-/// "Companion change: Ctrl gets double-tap-to-lock").
+/// The keybar's modifier arming state machine. Ctrl, Alt and Shift are all
+/// one-shot only.
 public struct ModifierState: Equatable, Sendable {
     public private(set) var ctrl: CtrlState = .off
     public private(set) var altArmed: Bool = false
@@ -14,17 +17,13 @@ public struct ModifierState: Equatable, Sendable {
 
     public init() {}
 
-    /// Single tap on the Ctrl gesture: off→armed, armed→off, locked→off (unlock).
+    /// Single tap on the Ctrl gesture: off→armed, armed→off (one-shot toggle).
     public mutating func tapCtrl() {
         switch ctrl {
-        case .off:    ctrl = .armed
-        case .armed:  ctrl = .off
-        case .locked: ctrl = .off
+        case .off:   ctrl = .armed
+        case .armed: ctrl = .off
         }
     }
-
-    /// Double tap on the Ctrl gesture: lock until tapped off.
-    public mutating func lockCtrl() { ctrl = .locked }
 
     /// Swipe-up arms Alt for one keystroke (no lock).
     public mutating func armAlt() { altArmed = true }
@@ -42,7 +41,7 @@ public struct ModifierState: Equatable, Sendable {
     /// sent raw.
     public var hasArmedModifier: Bool { ctrl != .off || altArmed || shiftArmed }
 
-    /// Clear one-shot arms after a keystroke fires; a Ctrl lock persists.
+    /// Clear one-shot arms after a keystroke fires.
     public mutating func consumeAfterKeystroke() {
         if ctrl == .armed { ctrl = .off }
         altArmed = false

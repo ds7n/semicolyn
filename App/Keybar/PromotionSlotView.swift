@@ -40,8 +40,12 @@ struct FkeySlotView: View {
     }
 }
 
-/// The Fn toggle slot. Background reflects Fn mode (armed/locked). Gestures land
-/// in Task 5 via `vm.fnTap()` / `vm.fnDoubleTap()`.
+/// The Fn toggle slot. Background reflects Fn mode (armed/locked). A single tap
+/// recognizer cycles off→armed→locked→off (`vm.fnTap()`); the former `count:2`
+/// double-tap-to-lock was removed because the sibling recognizer forced SwiftUI
+/// to wait out the double-tap window before firing the tap, which felt laggy.
+/// Manual lock is now the second tap of the cycle; auto-engage still locks
+/// directly (context-detection spec).
 struct FnSlotView: View {
     let mode: FnMode
     let vm: ConnectionViewModel
@@ -57,7 +61,6 @@ struct FnSlotView: View {
         Text("Fn").font(.caption).foregroundStyle(Color(theme.text.primary))
             .frame(minWidth: 34, minHeight: 34).padding(.horizontal, 6)
             .background(bg).clipShape(RoundedRectangle(cornerRadius: 6))
-            .onTapGesture(count: 2) { vm.fnDoubleTap() }
-            .onTapGesture(count: 1) { vm.fnTap() }
+            .onTapGesture { vm.fnTap() }
     }
 }
