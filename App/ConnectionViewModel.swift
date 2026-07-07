@@ -901,11 +901,23 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // limit, not a realistic paste-a-secret case.)
         let optedOut = tracker.lastCommittedLineOptedOut
         let deadline = DispatchTime.now() + .milliseconds(40)
+        // `observePredictorInput` and the coalescer are both @MainActor (this VM is
+        // @MainActor; the only caller is `sendTerminalInput`), so no lock is needed.
+        // Settle and refresh run in the same hop in program order: no fragile
+        // wall-clock offsets between them (findings C/D).
         if !scalars.isEmpty {
+            refreshCoalescer.requestRefresh(at: Date().timeIntervalSinceReferenceDate)
             DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
-                // Grid-read echo settle stays on the main actor; the suggestion
-                // recompute is handled by the coalesced trailing check below.
-                self?.passwordDetector.settleLine(scalars: scalars, from: anchor)
+                guard let self else { return }
+                // 1) settle echo against the grid (L1), THEN
+                self.passwordDetector.settleLine(scalars: scalars, from: anchor)
+                // 2) recompute suggestions in the same main-actor hop, in program order,
+                //    so the refresh always reflects post-settle state (findings C/D — no
+                //    fragile inter-hop wall-clock offsets). Trailing-debounce preserved:
+                //    only recompute if no newer keystroke arrived.
+                if self.refreshCoalescer.isDue(at: Date().timeIntervalSinceReferenceDate) {
+                    self.refreshPredictorSuggestions()
+                }
             }
         }
         for b in bytes where b == 0x0d || b == 0x0a {
@@ -924,22 +936,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 }
                 self.pendingLineTokens.removeAll(keepingCapacity: true)
                 self.passwordDetector.resetLine()
-            }
-        }
-        // Coalesce: a typing burst recomputes suggestions once, not per keystroke.
-        // Record this request, then check `quietWindow` later — recompute only if no
-        // newer keystroke arrived in the meantime (trailing debounce). Scheduled just
-        // AFTER the 40ms echo-settle hop so the recompute reflects post-settle state.
-        // Only recompute suggestions for chunks that carried printable input. An
-        // Enter/control-only chunk (empty scalars) must not trigger a refresh — the
-        // prefix just reset to empty and a refresh would surface stale/empty results.
-        if !scalars.isEmpty {
-            refreshCoalescer.requestRefresh(at: Date().timeIntervalSinceReferenceDate)
-            DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(5)) { [weak self] in
-                guard let self else { return }
-                if self.refreshCoalescer.isDue(at: Date().timeIntervalSinceReferenceDate) {
-                    self.refreshPredictorSuggestions()
-                }
             }
         }
     }
@@ -968,6 +964,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         guard s.hasPrefix(tracker.current) else { return }
         let suffix = String(s.dropFirst(tracker.current.count))
         guard !suffix.isEmpty else { return }
+        predictorVM.setSuggestions([])   // clear immediately; the echo round-trip repopulates from the new prefix
         sendTerminalInput(Array(suffix.utf8))
     }
 
