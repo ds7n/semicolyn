@@ -40,8 +40,9 @@ output.
 
 Authoritative gate inside the engine so every caller is protected:
 
-- `PredictorEngine.suggestions(forPrefix:after:)`: `guard prefix.count >= minPrefix else { return [] }` at the top. `minPrefix` is a `SuggestionConfig` knob, default **2** (matches the "1–2 characters" intent; 2 chosen so a single stray char doesn't trigger).
-- This alone makes an empty-prefix (post-Enter) refresh return `[]`.
+- `PredictorEngine.suggestions(forPrefix:after:)`: gate near the top, `minPrefix` a `SuggestionConfig` knob, default **2** (matches the "1–2 characters" intent; 2 chosen so a single stray char doesn't trigger).
+- **The gate applies ONLY to the from-scratch (unigram) path — NOT the next-token (bigram) path.** The engine already treats a non-empty `previous` as "suggest what follows this token" (a legitimate feature: type `git ` then a space → suggest `status`/`commit` with an empty word-prefix — covered by existing tests `testLearnedNextTokenSurfaces…`, `testSeedNextTokenSurfaces…`, `testLearnedNextTokenOutranksSeed`, all of which call `suggestions(forPrefix: "", after: "git")`). Gating on bare `prefix.count` would break those. So the gate is: `guard previousIsUsable || prefix.count >= config.minPrefix else { return [] }`, where `previousIsUsable == (previous?.isEmpty == false)`. Bugs 3/4 are the *no-preceding-token* empty-prefix case (start of a command line), which this still blocks.
+- This makes an empty-prefix, no-previous (post-Enter / start-of-line) refresh return `[]`, while preserving bigram next-token suggestions.
 
 ### Fix 3 — Don't schedule a refresh for input-less chunks (bug 4, belt-and-suspenders)
 
