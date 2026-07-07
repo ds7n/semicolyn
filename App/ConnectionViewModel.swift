@@ -157,7 +157,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// in flight per handshake; if a stale continuation somehow remains, resolve
     /// it as rejected (the safe direction) rather than leaking its task.
     func present(_ prompt: HostKeyPrompt) async -> Bool {
-        await withCheckedContinuation { cont in
+        DebugLog.shared.log("hostkey: prompt shown (\(String(describing: prompt).prefix(60)))")
+        return await withCheckedContinuation { cont in
             promptContinuation?.resume(returning: false)
             promptContinuation = cont
             pendingPrompt = prompt
@@ -166,6 +167,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     /// Called by the view when the user taps a modal button.
     func resolvePrompt(_ trusted: Bool) {
+        DebugLog.shared.log("hostkey: prompt resolved trusted=\(trusted)")
         pendingPrompt = nil
         promptContinuation?.resume(returning: trusted)
         promptContinuation = nil
@@ -389,10 +391,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // key isn't stored on this device).
             if let key = try AppStores.shared.identities.privateKeyOpenSSH(for: identityID) {
                 // No silent fallback: a present-but-rejected key returns its outcome.
-                return try await conn.authenticatePublickey(user: user, privateKeyOpenssh: key)
+                DebugLog.shared.log("authenticate: publickey (identity=\(identityID))")
+                let outcome = try await conn.authenticatePublickey(user: user, privateKeyOpenssh: key)
+                DebugLog.shared.log("authenticate: publickey → \(String(describing: outcome))")
+                return outcome
             }
+            DebugLog.shared.log("authenticate: identity \(identityID) has no stored key → password fallback")
+        } else {
+            DebugLog.shared.log("authenticate: no identity resolved → password")
         }
-        return try await conn.authenticatePassword(user: user, password: password)
+        let outcome = try await conn.authenticatePassword(user: user, password: password)
+        DebugLog.shared.log("authenticate: password → \(String(describing: outcome))")
+        return outcome
     }
 
     // MARK: - Host record
@@ -443,7 +453,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         let probeSession = try? await conn.openExec(command: "tmux -V", term: "xterm-256color",
                                                     cols: 80, rows: 24, output: sink)
-        guard probeSession != nil else { return nil }
+        guard probeSession != nil else {
+            DebugLog.shared.log("probeTmuxVersion: exec FAILED to open → nil")
+            return nil
+        }
         defer { if let probeSession { Task { try? await probeSession.close() } } }
         // Race the exec-channel close against a 2-second guard in case onExit
         // is never fired (e.g. some server implementations don't send channel EOF
@@ -459,12 +472,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             group.cancelAll()
         }
         let text = String(decoding: captured, as: UTF8.self)
+        DebugLog.shared.log("probeTmuxVersion: got \(text.isEmpty ? "EMPTY (nil)" : text.trimmingCharacters(in: .whitespacesAndNewlines))")
         return text.isEmpty ? nil : text
     }
 
     /// Open a raw PTY shell: the original pre-tmux path. Sets `connection`,
     /// `session`, and `state = .shell`.
     private func openRawShell(conn: Connection) async throws {
+        DebugLog.shared.log("openRawShell: opening PTY shell")
         let sess = try await conn.openShell(
             term: "xterm-256color", cols: 80, rows: 24, output: output)
         connection = conn
@@ -484,6 +499,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             let harvestText = String(decoding: bytes, as: UTF8.self)
             Task { [predictor = self.predictor] in await predictor?.harvest(output: harvestText) }
         }
+        DebugLog.shared.log("openRawShell: shell opened, state=.shell")
         state = .shell
     }
 
@@ -521,7 +537,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         let sess = try? await conn.openExec(command: command, term: "xterm-256color",
                                             cols: 80, rows: 24, output: sink)
-        guard sess != nil else { return "" }
+        guard sess != nil else {
+            DebugLog.shared.log("mosh: bootstrap exec FAILED to open (openExec returned nil)")
+            return ""
+        }
         defer { if let sess { Task { try? await sess.close() } } }
         await withTaskGroup(of: Void.self) { group in
             group.addTask { for await _ in done { break } }
@@ -536,7 +555,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// with a banner. Returns true if a Mosh session was attached; false if it fell
     /// back (the caller then runs the existing tmux/raw branch).
     private func attachMoshIfPossible(conn: Connection, host: Host, defaults: Defaults) async -> Bool {
-        guard resolveMoshEnabled(host: host, defaults: defaults) else { return false }
+        guard resolveMoshEnabled(host: host, defaults: defaults) else {
+            DebugLog.shared.log("mosh: disabled for this host → SSH/tmux path")
+            return false
+        }
         // Effective config for the argv (port range, server path, prediction mode).
         // resolveOptional honors Inherited three-state (NOT host.mosh.value).
         let cfg = resolveOptional(host.mosh, defaults.mosh) ?? MoshConfig(enabled: true)
@@ -659,6 +681,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // session name — which a Defaults-level value can be, since the Defaults
             // editor has no per-field validation). Surface it via the degraded
             // banner instead of silently dropping to a raw shell everywhere.
+            DebugLog.shared.log("attachTmux: makeStartCommand nil (bad session name) → degraded raw shell")
             degraded = .couldNotStart
             try await openRawShell(conn: conn)
             return
@@ -742,6 +765,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Tmux crashed: reuse the live connection for a raw shell, then show the
     /// persistent crash banner. If the connection is also gone, surface a failure.
     private func recoverFromTmuxCrash(conn: Connection) async {
+        DebugLog.shared.log("recoverFromTmuxCrash: tmux crashed → raw shell on live conn")
         tmux?.stop(); tmux = nil
         do {
             try await openRawShell(conn: conn)   // sets session/rawWriter, tmuxState=nil, state=.shell
@@ -750,8 +774,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             paneViews.removeAll()
             pendingPaneBytes.removeAll()
             renderablePanes.removeAll()
+            DebugLog.shared.log("recoverFromTmuxCrash: raw shell up → crash banner")
             crashBanner = .tmuxEnded
         } catch {
+            DebugLog.shared.log("recoverFromTmuxCrash: raw shell THREW \(String(describing: error)) → .failed")
             state = .failed("tmux ended and the connection is no longer reachable.")
         }
     }
@@ -773,11 +799,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// old session somehow survived this reattaches to it (acceptable for v1 —
     /// distinct fresh-session naming is a follow-up).
     func startNewTmux() {
-        guard let conn = connection else { return }
+        guard let conn = connection else {
+            DebugLog.shared.log("startNewTmux: ABORT no connection")
+            return
+        }
         crashBanner = nil
         Task {
             do { try await attachTmux(conn: conn) }
-            catch { state = .failed("Could not start tmux: the connection is no longer reachable.") }
+            catch {
+                DebugLog.shared.log("startNewTmux: attach THREW → .failed")
+                state = .failed("Could not start tmux: the connection is no longer reachable.")
+            }
         }
     }
 
@@ -939,7 +971,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `findOrCreateHost`). Throws a user-facing `.failed` state if the user
     /// field cannot be resolved.
     func connect(savedHost: Host, password: String) {
-        if state == .connecting || state == .shell { return }
+        if state == .connecting || state == .shell {
+            DebugLog.shared.log("connect(saved): IGNORED — already \(state == .connecting ? "connecting" : "in shell")")
+            return
+        }
         lastSavedHost = savedHost
         lastPassword = password
         teardown()
@@ -950,9 +985,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         do {
             user = try resolveUser(host: savedHost, defaults: defaults)
         } catch ResolutionError.userUnset {
+            DebugLog.shared.log("connect(saved): user unset → .failed (pre-connect)")
             state = .failed("Set a user for this host or in Defaults to connect.")
             return
         } catch {
+            DebugLog.shared.log("connect(saved): resolveUser THREW \(String(describing: error)) → .failed")
             state = .failed(String(describing: error))
             return
         }
@@ -1009,14 +1046,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     // MARK: - Connect (ad-hoc)
 
     func connect(host: String, port: String, user: String, password: String) {
-        if state == .connecting || state == .shell { return }   // ignore re-taps
+        if state == .connecting || state == .shell {
+            DebugLog.shared.log("connect(adhoc): IGNORED — already \(state == .connecting ? "connecting" : "in shell")")
+            return
+        }
         teardown()
         state = .connecting
         degraded = nil
         let addr = "\(host):\(port.isEmpty ? "22" : port)"
         output.onExit = { [weak self] exit in
+            DebugLog.shared.log("connect(adhoc): output.onExit → .failed(\(exit.error ?? "Session closed"))")
             self?.state = .failed(exit.error ?? "Session closed")
         }
+        DebugLog.shared.log("connect(adhoc): START addr=\(addr) user=\(user)")
         Task {
             do {
                 let portNum = Int(port) ?? 22
@@ -1029,11 +1071,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     addr: addr, allowLegacy: false, allowDeprecated: false,
                     keepalive: keepaliveConfig(host: hostRecord, defaults: defaults),
                     verifier: verifier)
+                DebugLog.shared.log("connect(adhoc): TCP+handshake OK, authenticating")
                 let outcome = try await authenticate(conn: conn, user: user, host: hostRecord, defaults: defaults, password: password)
                 switch outcome {
                 case .success:
-                    break
+                    DebugLog.shared.log("connect(adhoc): auth SUCCESS")
                 default:
+                    DebugLog.shared.log("connect(adhoc): auth FAILED (\(String(describing: outcome))) → .failed")
                     state = .failed("Authentication failed")
                     return
                 }
@@ -1043,14 +1087,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 startPredictor(host: hostRecord, defaults: defaults2)
                 // Mosh takes precedence over tmux when enabled + bootstrappable.
                 if await attachMoshIfPossible(conn: conn, host: hostRecord, defaults: defaults2) {
+                    DebugLog.shared.log("connect(adhoc): went MOSH path")
                     return
                 }
+                DebugLog.shared.log("connect(adhoc): → attachSSHShell (tmux/raw)")
                 try await attachSSHShell(conn: conn, host: hostRecord, defaults: defaults2)
             } catch ConnectError.HostKeyRejected {
+                DebugLog.shared.log("connect(adhoc): HostKeyRejected → .failed")
                 state = .failed("Host key not trusted")
             } catch ConnectError.Timeout {
+                DebugLog.shared.log("connect(adhoc): Timeout → .failed")
                 state = .failed("Couldn't reach host — connection timed out")
             } catch {
+                DebugLog.shared.log("connect(adhoc): THREW \(String(describing: error)) → .failed")
                 state = .failed(String(describing: error))
             }
         }
