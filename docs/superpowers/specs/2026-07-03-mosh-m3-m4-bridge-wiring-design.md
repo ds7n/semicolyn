@@ -209,6 +209,15 @@ banner. **After the first frame**, trust Mosh to survive drops (degraded banner 
 loop exit reuses the crash banner. This reuses the tmux crash-vs-degrade UI states already
 in the VM — **no new banner states**.
 
+> **Amendment 2026-07-07 (see `2026-07-07-mosh-exit-classification-design.md`):** the
+> `firstFrameSeen` discriminator was removed. Real mosh emits an init/clear framebuffer
+> diff BEFORE the UDP handshake is confirmed, so `onFirstFrame` fires for a connection that
+> then fails (device trace: nonzero exit 90ms after `onFirstFrame`, wrongly routed to the
+> crash banner). Exits are now classified by **reason + elapsed time**: a nonzero exit within
+> a 3s grace window → SSH fallback (even if a frame was "seen"); ≥3s → crash banner; a clean
+> exit → session ended. A separate 10s first-frame watchdog covers a hung UDP path that never
+> calls back.
+
 | failure | detection | behavior |
 |---|---|---|
 | `mosh-server` not installed | stdout has no `MOSH CONNECT` → `.noConnectLine` | banner *"mosh-server not found on host — using SSH"* → existing tmux/raw path |
