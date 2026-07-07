@@ -63,8 +63,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private var predictor: PredictorActor?
     private var tracker = InputTokenTracker()
     /// Trailing-debounce so a typing burst recomputes suggestions once, not per
-    /// keystroke (Plan B). The 40ms quiet window matches the L1 echo-settle hop.
-    private var refreshCoalescer = SuggestionRefreshCoalescer(quietWindow: 0.04)
+    /// keystroke (Plan B).
+    // 0.035 < the 40ms settle-hop delay so the folded `isDue` check clears the window
+    // with margin (the refresh runs inside the 40ms echo-settle hop; a 40ms window would
+    // land exactly on the threshold). Trailing-debounce intent unchanged: a newer
+    // keystroke within ~35ms still defers the recompute.
+    private var refreshCoalescer = SuggestionRefreshCoalescer(quietWindow: 0.035)
     private var learnedStore: LearnedStore?
     /// Write-time gate keeping typed secrets out of the learned vocabulary
     /// (`observePredictorInput`). See `PasswordEntryDetector`. Lazily wires the
@@ -497,18 +501,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
         tmuxState = nil   // raw mode: single-terminal path
-        // Harvest raw-shell output for the predictor through the dedicated harvest
-        // slot. `TerminalScreen.makeUIView` installs its render closure into
-        // `output.onBytes`; using `onHarvestBytes` lets both fire from `onOutput`
-        // (previously the render closure clobbered this and degraded-mode output
-        // never trained the predictor).
         output.onHarvestBytes = { [weak self] bytes in
             guard let self else { return }
-            // Feed the output stream to the password gate (echo inference +
-            // prompt-text) so it can classify the next typed line.
+            // Feed output to the password-prompt gate only. We deliberately no longer
+            // harvest free terminal output as suggestion candidates — that pulled the
+            // shell prompt (Starship) into suggestions. Suggestions now source from
+            // typed-command echo (record) + seed only. (predictor-suggestion-hygiene spec, Fix 1.)
             self.passwordDetector.noteOutput(bytes)
-            let harvestText = String(decoding: bytes, as: UTF8.self)
-            Task { [predictor = self.predictor] in await predictor?.harvest(output: harvestText) }
         }
         DebugLog.shared.log("openRawShell: shell opened, state=.shell")
         state = .shell
@@ -749,11 +748,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // buffering, and don't harvest output the user can't see.
                 return
             }
-            // Harvest pane output for the predictor — visible panes only (a live
-            // view or pending registration), not filtered by active pane.
+            // Feed output to the password-prompt gate only. We deliberately no longer
+            // harvest free terminal output as suggestion candidates — that pulled the
+            // shell prompt (Starship) into suggestions. Suggestions now source from
+            // typed-command echo (record) + seed only. (predictor-suggestion-hygiene spec, Fix 1.)
             self.passwordDetector.noteOutput(bytes)
-            let harvestText = String(decoding: bytes, as: UTF8.self)
-            Task { [predictor = self.predictor] in await predictor?.harvest(output: harvestText) }
         }
         runtime.onStateChanged = { [weak self] state in
             guard let self else { return }
@@ -951,6 +950,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
         }
+        // If this chunk left the line empty with no usable preceding token (an ESC /
+        // Ctrl-* / control line reset, or a backspace-to-empty), clear stale chips now.
+        // Enter is already handled synchronously below; the normal typing case has a
+        // non-empty `current` so this is a no-op there. (predictor-suggestion-hygiene
+        // spec, Fix 4: "clear on ESC/control line reset".)
+        if tracker.current.isEmpty, tracker.previous?.isEmpty != false {
+            predictorVM.setSuggestions([])
+        }
         // L4a: the tracker latches the just-committed line's opt-out at its Enter,
         // so this is correct even when a leading-space line and its Enter arrive in
         // ONE chunk (paste). (Per-chunk coarseness matches L1's: a chunk with two
@@ -958,14 +965,27 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // limit, not a realistic paste-a-secret case.)
         let optedOut = tracker.lastCommittedLineOptedOut
         let deadline = DispatchTime.now() + .milliseconds(40)
+        // `observePredictorInput` and the coalescer are both @MainActor (this VM is
+        // @MainActor; the only caller is `sendTerminalInput`), so no lock is needed.
+        // Settle and refresh run in the same hop in program order: no fragile
+        // wall-clock offsets between them (findings C/D).
         if !scalars.isEmpty {
+            refreshCoalescer.requestRefresh(at: Date().timeIntervalSinceReferenceDate)
             DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
-                // Grid-read echo settle stays on the main actor; the suggestion
-                // recompute is handled by the coalesced trailing check below.
-                self?.passwordDetector.settleLine(scalars: scalars, from: anchor)
+                guard let self else { return }
+                // 1) settle echo against the grid (L1), THEN
+                self.passwordDetector.settleLine(scalars: scalars, from: anchor)
+                // 2) recompute suggestions in the same main-actor hop, in program order,
+                //    so the refresh always reflects post-settle state (findings C/D — no
+                //    fragile inter-hop wall-clock offsets). Trailing-debounce preserved:
+                //    only recompute if no newer keystroke arrived.
+                if self.refreshCoalescer.isDue(at: Date().timeIntervalSinceReferenceDate) {
+                    self.refreshPredictorSuggestions()
+                }
             }
         }
         for b in bytes where b == 0x0d || b == 0x0a {
+            predictorVM.setSuggestions([])   // line committed → clear stale chips immediately
             DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(10)) { [weak self] in
                 guard let self else { return }
                 let echoConfirmed = self.passwordDetector.shouldLearnCommittedLine()
@@ -982,22 +1002,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self.passwordDetector.resetLine()
             }
         }
-        // Coalesce: a typing burst recomputes suggestions once, not per keystroke.
-        // Record this request, then check `quietWindow` later — recompute only if no
-        // newer keystroke arrived in the meantime (trailing debounce). Scheduled just
-        // AFTER the 40ms echo-settle hop so the recompute reflects post-settle state.
-        refreshCoalescer.requestRefresh(at: Date().timeIntervalSinceReferenceDate)
-        DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(5)) { [weak self] in
-            guard let self else { return }
-            if self.refreshCoalescer.isDue(at: Date().timeIntervalSinceReferenceDate) {
-                self.refreshPredictorSuggestions()
-            }
-        }
     }
 
     private func refreshPredictorSuggestions() {
         guard let predictor else { predictorVM.setSuggestions([]); return }
         let prefix = tracker.current, prev = tracker.previous
+        // Mirror the engine's conditional min-prefix floor so a short from-scratch prefix
+        // clears chips instead of leaving stale ones up. The bigram path (a usable
+        // `prev`) is exempt — next-token suggestions are valid with an empty prefix.
+        // NOTE: literal `2` must stay in sync with SuggestionConfig.minPrefix (currently 2).
+        // A future task can plumb the config value through; out of scope here.
+        let hasUsablePrevious = (prev?.isEmpty == false)
+        if !hasUsablePrevious, prefix.count < 2 { predictorVM.setSuggestions([]); return }
         Task { [weak self] in
             let raw = await predictor.suggestions(forPrefix: prefix, after: prev)
             let chips = predictorChips(current: prefix, suggestions: raw)
@@ -1012,6 +1028,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         guard s.hasPrefix(tracker.current) else { return }
         let suffix = String(s.dropFirst(tracker.current.count))
         guard !suffix.isEmpty else { return }
+        predictorVM.setSuggestions([])   // clear immediately; the echo round-trip repopulates from the new prefix
         sendTerminalInput(Array(suffix.utf8))
     }
 
