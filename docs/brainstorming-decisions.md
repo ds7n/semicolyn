@@ -122,7 +122,9 @@ Two complementary input mechanisms central to the differentiation:
 
 ### Cursor placement
 
-| Topic | Decision |
+> **SUPERSEDED 2026-07-07** by `docs/superpowers/specs/2026-07-06-cursor-centric-interaction-design.md`. The always-on halo below is replaced by the iOS-native model: **tap = reposition** (same-line reliable), **quick-drag = scrub** the cursor, **hold-then-drag = native selection + loupe**. The cursor itself is the single affordance — no separate halo. The delta/gain/dead-zone movement math (rows below) is RETAINED for the quick-drag scrub (`CursorDragEngine`). In a `mouse=a` pane the tap/drag gestures suspend so touches forward as SGR mouse events (consistent with the Mouse-mode row §"Mouse mode").
+
+| Topic | Decision (halo model — superseded, see banner) |
 |---|---|
 | Gesture model | **Drag from a halo around the cursor.** ~60pt halo, faintly visible always (~15% opacity), brightens on touch. Outside the halo, existing gestures (focus / scroll / window-switch / selection) behave normally. |
 | Movement model | **Delta-based (mouse-like), never joystick.** Cursor moves by `finger_delta × gain(speed)`. Stops when finger stops; no momentum, no position-based continuous scrolling. |
@@ -455,7 +457,7 @@ Two complementary input mechanisms central to the differentiation:
 | Advertised TERM | `TERM=xterm-256color` + `COLORTERM=truecolor`. 256-color baseline, opportunistic 24-bit rendering when apps emit `\x1b[38;2;R;G;Bm` / `\x1b[48;2;R;G;Bm`. Same as Blink / Termius / Prompt 3 / iTerm2 / Alacritty. |
 | OSC 52 (clipboard) | **Allowed by default, per-host toggle to disable.** `semicolyn.osc52.allow` in the schema, default `true`. Disabled means the write sequence is parsed and dropped silently. **Read sequences (`\x1b]52;c;?\x07`) never honored regardless of the toggle** — sending the user's clipboard to a remote is a separate boundary v1 doesn't cross. |
 | OSC 0/2 (title) | Captured per window, surfaced only in the **Esc-pill picker Live group as a dim suffix** (`build-01 — ~/src/semicolyn`). Title truncates first, window name never. Nowhere else. |
-| Mouse mode | **Hybrid.** Modes 1000 / 1002 / 1003 / 1006 / 1015 supported. In a mouse-active pane: taps forward as mouse events (SGR encoding), drag forwards as motion, two-finger scroll forwards as wheel events. **Cursor halo and iOS long-press selection auto-suspend in that pane only.** Bronze 4pt indicator at the pane's top-right interior corner. All other gestures (keybar, Esc pill, etc.) work. Mouse mode is per-pane. |
+| Mouse mode | **Hybrid.** Modes 1000 / 1002 / 1003 / 1006 / 1015 supported. In a mouse-active pane: taps forward as mouse events (SGR encoding), drag forwards as motion, two-finger scroll forwards as wheel events. **The tap/drag cursor gestures and iOS long-press selection auto-suspend in that pane only** (cursor-centric model, 2026-07-06 spec). Bronze 4pt indicator at the pane's top-right interior corner. All other gestures (keybar, Esc pill, etc.) work. Mouse mode is per-pane. |
 | Closed-set policy | Semicolyn's negotiation list contains only classified algorithms / sequences. New ones wait for an app update. |
 | Out of scope (v1) | Bracketed paste (likely-add), Sixel / iTerm2-inline-image / Kitty graphics, OSC 8 hyperlinks. |
 
