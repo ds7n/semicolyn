@@ -126,6 +126,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// First-frame watchdog: fires an SSH fallback if the Mosh loop signals no life
     /// (no onFirstFrame, no onEnd) within the window. Cancelled by either callback.
     private var moshWatchdog: Task<Void, Never>?
+    /// True once a terminal Mosh handler (the watchdog fallback OR `onEnd`) has
+    /// resolved this session. Guards against the watchdog and an already-enqueued
+    /// `onEnd` both running their branch (main-actor-serialized, so a flag suffices):
+    /// e.g. the watchdog attaches SSH, then a queued `onEnd` would otherwise clobber
+    /// it with a spurious crash banner. Reset in `teardown()` with the rest of Mosh state.
+    private var moshResolved = false
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -342,6 +348,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// attempt so no stale handles or buffered bytes carry over to the new session.
     private func teardown() {
         moshWatchdog?.cancel(); moshWatchdog = nil
+        moshResolved = false
         moshSession?.stop()
         moshSession = nil
         moshFirstFrameSeen = false
@@ -615,6 +622,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             sess.onEnd = { [weak self] reason in
                 guard let self else { return }
                 self.moshWatchdog?.cancel(); self.moshWatchdog = nil
+                // The watchdog may have already resolved this session (attached SSH)
+                // via an onEnd dispatch that was enqueued before the watchdog niled it.
+                // Bail so we don't clobber the watchdog's SSH shell with a stale banner.
+                if self.moshResolved {
+                    DebugLog.shared.log("mosh: onEnd after watchdog already resolved → ignored")
+                    return
+                }
+                self.moshResolved = true
                 DebugLog.shared.log("mosh: onEnd firstFrameSeen=\(self.moshFirstFrameSeen) reason=\(reason ?? "nil")")
                 let elapsed = ProcessInfo.processInfo.systemUptime - moshStartedAt
                 switch moshExitDecision(reason: reason, elapsed: elapsed) {
@@ -660,6 +675,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 guard !Task.isCancelled, let self else { return }
                 // No onFirstFrame/onEnd cancelled us → the loop signalled no life.
                 guard case .fallbackSSH = moshWatchdogAction(sawAnyCallback: false) else { return }
+                // Claim the resolution before the attachSSHShell suspension point so a
+                // late onEnd (enqueued before we niled the callback) bails instead of
+                // clobbering this SSH shell.
+                if self.moshResolved { return }
+                self.moshResolved = true
                 DebugLog.shared.log("mosh: watchdog fired (no frame/exit in 10s) → SSH fallback")
                 self.moshSession?.stop()
                 self.moshSession = nil
