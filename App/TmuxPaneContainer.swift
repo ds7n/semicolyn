@@ -57,7 +57,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         // Refresh halo and dot colors on theme changes.
         context.coordinator.bellHaloColor = UIColor(Color(theme.bell.edge))
         context.coordinator.accentDotColor = UIColor(Color(theme.accent.primary.alpha(0.40)))
-        context.coordinator.cursorHaloColor = UIColor(Color(theme.accent.primary))
         // Recolor every live pane when the theme changes.
         for pane in uiView.paneTerminalViews {
             applyPalette(theme.terminalPalette(), to: pane)
@@ -66,8 +65,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         context.coordinator.onTmuxResize = onTmuxResize
         // Update mouse-active dot visibility and selection gesture state for all panes.
         context.coordinator.updateMouseDots(for: uiView.panes)
-        // Reposition each focused pane's cursor-placement halo on the live cursor.
-        context.coordinator.refreshCursorHalos()
     }
 
     /// Bridges SwiftTerm input from whichever pane is active to the VM.
@@ -87,7 +84,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         var selectionLongPresses: [ObjectIdentifier: UILongPressGestureRecognizer] = [:]
         /// Per-pane pinch-zoom gesture recognizers keyed by TerminalView identity.
         private var pinchRecognizers: [ObjectIdentifier: UIPinchGestureRecognizer] = [:]
-        /// Per-pane cursor-placement drag controllers (halo + pan), keyed by TerminalView identity.
+        /// Per-pane cursor-placement drag controllers (tap + pan), keyed by TerminalView identity.
         private var cursorDrags: [ObjectIdentifier: CursorDragController] = [:]
         /// Baseline font size for pinch-zoom; shared across all panes in this window.
         /// Updated on `.ended`; persists for the window's lifetime only (not stored to host — v1.5+).
@@ -101,10 +98,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Current accent primary color for mouse dots, refreshed from the theme in updateUIView.
         var accentDotColor: UIColor {
             didSet { mouseDots.values.forEach { $0.backgroundColor = accentDotColor } }
-        }
-        /// Current cursor-placement halo color (theme accent), refreshed in updateUIView.
-        var cursorHaloColor: UIColor {
-            didSet { cursorDrags.values.forEach { $0.configure(color: cursorHaloColor) } }
         }
         /// Whether OSC 52 clipboard writes are permitted for this session.
         private let osc52Allowed: Bool
@@ -131,7 +124,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
             self.baseFontSize = settings.fontSize
             self.bellHaloColor = UIColor(Color(theme.bell.edge))
             self.accentDotColor = UIColor(Color(theme.accent.primary.alpha(0.40)))
-            self.cursorHaloColor = UIColor(Color(theme.accent.primary))
             self.osc52Allowed = osc52Allowed
             self.onTitle = onTitle
         }
@@ -166,11 +158,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
             view.addGestureRecognizer(pinch)
             pinchRecognizers[key] = pinch
 
-            // Install cursor-placement drag (halo + halo-gated pan); enabled per-pane in apply().
+            // Install cursor-placement drag (tap + pan, no halo); enabled per-pane in apply().
             let drag = CursorDragController(view: view, send: cursorSend)
-            drag.configure(color: cursorHaloColor)
             drag.active = false
-            drag.install()
             cursorDrags[key] = drag
         }
 
@@ -194,11 +184,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Enable the cursor-placement drag only on the focused pane (called from apply()).
         func setCursorDragActive(_ view: TerminalView, _ active: Bool) {
             cursorDrags[ObjectIdentifier(view)]?.active = active
-        }
-
-        /// Reposition every pane's cursor halo on the live cursor (called from updateUIView).
-        func refreshCursorHalos() {
-            cursorDrags.values.forEach { $0.refresh() }
         }
 
         /// Handles pinch-to-zoom across all panes. The baseline (`baseFontSize`) is
@@ -254,16 +239,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 let key = ObjectIdentifier(view)
                 let mouseActive = view.getTerminal().mouseMode != .off
                 mouseDots[key]?.isHidden = !mouseActive
-                if let gr = selectionLongPresses[key] {
-                    if mouseActive {
-                        gr.isEnabled = false
-                        // Cursor placement is deliberately NOT suspended under mouse-mode — it
-                        // synthesizes arrow keys, not mouse events (locked design). Selection-handle
-                        // suppression is wired on the Simulator pass (no public SwiftTerm signal yet).
-                    } else {
-                        gr.isEnabled = true
-                    }
-                }
+                // Suspend the tap/pan cursor gestures in a mouse-reporting pane so taps
+                // and drags forward as SGR mouse events instead of synthesizing arrows
+                // (cursor-centric spec; supersedes the old halo's "never suspend"
+                // decision — the tap affordance means a tap in a mouse app should click).
+                cursorDrags[key]?.suppressed = mouseActive
+                // (SwiftTerm owns the selection long-press; `selectionLongPresses` was
+                // never wired — stale phase-4 TODO — so there's nothing to toggle here.)
             }
         }
 

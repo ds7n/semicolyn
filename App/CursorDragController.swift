@@ -4,90 +4,56 @@ import UIKit
 import SwiftTerm
 import SemicolynKit
 
-/// Drives the cursor-placement drag for one SwiftTerm `TerminalView`: a faint halo at the
-/// cursor + a halo-gated single-finger pan that runs `CursorDragEngine` and streams
-/// synthesized arrow keys to the remote. Because it sends arrows (not mouse events) it works
-/// under `set mouse=a`. One instance per `TerminalView`. macOS-CI-validated; not built on Linux.
-///
-/// Deferred to the Simulator feel-pass (uncertain SwiftTerm APIs / feel-tuning): the loupe
-/// magnifier (needs `getChar` row text) and the offscreen `⌖` scrollback indicator (needs the
-/// undocumented `scrolled(position:)` semantics).
+/// Cursor-centric touch controller (replaces the halo). Installs a tap (reposition)
+/// and a plain pan (scrub) on a focused, non-mouse-mode `TerminalView`. Long-press →
+/// SwiftTerm native selection is a SEPARATE existing recognizer, left untouched; the
+/// pan yields to it naturally (early finger movement → pan; stay still ~0.5s → the
+/// long-press fires and selection wins).
 final class CursorDragController: NSObject, UIGestureRecognizerDelegate {
-    /// Halo radius in points (60pt diameter, per the locked design).
-    static let haloRadius: CGFloat = 30
+    /// This pane is the focused one (only the focused pane gets cursor gestures).
+    var active = false
+    /// The pane is in mouse-reporting mode (`mouse=a`); suspend cursor gestures so
+    /// taps/drags forward as SGR mouse events instead.
+    var suppressed = false
 
-    let halo = CursorHaloView(frame: .zero)
     private weak var view: TerminalView?
     private let send: ([UInt8]) -> Void
+    // `var` (not `let`): CursorDragEngine is a value type whose begin()/step()/end()
+    // are `mutating` — a `let` would not compile.
     private var engine = CursorDragEngine()
+    private var tap: UITapGestureRecognizer?
     private var pan: UIPanGestureRecognizer?
-    private let haptics = UIImpactFeedbackGenerator(style: .light)
-
-    /// Whether this pane is focused (multi-pane); halo + drag are live only when active.
-    var active = true { didSet { refreshEnabled() } }
-    /// Suppressed while iOS-native selection handles are visible (host-driven). NOTE: mouse-mode
-    /// does NOT suppress — we synthesize arrows, so the drag works under `mouse=a`.
-    var suppressed = false { didSet { refreshEnabled() } }
-
-    private var lastPoint = CGPoint.zero
-    private var emittedAny = false
+    private var lastPoint: CGPoint = .zero
 
     init(view: TerminalView, send: @escaping ([UInt8]) -> Void) {
         self.view = view
         self.send = send
         super.init()
+        install()
     }
 
-    /// Install the halo overlay + the halo-gated pan recognizer onto the view.
-    func install() {
+    private func install() {
         guard let view else { return }
-        halo.frame = view.bounds
-        halo.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(halo)
+        let t = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        t.delegate = self
+        view.addGestureRecognizer(t)
+        tap = t
         let p = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-        p.maximumNumberOfTouches = 1
         p.delegate = self
+        // Single-finger scrub only: a two-finger swipe stays a scroll, not a cursor
+        // drag (matches the old controller; avoids fighting the terminal's scroll).
+        p.maximumNumberOfTouches = 1
         view.addGestureRecognizer(p)
         pan = p
-        refresh()
     }
 
     func remove() {
-        if let pan, let view { view.removeGestureRecognizer(pan) }
-        pan = nil
-        halo.removeFromSuperview()
+        if let view, let t = tap { view.removeGestureRecognizer(t) }
+        if let view, let p = pan { view.removeGestureRecognizer(p) }
+        tap = nil; pan = nil
     }
 
-    func configure(color: UIColor) { halo.configure(color: color) }
-
-    /// Recompute the halo position from the live cursor; hide when inactive/suppressed/offscreen.
-    func refresh() {
-        guard active, !suppressed, let view, let c = cursorCenter(in: view) else { halo.hide(); return }
-        halo.place(center: c, radius: Self.haloRadius)
-    }
-
-    private func refreshEnabled() {
-        pan?.isEnabled = active && !suppressed
-        refresh()
-    }
-
-    // MARK: - Cursor geometry
-
-    /// Live cursor cell → pane-local center point, or nil if offscreen / unmeasurable.
-    private func cursorCenter(in view: TerminalView) -> CGPoint? {
-        let term = view.getTerminal()
-        let (cw, ch) = cellSize(of: view)
-        guard cw > 0, ch > 0 else { return nil }
-        let visibleRows = Int(Double(view.bounds.height) / ch)
-        guard let p = cursorHaloPlacement(cursorCol: term.buffer.x, cursorRow: term.buffer.y,
-                                          cellWidth: cw, cellHeight: ch,
-                                          paneWidth: Double(view.bounds.width),
-                                          paneHeight: Double(view.bounds.height),
-                                          visibleRows: visibleRows,
-                                          radius: Double(Self.haloRadius)) else { return nil }
-        if p.isOffscreen { return nil }
-        return CGPoint(x: p.centerX, y: p.centerY)
-    }
+    // MARK: cell metrics
 
     private func cellSize(of view: TerminalView) -> (Double, Double) {
         let f = view.font
@@ -96,17 +62,35 @@ final class CursorDragController: NSObject, UIGestureRecognizerDelegate {
         return (w, h)
     }
 
-    // MARK: - Gesture
+    // MARK: tap → reposition
+
+    @objc private func handleTap(_ g: UITapGestureRecognizer) {
+        guard active, !suppressed, let view else { return }
+        let term = view.getTerminal()
+        let (cw, ch) = cellSize(of: view)
+        guard cw > 0, ch > 0 else { return }
+        // The tap converts a VIEWPORT pixel to a cell, but the live cursor row
+        // (buffer.y) is only viewport-relative when NOT scrolled into scrollback. If
+        // the live cursor is scrolled off the visible viewport, `toRow - buffer.y`
+        // spans two coordinate spaces → a bogus cross-row arrow run. Bail in that case
+        // (mirrors the removed halo's `isOffscreen` guard). Same-viewport taps are fine.
+        let visibleRows = Int(Double(view.bounds.height) / ch)
+        guard visibleRows > 0, term.buffer.y >= 0, term.buffer.y < visibleRows else { return }
+        let pt = g.location(in: view)
+        let toCol = Int((Double(pt.x) / cw).rounded(.down))
+        let toRow = Int((Double(pt.y) / ch).rounded(.down))
+        let runs = cursorTapArrows(fromCol: term.buffer.x, fromRow: term.buffer.y,
+                                   toCol: toCol, toRow: toRow)
+        emitRuns(runs)
+    }
+
+    // MARK: pan → scrub (drag math unchanged)
 
     @objc private func handlePan(_ g: UIPanGestureRecognizer) {
-        guard let view else { return }
+        guard active, !suppressed, let view else { return }
         switch g.state {
         case .began:
-            engine.begin()
-            emittedAny = false
-            lastPoint = g.location(in: view)
-            halo.setEngaged(true)
-            haptics.impactOccurred()
+            engine.begin(); lastPoint = g.location(in: view)
         case .changed:
             let pt = g.location(in: view)
             let delta = (dx: Double(pt.x - lastPoint.x), dy: Double(pt.y - lastPoint.y))
@@ -116,22 +100,19 @@ final class CursorDragController: NSObject, UIGestureRecognizerDelegate {
             let (cw, ch) = cellSize(of: view)
             let move = engine.step(fingerDelta: delta, speed: speed, cellW: cw, cellH: ch, at: Date())
             emit(cols: move.cols, rows: move.rows)
-            refresh()
         case .ended, .cancelled, .failed:
             engine.end()
-            halo.setEngaged(false)
-            if emittedAny { haptics.impactOccurred() } // lift haptic only after real movement
-            refresh()
         default:
             break
         }
     }
 
-    /// Translate a signed cell delta into arrow keystrokes and stream them to the remote.
-    private func emit(cols: Int, rows: Int) {
-        let runs = arrowEvents(cols: cols, rows: rows)
+    // MARK: emit
+
+    private func emit(cols: Int, rows: Int) { emitRuns(arrowEvents(cols: cols, rows: rows)) }
+
+    private func emitRuns(_ runs: [ArrowRun]) {
         guard !runs.isEmpty, let view else { return }
-        emittedAny = true
         let app = view.getTerminal().applicationCursor
         var bytes: [UInt8] = []
         for run in runs {
@@ -141,13 +122,16 @@ final class CursorDragController: NSObject, UIGestureRecognizerDelegate {
         send(bytes)
     }
 
-    // MARK: - UIGestureRecognizerDelegate (halo-gated engage)
+    // MARK: arbitration
 
-    /// Only claim the touch when it lands inside the halo on the focused, un-suppressed pane —
-    /// otherwise yield so scroll / window-switch / selection proceed untouched.
-    func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
-        guard active, !suppressed, let view, let c = cursorCenter(in: view) else { return false }
-        let pt = g.location(in: view)
-        return hypot(pt.x - c.x, pt.y - c.y) <= Self.haloRadius
+    // Coexist with SwiftTerm's scroll + the tap, but NOT with a long-press: a
+    // hold-then-drag must select (loupe + handles), not simultaneously scrub the
+    // cursor. Yielding the pan to any long-press keeps "hold still → select, move →
+    // scrub" mutually exclusive (spec's arbitration; the spec flagged simultaneity as
+    // the field-test risk).
+    func gestureRecognizer(_ g: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        if other is UILongPressGestureRecognizer { return false }
+        return true
     }
 }
