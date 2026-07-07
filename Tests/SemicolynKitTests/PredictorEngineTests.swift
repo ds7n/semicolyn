@@ -28,7 +28,9 @@ final class PredictorEngineTests: XCTestCase {
     /// fix the raw split fused `\u{1b}[38;2;…m` onto `djmyers`, so escape codes
     /// leaked into suggestions.
     func testHarvestStripsEscapeCodesFromColoredOutput() {
-        var e = engine()
+        // minPrefix: 0 so the 1-char ESC-prefix assertion below exercises the real
+        // escape-strip filter rather than being short-circuited by the min-prefix gate.
+        var e = engine(config: SuggestionConfig(minPrefix: 0))
         e.harvest(output: "\u{1b}[38;2;122;162;247mdjmyers\u{1b}[0m@host")
         // The visible text is suggestable with the color codes gone. The reset
         // `\u{1b}[0m` between `djmyers` and `@host` is stripped, so they fuse into
@@ -47,19 +49,19 @@ final class PredictorEngineTests: XCTestCase {
     func testLearnedUnigramSuggested() {
         var e = engine()
         for _ in 0..<4 { e.record("claude") }   // 4 nil → graduates; higher count
-        for _ in 0..<3 { e.record("crayon") }   // 3 nil → graduates; claude (4) strictly outranks crayon (3)
-        XCTAssertEqual(e.suggestions(forPrefix: "c"), ["claude", "crayon"])
+        for _ in 0..<3 { e.record("clasp") }    // 3 nil → graduates; claude (4) strictly outranks clasp (3)
+        XCTAssertEqual(e.suggestions(forPrefix: "cl"), ["claude", "clasp"])
     }
 
     func testSeedFillsUnigramWhenLearnedEmpty() {
         let e = engine(seed: sampleSeed())
-        XCTAssertEqual(e.suggestions(forPrefix: "g"), ["git", "grep"])
+        XCTAssertEqual(e.suggestions(forPrefix: "gi"), ["git"])
     }
 
     func testSeedlessEngineStillSuggestsFromLearned() {
         var e = engine()   // no seed
         for _ in 0..<3 { e.record("deploy") }   // ≥ 3 nil → graduates
-        XCTAssertEqual(e.suggestions(forPrefix: "d"), ["deploy"])
+        XCTAssertEqual(e.suggestions(forPrefix: "de"), ["deploy"])
     }
 
     // MARK: bigram (next-token)
@@ -94,7 +96,7 @@ final class PredictorEngineTests: XCTestCase {
         // dead bigram axis that would return nothing.
         var e = engine()
         for _ in 0..<3 { e.record("deploy") }   // ≥ 3 nil → graduates
-        XCTAssertEqual(e.suggestions(forPrefix: "d", after: ""), ["deploy"])
+        XCTAssertEqual(e.suggestions(forPrefix: "de", after: ""), ["deploy"])
     }
 
     // MARK: privacy (write-time)
@@ -113,7 +115,7 @@ final class PredictorEngineTests: XCTestCase {
         // the excluded-previous contexts (adjacency still suppressed by filter).
         for _ in 0..<3 { e.record("deploy") }
         for _ in 0..<2 { e.record("deploy", after: "secret-token") }
-        XCTAssertEqual(e.suggestions(forPrefix: "d"), ["deploy"],
+        XCTAssertEqual(e.suggestions(forPrefix: "de"), ["deploy"],
                        "the non-excluded next token is still a valid unigram")
         XCTAssertEqual(e.suggestions(forPrefix: "", after: "secret-token"), [],
                        "no adjacency may be learned from an excluded previous token")
@@ -132,7 +134,7 @@ final class PredictorEngineTests: XCTestCase {
         var e = engine()
         for _ in 0..<3 { e.record("deploy") }   // ≥ 3 nil → graduates
         e.rollover()
-        XCTAssertEqual(e.suggestions(forPrefix: "d"), ["deploy"],
+        XCTAssertEqual(e.suggestions(forPrefix: "de"), ["deploy"],
                        "sealed-day learning still suggests within the window")
     }
 
@@ -149,8 +151,8 @@ final class PredictorEngineTests: XCTestCase {
 
     func testTopKConfigCapsResults() {
         var e = engine(config: SuggestionConfig(topK: 2))
-        e.record("xa", count: 5); e.record("xb", count: 4); e.record("xc", count: 3)
-        XCTAssertEqual(e.suggestions(forPrefix: "x"), ["xa", "xb"])
+        e.record("xeaa", count: 5); e.record("xebb", count: 4); e.record("xecc", count: 3)
+        XCTAssertEqual(e.suggestions(forPrefix: "xe"), ["xeaa", "xebb"])
     }
 
     // MARK: output-token harvesting
@@ -317,6 +319,54 @@ final class PredictorEngineTests: XCTestCase {
         // stored, so suggestions must be empty.
         XCTAssertTrue(engine.suggestions(forPrefix: "aabb").isEmpty,
                       "isPatternAdjacent must force low-confidence even when echoConfirmed:true and optedOut:false — the third signal in the derivation")
+    }
+
+    // MARK: - Min-prefix gate (bugs 3/4)
+
+    // Min-prefix gate (bugs 3/4): no suggestions below the threshold on the FROM-SCRATCH
+    // (no preceding token) path, even when the vocabulary would match. Default minPrefix 2.
+    func testEmptyPrefixNoPreviousReturnsNoSuggestions() {
+        var e = engine(config: SuggestionConfig(topK: 3))
+        for _ in 0..<3 { e.record("git") }   // graduate via 3 nil occurrences
+        XCTAssertEqual(e.suggestions(forPrefix: ""), [])
+    }
+    func testOneCharPrefixReturnsNoSuggestionsAtDefaultMinPrefix() {
+        var e = engine(config: SuggestionConfig(topK: 3))
+        for _ in 0..<3 { e.record("git") }
+        XCTAssertEqual(e.suggestions(forPrefix: "g"), [])
+    }
+    func testTwoCharPrefixReturnsSuggestions() {
+        var e = engine(config: SuggestionConfig(topK: 3))
+        for _ in 0..<3 { e.record("git") }
+        XCTAssertEqual(e.suggestions(forPrefix: "gi"), ["git"])
+    }
+    func testMinPrefixIsConfigurable() {
+        var e = engine(config: SuggestionConfig(topK: 3, minPrefix: 1))
+        for _ in 0..<3 { e.record("git") }
+        XCTAssertEqual(e.suggestions(forPrefix: "g"), ["git"])   // 1-char allowed when minPrefix=1
+    }
+    // REGRESSION GUARD: the bigram (next-token) path must STILL work with an empty
+    // prefix + a preceding token — the gate must not touch it.
+    func testEmptyPrefixWithPreviousStillSuggests() {
+        var e = engine(config: SuggestionConfig(topK: 3))
+        for _ in 0..<3 { e.record("status") }
+        for _ in 0..<3 { e.record("status", after: "git") }
+        XCTAssertEqual(e.suggestions(forPrefix: "", after: "git"), ["status"])
+    }
+
+    // MARK: - Bug 2 guard: un-recorded tokens must never surface
+
+    // Bug 2 (leak guard): a token that was neither typed/learned nor seeded must never
+    // be suggested. After Fix 1 the App stops feeding output to `harvest`, so the only
+    // way a token reaches suggestions is via `record` (typed) or the seed. This pins
+    // that a never-recorded token is absent — a regression here would mean output is
+    // leaking back into candidates.
+    func testUnrecordedTokenIsNotSuggested() {
+        var e = engine(config: SuggestionConfig(topK: 3))
+        for _ in 0..<3 { e.record("git") }   // graduate the only recorded token (String API)
+        // "gitprompt" was never recorded; a 2-char prefix that would match it must only
+        // surface the recorded "git", never an un-recorded token.
+        XCTAssertEqual(e.suggestions(forPrefix: "gi"), ["git"])
     }
 
     // MARK: - Task 6: purgeLearned + forgetLastLine + beginLine
