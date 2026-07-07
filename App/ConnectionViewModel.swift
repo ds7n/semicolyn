@@ -598,6 +598,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self?.output.onOutput(data: data)
             }
             sess.onFirstFrame = { [weak self] in
+                // Frames are flowing: the UDP path is up. `moshFirstFrameSeen` is no
+                // longer the exit discriminator (that's reason+elapsed now), but it
+                // still records that a frame arrived; cancelling the watchdog here is
+                // the important effect — the loop signalled life, so don't SSH-fall-back.
                 DebugLog.shared.log("mosh: onFirstFrame — UDP handshake up, frames flowing")
                 self?.moshFirstFrameSeen = true
                 self?.moshWatchdog?.cancel(); self?.moshWatchdog = nil
