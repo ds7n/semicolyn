@@ -67,10 +67,14 @@ final class TmuxRuntime {
     /// Feed raw channel bytes: fan pane output out by id, then publish state.
     func ingest(_ bytes: [UInt8]) {
         let out = controller.feed(bytes)
-        // Raw preview (control-mode is line text) so a `%error`/`can't find pane`
-        // reply to send-keys is visible. Printable ASCII only, capped.
-        let preview = String(decoding: bytes.prefix(80).map { (0x20...0x7e).contains($0) ? $0 : 0x2e }, as: UTF8.self)
-        DebugLog.shared.log("tmux rx[\(bytes.count)B] paneOut=\(out.paneOutput.count) resolved=\(out.resolved.count): \(preview)")
+        // Diagnostic (gated no-op when disabled): the raw preview + counts. The
+        // `preview` string is built inside the autoclosure, so it costs nothing on
+        // the high-frequency output path unless diagnostics is on. A `%error`/
+        // `can't find pane` reply to send-keys is visible in it.
+        DebugLog.shared.log({
+            let preview = String(decoding: bytes.prefix(80).map { (0x20...0x7e).contains($0) ? $0 : 0x2e }, as: UTF8.self)
+            return "tmux rx[\(bytes.count)B] paneOut=\(out.paneOutput.count) resolved=\(out.resolved.count): \(preview)"
+        }())
         for chunk in out.paneOutput { onPaneBytes?(chunk.pane, chunk.data) }
         if out.stateChanged { onStateChanged?(controller.state) }
         // Attach-prime: on the .attaching→.attached edge the controller asks us to
@@ -139,8 +143,8 @@ final class TmuxRuntime {
             return
         }
         guard let line = TmuxCommand.sendKeys(target: pane, bytes: bytes) else { return }
-        DebugLog.shared.log("send-keys → \(line)")
         write(line)
+        DebugLog.shared.log("send-keys → \(line)")   // after write; @autoclosure no-op when disabled
     }
 
     /// Make `id` the active window (tmux will emit the layout/active events).

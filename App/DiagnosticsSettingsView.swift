@@ -15,6 +15,7 @@ struct DiagnosticsSettingsView: View {
         List {
             Section {
                 Toggle("Show debug log panel", isOn: $showDebugPanel)
+                    .onChange(of: showDebugPanel) { _, on in DebugLog.shared.enabled = on }
             } footer: {
                 Text("Adds a 🐞 button in a connected session that opens a scrollable "
                      + "diagnostic log (connection, tmux attach, input routing) with a "
@@ -22,5 +23,6 @@ struct DiagnosticsSettingsView: View {
             }
         }
         .navigationTitle("Diagnostics")
+        .onAppear { DebugLog.shared.enabled = showDebugPanel }
     }
 }

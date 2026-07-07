@@ -3,13 +3,17 @@
 import SwiftUI
 import UIKit
 
-/// TEMPORARY on-screen diagnostic panel for the tmux reattach/no-echo investigation.
-/// Toggled by a 🐞 button; shows the rolling `DebugLog` buffer, auto-scrolled to the
-/// newest line, with Copy (→ clipboard, to paste back) and Clear. Remove with
-/// `DebugLog` once the bug is root-caused.
+/// On-screen diagnostic panel (Settings → Diagnostics). Shows the rolling `DebugLog`
+/// buffer with Copy (→ clipboard) and Clear. The buffer is not `@Published` (so
+/// recording never invalidates SwiftUI per keystroke); the panel instead observes
+/// `log.revision` and drives `refresh()` on a ~0.5s timer while visible — a redraw
+/// cadence the human eye can't out-pace, at zero cost to the input path.
 struct DebugLogPanel: View {
     @ObservedObject var log = DebugLog.shared
     let onClose: () -> Void
+
+    /// Refresh the panel a couple of times a second while it is open.
+    private let tick = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,13 +43,15 @@ struct DebugLogPanel: View {
                         }
                     }
                     .padding(.horizontal, 6)
+                    .id(log.revision)   // redraw when refresh() bumps revision
                 }
-                .onChange(of: log.lines.count) { _, n in
-                    if n > 0 { proxy.scrollTo(n - 1, anchor: .bottom) }
+                .onChange(of: log.revision) { _, _ in
+                    if !log.lines.isEmpty { proxy.scrollTo(log.lines.count - 1, anchor: .bottom) }
                 }
             }
             .background(Color.black.opacity(0.85))
         }
         .frame(maxHeight: 320)
+        .onReceive(tick) { _ in log.refresh() }
     }
 }
