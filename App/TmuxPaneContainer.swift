@@ -417,9 +417,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 }()
                 view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
                 let isActive = (rect.pane == window.activePane)
+                // The active-pane border only conveys meaning when there is more than
+                // one pane (it answers "which pane has focus"). In a single-pane window
+                // it reads as a pointless coral rim around the whole terminal, so
+                // suppress ALL border chrome there. Keyboard focus is unaffected.
+                let singlePane = (rects.count <= 1)
                 if isActive {
-                    view.layer.borderColor = activeBorderColor.cgColor
-                    view.layer.borderWidth = 1.5
+                    view.layer.borderWidth = singlePane ? 0 : 1.5
+                    if !singlePane { view.layer.borderColor = activeBorderColor.cgColor }
                     if !view.isFirstResponder {
                         let ok = view.becomeFirstResponder()
                         DebugLog.shared.log("pane \(rect.pane) ACTIVE existed=\(existed) inWindow=\(view.window != nil) becomeFirstResponder→\(ok) isFR=\(view.isFirstResponder)")
@@ -428,7 +433,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     }
                 } else {
                     view.layer.borderColor = inactiveBorderColor.cgColor
-                    view.layer.borderWidth = 0.5
+                    view.layer.borderWidth = singlePane ? 0 : 0.5
                 }
                 coordinator?.setCursorDragActive(view, isActive)
             }
