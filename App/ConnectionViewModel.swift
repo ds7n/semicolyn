@@ -542,8 +542,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let cfg = resolveOptional(host.mosh, defaults.mosh) ?? MoshConfig(enabled: true)
         let command = moshServerCommand(cfg).joined(separator: " ")
         let stdout = await captureMoshBootstrap(conn: conn, command: command)
+        DebugLog.shared.log("mosh: bootstrap captured \(stdout.count)B")
         switch moshBranchOutcome(stdout: stdout, enabled: true) {
         case let .mosh(port, key):
+            DebugLog.shared.log("mosh: bootstrap OK port=\(port) keyLen=\(key.count) → starting UDP session")
             let predict = cfg.predictionMode?.rawValue ?? "adaptive"
             // Seeded at 80×24: the terminal view hasn't laid out yet at connect time,
             // so the real grid isn't known here. The first debounced resize from
@@ -572,10 +574,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             sess.onFirstFrame = { [weak self] in
                 // Frames are flowing: the UDP path is up. From here on, loop exits are
                 // mid-session events, not handshake failures.
+                DebugLog.shared.log("mosh: onFirstFrame — UDP handshake up, frames flowing")
                 self?.moshFirstFrameSeen = true
             }
-            sess.onEnd = { [weak self] _ in
+            sess.onEnd = { [weak self] reason in
                 guard let self else { return }
+                DebugLog.shared.log("mosh: onEnd firstFrameSeen=\(self.moshFirstFrameSeen) reason=\(reason ?? "nil")")
                 if self.moshFirstFrameSeen {
                     // Post-first-frame exit (session/server death, clean or not).
                     // Tear the dead Mosh session down FIRST: sendTerminalInput checks
@@ -587,6 +591,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     self.moshSession = nil
                     self.moshFirstFrameSeen = false
                     // Then reuse the mid-session crash banner — the same state tmux uses.
+                    DebugLog.shared.log("mosh: post-first-frame exit → crash banner")
                     self.crashBanner = .tmuxEnded
                     return
                 }
@@ -596,15 +601,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self.moshSession?.stop()
                 self.moshSession = nil
                 self.moshFallback = "Mosh UDP unreachable (check firewall) — using SSH"
+                DebugLog.shared.log("mosh: pre-first-frame exit (UDP blocked) → SSH fallback")
                 Task { [weak self] in
                     guard let self else { return }
                     do {
                         try await self.attachSSHShell(conn: conn, host: host, defaults: defaults)
                     } catch {
+                        DebugLog.shared.log("mosh: SSH fallback THREW \(String(describing: error)) → .failed")
                         self.state = .failed(String(describing: error))
                     }
                 }
             }
+            DebugLog.shared.log("mosh: sess.start() — UDP session launching, state=.shell")
             sess.start()
             moshSession = sess
             connection = conn
@@ -612,6 +620,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             state = .shell
             return true
         case let .fallback(reason):
+            DebugLog.shared.log("mosh: bootstrap FALLBACK (\(reason)) → caller runs SSH/tmux")
             moshFallback = reason   // pre-handoff banner; caller runs the SSH/tmux path
             return false
         }
