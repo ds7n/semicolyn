@@ -63,8 +63,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private var predictor: PredictorActor?
     private var tracker = InputTokenTracker()
     /// Trailing-debounce so a typing burst recomputes suggestions once, not per
-    /// keystroke (Plan B). The 40ms quiet window matches the L1 echo-settle hop.
-    private var refreshCoalescer = SuggestionRefreshCoalescer(quietWindow: 0.04)
+    /// keystroke (Plan B).
+    // 0.035 < the 40ms settle-hop delay so the folded `isDue` check clears the window
+    // with margin (the refresh runs inside the 40ms echo-settle hop; a 40ms window would
+    // land exactly on the threshold). Trailing-debounce intent unchanged: a newer
+    // keystroke within ~35ms still defers the recompute.
+    private var refreshCoalescer = SuggestionRefreshCoalescer(quietWindow: 0.035)
     private var learnedStore: LearnedStore?
     /// Write-time gate keeping typed secrets out of the learned vocabulary
     /// (`observePredictorInput`). See `PasswordEntryDetector`. Lazily wires the
@@ -893,6 +897,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         passwordDetector.noteInput(bytes)
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
+        }
+        // If this chunk left the line empty with no usable preceding token (an ESC /
+        // Ctrl-* / control line reset, or a backspace-to-empty), clear stale chips now.
+        // Enter is already handled synchronously below; the normal typing case has a
+        // non-empty `current` so this is a no-op there. (predictor-suggestion-hygiene
+        // spec, Fix 4: "clear on ESC/control line reset".)
+        if tracker.current.isEmpty, tracker.previous?.isEmpty != false {
+            predictorVM.setSuggestions([])
         }
         // L4a: the tracker latches the just-committed line's opt-out at its Enter,
         // so this is correct even when a leading-space line and its Enter arrive in
