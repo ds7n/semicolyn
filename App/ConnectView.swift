@@ -43,6 +43,7 @@ struct ConnectView: View {
                 }
                 Section {
                     Button {
+                        InputClickFeedback.play()
                         vm.connect(host: host, port: port, user: user, password: password)
                     } label: {
                         if vm.state == .connecting {

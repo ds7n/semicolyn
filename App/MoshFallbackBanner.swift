@@ -18,7 +18,7 @@ struct MoshFallbackBanner: View {
             Image(systemName: "exclamationmark.triangle.fill")
             Text(reason).font(.caption).lineLimit(3).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            Button(action: onDismiss) { Image(systemName: "xmark") }.buttonStyle(.plain)
+            Button { InputClickFeedback.play(); onDismiss() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .foregroundStyle(.black)

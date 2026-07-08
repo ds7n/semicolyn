@@ -49,7 +49,7 @@ struct DefaultsEditorView: View {
                 get: { saveError != nil },
                 set: { if !$0 { saveError = nil } }
             )) {
-                Button("OK", role: .cancel) { saveError = nil }
+                Button("OK", role: .cancel) { InputClickFeedback.play(); saveError = nil }
             } message: {
                 Text(saveError ?? "")
             }
@@ -61,7 +61,7 @@ struct DefaultsEditorView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarLeading) {
-            Button("Cancel") { dismiss() }
+            Button("Cancel") { InputClickFeedback.play(); dismiss() }
         }
         ToolbarItem(placement: .principal) {
             Text("Defaults")
@@ -69,7 +69,7 @@ struct DefaultsEditorView: View {
                 .foregroundStyle(Color(theme.text.primary))
         }
         ToolbarItem(placement: .navigationBarTrailing) {
-            Button("Save") { performSave() }
+            Button("Save") { InputClickFeedback.play(); performSave() }
                 .fontWeight(.semibold)
                 .foregroundStyle(Color(theme.accent.primary))
         }
@@ -291,7 +291,7 @@ struct DefaultsEditorView: View {
                     .foregroundStyle(Color(theme.text.primary))
                 Spacer()
                 if case .explicit = vm.defaults.preferredAuthentications {
-                    Button("Clear") { vm.defaults.preferredAuthentications = .inherit }
+                    Button("Clear") { InputClickFeedback.play(); vm.defaults.preferredAuthentications = .inherit }
                         .font(.caption)
                         .foregroundStyle(Color(theme.accent.primary))
                 }

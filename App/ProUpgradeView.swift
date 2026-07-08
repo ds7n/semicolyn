@@ -23,6 +23,7 @@ struct ProUpgradeView: View {
             }
             Section {
                 Button {
+                    InputClickFeedback.play()
                     // Stub: real StoreKit purchase lands in the Pro slice.
                 } label: {
                     Text("Unlock Semicolyn Pro — coming soon")
@@ -33,6 +34,7 @@ struct ProUpgradeView: View {
             #if DEBUG
             Section("Debug") {
                 Button(pro.isPro ? "Lock (debug)" : "Unlock (debug)") {
+                    InputClickFeedback.play()
                     pro.setProForDebug(!pro.isPro)
                 }
             }

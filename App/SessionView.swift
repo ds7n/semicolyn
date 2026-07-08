@@ -195,6 +195,7 @@ struct SessionView: View {
         .overlay(alignment: .topTrailing) {
             if case .shell = vm.state {
                 Button {
+                    InputClickFeedback.play()
                     confirmingDisconnect = true
                 } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -210,7 +211,7 @@ struct SessionView: View {
         }
         .confirmationDialog("Disconnect from \(host.label)?",
                             isPresented: $confirmingDisconnect, titleVisibility: .visible) {
-            Button("Disconnect", role: .destructive) { vm.disconnect() }
+            Button("Disconnect", role: .destructive) { InputClickFeedback.play(); vm.disconnect() }
             Button("Cancel", role: .cancel) {}
         }
         // DIAGNOSTIC: a 🐞 toggle (top-leading) opens a scrollable debug log panel
@@ -218,7 +219,7 @@ struct SessionView: View {
         // behind Settings → Diagnostics → "Show debug log panel" (off by default).
         .overlay(alignment: .topLeading) {
             if case .shell = vm.state, diagnosticsPanelEnabled {
-                Button { showDebugPanel.toggle() } label: {
+                Button { InputClickFeedback.play(); showDebugPanel.toggle() } label: {
                     Image(systemName: "ladybug.fill")
                         .font(.system(size: 15))
                         .foregroundStyle(.green)
@@ -379,6 +380,7 @@ struct SessionView: View {
 
                 Section {
                     Button {
+                        InputClickFeedback.play()
                         credentialsResolved = true
                         needsPasswordEntry = false
                         vm.connect(savedHost: host, password: password)
@@ -403,7 +405,7 @@ struct SessionView: View {
             .navigationTitle("Connect")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") { dismiss() }
+                    Button("Close") { InputClickFeedback.play(); dismiss() }
                 }
             }
         }
@@ -432,9 +434,10 @@ struct SessionView: View {
                         .foregroundStyle(Color(theme.text.primary))
                         .padding(.horizontal, 32)
                     HStack(spacing: 16) {
-                        Button("Close") { dismiss() }
+                        Button("Close") { InputClickFeedback.play(); dismiss() }
                             .buttonStyle(.bordered)
                         Button("Retry") {
+                            InputClickFeedback.play()
                             vm.connect(savedHost: host, password: password)
                         }
                         .buttonStyle(.borderedProminent)
@@ -449,7 +452,7 @@ struct SessionView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") { dismiss() }
+                    Button("Close") { InputClickFeedback.play(); dismiss() }
                 }
             }
         }

@@ -18,7 +18,7 @@ struct PromotionSlotView: View {
         .frame(minWidth: 34, minHeight: 34).padding(.horizontal, 6)
         .background(Color(theme.keybar.slotBgPromoted))
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .onTapGesture { if let c = slot.tap.first { vm.keybar.tapSymbol(c) } }
+        .onInputClickTap { if let c = slot.tap.first { vm.keybar.tapSymbol(c) } }
         .gesture(DragGesture(minimumDistance: 12).onEnded { g in
             if g.translation.height < -12, let u = slot.up?.first { vm.keybar.tapSymbol(u) }
             else if g.translation.height > 12, let d = slot.down?.first { vm.keybar.tapSymbol(d) }
@@ -36,7 +36,7 @@ struct FkeySlotView: View {
             .frame(minWidth: 34, minHeight: 34).padding(.horizontal, 6)
             .background(Color(theme.keybar.slotBg))
             .clipShape(RoundedRectangle(cornerRadius: 6))
-            .onTapGesture { vm.fnTapFKey(n) }   // sends F-key + consumes one-shot Fn (Task 5)
+            .onInputClickTap { vm.fnTapFKey(n) }   // sends F-key + consumes one-shot Fn (Task 5)
     }
 }
 
@@ -61,6 +61,6 @@ struct FnSlotView: View {
         Text("Fn").font(.caption).foregroundStyle(Color(theme.text.primary))
             .frame(minWidth: 34, minHeight: 34).padding(.horizontal, 6)
             .background(bg).clipShape(RoundedRectangle(cornerRadius: 6))
-            .onTapGesture { vm.fnTap() }
+            .onInputClickTap { vm.fnTap() }
     }
 }
