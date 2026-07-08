@@ -49,4 +49,24 @@ final class FixedKeySecondaryTests: XCTestCase {
     func testResolveNoDefaultNoOverrideIsEmpty() {
         XCTAssertEqual(resolveSecondaries(for: .fkey(2), overrides: [:]), SwipeSecondaries())
     }
+    // KeybarSettings persists the override map.
+    func testKeybarSettingsCarriesOverrides() throws {
+        var s = KeybarSettings()
+        s.fixedKeySecondaries = [.symbol("-"): SwipeSecondaries(up: .literal("X"))]
+        let back = try JSONDecoder().decode(KeybarSettings.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(back.fixedKeySecondaries[.symbol("-")]?.up, .literal("X"))
+    }
+    // Router emits the right bytes for each SecondaryValue kind.
+    func testEmitSecondaryLiteral() {
+        var sent: [UInt8] = []
+        let r = KeybarInputRouter(applicationCursorKeys: { false }, send: { sent += $0 })
+        r.emitSecondary(.literal("_"))
+        XCTAssertEqual(sent, Array("_".utf8))
+    }
+    func testEmitSecondaryShiftTab() {
+        var sent: [UInt8] = []
+        let r = KeybarInputRouter(applicationCursorKeys: { false }, send: { sent += $0 })
+        r.emitSecondary(.key(.tab, KeyModifiers(shift: true)))
+        XCTAssertEqual(sent, Array("\u{1b}[Z".utf8))   // back-tab
+    }
 }
