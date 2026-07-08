@@ -59,7 +59,6 @@ struct SessionView: View {
                             register: { vm.registerPane($0, $1) },
                             unregister: { vm.unregisterPane($0) },
                             send: { vm.terminalKeyboardInput($0) },
-                            cursorSend: { vm.sendTerminalInput($0) },
                             theme: theme,
                             settings: AppStores.shared.terminalSettings.settings,
                             osc52Allowed: vm.osc52Allowed,
@@ -117,7 +116,6 @@ struct SessionView: View {
                     }
                 } else {
                     TerminalScreen(send: { [weak vm] bytes in vm?.terminalKeyboardInput(bytes) },
-                                   cursorSend: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
                                    output: vm.output,
                                    session: vm.session,
                                    // Mosh has no ShellSession, so its debounced resize routes
