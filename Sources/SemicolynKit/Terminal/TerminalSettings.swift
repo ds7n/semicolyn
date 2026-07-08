@@ -3,7 +3,7 @@
 import Foundation
 
 /// Caret rendering style, independent of blink (mirrors DECSCUSR families).
-public enum CursorStyle: Equatable, Sendable { case block, underline, bar }
+public enum CursorStyle: Equatable, Sendable, Codable { case block, underline, bar }
 
 /// A selectable terminal typeface. `.system` = SF Mono (no icons); `.bundled`
 /// = a Nerd Font shipped in the app bundle; `.imported` = a user-registered
@@ -69,7 +69,7 @@ public enum FontCatalog {
 
 /// Terminal rendering preferences. Pure value type; defaults baked in per the
 /// Plan C spec. A future Settings screen binds to this; Plan C ships defaults.
-public struct TerminalSettings: Equatable, Sendable {
+public struct TerminalSettings: Equatable, Sendable, Codable {
     public var fontSize: Double
     public var cursorStyle: CursorStyle
     public var cursorBlink: Bool
