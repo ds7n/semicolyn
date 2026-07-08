@@ -17,9 +17,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
     /// Active-pane keystrokes/paste bytes typed on the keyboard → remote, routed so
     /// an armed keybar Ctrl/Alt/Shift applies (via `vm.terminalKeyboardInput`).
     let send: ([UInt8]) -> Void
-    /// Synthesized bytes (cursor-placement arrows) → remote RAW, bypassing the
-    /// armed-modifier routing (an armed Ctrl must not mangle a cursor-drag arrow).
-    var cursorSend: ([UInt8]) -> Void
     let theme: Theme
     /// Terminal rendering preferences (font, cursor, scrollback). Defaults from
     /// `AppStores.shared.terminalSettings.settings` at the call site.
@@ -35,7 +32,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
     var onSSHLink: ((URL) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
-        let c = Coordinator(send: send, cursorSend: cursorSend, theme: theme, settings: settings, osc52Allowed: osc52Allowed, onTitle: onTitle)
+        let c = Coordinator(send: send, theme: theme, settings: settings, osc52Allowed: osc52Allowed, onTitle: onTitle)
         c.onTmuxResize = onTmuxResize
         c.onSSHLink = onSSHLink
         return c
@@ -70,8 +67,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
     /// Bridges SwiftTerm input from whichever pane is active to the VM.
     final class Coordinator: NSObject, TerminalViewDelegate {
         private let send: ([UInt8]) -> Void
-        /// Raw send for synthesized cursor-drag arrows (bypasses armed modifiers).
-        private let cursorSend: ([UInt8]) -> Void
         /// Per-pane bell state machines keyed by the TerminalView identity.
         /// Using ObjectIdentifier allows weak-ref-free keying without PaneID exposure here.
         private var bellMachines: [ObjectIdentifier: BellStateMachine] = [:]
@@ -84,8 +79,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         var selectionLongPresses: [ObjectIdentifier: UILongPressGestureRecognizer] = [:]
         /// Per-pane pinch-zoom gesture recognizers keyed by TerminalView identity.
         private var pinchRecognizers: [ObjectIdentifier: UIPinchGestureRecognizer] = [:]
-        /// Per-pane cursor-placement drag controllers (tap + pan), keyed by TerminalView identity.
-        private var cursorDrags: [ObjectIdentifier: CursorDragController] = [:]
         /// Baseline font size for pinch-zoom; shared across all panes in this window.
         /// Updated on `.ended`; persists for the window's lifetime only (not stored to host — v1.5+).
         var baseFontSize: Double
@@ -115,11 +108,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// to each pane `TerminalView` at creation time.
         let settings: TerminalSettings
 
-        init(send: @escaping ([UInt8]) -> Void, cursorSend: @escaping ([UInt8]) -> Void,
+        init(send: @escaping ([UInt8]) -> Void,
              theme: Theme, settings: TerminalSettings,
              osc52Allowed: Bool = true, onTitle: ((TerminalView, String) -> Void)? = nil) {
             self.send = send
-            self.cursorSend = cursorSend
             self.settings = settings
             self.baseFontSize = settings.fontSize
             self.bellHaloColor = UIColor(Color(theme.bell.edge))
@@ -158,10 +150,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
             view.addGestureRecognizer(pinch)
             pinchRecognizers[key] = pinch
 
-            // Install cursor-placement drag (tap + pan, no halo); enabled per-pane in apply().
-            let drag = CursorDragController(view: view, send: cursorSend)
-            drag.active = false
-            cursorDrags[key] = drag
+            // Cursor placement uses SwiftTerm's native gestures, not a custom controller:
+            // `allowMouseReporting = false` makes its pan a cursor-key scrub and its
+            // tap/long-press do reposition + selection. Panes start non-reporting; the
+            // per-pane value is reconciled in apply()/updateMouseDots (a mouse=a pane
+            // flips it back to true so mouse events forward).
+            view.allowMouseReporting = false
         }
 
         /// Called from ContainerView when a TerminalView is removed.
@@ -177,13 +171,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 view.removeGestureRecognizer(pinch)
                 pinchRecognizers[key] = nil
             }
-            cursorDrags[key]?.remove()
-            cursorDrags[key] = nil
-        }
-
-        /// Enable the cursor-placement drag only on the focused pane (called from apply()).
-        func setCursorDragActive(_ view: TerminalView, _ active: Bool) {
-            cursorDrags[ObjectIdentifier(view)]?.active = active
         }
 
         /// Handles pinch-to-zoom across all panes. The baseline (`baseFontSize`) is
@@ -236,16 +223,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
         ///   This is the best-known SwiftTerm 1.x public API; not verifiable on Linux.
         func updateMouseDots(for panes: [PaneID: TerminalView]) {
             for (_, view) in panes {
-                let key = ObjectIdentifier(view)
                 let mouseActive = view.getTerminal().mouseMode != .off
-                mouseDots[key]?.isHidden = !mouseActive
-                // Suspend the tap/pan cursor gestures in a mouse-reporting pane so taps
-                // and drags forward as SGR mouse events instead of synthesizing arrows
-                // (cursor-centric spec; supersedes the old halo's "never suspend"
-                // decision — the tap affordance means a tap in a mouse app should click).
-                cursorDrags[key]?.suppressed = mouseActive
-                // (SwiftTerm owns the selection long-press; `selectionLongPresses` was
-                // never wired — stale phase-4 TODO — so there's nothing to toggle here.)
+                mouseDots[ObjectIdentifier(view)]?.isHidden = !mouseActive
+                // Mouse-reporting pane → allow SwiftTerm to forward mouse events; else keep
+                // it off so SwiftTerm's pan is a cursor-key scrub + its tap/long-press do
+                // reposition/selection (cursor-centric model). A tap in a mouse app clicks.
+                view.allowMouseReporting = mouseActive
             }
         }
 
@@ -417,7 +400,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     view.layer.borderColor = inactiveBorderColor.cgColor
                     view.layer.borderWidth = singlePane ? 0 : 0.5
                 }
-                coordinator?.setCursorDragActive(view, isActive)
             }
         }
     }
