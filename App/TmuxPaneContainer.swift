@@ -320,23 +320,37 @@ struct TmuxPaneContainer: UIViewRepresentable {
             coordinator?.noteClientSize(cols: grid.cols, rows: grid.rows)
         }
 
-        /// Cell metrics derived from a registered terminal's font (monospace → uniform cell).
+        /// Cell metrics (monospace → uniform cell), used to compute the container grid
+        /// we report to tmux as the client size.
         ///
-        /// Uses `TerminalView.font` (confirmed public in SwiftTerm) for cell width via
-        /// `"W".size(withAttributes:)`, and `f.lineHeight` for cell height. The
-        /// brief's `getTerminal().rows`-based height is more accurate but requires
-        /// `getTerminal()` to be part of the public API — cannot verify on Linux, so
-        /// we use the conservative `f.lineHeight` fallback unconditionally for safety.
-        /// Computed once from the first registered pane view; reused thereafter.
+        /// PRIMARY: derive the cell from SwiftTerm's OWN authoritative layout — a live,
+        /// laid-out pane renders `getTerminal().cols × rows` cells across its bounds, so
+        /// `bounds.width / cols` (and `bounds.height / rows`) is exactly SwiftTerm's
+        /// effective cell (glyph ADVANCE + insets), which is what actually wraps. This
+        /// fixes the off-by-1-3-column bug: our old `"W".size(withAttributes:)` measured
+        /// the glyph BOUNDING BOX (narrower than the advance), so the computed cell was
+        /// too small → we told tmux MORE cols than fit → lines wrapped 1-3 chars early.
+        ///
+        /// FALLBACK: before any pane is laid out (zero bounds / zero cols), estimate from
+        /// the font (`"W".size` width, `lineHeight`) so early passes still produce a sane
+        /// grid. The SwiftTerm-derived value is cached; the font estimate is NOT (so we
+        /// upgrade to the accurate value as soon as a pane has geometry).
         private func resolvedCell() -> (w: Double, h: Double) {
             if let cached = cachedCell { return cached }
             guard let sample = panes.values.first else { return (8, 16) }
+            let term = sample.getTerminal()
+            let cols = term.cols, rows = term.rows
+            let bw = Double(sample.bounds.width), bh = Double(sample.bounds.height)
+            if cols > 0, rows > 0, bw > 0, bh > 0 {
+                let metrics = (w: bw / Double(cols), h: bh / Double(rows))
+                cachedCell = metrics   // accurate — cache until the font changes (invalidateCachedCell)
+                return metrics
+            }
+            // Not laid out yet: font estimate, uncached (recompute next pass until a pane
+            // has real geometry). `"W".size` is a bounding box, so this slightly over-
+            // counts cols — but only for the brief pre-layout window.
             let f = sample.font
-            let w = Double("W".size(withAttributes: [.font: f]).width)
-            let h = Double(f.lineHeight)
-            let metrics = (w, h)
-            cachedCell = metrics
-            return metrics
+            return (w: Double("W".size(withAttributes: [.font: f]).width), h: Double(f.lineHeight))
         }
 
         func apply(state: TmuxSessionState,
