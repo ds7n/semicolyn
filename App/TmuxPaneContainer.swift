@@ -30,11 +30,21 @@ struct TmuxPaneContainer: UIViewRepresentable {
     var onTmuxResize: ((Int, Int) -> Void)? = nil
     /// Called when the user taps an ssh:// link; routes to the confirm-connect sheet.
     var onSSHLink: ((URL) -> Void)? = nil
+    /// The connection view model — passed to each pane's inputAccessory-hosted keybar.
+    var vm: ConnectionViewModel
+    /// Keybar customization store — passed to each pane's inputAccessory-hosted keybar.
+    var keybarSettings: KeybarSettingsStore = AppStores.shared.keybarSettings
+    /// Whether a hardware keyboard is connected (drives the keybar's compact/hidden mode).
+    var hardwareKeyboardConnected: Bool = false
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(send: send, theme: theme, settings: settings, osc52Allowed: osc52Allowed, onTitle: onTitle)
         c.onTmuxResize = onTmuxResize
         c.onSSHLink = onSSHLink
+        c.vm = vm
+        c.keybarSettings = keybarSettings
+        c.theme = theme
+        c.hardwareKeyboardConnected = hardwareKeyboardConnected
         return c
     }
 
@@ -108,6 +118,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// to each pane `TerminalView` at creation time.
         let settings: TerminalSettings
 
+        /// Keybar-accessory inputs, set immediately after init in `makeCoordinator`.
+        /// (IUO to keep `makeKeybarAccessory()` non-optional; always assigned before use.)
+        var vm: ConnectionViewModel!
+        var keybarSettings: KeybarSettingsStore = AppStores.shared.keybarSettings
+        var theme: Theme = Theme.neonMidnight
+        var hardwareKeyboardConnected: Bool = false
+
         init(send: @escaping ([UInt8]) -> Void,
              theme: Theme, settings: TerminalSettings,
              osc52Allowed: Bool = true, onTitle: ((TerminalView, String) -> Void)? = nil) {
@@ -118,6 +135,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
             self.accentDotColor = UIColor(Color(theme.accent.primary.alpha(0.40)))
             self.osc52Allowed = osc52Allowed
             self.onTitle = onTitle
+            self.theme = theme
+        }
+
+        /// Build a keybar audio-feedback accessory for a pane's TerminalView. Each pane
+        /// owns its own instance sharing the same `vm`; iOS shows the accessory of the
+        /// first-responder pane, so the keybar follows the active pane via the existing
+        /// per-pane `becomeFirstResponder` handling.
+        func makeKeybarAccessory() -> KeybarInputAccessory {
+            KeybarInputAccessory(vm: vm, keybarSettings: keybarSettings,
+                                 theme: theme, hardwareKeyboardConnected: hardwareKeyboardConnected)
         }
 
         // MARK: - Halo + mouse dot lifecycle
@@ -383,9 +410,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     DebugLog.shared.log("pane \(rect.pane) CREATE TerminalView (reattach makes a fresh view)")
                     let t = TerminalView(frame: .zero)
                     t.terminalDelegate = coordinator
-                    // Suppress SwiftTerm's built-in accessory bar — our `KeybarView`
-                    // is the single accessory row (see TerminalScreen.makeUIView).
-                    t.inputAccessoryView = nil
+                    // Our keybar IS this pane's input accessory view (a real UIInputView
+                    // audio-feedback context, so `playInputClick()` fires). iOS shows the
+                    // accessory of whichever pane is first responder.
+                    t.inputAccessoryView = coordinator?.makeKeybarAccessory()
                     // Apply configured font so rendered pane matches the pinch baseline.
                     if let fontSize = coordinator?.settings.fontSize {
                         t.font = UIFont.monospacedSystemFont(ofSize: CGFloat(fontSize), weight: .regular)

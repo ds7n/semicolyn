@@ -64,14 +64,13 @@ struct SessionView: View {
                             osc52Allowed: vm.osc52Allowed,
                             onTitle: { [weak vm] view, t in vm?.setTmuxTitle(from: view, t) },
                             onTmuxResize: { [weak vm] cols, rows in vm?.setTmuxClientSize(cols: cols, rows: rows) },
-                            onSSHLink: { [weak vm] url in vm?.presentSSHLink(url) })
+                            onSSHLink: { [weak vm] url in vm?.presentSSHLink(url) },
+                            vm: vm,
+                            keybarSettings: AppStores.shared.keybarSettings,
+                            hardwareKeyboardConnected: hardwareKeyboard.isConnected)
                         // Client size is reported by the pane container's layout pass
                         // (bounds ÷ measured cell) via onTmuxResize — no coarse estimate.
                     }
-                    // NOTE: the terminal must respect the bottom safe area so the
-                    // keybar's `.safeAreaInset` below genuinely reserves space and the
-                    // terminal ends ABOVE the keybar (not under it). Only the keybar's
-                    // background extends into the home-indicator strip (see the inset).
                     .overlay(alignment: .top) {
                         if let reason = vm.degraded {
                             DegradedBanner(reason: reason) { vm.degraded = nil }
@@ -104,16 +103,8 @@ struct SessionView: View {
                         }
                     }
                     .animation(.easeInOut, value: vm.crashBanner)
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        VStack(spacing: 0) {
-                            PredictorStripView(vm: vm, predictorVM: vm.predictorVM)
-                            KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm,
-                                       hardwareKeyboardConnected: hardwareKeyboard.isConnected)
-                        }
-                        // Extend only the keybar's panel background into the
-                        // home-indicator strip; the keys stay within the safe area.
-                        .background(Color(theme.surface.panel).ignoresSafeArea(edges: .bottom))
-                    }
+                    // Keybar + predictor now mount as each pane's inputAccessoryView
+                    // (see TmuxPaneContainer); no .safeAreaInset keybar here anymore.
                 } else {
                     TerminalScreen(send: { [weak vm] bytes in vm?.terminalKeyboardInput(bytes) },
                                    output: vm.output,
