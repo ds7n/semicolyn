@@ -17,6 +17,11 @@ struct SettingsView: View {
                     Label("Appearance", systemImage: "paintpalette")
                 }
                 NavigationLink {
+                    TerminalSettingsView()
+                } label: {
+                    Label("Terminal", systemImage: "terminal")
+                }
+                NavigationLink {
                     PrivacySettingsView()
                 } label: {
                     Label("Privacy", systemImage: "hand.raised")

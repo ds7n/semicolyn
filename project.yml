@@ -26,7 +26,12 @@ targets:
     type: application
     platform: iOS
     sources:
-      - App
+      - path: App
+        # .ttf files under App/Resources/Fonts are auto-classified as bundle
+        # resources by XcodeGen. Exclude the REUSE .license sidecars — they document
+        # the fonts' licensing in-repo but must not ship inside the .app.
+        excludes:
+          - "Resources/Fonts/*.license"
     dependencies:
       - package: SemicolynPackage
         product: SemicolynSSHCoreFFI
@@ -53,6 +58,11 @@ targets:
         # bridges + SwiftTerm aren't Swift-6 strict-concurrency clean; tighten later.
         SWIFT_VERSION: "5.0"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        # Bundled Nerd Fonts (App/Resources/Fonts/*.ttf). UIAppFonts registers them at
+        # launch so the terminal can render icon/powerline glyphs. XcodeGen bundles the
+        # .ttf files automatically (non-source files under the `App` source tree).
+        # Xcode maps this space-separated INFOPLIST_KEY_ value to the UIAppFonts array.
+        INFOPLIST_KEY_UIAppFonts: "HackNerdFont-Regular.ttf JetBrainsMonoNerdFont-Regular.ttf"
         # Required for App Store upload since the app targets iPad (device family 1,2).
         # A terminal is comfortable in any orientation; iPhone omits upside-down per norm.
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"

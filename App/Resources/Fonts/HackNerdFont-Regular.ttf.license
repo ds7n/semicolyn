@@ -1,0 +1,9 @@
+SPDX-FileCopyrightText: 2018 Source Foundry Authors
+SPDX-FileCopyrightText: Nerd Fonts patch © Ryan L. McIntyre and contributors
+SPDX-License-Identifier: MIT
+
+Hack Nerd Font — the Hack typeface (© Source Foundry Authors, MIT) patched with
+Nerd Fonts glyphs (ryanoasis/nerd-fonts, MIT). Bundled from Nerd Fonts v3.4.0.
+Hack incorporates DejaVu (public domain) and Bitstream Vera (Bitstream Vera License,
+reserved names "Bitstream"/"Vera"). Full license text ships in the font's own name
+table and at github.com/source-foundry/Hack and github.com/ryanoasis/nerd-fonts.
