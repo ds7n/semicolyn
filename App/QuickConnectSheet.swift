@@ -37,10 +37,10 @@ struct QuickConnectSheet: View {
             .frame(maxWidth: .infinity)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
+                    Button("Cancel") { InputClickFeedback.play(); onCancel() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Connect", action: onConnect).bold()
+                    Button("Connect") { InputClickFeedback.play(); onConnect() }.bold()
                 }
             }
         }

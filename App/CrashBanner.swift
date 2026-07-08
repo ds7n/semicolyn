@@ -24,15 +24,15 @@ struct CrashBanner: View {
                 // White pill on the red banner — force a DARK label so the text is
                 // legible (the banner's .foregroundStyle(.white) would otherwise make
                 // it white-on-white and invisible).
-                Button("Reattach", action: onReattach)
+                Button("Reattach") { InputClickFeedback.play(); onReattach() }
                     .buttonStyle(.borderedProminent)
                     .tint(.white)
                     .foregroundStyle(Color(theme.state.broken))
-                Button("Start new tmux", action: onStartNew)
+                Button("Start new tmux") { InputClickFeedback.play(); onStartNew() }
                     .buttonStyle(.bordered)
                     .tint(.white)
                 Spacer()
-                Button("Dismiss", action: onDismiss).buttonStyle(.plain)
+                Button("Dismiss") { InputClickFeedback.play(); onDismiss() }.buttonStyle(.plain)
             }
             .font(.caption)
         }

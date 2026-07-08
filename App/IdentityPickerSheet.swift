@@ -61,7 +61,7 @@ struct IdentityPickerSheet: View {
                         .foregroundStyle(Color(theme.text.primary))
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") { InputClickFeedback.play(); dismiss() }
                         .foregroundStyle(Color(theme.accent.primary))
                 }
             }
@@ -107,7 +107,7 @@ struct IdentityPickerSheet: View {
                 biometricPolicyPicker
             }
             Section {
-                Button("Generate & Save") { generate() }
+                Button("Generate & Save") { InputClickFeedback.play(); generate() }
                     .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
             } footer: {
                 if let errorText { Text(errorText).foregroundStyle(.red) }
@@ -129,7 +129,7 @@ struct IdentityPickerSheet: View {
             }
             Section { biometricPolicyPicker }
             Section {
-                Button("Import & Save") { importKey() }
+                Button("Import & Save") { InputClickFeedback.play(); importKey() }
                     .disabled(importName.trimmingCharacters(in: .whitespaces).isEmpty || pastedKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             } footer: {
                 if let errorText { Text(errorText).foregroundStyle(.red) }
@@ -193,7 +193,7 @@ private struct IdentityRow: View {
     let onTap: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
+        Button { InputClickFeedback.play(); onTap() } label: {
             HStack(spacing: 12) {
                 // Display name + fingerprint
                 VStack(alignment: .leading, spacing: 2) {

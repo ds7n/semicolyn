@@ -36,6 +36,11 @@ struct KeybarView: View {
                 barChrome { fullContent }
             }
         }
+        // Provide a UIInputViewAudioFeedback context so `UIDevice.playInputClick()`
+        // (fired by `.onInputClickTap` on the slots/chips) can play the keyboard
+        // CLICK SOUND when the user has keyboard sound enabled — mirroring their
+        // system keyboard feedback settings. Zero-size, non-interactive.
+        .background(InputClickHost().frame(width: 0, height: 0))
         // Reverse-bar: a layout-mirror only. RTL flips HStack order + the
         // ScrollView's leading edge so the locked region anchors right and the
         // Esc pill lands far-right; DragGesture translations are unaffected, so

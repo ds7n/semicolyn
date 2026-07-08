@@ -25,7 +25,7 @@ struct SymbolSlotView: View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
             Text(symbol).font(.system(.body, design: .monospaced)).foregroundStyle(Color(theme.text.primary))
         }
-        .onTapGesture { if let c = symbol.first { vm.keybar.tapSymbol(c) } }
+        .onInputClickTap { if let c = symbol.first { vm.keybar.tapSymbol(c) } }
     }
 }
 
@@ -37,7 +37,7 @@ struct TabSlotView: View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
             Text("⇥").foregroundStyle(Color(theme.text.primary))
         }
-        .onTapGesture { vm.keybar.tapTab() }
+        .onInputClickTap { vm.keybar.tapTab() }
     }
 }
 
@@ -59,7 +59,7 @@ struct ModifierSlotView: View {
         SlotChrome(bg: bg) {
             Text("⌃").foregroundStyle(Color(theme.text.primary))
         }
-        .onTapGesture { vm.keybar.tapCtrl() }
+        .onInputClickTap { vm.keybar.tapCtrl() }
         .gesture(DragGesture(minimumDistance: 12).onEnded { g in
             if g.translation.height < -12 { vm.keybar.armAlt() }
             else if g.translation.height > 12 { vm.keybar.armShift() }
@@ -85,7 +85,7 @@ struct EscPillView: View {
                     .offset(x: 4, y: -3)
             }
         }
-        .onTapGesture { vm.keybar.tapEscape() }
+        .onInputClickTap { vm.keybar.tapEscape() }
         .onLongPressGesture { onOpenSettings() }
         .gesture(DragGesture(minimumDistance: 18).onEnded { g in
             if g.translation.width > 18 { vm.selectNextWindow() }
@@ -106,7 +106,7 @@ struct PinnedMacroSlotView: View {
             Text(macro.name).font(.caption).lineLimit(1)
                 .foregroundStyle(Color(theme.text.primary))
         }
-        .onTapGesture { vm.keybar.fireMacro(macro.body) }
+        .onInputClickTap { vm.keybar.fireMacro(macro.body) }
     }
 }
 
@@ -145,7 +145,7 @@ struct CustomSlotView: View {
         .overlay(alignment: .topTrailing) {
             if slot.longPress != nil { hintGlyph("≡").offset(x: -2, y: 2) }
         }
-        .onTapGesture { fire(.tap) }
+        .onInputClickTap { fire(.tap) }
         .onLongPressGesture { fire(.longPress) }
         .gesture(DragGesture(minimumDistance: 12).onEnded { g in
             if g.translation.height < -12 { fire(.swipeUp) }
@@ -178,7 +178,7 @@ struct PadView: View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
             Image(systemName: "dpad").foregroundStyle(Color(theme.text.primary))
         }
-        .onTapGesture { vm.zoomActivePane() }
+        .onInputClickTap { vm.zoomActivePane() }
         .gesture(DragGesture(minimumDistance: 16).onEnded { g in
             let dx = g.translation.width, dy = g.translation.height
             if abs(dx) > abs(dy) { vm.keybar.arrow(dx > 0 ? .right : .left) }

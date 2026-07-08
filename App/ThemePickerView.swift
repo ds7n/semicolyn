@@ -34,6 +34,7 @@ struct ThemePickerView: View {
     private func row(for descriptor: ThemeDescriptor) -> some View {
         let locked = descriptor.isPro && !pro.isPro
         Button {
+            InputClickFeedback.play()
             if locked {
                 showingUpgrade = true
             } else {

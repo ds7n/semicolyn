@@ -33,6 +33,7 @@ struct HostListView: View {
                 ToolbarItemGroup(placement: .navigationBarLeading) {
                     // Defaults is always reachable, even when the host list is empty.
                     Button {
+                        InputClickFeedback.play()
                         showingDefaults = true
                     } label: {
                         Image(systemName: "slider.horizontal.3")
@@ -40,6 +41,7 @@ struct HostListView: View {
                     .accessibilityLabel("Defaults")
 
                     Button {
+                        InputClickFeedback.play()
                         showingSettings = true
                     } label: {
                         Image(systemName: "gearshape")
@@ -48,6 +50,7 @@ struct HostListView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
+                        InputClickFeedback.play()
                         editorMode = .creating
                     } label: {
                         Image(systemName: "plus")
@@ -86,7 +89,7 @@ struct HostListView: View {
                     set: { if !$0 { vm.deleteError = nil } }
                 )
             ) {
-                Button("OK", role: .cancel) { vm.deleteError = nil }
+                Button("OK", role: .cancel) { InputClickFeedback.play(); vm.deleteError = nil }
             } message: {
                 Text(vm.deleteError ?? "")
             }
@@ -98,6 +101,7 @@ struct HostListView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Button {
+                InputClickFeedback.play()
                 editorMode = .creating
             } label: {
                 Text("Add your first host")
@@ -114,6 +118,7 @@ struct HostListView: View {
 
             // Defaults is always reachable from the empty state (spec: Defaults editor entry points).
             Button {
+                InputClickFeedback.play()
                 showingDefaults = true
             } label: {
                 Text("Edit defaults")
@@ -132,6 +137,7 @@ struct HostListView: View {
         List {
             // Defaults row — top of the host list (spec: §Defaults editor entry points).
             Button {
+                InputClickFeedback.play()
                 showingDefaults = true
             } label: {
                 Label("Defaults", systemImage: "slider.horizontal.3")
@@ -141,6 +147,7 @@ struct HostListView: View {
 
             ForEach(vm.hosts, id: \.id) { host in
                 Button {
+                    InputClickFeedback.play()
                     connectingHost = IdentifiableHost(host)
                 } label: {
                     HostRow(host: host)
@@ -149,6 +156,7 @@ struct HostListView: View {
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     // Delete action
                     Button(role: .destructive) {
+                        InputClickFeedback.play()
                         vm.delete(host)
                     } label: {
                         Label("Delete", systemImage: "trash")
@@ -156,6 +164,7 @@ struct HostListView: View {
 
                     // Edit action
                     Button {
+                        InputClickFeedback.play()
                         editorMode = .editing(host)
                     } label: {
                         Label("Edit", systemImage: "pencil")

@@ -83,6 +83,7 @@ struct FirstTrustModal: View {
             // Buttons
             HStack(spacing: 12) {
                 Button {
+                    InputClickFeedback.play()
                     onDecision(true)
                 } label: {
                     Text("Trust & Connect")
@@ -92,6 +93,7 @@ struct FirstTrustModal: View {
                 .tint(Color(theme.accent.primary))
 
                 Button {
+                    InputClickFeedback.play()
                     onDecision(false)
                 } label: {
                     Text("Cancel")
@@ -190,6 +192,7 @@ struct MismatchModal: View {
             // Buttons
             HStack(spacing: 12) {
                 Button {
+                    InputClickFeedback.play()
                     onDecision(false)
                 } label: {
                     Text("Cancel")
@@ -199,6 +202,7 @@ struct MismatchModal: View {
                 .foregroundStyle(Color(theme.text.secondary))
 
                 Button(role: .destructive) {
+                    InputClickFeedback.play()
                     showReplaceConfirm = true
                 } label: {
                     Text("Replace key & connect")
@@ -211,6 +215,7 @@ struct MismatchModal: View {
                     titleVisibility: .visible
                 ) {
                     Button("Replace and connect", role: .destructive) {
+                        InputClickFeedback.play()
                         onDecision(true)
                     }
                     Button("Cancel", role: .cancel) {

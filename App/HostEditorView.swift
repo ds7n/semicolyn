@@ -141,7 +141,7 @@ struct HostEditorView: View {
             isPresented: $showingDiscardConfirm,
             titleVisibility: .visible
         ) {
-            Button("Discard changes", role: .destructive) { dismiss() }
+            Button("Discard changes", role: .destructive) { InputClickFeedback.play(); dismiss() }
             Button("Keep editing", role: .cancel) {}
         }
         // Task 5 — delete confirmation sheet
@@ -150,7 +150,7 @@ struct HostEditorView: View {
             isPresented: $showingDeleteConfirm,
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) { performDelete() }
+            Button("Delete", role: .destructive) { InputClickFeedback.play(); performDelete() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This removes the host config from your library. The action cannot be undone.")
@@ -163,7 +163,7 @@ struct HostEditorView: View {
                 set: { if !$0 { deleteRefusalReferrers = nil } }
             )
         ) {
-            Button("OK", role: .cancel) { deleteRefusalReferrers = nil }
+            Button("OK", role: .cancel) { InputClickFeedback.play(); deleteRefusalReferrers = nil }
         } message: {
             if let referrers = deleteRefusalReferrers {
                 let names = referrers.map { $0.label.isEmpty ? $0.id.uuidString : $0.label }
@@ -180,6 +180,7 @@ struct HostEditorView: View {
             )
         ) {
             Button("OK") {
+                InputClickFeedback.play()
                 vm.saveWarning = nil
                 dismiss()
             }
@@ -193,7 +194,7 @@ struct HostEditorView: View {
             get: { genericError != nil },
             set: { if !$0 { genericError = nil } }
         )) {
-            Button("OK", role: .cancel) { genericError = nil }
+            Button("OK", role: .cancel) { InputClickFeedback.play(); genericError = nil }
         } message: {
             Text(genericError ?? "")
         }
@@ -205,6 +206,7 @@ struct HostEditorView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarLeading) {
             Button("Cancel") {
+                InputClickFeedback.play()
                 if hasChanges {
                     showingDiscardConfirm = true
                 } else {
@@ -225,6 +227,7 @@ struct HostEditorView: View {
         }
         ToolbarItem(placement: .navigationBarTrailing) {
             Button("Save") {
+                InputClickFeedback.play()
                 performSave()
             }
             .disabled(!vm.canSave)
@@ -364,6 +367,7 @@ struct HostEditorView: View {
 
             // Identity add button
             Button {
+                InputClickFeedback.play()
                 showingIdentityPicker = true
             } label: {
                 Label(

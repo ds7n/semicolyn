@@ -18,7 +18,7 @@ struct PrivacySettingsView: View {
     var body: some View {
         List {
             Section {
-                Button(role: .destructive) { confirming = true } label: {
+                Button(role: .destructive) { InputClickFeedback.play(); confirming = true } label: {
                     Label("Forget everything the predictor learned", systemImage: "trash")
                 }
             } footer: {
@@ -29,6 +29,7 @@ struct PrivacySettingsView: View {
         .confirmationDialog("Forget the predictor's learned words?",
                             isPresented: $confirming, titleVisibility: .visible) {
             Button("Forget Everything", role: .destructive) {
+                InputClickFeedback.play()
                 try? AppStores.shared.purgePredictorLearned()
                 purged = true
             }
@@ -37,7 +38,7 @@ struct PrivacySettingsView: View {
             Text("This can't be undone. Built-in suggestions are kept.")
         }
         .alert("Predictor memory cleared", isPresented: $purged) {
-            Button("OK", role: .cancel) {}
+            Button("OK", role: .cancel) { InputClickFeedback.play() }
         }
     }
 }

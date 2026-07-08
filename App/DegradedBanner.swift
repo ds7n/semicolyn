@@ -23,7 +23,7 @@ struct DegradedBanner: View {
             Image(systemName: "exclamationmark.triangle.fill")
             Text(message).font(.caption)
             Spacer()
-            Button(action: onDismiss) { Image(systemName: "xmark") }.buttonStyle(.plain)
+            Button { InputClickFeedback.play(); onDismiss() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .foregroundStyle(.black)
