@@ -16,7 +16,7 @@ struct WindowTabStrip: View {
             HStack(spacing: 6) {
                 ForEach(windows, id: \.id) { win in
                     let isActive = win.id == active
-                    Button { onSelect(win.id) } label: {
+                    Button { InputClickFeedback.play(); onSelect(win.id) } label: {
                         Text(win.name.isEmpty ? "@\(win.id.raw)" : win.name)
                             .font(.caption.monospaced())
                             .padding(.horizontal, 10).padding(.vertical, 4)
