@@ -46,7 +46,7 @@ struct KeybarView: View {
         .environment(\.layoutDirection,
                      keybarSettings.settings.direction == .lockedRight ? .rightToLeft : .leftToRight)
         .sheet(isPresented: $showingSettings) {
-            KeybarSettingsSheet(store: keybarSettings)
+            SettingsView(context: .inSession, keybarSettings: keybarSettings)
         }
     }
 

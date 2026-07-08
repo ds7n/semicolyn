@@ -273,7 +273,7 @@ struct SessionView: View {
     @ViewBuilder private func sessionSheet(_ sheet: SessionSheet) -> some View {
         switch sheet {
         case .settings:
-            KeybarSettingsSheet(store: AppStores.shared.keybarSettings)
+            SettingsView(context: .inSession, keybarSettings: AppStores.shared.keybarSettings)
         case .launcher:
             NavigationStack { MacroLibraryView(store: AppStores.shared.keybarSettings) }
         case .tips:
