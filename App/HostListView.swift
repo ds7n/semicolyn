@@ -12,8 +12,6 @@ struct HostListView: View {
     /// `nil` means the editor is closed; `.creating` opens it for a new host;
     /// `.editing(host)` opens it for an existing host.
     @State private var editorMode: HostEditorMode?
-    /// Whether the Defaults editor sheet is presented.
-    @State private var showingDefaults = false
     /// Whether the top-level Settings sheet is presented.
     @State private var showingSettings = false
     /// Non-nil when the user has tapped a saved host to connect (Task 8).
@@ -31,15 +29,6 @@ struct HostListView: View {
             .navigationTitle("Hosts")
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarLeading) {
-                    // Defaults is always reachable, even when the host list is empty.
-                    Button {
-                        InputClickFeedback.play()
-                        showingDefaults = true
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                    }
-                    .accessibilityLabel("Defaults")
-
                     Button {
                         InputClickFeedback.play()
                         showingSettings = true
@@ -60,13 +49,10 @@ struct HostListView: View {
             .onAppear {
                 vm.reload()
             }
-            // Defaults editor sheet — Task 7.
-            .sheet(isPresented: $showingDefaults) {
-                DefaultsEditorView()
-            }
             // Settings sheet — Task 4.
             .sheet(isPresented: $showingSettings) {
-                SettingsView()
+                SettingsView(context: .preConnect,
+                             keybarSettings: AppStores.shared.keybarSettings)
             }
             // Session cover — Task 8: tap a saved host to connect.
             .fullScreenCover(item: $connectingHost) { wrapper in
@@ -115,18 +101,6 @@ struct HostListView: View {
                 .foregroundStyle(Color(theme.text.secondary))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
-
-            // Defaults is always reachable from the empty state (spec: Defaults editor entry points).
-            Button {
-                InputClickFeedback.play()
-                showingDefaults = true
-            } label: {
-                Text("Edit defaults")
-                    .font(.subheadline)
-                    .foregroundStyle(Color(theme.text.secondary))
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -135,16 +109,6 @@ struct HostListView: View {
 
     private var hostList: some View {
         List {
-            // Defaults row — top of the host list (spec: §Defaults editor entry points).
-            Button {
-                InputClickFeedback.play()
-                showingDefaults = true
-            } label: {
-                Label("Defaults", systemImage: "slider.horizontal.3")
-                    .foregroundStyle(Color(theme.text.primary))
-            }
-            .buttonStyle(.plain)
-
             ForEach(vm.hosts, id: \.id) { host in
                 Button {
                     InputClickFeedback.play()
