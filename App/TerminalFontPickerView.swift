@@ -24,7 +24,7 @@ struct TerminalFontPickerView: View {
                 }
             }
             Section("Imported") {
-                ForEach(importedFaces, id: \.displayName) { face in
+                ForEach(importedFaces, id: \.self) { face in
                     row(face)
                 }
                 .onDelete(perform: deleteImported)

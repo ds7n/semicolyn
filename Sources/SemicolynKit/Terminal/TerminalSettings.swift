@@ -8,8 +8,8 @@ public enum CursorStyle: Equatable, Sendable, Codable { case block, underline, b
 /// A selectable terminal typeface. `.system` = SF Mono (no icons); `.bundled`
 /// = a Nerd Font shipped in the app bundle; `.imported` = a user-registered
 /// `.ttf`/`.otf`. The associated `String` is the font's PostScript name.
-public struct TerminalFont: Equatable, Sendable, Codable {
-    public enum Kind: Equatable, Sendable, Codable {
+public struct TerminalFont: Equatable, Hashable, Sendable, Codable {
+    public enum Kind: Equatable, Hashable, Sendable, Codable {
         case system
         case bundled(String)
         case imported(String)

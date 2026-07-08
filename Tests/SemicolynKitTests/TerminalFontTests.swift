@@ -27,4 +27,21 @@ final class TerminalFontTests: XCTestCase {
         let back = try JSONDecoder().decode(TerminalSettings.self, from: JSONEncoder().encode(s))
         XCTAssertEqual(back, s)
     }
+
+    // Hashable: distinct faces are distinct Set members; equal faces collapse. This is
+    // what the picker's `ForEach(..., id: \.self)` relies on for correct row identity —
+    // two imported fonts differing only by PostScript name must NOT collide even when
+    // their displayName is identical (the same-basename-import bug the picker guards).
+    func testTerminalFontHashableDistinguishesSameDisplayNameDifferentKind() {
+        let a = TerminalFont(kind: .imported("FontA-Regular"), displayName: "MyFont")
+        let b = TerminalFont(kind: .imported("FontB-Regular"), displayName: "MyFont")
+        XCTAssertNotEqual(a, b)
+        XCTAssertEqual(Set([a, b, a]).count, 2)   // a de-dupes with itself; b stays distinct
+    }
+    func testTerminalFontHashableEqualFacesCollapseInSet() {
+        let x = TerminalFont(kind: .bundled("HackNF-Regular"), displayName: "Hack Nerd Font")
+        let y = TerminalFont(kind: .bundled("HackNF-Regular"), displayName: "Hack Nerd Font")
+        XCTAssertEqual(x, y)
+        XCTAssertEqual(Set([x, y]).count, 1)
+    }
 }
