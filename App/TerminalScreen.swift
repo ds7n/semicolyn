@@ -33,21 +33,31 @@ struct TerminalScreen: UIViewRepresentable {
     var onTitle: ((String) -> Void)? = nil
     /// Called when the user taps an ssh:// link; routes to the confirm-connect sheet.
     var onSSHLink: ((URL) -> Void)? = nil
+    /// The connection view model — passed to the inputAccessory-hosted keybar/predictor.
+    var vm: ConnectionViewModel
+    /// Keybar customization store — passed to the inputAccessory-hosted keybar.
+    var keybarSettings: KeybarSettingsStore = AppStores.shared.keybarSettings
+    /// Whether a hardware keyboard is connected (drives the keybar's compact/hidden mode).
+    var hardwareKeyboardConnected: Bool = false
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(send: send, session: session, settings: settings, theme: theme, osc52Allowed: osc52Allowed, onTitle: onTitle)
         c.onSSHLink = onSSHLink
         c.onResize = onResize
+        // Build + retain the keybar audio-feedback accessory for this terminal.
+        c.keybarAccessory = KeybarInputAccessory(vm: vm, keybarSettings: keybarSettings,
+                                                 theme: theme,
+                                                 hardwareKeyboardConnected: hardwareKeyboardConnected)
         return c
     }
 
     func makeUIView(context: Context) -> TerminalView {
         let terminal = TerminalView(frame: .zero)
         terminal.terminalDelegate = context.coordinator
-        // Suppress SwiftTerm's built-in keyboard accessory bar — our own `KeybarView`
-        // is the single accessory row (mounted via `safeAreaInset`). Leaving both
-        // shows two stacked bars above the keyboard.
-        terminal.inputAccessoryView = nil
+        // Our keybar IS the terminal's input accessory view now (a real UIInputView
+        // audio-feedback context, so `playInputClick()` fires). This replaces both
+        // SwiftTerm's built-in bar and the old `.safeAreaInset` keybar mount.
+        terminal.inputAccessoryView = context.coordinator.keybarAccessory
 
         // Apply terminal rendering preferences from settings.
         let s = context.coordinator.settings
@@ -124,6 +134,9 @@ struct TerminalScreen: UIViewRepresentable {
         private let onSend: ([UInt8]) -> Void
         private let session: ShellSession?
         let settings: TerminalSettings
+        /// The keybar audio-feedback accessory, retained for this terminal's lifetime
+        /// and assigned as the TerminalView's `inputAccessoryView`.
+        var keybarAccessory: KeybarInputAccessory?
         /// Bell halo overlay installed into the TerminalView in makeUIView.
         let halo: BellHaloView
         private var bellMachine: BellStateMachine = BellStateMachine()
