@@ -21,11 +21,11 @@ struct DebugLogPanel: View {
                 Text("debug log (\(log.lines.count))")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 Spacer()
-                Button("Copy") { UIPasteboard.general.string = log.joined }
+                Button("Copy") { InputClickFeedback.play(); UIPasteboard.general.string = log.joined }
                     .font(.system(size: 11))
-                Button("Clear") { log.clear() }
+                Button("Clear") { InputClickFeedback.play(); log.clear() }
                     .font(.system(size: 11))
-                Button("Close") { onClose() }
+                Button("Close") { InputClickFeedback.play(); onClose() }
                     .font(.system(size: 11))
             }
             .padding(.horizontal, 8).padding(.vertical, 5)
