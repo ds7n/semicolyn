@@ -116,8 +116,12 @@ follows the established row-pushes-detail-view pattern exactly.
 
 ## 4. Persistence
 
-- `fontFace` persists via the same store that saves `fontSize` today
-  (`App/TerminalSettingsStore.swift`); `TerminalFont: Codable` serializes it.
+- **Correction:** `TerminalSettingsStore` is currently **in-memory only** — `fontSize`
+  is not persisted today. This feature **adds persistence** to that store, mirroring
+  `App/ThemeSettingsStore.swift` (a `@Published … { didSet { persist() } }` + a
+  `UserDefaults` key loaded in `init`). We persist the whole `TerminalSettings` as a
+  JSON-encoded `Codable` blob (so `fontSize` comes along for free), or minimally just the
+  `fontFace`. `TerminalFont: Codable` serializes the face.
 - Imported font files are copied into Application Support and survive relaunch; the
   persisted `.imported(name)` re-resolves after launch-time re-registration. If a
   previously-imported file is gone at launch, resolve-with-fallback (§1) quietly reverts
@@ -143,11 +147,23 @@ follows the established row-pushes-detail-view pattern exactly.
 against real registered fonts, picker selection, import round-trip, and — device only —
 whether FiraCode **ligatures** render under SwiftTerm and whether icons render.
 
-## Ligatures caveat
+## Ligatures caveat — investigated 2026-07-08
 
-FiraCode ligatures render **only if SwiftTerm draws runs that allow ligatures**; if
-SwiftTerm renders strictly cell-by-cell, ligatures won't form. **Icons render regardless
-of ligature support.** Verify on-device; note the outcome. Not a blocker.
+Checked SwiftTerm's default (CoreGraphics) draw path (`Apple/AppleTerminalView.swift`
+`buildAttributedString` → `CTLineCreateWithAttributedString`):
+
+- SwiftTerm **batches consecutive same-attribute characters into one `NSAttributedString`**
+  and draws each segment with `CTLineCreateWithAttributedString` — it does **not** draw
+  strictly cell-by-cell, and it **never sets `kCTLigatureAttributeName = 0`**. CoreText
+  therefore uses its default, which **enables standard ligatures**.
+- **Expectation: common code ligatures (`=>`, `!=`, `->`, `>=`) will render** with
+  FiraCode. Caveats: a ligature won't form across an attribute boundary (e.g. color change
+  mid-sequence flushes the batch), and SwiftTerm appends `U+FE0E` after
+  text-presentation symbols, which breaks a run for those specific glyphs.
+- **Icons are single-cell glyphs — unaffected by ligature logic; they always render.**
+
+Net: ligatures are **likely YES**, not merely "uncertain." Still confirm on-device on the
+first build carrying the fonts; not a blocker either way.
 
 ## Files touched
 
