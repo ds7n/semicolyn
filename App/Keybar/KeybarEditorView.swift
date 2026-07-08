@@ -3,35 +3,6 @@
 import SwiftUI
 import SemicolynKit
 
-/// The Settings tree surfaced from a long-press on the Esc pill. For 4d-1 its
-/// only leaf is the Keybar editor; the spec's full unified picker (windows /
-/// Live hosts / Recent / Connect) is a later slice.
-struct KeybarSettingsSheet: View {
-    @ObservedObject var store: KeybarSettingsStore
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                NavigationLink {
-                    KeybarEditorView(store: store)
-                } label: {
-                    Label("Keybar", systemImage: "keyboard")
-                }
-                NavigationLink {
-                    MacroLibraryView(store: store)
-                } label: {
-                    Label("Launcher", systemImage: "command")
-                }
-            }
-            .navigationTitle("Settings")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-            }
-        }
-    }
-}
-
 /// The modal flows reachable from the Keybar editor's "+ Add" / row edit.
 private enum KeybarEditorSheet: Identifiable {
     case launcher, createMacro, createSlot
