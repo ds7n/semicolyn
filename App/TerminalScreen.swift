@@ -93,6 +93,19 @@ struct TerminalScreen: UIViewRepresentable {
         // scrub + selection-drag both broke).
         terminal.allowMouseReporting = false
 
+        // Restore the keyboard (and, with it, the keybar — which now rides as the
+        // terminal's inputAccessoryView, PR #66) after it's been dismissed. A tap only
+        // re-claims first responder when the terminal is NOT already first responder;
+        // when the keyboard is up this recognizer no-ops and SwiftTerm's own tap
+        // (cursor placement) works normally. `cancelsTouchesInView = false` so the tap
+        // still reaches SwiftTerm.
+        let restoreTap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleRestoreTap(_:))
+        )
+        restoreTap.cancelsTouchesInView = false
+        terminal.addGestureRecognizer(restoreTap)
+
         // Render PTY output as it arrives (already hopped to main in the bridge).
         output.onBytes = { [weak terminal] bytes in
             terminal?.feed(byteArray: bytes[...])
@@ -101,13 +114,12 @@ struct TerminalScreen: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TerminalView, context: Context) {
-        // Claim keyboard focus ONCE so the on-screen keyboard appears on the raw/mosh
-        // path (the tmux path does the equivalent per active pane). Done here, not in
-        // makeUIView, because a view must be in a window for becomeFirstResponder to
-        // take — the first updateUIView is the earliest that reliably holds. Claiming
-        // only once means a user who later dismisses the keyboard is not fought.
-        if !context.coordinator.didClaimFocus, uiView.window != nil {
-            context.coordinator.didClaimFocus = true
+        // Claim keyboard focus ONCE when the view first lands in a window (so the
+        // on-screen keyboard + keybar accessory appear). We don't re-claim on later
+        // passes — a user who dismisses the keyboard is not fought here. Re-showing it
+        // after dismissal is the job of `handleRestoreTap` (tap the terminal).
+        if !context.coordinator.didInitialFocus, uiView.window != nil {
+            context.coordinator.didInitialFocus = true
             uiView.becomeFirstResponder()
         }
         // Refresh halo color when theme changes.
@@ -168,11 +180,11 @@ struct TerminalScreen: UIViewRepresentable {
         /// without clobbering an in-progress pinch on every SwiftUI pass.
         var lastAppliedFace: TerminalFont
         var lastAppliedFontSize: Double
-        /// True once we have claimed keyboard focus for this terminal. We claim it a
-        /// single time (on the first `updateUIView` after the view is in a window, so
-        /// `becomeFirstResponder` can actually succeed) and then never re-grab it, so
-        /// a user who dismisses the keyboard is not fought on every SwiftUI pass.
-        var didClaimFocus = false
+        /// True once we've claimed keyboard focus the first time (on the first
+        /// `updateUIView` after the view is in a window, so `becomeFirstResponder` can
+        /// succeed). We don't re-claim on later passes (a user who dismisses the
+        /// keyboard isn't fought); `handleRestoreTap` re-shows it on a tap instead.
+        var didInitialFocus = false
 
         init(send: @escaping ([UInt8]) -> Void, session: ShellSession?, settings: TerminalSettings, theme: Theme,
              osc52Allowed: Bool = true, onTitle: ((String) -> Void)? = nil) {
@@ -228,8 +240,25 @@ struct TerminalScreen: UIViewRepresentable {
             }
         }
 
+        /// Re-show the keyboard (and the keybar accessory) after the user has dismissed
+        /// it. Only acts when the terminal is NOT already first responder — when the
+        /// keyboard is up, this no-ops and SwiftTerm's own tap (cursor placement) is
+        /// unaffected (this recognizer has `cancelsTouchesInView = false`).
+        @objc func handleRestoreTap(_ recognizer: UITapGestureRecognizer) {
+            guard let terminal = recognizer.view as? TerminalView else { return }
+            if !terminal.isFirstResponder {
+                let ok = terminal.becomeFirstResponder()
+                DebugLog.shared.log("restoreTap → becomeFirstResponder=\(ok)")
+            }
+        }
+
         // Keystrokes / pasted bytes from the user → remote (tmux or raw PTY).
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
+            // Diagnostic (build 28, key-repeat investigation): log each byte batch
+            // SwiftTerm emits. Holding a soft key that auto-repeats should produce
+            // repeated send() calls; a single call while held means the OS is not
+            // delivering repeat to SwiftTerm. Zero cost when diagnostics is disabled.
+            DebugLog.shared.log("send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
             onSend(Array(data))
         }
 

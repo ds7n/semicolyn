@@ -286,7 +286,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         // MARK: - TerminalViewDelegate
 
-        func send(source: TerminalView, data: ArraySlice<UInt8>) { send(Array(data)) }
+        func send(source: TerminalView, data: ArraySlice<UInt8>) {
+            // Diagnostic (build 28, key-repeat investigation) — see TerminalScreen.send.
+            DebugLog.shared.log("tmux send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
+            send(Array(data))
+        }
 
         // tmux owns the visible geometry. The client size is driven by the full
         // container grid (`ContainerView.layoutSubviews` → `noteClientSize`), not a
