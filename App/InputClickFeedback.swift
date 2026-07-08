@@ -24,27 +24,11 @@ enum InputClickFeedback {
     }
 }
 
-/// A `UIView` that conforms to `UIInputViewAudioFeedback` so `playInputClick()` has a
-/// valid audio-feedback context. Hosting the tappable controls under this (via
-/// `InputClickHost` below) is what lets the click SOUND play when the user has
-/// keyboard sound enabled. `enableInputClicksWhenVisible` returning `true` is the
-/// required opt-in.
-final class InputClickAudioView: UIView, UIInputViewAudioFeedback {
-    var enableInputClicksWhenVisible: Bool { true }
-}
-
-/// Transparent SwiftUI wrapper that places an `InputClickAudioView` in the hierarchy
-/// so descendant taps calling `InputClickFeedback.play()` have the audio-feedback
-/// context. Zero-size / non-interactive; purely provides the responder context.
-struct InputClickHost: UIViewRepresentable {
-    func makeUIView(context: Context) -> InputClickAudioView {
-        let v = InputClickAudioView()
-        v.isUserInteractionEnabled = false
-        v.backgroundColor = .clear
-        return v
-    }
-    func updateUIView(_ uiView: InputClickAudioView, context: Context) {}
-}
+// The `UIInputViewAudioFeedback` responder context for `playInputClick()` is provided
+// by `KeybarInputAccessory` (the keybar is hosted as the terminal's real
+// inputAccessoryView). The former zero-size `InputClickHost`/`InputClickAudioView`
+// never entered the responder chain and made `playInputClick()` a silent no-op, so
+// they were removed.
 
 extension View {
     /// Fire the system-honoring keyboard click when `trigger` changes (i.e. on each
