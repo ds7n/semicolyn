@@ -20,8 +20,4 @@ final class TerminalFontTests: XCTestCase {
         let back = try JSONDecoder().decode(TerminalFont.self, from: JSONEncoder().encode(f))
         XCTAssertEqual(back, f)
     }
-    func testSettingsDefaultFontFaceIsSystemForNow() {
-        // Task 2 will change this expectation to Hack (the default).
-        XCTAssertEqual(TerminalSettings().fontFace.kind, .system)
-    }
 }

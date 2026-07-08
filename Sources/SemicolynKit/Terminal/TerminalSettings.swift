@@ -22,6 +22,51 @@ public struct TerminalFont: Equatable, Sendable, Codable {
     }
 }
 
+/// A font shipped inside the app bundle. `fileName` is the resource file
+/// (without extension assumptions handled by the App tier); `postScriptName`
+/// is what `UIFont(name:)` needs; `license` is the SPDX / upstream id.
+public struct BundledFont: Equatable, Sendable {
+    public let displayName: String
+    public let postScriptName: String
+    public let fileName: String
+    public let license: String
+    public var face: TerminalFont {
+        TerminalFont(kind: .bundled(postScriptName), displayName: displayName)
+    }
+}
+
+/// The curated font set + the resolve-with-fallback that keeps an unresolvable
+/// face from tofu-ing the whole terminal.
+public enum FontCatalog {
+    public static let bundled: [BundledFont] = [
+        BundledFont(displayName: "Hack Nerd Font",
+                    postScriptName: "HackNerdFont-Regular",
+                    fileName: "HackNerdFont-Regular",
+                    license: "MIT"),
+        BundledFont(displayName: "JetBrainsMono Nerd Font",
+                    postScriptName: "JetBrainsMonoNerdFont-Regular",
+                    fileName: "JetBrainsMonoNerdFont-Regular",
+                    license: "OFL-1.1"),
+    ]
+    public static let `default`: BundledFont = bundled[0]   // Hack — mobile-legible
+
+    /// Resolve a face to the PostScript name to render with.
+    /// - Returns: `nil` for `.system` (caller uses `monospacedSystemFont`);
+    ///   the exact name for bundled or a registered imported face; the default
+    ///   bundled font's name for an imported face not in `registeredImported`.
+    public static func resolvePostScriptName(
+        _ face: TerminalFont, registeredImported: Set<String>) -> String? {
+        switch face.kind {
+        case .system:
+            return nil
+        case .bundled(let name):
+            return name
+        case .imported(let name):
+            return registeredImported.contains(name) ? name : `default`.postScriptName
+        }
+    }
+}
+
 /// Terminal rendering preferences. Pure value type; defaults baked in per the
 /// Plan C spec. A future Settings screen binds to this; Plan C ships defaults.
 public struct TerminalSettings: Equatable, Sendable {
@@ -40,7 +85,7 @@ public struct TerminalSettings: Equatable, Sendable {
                 cursorStyle: CursorStyle = .block,
                 cursorBlink: Bool = false,
                 scrollbackLines: Int = 5000,
-                fontFace: TerminalFont = TerminalFont(kind: .system, displayName: "System")) {
+                fontFace: TerminalFont = FontCatalog.default.face) {
         self.fontSize = TerminalSettings.clampFont(fontSize)
         self.cursorStyle = cursorStyle
         self.cursorBlink = cursorBlink
