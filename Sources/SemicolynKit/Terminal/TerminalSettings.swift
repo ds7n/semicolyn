@@ -5,6 +5,23 @@ import Foundation
 /// Caret rendering style, independent of blink (mirrors DECSCUSR families).
 public enum CursorStyle: Equatable, Sendable { case block, underline, bar }
 
+/// A selectable terminal typeface. `.system` = SF Mono (no icons); `.bundled`
+/// = a Nerd Font shipped in the app bundle; `.imported` = a user-registered
+/// `.ttf`/`.otf`. The associated `String` is the font's PostScript name.
+public struct TerminalFont: Equatable, Sendable, Codable {
+    public enum Kind: Equatable, Sendable, Codable {
+        case system
+        case bundled(String)
+        case imported(String)
+    }
+    public var kind: Kind
+    public var displayName: String
+    public init(kind: Kind, displayName: String) {
+        self.kind = kind
+        self.displayName = displayName
+    }
+}
+
 /// Terminal rendering preferences. Pure value type; defaults baked in per the
 /// Plan C spec. A future Settings screen binds to this; Plan C ships defaults.
 public struct TerminalSettings: Equatable, Sendable {
@@ -12,6 +29,7 @@ public struct TerminalSettings: Equatable, Sendable {
     public var cursorStyle: CursorStyle
     public var cursorBlink: Bool
     public var scrollbackLines: Int
+    public var fontFace: TerminalFont
 
     /// Allowed font-point range (touch-legible floor, sane ceiling).
     public static let fontRange: ClosedRange<Double> = 9...24
@@ -21,11 +39,13 @@ public struct TerminalSettings: Equatable, Sendable {
     public init(fontSize: Double = 13,
                 cursorStyle: CursorStyle = .block,
                 cursorBlink: Bool = false,
-                scrollbackLines: Int = 5000) {
+                scrollbackLines: Int = 5000,
+                fontFace: TerminalFont = TerminalFont(kind: .system, displayName: "System")) {
         self.fontSize = TerminalSettings.clampFont(fontSize)
         self.cursorStyle = cursorStyle
         self.cursorBlink = cursorBlink
         self.scrollbackLines = scrollbackLines
+        self.fontFace = fontFace
     }
 
     /// Clamp a requested font size into the legible range.
