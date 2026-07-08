@@ -13,8 +13,6 @@ struct TerminalScreen: UIViewRepresentable {
     /// Called with raw keystroke/paste bytes. In tmux mode this routes through
     /// `TmuxRuntime.sendInput`; in raw-PTY mode it writes directly to the channel.
     let send: ([UInt8]) -> Void
-    /// Raw send for synthesized cursor-drag arrows (bypasses armed-modifier routing).
-    var cursorSend: ([UInt8]) -> Void
     let output: TerminalShellOutput
     /// The live session is retained here for resize notifications only.
     let session: ShellSession?
@@ -76,13 +74,14 @@ struct TerminalScreen: UIViewRepresentable {
         )
         terminal.addGestureRecognizer(pinch)
 
-        // Install cursor-placement drag (tap = reposition, pan = scrub, no halo).
-        // The single-terminal path (raw SSH / mosh) is always THE focused terminal,
-        // so activate its gestures unconditionally. (The tmux multi-pane path gates
-        // `active` per focused pane via setCursorDragActive; here there's one pane.)
-        let cursorDrag = CursorDragController(view: terminal, send: cursorSend)
-        cursorDrag.active = true
-        context.coordinator.cursorDrag = cursorDrag
+        // Cursor placement uses SwiftTerm's OWN gestures, not a custom controller:
+        // with `allowMouseReporting = false`, SwiftTerm turns a pan into cursor-key
+        // commands (drag = scrub) and its native tap/double-tap/long-press give
+        // reposition + word/line select + selection-extend. We flip it back to `true`
+        // in a `mouse=a` pane (see updateMouseDot) so a mouse app gets its events. A
+        // custom pan controller here just fought SwiftTerm's built-in pan (device:
+        // scrub + selection-drag both broke).
+        terminal.allowMouseReporting = false
 
         // Render PTY output as it arrives (already hopped to main in the bridge).
         output.onBytes = { [weak terminal] bytes in
@@ -140,8 +139,6 @@ struct TerminalScreen: UIViewRepresentable {
         /// Baseline font size for pinch-zoom; updated when a pinch gesture ends.
         /// Persists for the window's lifetime only (not stored to the host — v1.5+).
         var baseSize: Double
-        /// Cursor-placement drag (tap + pan → synthesized arrow keys); installed in makeUIView.
-        var cursorDrag: CursorDragController?
         /// True once we have claimed keyboard focus for this terminal. We claim it a
         /// single time (on the first `updateUIView` after the view is in a window, so
         /// `becomeFirstResponder` can actually succeed) and then never re-grab it, so
@@ -231,12 +228,10 @@ struct TerminalScreen: UIViewRepresentable {
         func updateMouseDot(from terminalView: TerminalView) {
             let mouseActive = terminalView.getTerminal().mouseMode != .off
             mouseDot.isHidden = !mouseActive
-            // Suspend the tap/pan cursor gestures in a mouse-reporting pane so taps and
-            // drags forward as SGR mouse events instead of synthesizing arrows
-            // (cursor-centric spec; supersedes the old halo's "never suspend" decision).
-            // NOTE: SwiftTerm owns the selection long-press; our `selectionLongPress`
-            // property was never wired (stale phase-4 TODO), so we don't toggle it here.
-            cursorDrag?.suppressed = mouseActive
+            // Mouse-reporting app → let SwiftTerm forward mouse events (allowMouseReporting
+            // = true). Otherwise keep it false so SwiftTerm's pan is cursor-key scrub and
+            // its tap/long-press do reposition + selection (cursor-centric model).
+            terminalView.allowMouseReporting = mouseActive
         }
 
         // Visual bell: pulse halo + optional haptic (throttled by BellStateMachine).
