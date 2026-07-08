@@ -17,10 +17,20 @@ import SemicolynKit
 
     /// Directory where user-imported font files are copied so they survive relaunch.
     /// The picker copies into here; `registerImportedFonts()` re-registers them at launch.
+    /// Pure path computation — reading it does NOT create the directory (use
+    /// `ensureImportedFontsDirectory()` for that, so a plain read has no side effect).
     static var importedFontsDirectory: URL? {
         try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                     appropriateFor: nil, create: true)
+                                     appropriateFor: nil, create: false)
             .appendingPathComponent("Fonts", isDirectory: true)
+    }
+
+    /// Return the imported-fonts directory, creating it if needed. The picker calls
+    /// this before copying an imported file in.
+    static func ensureImportedFontsDirectory() -> URL? {
+        guard let dir = importedFontsDirectory else { return nil }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }
 
     /// Re-register every previously-imported font file at launch, so a persisted
