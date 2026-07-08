@@ -214,6 +214,7 @@ extension HostEditorView {
             }
 
             Button {
+                InputClickFeedback.play()
                 var updated = vm.host.proxyJump.value ?? []
                 updated.append(.inline(hostName: "", port: nil, user: nil, identities: nil))
                 vm.host.proxyJump = .explicit(updated)
@@ -267,6 +268,7 @@ extension HostEditorView {
                 )
             }
             Button {
+                InputClickFeedback.play()
                 var updated = vm.host.localForwards.value ?? []
                 updated.append(LocalForward(bindAddress: nil, bindPort: 0, hostAddress: "", hostPort: 0))
                 vm.host.localForwards = .explicit(updated)
@@ -305,6 +307,7 @@ extension HostEditorView {
                 )
             }
             Button {
+                InputClickFeedback.play()
                 var updated = vm.host.remoteForwards.value ?? []
                 updated.append(RemoteForward(bindAddress: nil, bindPort: 0, hostAddress: "", hostPort: 0))
                 vm.host.remoteForwards = .explicit(updated)
@@ -343,6 +346,7 @@ extension HostEditorView {
                 )
             }
             Button {
+                InputClickFeedback.play()
                 var updated = vm.host.dynamicForwards.value ?? []
                 updated.append(DynamicForward(bindAddress: nil, bindPort: 0))
                 vm.host.dynamicForwards = .explicit(updated)
@@ -677,6 +681,7 @@ extension HostEditorView {
     var deleteSection: some View {
         Section {
             Button(role: .destructive) {
+                InputClickFeedback.play()
                 showingDeleteConfirm = true
             } label: {
                 HStack {
@@ -737,7 +742,7 @@ private struct JumpHopRow: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: .infinity)
 
-                Button(role: .destructive) { onRemove() } label: {
+                Button(role: .destructive) { InputClickFeedback.play(); onRemove() } label: {
                     Image(systemName: "minus.circle.fill")
                         .foregroundStyle(Color(theme.state.broken))
                 }
@@ -883,7 +888,7 @@ private struct LocalForwardRow: View {
                     .font(.subheadline)
                     .foregroundStyle(Color(theme.text.secondary))
                 Spacer()
-                Button(role: .destructive) { onRemove() } label: {
+                Button(role: .destructive) { InputClickFeedback.play(); onRemove() } label: {
                     Image(systemName: "minus.circle.fill")
                         .foregroundStyle(Color(theme.state.broken))
                 }
@@ -972,7 +977,7 @@ private struct RemoteForwardRow: View {
                     .font(.subheadline)
                     .foregroundStyle(Color(theme.text.secondary))
                 Spacer()
-                Button(role: .destructive) { onRemove() } label: {
+                Button(role: .destructive) { InputClickFeedback.play(); onRemove() } label: {
                     Image(systemName: "minus.circle.fill")
                         .foregroundStyle(Color(theme.state.broken))
                 }
@@ -1061,7 +1066,7 @@ private struct DynamicForwardRow: View {
                     .font(.subheadline)
                     .foregroundStyle(Color(theme.text.secondary))
                 Spacer()
-                Button(role: .destructive) { onRemove() } label: {
+                Button(role: .destructive) { InputClickFeedback.play(); onRemove() } label: {
                     Image(systemName: "minus.circle.fill")
                         .foregroundStyle(Color(theme.state.broken))
                 }
