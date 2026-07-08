@@ -132,9 +132,10 @@ struct SessionView: View {
                                    theme: theme,
                                    osc52Allowed: vm.osc52Allowed,
                                    onTitle: { [weak vm] t in vm?.terminalTitle = t },
-                                   onSSHLink: { [weak vm] url in vm?.presentSSHLink(url) })
-                        // Respect the bottom safe area so the keybar inset reserves
-                        // space and the terminal ends above it (see the tmux branch).
+                                   onSSHLink: { [weak vm] url in vm?.presentSSHLink(url) },
+                                   vm: vm,
+                                   keybarSettings: AppStores.shared.keybarSettings,
+                                   hardwareKeyboardConnected: hardwareKeyboard.isConnected)
                         .overlay(alignment: .top) {
                             if let reason = vm.degraded {
                                 DegradedBanner(reason: reason) { vm.degraded = nil }
@@ -167,16 +168,8 @@ struct SessionView: View {
                             }
                         }
                         .animation(.easeInOut, value: vm.crashBanner)
-                        .safeAreaInset(edge: .bottom, spacing: 0) {
-                            VStack(spacing: 0) {
-                                PredictorStripView(vm: vm, predictorVM: vm.predictorVM)
-                                KeybarView(keybarSettings: AppStores.shared.keybarSettings, vm: vm,
-                                       hardwareKeyboardConnected: hardwareKeyboard.isConnected)
-                            }
-                            // Extend only the keybar's panel background into the
-                            // home-indicator strip; the keys stay within the safe area.
-                            .background(Color(theme.surface.panel).ignoresSafeArea(edges: .bottom))
-                        }
+                        // Keybar + predictor now mount as the terminal's inputAccessoryView
+                        // (see TerminalScreen); no .safeAreaInset keybar here anymore.
                 }
             } else if resolving {
                 // Resolution not yet run — show a neutral spinner with no label
