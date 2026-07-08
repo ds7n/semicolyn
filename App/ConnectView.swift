@@ -18,7 +18,8 @@ struct ConnectView: View {
                            output: vm.output,
                            session: vm.session,
                            osc52Allowed: vm.osc52Allowed,
-                           onTitle: { [weak vm] t in vm?.terminalTitle = t })
+                           onTitle: { [weak vm] t in vm?.terminalTitle = t },
+                           vm: vm)
                 .ignoresSafeArea(.container, edges: .bottom)
         } else {
             form
