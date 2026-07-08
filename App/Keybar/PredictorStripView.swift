@@ -28,7 +28,7 @@ struct PredictorStripView: View {
                                     .padding(.horizontal, 10).padding(.vertical, 3)
                                     .background(Color(theme.predictor.suggestionBg))
                                     .clipShape(Capsule())
-                                    .onTapGesture { vm.acceptSuggestion(s) }
+                                    .onInputClickTap { vm.acceptSuggestion(s) }
                             }
                         }
                         .padding(.horizontal, 8)

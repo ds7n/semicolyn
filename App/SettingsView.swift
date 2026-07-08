@@ -30,7 +30,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Done") { InputClickFeedback.play(); dismiss() }
                 }
             }
         }
