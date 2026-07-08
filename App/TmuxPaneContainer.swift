@@ -209,7 +209,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
             switch recognizer.state {
             case .changed:
                 let newSize = TerminalSettings.clampFont(baseFontSize * Double(recognizer.scale))
-                let font = TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(newSize))
+                // UIKit delivers gesture callbacks on the main thread; this @objc
+                // selector is nonisolated, so hop onto the main actor to call the
+                // @MainActor font provider.
+                let font = MainActor.assumeIsolated {
+                    TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(newSize))
+                }
                 // Apply to the pane being pinched immediately; apply to all registered
                 // panes so the window stays visually consistent.
                 for view in pinchRecognizers.keys.compactMap({ paneView(for: $0) }) {

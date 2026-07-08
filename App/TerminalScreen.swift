@@ -197,7 +197,12 @@ struct TerminalScreen: UIViewRepresentable {
             switch recognizer.state {
             case .changed:
                 let newSize = TerminalSettings.clampFont(baseSize * Double(recognizer.scale))
-                terminal.font = TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(newSize))
+                // UIKit delivers gesture callbacks on the main thread; this @objc
+                // selector is nonisolated, so hop onto the main actor to call the
+                // @MainActor font provider.
+                terminal.font = MainActor.assumeIsolated {
+                    TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(newSize))
+                }
                 recognizer.scale = 1
                 baseSize = newSize
             case .ended:
