@@ -104,6 +104,17 @@ struct TerminalScreen: UIViewRepresentable {
         context.coordinator.halo.configure(color: UIColor(Color(theme.bell.edge)))
         // Recolor the live terminal when the theme changes.
         applyPalette(theme.terminalPalette(), to: uiView)
+        // Re-apply the font live when the user changes face/size in the settings
+        // picker. Compare against the last SETTINGS-applied values (not the pinch
+        // baseSize) so an in-progress pinch isn't clobbered on every SwiftUI pass;
+        // a deliberate settings change resets the pinch baseline to the new size.
+        let coord = context.coordinator
+        if settings.fontFace != coord.lastAppliedFace || settings.fontSize != coord.lastAppliedFontSize {
+            uiView.font = TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(settings.fontSize))
+            coord.lastAppliedFace = settings.fontFace
+            coord.lastAppliedFontSize = settings.fontSize
+            coord.baseSize = settings.fontSize
+        }
         // Update mouse-active dot visibility and selection gesture state.
         context.coordinator.updateMouseDot(from: uiView)
     }
@@ -139,6 +150,11 @@ struct TerminalScreen: UIViewRepresentable {
         /// Baseline font size for pinch-zoom; updated when a pinch gesture ends.
         /// Persists for the window's lifetime only (not stored to the host — v1.5+).
         var baseSize: Double
+        /// Last font face/size applied FROM SETTINGS (not from a pinch). Used by
+        /// `updateUIView` to detect a settings change (picker) and re-apply live,
+        /// without clobbering an in-progress pinch on every SwiftUI pass.
+        var lastAppliedFace: TerminalFont
+        var lastAppliedFontSize: Double
         /// True once we have claimed keyboard focus for this terminal. We claim it a
         /// single time (on the first `updateUIView` after the view is in a window, so
         /// `becomeFirstResponder` can actually succeed) and then never re-grab it, so
@@ -151,6 +167,8 @@ struct TerminalScreen: UIViewRepresentable {
             self.session = session
             self.settings = settings
             self.baseSize = settings.fontSize
+            self.lastAppliedFace = settings.fontFace
+            self.lastAppliedFontSize = settings.fontSize
             self.halo = BellHaloView(frame: .zero)
             self.osc52Allowed = osc52Allowed
             self.onTitle = onTitle

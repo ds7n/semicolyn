@@ -58,6 +58,19 @@ struct TmuxPaneContainer: UIViewRepresentable {
         for pane in uiView.paneTerminalViews {
             applyPalette(theme.terminalPalette(), to: pane)
         }
+        // Re-apply the font live to every pane when the user changes face/size in the
+        // settings picker. Guard on the last SETTINGS-applied values (not the pinch
+        // baseFontSize) so an in-progress pinch isn't clobbered each SwiftUI pass; a
+        // deliberate settings change resets the shared pinch baseline.
+        let coord = context.coordinator
+        if settings.fontFace != coord.lastAppliedFace || settings.fontSize != coord.lastAppliedFontSize {
+            let font = TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(settings.fontSize))
+            for pane in uiView.paneTerminalViews { pane.font = font }
+            coord.lastAppliedFace = settings.fontFace
+            coord.lastAppliedFontSize = settings.fontSize
+            coord.baseFontSize = settings.fontSize
+            coord.onInvalidateCachedCell?()   // font change alters cell metrics → recompute pane rects
+        }
         // Keep the resize callback current (parent may re-create the closure).
         context.coordinator.onTmuxResize = onTmuxResize
         // Update mouse-active dot visibility and selection gesture state for all panes.
@@ -82,6 +95,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Baseline font size for pinch-zoom; shared across all panes in this window.
         /// Updated on `.ended`; persists for the window's lifetime only (not stored to host — v1.5+).
         var baseFontSize: Double
+        /// Last font face/size applied FROM SETTINGS (not a pinch). `updateUIView`
+        /// re-applies to all panes when these differ from the incoming settings, so a
+        /// picker change lands live without clobbering an in-progress pinch.
+        var lastAppliedFace: TerminalFont
+        var lastAppliedFontSize: Double
         /// Called after a pinch font change to invalidate `ContainerView.cachedCell`.
         var onInvalidateCachedCell: (() -> Void)?
         /// Current bell halo color, refreshed from the theme in updateUIView.
@@ -114,6 +132,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
             self.send = send
             self.settings = settings
             self.baseFontSize = settings.fontSize
+            self.lastAppliedFace = settings.fontFace
+            self.lastAppliedFontSize = settings.fontSize
             self.bellHaloColor = UIColor(Color(theme.bell.edge))
             self.accentDotColor = UIColor(Color(theme.accent.primary.alpha(0.40)))
             self.osc52Allowed = osc52Allowed
