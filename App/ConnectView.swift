@@ -15,7 +15,6 @@ struct ConnectView: View {
     var body: some View {
         if case .shell = vm.state {
             TerminalScreen(send: { [weak vm] bytes in vm?.terminalKeyboardInput(bytes) },
-                           cursorSend: { [weak vm] bytes in vm?.sendTerminalInput(bytes) },
                            output: vm.output,
                            session: vm.session,
                            osc52Allowed: vm.osc52Allowed,
