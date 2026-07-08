@@ -5,6 +5,15 @@ import SemicolynKit
 
 @main
 struct SemicolynApp: App {
+    init() {
+        // Register bundled + previously-imported Nerd Fonts with CoreText before any
+        // TerminalView resolves its face, so `UIFont(name:)` finds them. `UIAppFonts`
+        // also auto-registers the bundled files; this call additionally re-registers
+        // user imports and is the single seam the font provider owns.
+        TerminalFontProvider.shared.registerBundledFonts()
+        TerminalFontProvider.shared.registerImportedFonts()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -25,5 +34,8 @@ private struct RootView: View {
             .environment(\.theme,
                          resolveTheme(selectedID: appearance.selectedThemeID,
                                       isPro: pro.isPro))
+            // Terminal preferences (font face/size) — the Terminal settings screen
+            // and font picker bind to this via @EnvironmentObject.
+            .environmentObject(AppStores.shared.terminalSettings)
     }
 }

@@ -10,9 +10,29 @@ import SemicolynKit
 /// system monospace, never tofu.
 @MainActor final class TerminalFontProvider {
     static let shared = TerminalFontProvider()
+    private init() {}
 
     private(set) var registeredImportedNames: Set<String> = []
     private var didRegisterBundled = false
+
+    /// Directory where user-imported font files are copied so they survive relaunch.
+    /// The picker copies into here; `registerImportedFonts()` re-registers them at launch.
+    static var importedFontsDirectory: URL? {
+        try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                     appropriateFor: nil, create: true)
+            .appendingPathComponent("Fonts", isDirectory: true)
+    }
+
+    /// Re-register every previously-imported font file at launch, so a persisted
+    /// `.imported(name)` face resolves. Safe to call once at startup.
+    func registerImportedFonts() {
+        guard let dir = Self.importedFontsDirectory,
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil) else { return }
+        for url in files where ["ttf", "otf"].contains(url.pathExtension.lowercased()) {
+            _ = registerImported(fileURL: url)
+        }
+    }
 
     /// Register the curated bundled fonts. Idempotent; safe to call at launch.
     func registerBundledFonts() {
