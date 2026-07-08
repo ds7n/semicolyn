@@ -51,7 +51,7 @@ struct TerminalScreen: UIViewRepresentable {
 
         // Apply terminal rendering preferences from settings.
         let s = context.coordinator.settings
-        terminal.font = UIFont.monospacedSystemFont(ofSize: CGFloat(s.fontSize), weight: .regular)
+        terminal.font = TerminalFontProvider.shared.font(for: s.fontFace, size: CGFloat(s.fontSize))
         terminal.getTerminal().options.scrollback = s.scrollbackLines
         // Apply the theme's terminal palette (bg/fg/cursor/selection + 16 ANSI).
         applyPalette(theme.terminalPalette(), to: terminal)
@@ -179,7 +179,7 @@ struct TerminalScreen: UIViewRepresentable {
             switch recognizer.state {
             case .changed:
                 let newSize = TerminalSettings.clampFont(baseSize * Double(recognizer.scale))
-                terminal.font = UIFont.monospacedSystemFont(ofSize: CGFloat(newSize), weight: .regular)
+                terminal.font = TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(newSize))
                 recognizer.scale = 1
                 baseSize = newSize
             case .ended:

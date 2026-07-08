@@ -189,7 +189,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             switch recognizer.state {
             case .changed:
                 let newSize = TerminalSettings.clampFont(baseFontSize * Double(recognizer.scale))
-                let font = UIFont.monospacedSystemFont(ofSize: CGFloat(newSize), weight: .regular)
+                let font = TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(newSize))
                 // Apply to the pane being pinched immediately; apply to all registered
                 // panes so the window stays visually consistent.
                 for view in pinchRecognizers.keys.compactMap({ paneView(for: $0) }) {
@@ -387,8 +387,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     // is the single accessory row (see TerminalScreen.makeUIView).
                     t.inputAccessoryView = nil
                     // Apply configured font so rendered pane matches the pinch baseline.
-                    if let fontSize = coordinator?.settings.fontSize {
-                        t.font = UIFont.monospacedSystemFont(ofSize: CGFloat(fontSize), weight: .regular)
+                    if let s = coordinator?.settings {
+                        t.font = TerminalFontProvider.shared.font(for: s.fontFace, size: CGFloat(s.fontSize))
                     }
                     addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
                     coordinator?.installHalo(on: t)
