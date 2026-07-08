@@ -21,10 +21,17 @@ a face, and let the user import their own `.ttf`/`.otf`.
 - **Icon model: full patched fonts only.** Every bundled/imported face is expected to
   be a *full* Nerd Font with icons baked in. No symbols-only cascade / fallback layer.
   A plain (non-patched) font simply shows no icons — that is acceptable and expected.
-- **Bundled curated set (3 fonts):** JetBrainsMono Nerd Font, Hack Nerd Font,
-  FiraCode Nerd Font — all OFL/MIT-class, redistributable. Plus the current **system
-  monospace** offered as a selectable no-icon face.
-- **Default terminal face:** **FiraCode Nerd Font** (icons + ligatures out of the box).
+- **Bundled curated set (2 fonts):** Hack Nerd Font, JetBrainsMono Nerd Font — both
+  OFL/MIT-class, redistributable. Plus the current **system monospace** offered as a
+  selectable no-icon face. (FiraCode was dropped — see "Mobile-first font selection".)
+- **Default terminal face:** **Hack Nerd Font.**
+- **Mobile-first font selection:** defaults are chosen for on-glass rendering, not
+  desktop-monitor habits. Retina AA thins delicate strokes, the viewport is small, and
+  code ligatures are *harder* to parse at small physical sizes — so the default is Hack
+  (wide, sturdy strokes, strong `0/O/1/l/I` disambiguation, no ligatures). FiraCode was
+  dropped specifically because its ligatures-on-by-default is a worse mobile first
+  impression; dropping it also removes the ligature-rendering question entirely.
+  One default everywhere — no per-device (iPhone vs iPad) branching.
 - **User import:** document picker → register → persist an imported face.
 
 ## Non-goals (YAGNI)
@@ -57,7 +64,7 @@ public struct TerminalFont: Equatable, Sendable, Codable {
 ```
 
 - `TerminalSettings` gains `public var fontFace: TerminalFont`, defaulting to the
-  **FiraCode** bundled case.
+  **Hack** bundled case.
 - **`BundledFont` registry** — plain data array of records
   `{ displayName, postScriptName, fileName, license }`, one per curated font. Lives in
   Kit so its shape is unit-testable. The default face MUST reference a registry entry.
@@ -145,25 +152,20 @@ follows the established row-pushes-detail-view pattern exactly.
 
 **Apple tier (macOS-CI + manual on build):** font file registration, provider resolution
 against real registered fonts, picker selection, import round-trip, and — device only —
-whether FiraCode **ligatures** render under SwiftTerm and whether icons render.
+whether icons render (Hack default + JetBrainsMono).
 
-## Ligatures caveat — investigated 2026-07-08
+## Ligatures — not applicable (FiraCode dropped)
 
-Checked SwiftTerm's default (CoreGraphics) draw path (`Apple/AppleTerminalView.swift`
-`buildAttributedString` → `CTLineCreateWithAttributedString`):
+FiraCode was the only ligature font under consideration; it was dropped in favor of Hack
+(default) + JetBrainsMono, neither of which ships code ligatures. So there is no ligature
+behavior to verify for this cut.
 
-- SwiftTerm **batches consecutive same-attribute characters into one `NSAttributedString`**
-  and draws each segment with `CTLineCreateWithAttributedString` — it does **not** draw
-  strictly cell-by-cell, and it **never sets `kCTLigatureAttributeName = 0`**. CoreText
-  therefore uses its default, which **enables standard ligatures**.
-- **Expectation: common code ligatures (`=>`, `!=`, `->`, `>=`) will render** with
-  FiraCode. Caveats: a ligature won't form across an attribute boundary (e.g. color change
-  mid-sequence flushes the batch), and SwiftTerm appends `U+FE0E` after
-  text-presentation symbols, which breaks a run for those specific glyphs.
-- **Icons are single-cell glyphs — unaffected by ligature logic; they always render.**
-
-Net: ligatures are **likely YES**, not merely "uncertain." Still confirm on-device on the
-first build carrying the fonts; not a blocker either way.
+For the record, the SwiftTerm draw path *would* have supported ligatures: its default
+CoreGraphics path (`Apple/AppleTerminalView.swift` `buildAttributedString` →
+`CTLineCreateWithAttributedString`) batches consecutive same-attribute characters into one
+`NSAttributedString` and never sets `kCTLigatureAttributeName = 0`, so CoreText's default
+(ligatures on) applies. If a ligature font is ever re-introduced, ligatures are expected to
+render (breaking only across attribute boundaries / `U+FE0E`-tagged symbols).
 
 ## Files touched
 
@@ -176,7 +178,8 @@ first build carrying the fonts; not a blocker either way.
   `NavigationLink` row to `App/SettingsView.swift`.
 - `App/TerminalScreen.swift`, `App/TmuxPaneContainer.swift` — swap the 4 font call-sites.
 - `App/TerminalSettingsStore.swift` — persist `fontFace`.
-- `project.yml` — bundle the 3 font resources + `UIAppFonts` Info.plist entries.
+- `project.yml` — bundle the 2 font resources (Hack, JetBrainsMono) + `UIAppFonts`
+  Info.plist entries.
 - Font resource files (`.ttf`) + their license files (REUSE / per-font license).
 
 ## Licensing / REUSE

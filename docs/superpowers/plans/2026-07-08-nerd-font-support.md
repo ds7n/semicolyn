@@ -7,7 +7,7 @@ SPDX-License-Identifier: GPL-3.0-only
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let the terminal render Nerd Font glyphs (powerline/dev/file-type icons) by shipping a curated set of full patched fonts, defaulting to FiraCode, with a picker and user-import.
+**Goal:** Let the terminal render Nerd Font glyphs (powerline/dev/file-type icons) by shipping a curated set of full patched fonts, defaulting to Hack (mobile-legible), with a picker and user-import.
 
 **Architecture:** Pure font model + resolve-with-fallback live in `SemicolynKit` (Linux-tested). Font registration, the `UIFont` resolver, the picker, and import live in `App/` (Apple-only, macOS-CI + manual verify). The 4 hardcoded `monospacedSystemFont` call-sites route through one provider.
 
@@ -22,8 +22,9 @@ SPDX-License-Identifier: GPL-3.0-only
 - Swift 6 strict concurrency: Kit types are `Sendable`; `App/` stores are `@MainActor`.
 - Tests are real (equivalence-partitioning + boundary; assert exact observable values; a negative test asserts the *specific* failure — no tautologies).
 - **Icon model: full patched fonts only** — no symbols cascade.
-- **Default terminal face: FiraCode Nerd Font.**
-- Bundled set: FiraCode (default), JetBrainsMono, Hack — all full Nerd Fonts — plus the system monospace as a no-icon selectable face.
+- **Default terminal face: Hack Nerd Font** (chosen for mobile/on-glass legibility, not desktop habit).
+- Bundled set: Hack (default), JetBrainsMono — both full Nerd Fonts — plus the system monospace as a no-icon selectable face. (FiraCode dropped: ligatures-on is a worse mobile first impression; dropping it also removes the ligature question.)
+- One default everywhere — no per-device (iPhone vs iPad) branching.
 - Conventional commits; feature branch `feat/nerd-font-support`; squash-merge.
 - Kit build/test: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test --filter <name>`.
 
@@ -39,7 +40,7 @@ SPDX-License-Identifier: GPL-3.0-only
 - Consumes: nothing (foundational).
 - Produces:
   - `public struct TerminalFont: Equatable, Sendable, Codable { public enum Kind: Equatable, Sendable, Codable { case system; case bundled(String); case imported(String) }; public var kind: Kind; public var displayName: String; public init(kind: Kind, displayName: String) }`
-  - `TerminalSettings.fontFace: TerminalFont` (stored `var`), defaulting to `BundledFont.default.face` (defined in Task 2). **Until Task 2 lands**, default temporarily to `TerminalFont(kind: .system, displayName: "System")` — Task 2 flips it to FiraCode.
+  - `TerminalSettings.fontFace: TerminalFont` (stored `var`), defaulting to `FontCatalog.default.face` (defined in Task 2). **Until Task 2 lands**, default temporarily to `TerminalFont(kind: .system, displayName: "System")` — Task 2 flips it to Hack.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -57,7 +58,7 @@ final class TerminalFontTests: XCTestCase {
         XCTAssertEqual(back, f)
     }
     func testCodableRoundTripBundled() throws {
-        let f = TerminalFont(kind: .bundled("FiraCodeNF-Regular"), displayName: "FiraCode Nerd Font")
+        let f = TerminalFont(kind: .bundled("HackNerdFont-Regular"), displayName: "Hack Nerd Font")
         let back = try JSONDecoder().decode(TerminalFont.self, from: JSONEncoder().encode(f))
         XCTAssertEqual(back, f)
     }
@@ -67,7 +68,7 @@ final class TerminalFontTests: XCTestCase {
         XCTAssertEqual(back, f)
     }
     func testSettingsDefaultFontFaceIsSystemForNow() {
-        // Task 2 will change this expectation to FiraCode.
+        // Task 2 will change this expectation to Hack (the default).
         XCTAssertEqual(TerminalSettings().fontFace.kind, .system)
     }
 }
@@ -132,7 +133,7 @@ git commit -m "feat(kit): add TerminalFont model + fontFace on TerminalSettings"
 - Consumes: `TerminalFont` (Task 1).
 - Produces:
   - `public struct BundledFont: Equatable, Sendable { public let displayName: String; public let postScriptName: String; public let fileName: String; public let license: String; public var face: TerminalFont { TerminalFont(kind: .bundled(postScriptName), displayName: displayName) } }`
-  - `public enum FontCatalog { public static let bundled: [BundledFont]; public static let `default`: BundledFont }` — `default` is FiraCode; `bundled` = `[FiraCode, JetBrainsMono, Hack]`.
+  - `public enum FontCatalog { public static let bundled: [BundledFont]; public static let `default`: BundledFont }` — `default` is Hack; `bundled` = `[Hack, JetBrainsMono]`.
   - `public static func resolvePostScriptName(_ face: TerminalFont, registeredImported: Set<String>) -> String?` on `FontCatalog` — returns `nil` for `.system` (a sentinel meaning "use monospacedSystemFont"); the bundled/imported name if resolvable; and for an `.imported` name NOT in `registeredImported`, returns the **default bundled** font's PostScript name (fallback, never nil/tofu).
 
 - [ ] **Step 1: Write the failing test**
@@ -144,15 +145,15 @@ import XCTest
 @testable import SemicolynKit
 
 final class BundledFontTests: XCTestCase {
-    func testCatalogHasThreeBundledFonts() {
-        XCTAssertEqual(FontCatalog.bundled.count, 3)
+    func testCatalogHasTwoBundledFonts() {
+        XCTAssertEqual(FontCatalog.bundled.count, 2)
     }
-    func testDefaultIsFiraCodeAndIsInCatalog() {
-        XCTAssertEqual(FontCatalog.default.displayName, "FiraCode Nerd Font")
+    func testDefaultIsHackAndIsInCatalog() {
+        XCTAssertEqual(FontCatalog.default.displayName, "Hack Nerd Font")
         XCTAssertTrue(FontCatalog.bundled.contains(FontCatalog.default),
                       "default must be a font we actually ship")
     }
-    func testSettingsDefaultFaceIsFiraCode() {
+    func testSettingsDefaultFaceIsHack() {
         XCTAssertEqual(TerminalSettings().fontFace, FontCatalog.default.face)
     }
     // resolve-with-fallback: EP over the 3 Kinds + the unknown-imported boundary.
@@ -208,20 +209,16 @@ public struct BundledFont: Equatable, Sendable {
 /// face from tofu-ing the whole terminal.
 public enum FontCatalog {
     public static let bundled: [BundledFont] = [
-        BundledFont(displayName: "FiraCode Nerd Font",
-                    postScriptName: "FiraCodeNerdFont-Regular",
-                    fileName: "FiraCodeNerdFont-Regular",
-                    license: "OFL-1.1"),
-        BundledFont(displayName: "JetBrainsMono Nerd Font",
-                    postScriptName: "JetBrainsMonoNerdFont-Regular",
-                    fileName: "JetBrainsMonoNerdFont-Regular",
-                    license: "OFL-1.1"),
         BundledFont(displayName: "Hack Nerd Font",
                     postScriptName: "HackNerdFont-Regular",
                     fileName: "HackNerdFont-Regular",
                     license: "MIT"),
+        BundledFont(displayName: "JetBrainsMono Nerd Font",
+                    postScriptName: "JetBrainsMonoNerdFont-Regular",
+                    fileName: "JetBrainsMonoNerdFont-Regular",
+                    license: "OFL-1.1"),
     ]
-    public static let `default`: BundledFont = bundled[0]
+    public static let `default`: BundledFont = bundled[0]   // Hack — mobile-legible
 
     /// Resolve a face to the PostScript name to render with.
     /// - Returns: `nil` for `.system` (caller uses `monospacedSystemFont`);
@@ -241,7 +238,7 @@ public enum FontCatalog {
 }
 ```
 
-Flip the `TerminalSettings.init` default: `fontFace: TerminalFont = FontCatalog.default.face`. Update Task 1's `testSettingsDefaultFontFaceIsSystemForNow` — delete it (superseded by `testSettingsDefaultFaceIsFiraCode` here).
+Flip the `TerminalSettings.init` default: `fontFace: TerminalFont = FontCatalog.default.face`. Update Task 1's `testSettingsDefaultFontFaceIsSystemForNow` — delete it (superseded by `testSettingsDefaultFaceIsHack` here).
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -253,7 +250,7 @@ Expected: PASS; no regressions.
 
 ```bash
 git add Sources/SemicolynKit/Terminal/TerminalSettings.swift Tests/SemicolynKitTests/BundledFontTests.swift Tests/SemicolynKitTests/TerminalFontTests.swift
-git commit -m "feat(kit): add BundledFont catalog + resolve-with-fallback; default to FiraCode"
+git commit -m "feat(kit): add BundledFont catalog + resolve-with-fallback; default to Hack"
 ```
 
 ---
@@ -423,42 +420,44 @@ git commit -m "feat(app): add TerminalFontProvider (register bundled/imported + 
 ### Task 5: Bundle the font files + wire `project.yml` (App/build)
 
 **Files:**
-- Create: `App/Resources/Fonts/FiraCodeNerdFont-Regular.ttf` (+ `.license`)
-- Create: `App/Resources/Fonts/JetBrainsMonoNerdFont-Regular.ttf` (+ `.license`)
 - Create: `App/Resources/Fonts/HackNerdFont-Regular.ttf` (+ `.license`)
+- Create: `App/Resources/Fonts/JetBrainsMonoNerdFont-Regular.ttf` (+ `.license`)
 - Modify: `project.yml` (resource group + `UIAppFonts`)
 - Modify: `App/…AppEntry/RootView` — call `TerminalFontProvider.shared.registerBundledFonts()` at launch.
 
 **Interfaces:**
 - Consumes: `TerminalFontProvider.registerBundledFonts()` (Task 4).
-- Produces: the three fonts present in the app bundle + registered at launch.
+- Produces: the two fonts present in the app bundle + registered at launch.
 
 - [ ] **Step 1: Download the fonts and confirm exact PostScript names**
 
 ```bash
 mkdir -p App/Resources/Fonts && cd App/Resources/Fonts
 # Nerd Fonts release assets (v3+). Pin a release tag when running.
-curl -fLO https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip
-curl -fLO https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip
 curl -fLO https://github.com/ryanoasis/nerd-fonts/releases/latest/download/Hack.zip
+curl -fLO https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip
 # Extract only the Regular .ttf we need from each, rename to our fileName, delete the rest + zips.
 ```
 
 For each extracted `.ttf`, read its real PostScript name and reconcile with the catalog:
 
-```bash
-python3 - <<'PY'
+Write a small temp script `ps_names.py` (avoid inline heredocs per house rules) and run it:
+
+```python
+# ps_names.py
 from fontTools.ttLib import TTFont
-for p in ["FiraCodeNerdFont-Regular.ttf","JetBrainsMonoNerdFont-Regular.ttf","HackNerdFont-Regular.ttf"]:
-    f=TTFont(p); name=f["name"].getDebugName(6); print(p, "->", name)
-PY
+for p in ["HackNerdFont-Regular.ttf", "JetBrainsMonoNerdFont-Regular.ttf"]:
+    print(p, "->", TTFont(p)["name"].getDebugName(6))
+```
+```bash
+python3 ps_names.py && rm ps_names.py
 ```
 
 If any printed PostScript name differs from `FontCatalog`'s `postScriptName`, **update the catalog string in `TerminalSettings.swift` to match exactly** and re-run `swift test --filter BundledFontTests`. (Kit tests assert names round-trip, not that they match the file — this manual reconcile is the guard that names match reality.)
 
 - [ ] **Step 2: Add per-font license files (REUSE)**
 
-Each font's upstream `LICENSE`/`OFL.txt` goes beside it as `<fileName>.ttf.license` or a `.reuse/dep5` entry. FiraCode + JetBrainsMono = OFL-1.1; Hack = MIT (Hack license). Confirm REUSE passes: `docker compose run --rm dev reuse lint` (if `reuse` present in the dev image) — else document the license mapping in `App/Resources/Fonts/README.md`.
+Each font's upstream `LICENSE`/`OFL.txt` goes beside it as `<fileName>.ttf.license` or a `.reuse/dep5` entry. Hack = MIT (Hack license); JetBrainsMono = OFL-1.1. Confirm REUSE passes: `docker compose run --rm dev reuse lint` (if `reuse` present in the dev image) — else document the license mapping in `App/Resources/Fonts/README.md`.
 
 - [ ] **Step 3: Wire `project.yml`**
 
@@ -471,9 +470,8 @@ Add the fonts as bundled resources of the App target and declare `UIAppFonts` in
     info:
       properties:
         UIAppFonts:
-          - FiraCodeNerdFont-Regular.ttf
-          - JetBrainsMonoNerdFont-Regular.ttf
           - HackNerdFont-Regular.ttf
+          - JetBrainsMonoNerdFont-Regular.ttf
 ```
 
 (Match the existing `project.yml` structure — merge into the current App target's `sources`/`info`, don't duplicate the target.)
@@ -492,7 +490,7 @@ TerminalFontProvider.shared.registerBundledFonts()
 
 ```bash
 git add App/Resources/Fonts project.yml App/*  # entry point file
-git commit -m "feat(app): bundle FiraCode/JetBrainsMono/Hack Nerd Fonts + register at launch"
+git commit -m "feat(app): bundle Hack/JetBrainsMono Nerd Fonts + register at launch"
 ```
 
 ---
@@ -759,11 +757,11 @@ Expected: `linux-swift`, `linux-rust`, `lint`, **`macos`** all green. `macos` is
 - [ ] **Step 2: Cut a TestFlight build; device-verify**
 
 On green, dispatch "Release to TestFlight" off the merged main. On device confirm:
-  - Terminal renders FiraCode by default; **icons render** (run e.g. `eza --icons`, a Starship/powerlevel prompt, or `echo -e ' '`).
-  - **Ligatures**: type `=>`, `!=`, `->`, `>=` — confirm they ligate (spec predicts YES; record actual).
-  - Picker switches faces live; system face shows no icons; import a `.ttf` and confirm it renders and persists across relaunch (or reverts to default if the imported-list limitation bites — expected per Deferred).
+  - Terminal renders **Hack Nerd Font** by default; **icons render** (run e.g. `eza --icons` or a Starship/powerlevel prompt).
+  - Legibility check on a real device (the reason Hack is the default): confirm the default reads well at small font sizes on both iPhone and iPad.
+  - Picker switches faces live (Hack ↔ JetBrainsMono ↔ System); system face shows no icons; import a `.ttf` and confirm it renders and persists across relaunch (or reverts to default if the imported-list limitation bites — expected per Deferred).
 
-- [ ] **Step 3: Record ligature outcome in the spec** (update the "Ligatures caveat" section with the observed on-device result), then commit that doc change.
+- [ ] **Step 3: Record the on-device legibility/icon outcome** in the spec, then commit that doc change.
 
 ---
 
@@ -774,6 +772,6 @@ On green, dispatch "Release to TestFlight" off the merged main. On device confir
 
 ## Self-Review
 
-- **Spec coverage:** model+field (T1) ✓, registry+resolve-fallback (T2) ✓, persistence-correction (T3) ✓, provider/registration/resolver/import (T4) ✓, bundle+project.yml+launch (T5) ✓, 4 call-sites (T6) ✓, picker+minimal settings screen+import UI (T7) ✓, ligature investigation recorded (spec + T8 step 3) ✓, REUSE/licensing (T5 step 2) ✓, default=FiraCode (T2) ✓, full-patched-only (no cascade anywhere) ✓.
+- **Spec coverage:** model+field (T1) ✓, registry+resolve-fallback (T2) ✓, persistence-correction (T3) ✓, provider/registration/resolver/import (T4) ✓, bundle+project.yml+launch (T5) ✓, 4 call-sites (T6) ✓, picker+minimal settings screen+import UI (T7) ✓, mobile-first defaults / ligatures-N/A recorded (spec) ✓, REUSE/licensing (T5 step 2) ✓, default=Hack (T2) ✓, full-patched-only (no cascade anywhere) ✓.
 - **Placeholder scan:** no TBD/"handle errors" — every code step shows code; the only manual step (font download + PS-name reconcile, T5) is explicit with commands.
 - **Type consistency:** `TerminalFont(kind:displayName:)`, `FontCatalog.bundled/.default/.resolvePostScriptName(_:registeredImported:)`, `TerminalFontProvider.shared.font(for:size:)/registerBundledFonts()/registerImported(fileURL:)/registeredImportedNames`, `TerminalSettingsStore.settings/resetToDefaults()` — used consistently across T1→T7.
