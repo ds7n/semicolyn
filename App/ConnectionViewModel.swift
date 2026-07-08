@@ -578,13 +578,23 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         switch moshBranchOutcome(stdout: stdout, enabled: true) {
         case let .mosh(port, key):
             DebugLog.shared.log("mosh: bootstrap OK port=\(port) keyLen=\(key.count) → starting UDP session")
+            // mosh-client's getaddrinfo uses AI_NUMERICHOST (numeric IP only, NO DNS),
+            // so it rejects a hostname. Resolve host.hostName to a numeric IP here
+            // (SSH already reached the host, so it resolves). If we can't resolve, don't
+            // hand mosh a name it will reject — fall back to SSH with a clear reason.
+            guard let moshIP = MoshHostResolver.numericAddress(for: host.hostName) else {
+                DebugLog.shared.log("mosh: could not resolve \(host.hostName) to an IP → SSH fallback")
+                moshFallback = "Mosh: couldn't resolve \(host.hostName) — using SSH"
+                return false
+            }
+            DebugLog.shared.log("mosh: resolved \(host.hostName) → \(moshIP)")
             let predict = cfg.predictionMode?.rawValue ?? "adaptive"
             // Seeded at 80×24: the terminal view hasn't laid out yet at connect time,
             // so the real grid isn't known here. The first debounced resize from
             // TerminalScreen (via setMoshClientSize) corrects it once layout happens,
             // and mosh reflows. FUTURE (item #5 Q2(b)): to skip the brief 80×24 first
             // frame, track the last-known terminal grid on the VM and pass it here.
-            let sess = MoshSession(ip: host.hostName, port: String(port), key: key,
+            let sess = MoshSession(ip: moshIP, port: String(port), key: key,
                                    cols: 80, rows: 24, predictMode: predict)
             // Reset the handshake gate: onEnd before the first frame means the UDP
             // handshake never completed → fall back to SSH on the retained connection;
