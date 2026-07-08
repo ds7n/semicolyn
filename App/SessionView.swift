@@ -22,6 +22,10 @@ struct SessionView: View {
 
     @StateObject private var vm = ConnectionViewModel()
     @StateObject private var hardwareKeyboard = HardwareKeyboardMonitor()
+    /// Observed so a font-face/size change in the Terminal settings picker
+    /// invalidates `body` and re-applies live to the active terminal (via
+    /// each representable's `updateUIView`), not just on the next session.
+    @ObservedObject private var terminalSettings = AppStores.shared.terminalSettings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) private var theme
     @Environment(\.scenePhase) private var scenePhase
@@ -60,7 +64,7 @@ struct SessionView: View {
                             unregister: { vm.unregisterPane($0) },
                             send: { vm.terminalKeyboardInput($0) },
                             theme: theme,
-                            settings: AppStores.shared.terminalSettings.settings,
+                            settings: terminalSettings.settings,
                             osc52Allowed: vm.osc52Allowed,
                             onTitle: { [weak vm] view, t in vm?.setTmuxTitle(from: view, t) },
                             onTmuxResize: { [weak vm] cols, rows in vm?.setTmuxClientSize(cols: cols, rows: rows) },
@@ -129,6 +133,7 @@ struct SessionView: View {
                                    onResize: vm.isMoshActive
                                        ? { [weak vm] cols, rows in vm?.setMoshClientSize(cols: cols, rows: rows) }
                                        : nil,
+                                   settings: terminalSettings.settings,
                                    theme: theme,
                                    osc52Allowed: vm.osc52Allowed,
                                    onTitle: { [weak vm] t in vm?.terminalTitle = t },
