@@ -9,19 +9,43 @@ import XCTest
 
 final class WindowListingTests: XCTestCase {
     func testParseSingleWindow() {
-        let rows = ["@0 1 abcd,80x24,0,0,0"]
+        let rows = ["@0 1 abcd,80x24,0,0,0 editor"]
         let parsed = parseWindowListing(rows)
         XCTAssertEqual(parsed.count, 1)
         XCTAssertEqual(parsed[0].id, WindowID(raw: 0))
         XCTAssertTrue(parsed[0].active)
         XCTAssertEqual(parsed[0].layout, PaneLayout.parse("abcd,80x24,0,0,0"))
+        XCTAssertEqual(parsed[0].name, "editor",
+                       "window_name (4th field) must be parsed onto the ParsedWindow")
+    }
+
+    func testParseWindowNameWithSpaces() {
+        // tmux window names may contain spaces (e.g. "my logs"). Because the name is
+        // the free-form trailing field and the layout string never contains spaces,
+        // the whole remainder after the layout is the name — verbatim, spaces intact.
+        let rows = ["@1 1 abcd,80x24,0,0,1 my logs"]
+        let parsed = parseWindowListing(rows)
+        XCTAssertEqual(parsed.count, 1)
+        XCTAssertEqual(parsed[0].name, "my logs",
+                       "A window name with spaces must be captured whole, not truncated")
+    }
+
+    func testParseWindowMissingNameYieldsEmptyName() {
+        // Backward-compatible: a 3-field row (no name) still parses, name == "".
+        let rows = ["@0 1 abcd,80x24,0,0,0"]
+        let parsed = parseWindowListing(rows)
+        XCTAssertEqual(parsed.count, 1,
+                       "A legacy 3-field row (no name) must still parse")
+        XCTAssertEqual(parsed[0].name, "",
+                       "Absent name field yields an empty name, not a skipped row")
     }
 
     func testParseMultipleWindowsOneActive() {
-        let rows = ["@0 0 abcd,80x24,0,0,0", "@1 1 abcd,80x24,0,0,1"]
+        let rows = ["@0 0 abcd,80x24,0,0,0 shell", "@1 1 abcd,80x24,0,0,1 logs"]
         let parsed = parseWindowListing(rows)
         XCTAssertEqual(parsed.map(\.id), [WindowID(raw: 0), WindowID(raw: 1)])
         XCTAssertEqual(parsed.map(\.active), [false, true])
+        XCTAssertEqual(parsed.map(\.name), ["shell", "logs"])
     }
 
     func testParseSkipsMalformedRows() {
@@ -46,13 +70,18 @@ final class WindowListingTests: XCTestCase {
 
     func testWindowListingEventsSynthesizesAddLayoutAndActive() {
         let layout = PaneLayout.parse("abcd,80x24,0,0,0")!
-        let win = ParsedWindow(id: WindowID(raw: 3), active: true, layout: layout)
+        let win = ParsedWindow(id: WindowID(raw: 3), active: true, layout: layout, name: "editor")
         let events = windowListingEvents([win], sessionID: SessionID(raw: 0))
 
-        // Exactly 4 events for one active window: windowAdd + layoutChange +
-        // windowPaneChanged (active pane from layout) + sessionWindowChanged.
-        XCTAssertEqual(events.count, 4,
-                       "Expected exactly 4 events for a single active window")
+        // Exactly 5 events for one active, named window: windowAdd + windowRenamed +
+        // layoutChange + windowPaneChanged (active pane from layout) + sessionWindowChanged.
+        XCTAssertEqual(events.count, 5,
+                       "Expected exactly 5 events for a single active, named window")
+
+        // windowRenamed carries the parsed window name so the tab strip shows it
+        // (not the numeric @id fallback) after a reattach.
+        XCTAssertTrue(events.contains(.windowRenamed(WindowID(raw: 3), name: "editor")),
+                      "Expected a windowRenamed event carrying the window's name")
 
         // windowAdd for the window.
         XCTAssertTrue(events.contains(.windowAdd(WindowID(raw: 3))))
@@ -79,5 +108,20 @@ final class WindowListingTests: XCTestCase {
 
         // sessionWindowChanged to the active window.
         XCTAssertTrue(events.contains(.sessionWindowChanged(SessionID(raw: 0), active: WindowID(raw: 3))))
+    }
+
+    func testWindowListingEventsOmitsRenameForEmptyName() {
+        // An empty name must NOT emit a windowRenamed — renaming a window to "" would
+        // clobber any name tmux later reports and gains nothing (the tab strip already
+        // falls back to @id for an empty name).
+        let layout = PaneLayout.parse("abcd,80x24,0,0,0")!
+        let win = ParsedWindow(id: WindowID(raw: 4), active: false, layout: layout, name: "")
+        let events = windowListingEvents([win], sessionID: SessionID(raw: 0))
+
+        for event in events {
+            if case .windowRenamed = event {
+                XCTFail("An empty window name must not synthesize a windowRenamed event")
+            }
+        }
     }
 }
