@@ -99,11 +99,15 @@ public enum TmuxCommand {
     }
 
     /// `list-windows` formatted for attach-time layout discovery: each row is
-    /// `<window_id> <window_active> <window_layout>` (e.g. `@0 1 abcd,80x24,0,0,0`).
-    /// Parsed by ``parseWindowListing(_:)`` when `-CC` attaches to a session that
-    /// emitted no spontaneous `%window-add`/`%layout-change`.
+    /// `<window_id> <window_active> <window_layout> <window_name>`
+    /// (e.g. `@0 1 abcd,80x24,0,0,0 editor`). `window_name` is LAST because it may
+    /// contain spaces — the layout string never does, so the free-form remainder
+    /// after the layout is exactly the name. Parsed by ``parseWindowListing(_:)``
+    /// when `-CC` attaches to a session that emitted no spontaneous
+    /// `%window-add`/`%layout-change`/`%window-renamed`, so reattached tabs show
+    /// the real window name instead of the numeric `@id` fallback.
     public static func listWindowsForLayout() -> String {
-        "list-windows -F \"#{window_id} #{window_active} #{window_layout}\""
+        "list-windows -F \"#{window_id} #{window_active} #{window_layout} #{window_name}\""
     }
 
     /// Kill the session named `name`. Validates against the session-name charset

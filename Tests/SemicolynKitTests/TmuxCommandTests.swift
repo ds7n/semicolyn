@@ -178,7 +178,9 @@ final class TmuxCommandTests: XCTestCase {
     }
 
     func testListWindowsForLayoutCommand() {
+        // window_name is LAST so its (possibly space-containing) value is the free-form
+        // remainder — the layout string never contains spaces, so field 4 = the name.
         XCTAssertEqual(TmuxCommand.listWindowsForLayout(),
-                       "list-windows -F \"#{window_id} #{window_active} #{window_layout}\"")
+                       "list-windows -F \"#{window_id} #{window_active} #{window_layout} #{window_name}\"")
     }
 }
