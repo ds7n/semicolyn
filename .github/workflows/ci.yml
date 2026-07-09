@@ -53,26 +53,36 @@ jobs:
         run: docker compose build dev sshd
 
       - name: Start sshd fixtures
-        # sshd-legacy reuses the semicolyn-sshd image; bring both up on the compose network.
-        run: docker compose up -d sshd sshd-legacy
+        # sshd-legacy reuses the semicolyn-sshd image; bring both up on the compose
+        # network. --wait blocks until each service's healthcheck reports "listening
+        # on :22" (see docker-compose.yml), so the container is truly ready — not just
+        # "Started" — before the probe below runs.
+        run: docker compose up -d --wait sshd sshd-legacy
 
       - name: cargo test (waits for sshd, then runs unit + integration)
         run: |
           docker compose run --rm dev bash -c '
-            # Plain TCP readiness probe for both fixtures, then fail fast with a
-            # clear error if they never come up. Name resolution is hardened at
-            # the source via single-request-reopen (docker-compose dns_opt), so
-            # an explicit resolve check here is no longer needed.
-            ready() {
-              (echo > /dev/tcp/sshd/22)        2>/dev/null \
-                && (echo > /dev/tcp/sshd-legacy/22) 2>/dev/null
+            # Cross-container reachability probe by service name. The healthcheck
+            # already proved sshd is listening on :22; this confirms DNS + routing
+            # from the dev container. Name resolution is hardened via
+            # single-request-reopen (docker-compose dns_opt) against the glibc
+            # A/AAAA conntrack race. On failure we surface the REAL cause (resolve
+            # vs connect) instead of discarding it, so a residual flake is
+            # diagnosable rather than a blind "not reachable".
+            probe() { # $1=host
+              getent hosts "$1" >/dev/null 2>&1 || { echo "  resolve FAILED for $1"; return 1; }
+              (echo > "/dev/tcp/$1/22") 2>/dev/null    || { echo "  connect FAILED for $1:22"; return 1; }
             }
+            ready() { probe sshd >/dev/null 2>&1 && probe sshd-legacy >/dev/null 2>&1; }
             for i in $(seq 1 30); do
               ready && break
               sleep 1
             done
             if ! ready; then
-              echo "::error::sshd fixtures not reachable after 30s" >&2
+              echo "::error::sshd fixtures not reachable after 30s; diagnostics:" >&2
+              cat /etc/resolv.conf >&2
+              probe sshd >&2
+              probe sshd-legacy >&2
               exit 1
             fi
             cargo test -p semicolyn-ssh-core'
