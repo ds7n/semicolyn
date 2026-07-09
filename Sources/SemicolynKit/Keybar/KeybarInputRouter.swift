@@ -45,6 +45,19 @@ public final class KeybarInputRouter {
         send(bytes)
     }
 
+    /// Emit a fixed-key swipe secondary. A literal sends its UTF-8 bytes; a key
+    /// secondary encodes through `encodeKey` with its modifiers (e.g. Shift-Tab).
+    public func emitSecondary(_ value: SecondaryValue) {
+        switch value {
+        case .literal(let s):
+            let bytes = Array(s.utf8)
+            if !bytes.isEmpty { send(bytes) }
+        case .key(let input, let mods):
+            let bytes = encodeKey(input, modifiers: mods, applicationCursorKeys: applicationCursorKeys())
+            if !bytes.isEmpty { send(bytes) }
+        }
+    }
+
     /// Bytes typed on the terminal keyboard (SwiftTerm delegate). When a keybar
     /// modifier is armed and the input is exactly one printable ASCII byte
     /// (0x20–0x7e), re-encode it through the armed modifiers (e.g. armed Ctrl + 'a'
