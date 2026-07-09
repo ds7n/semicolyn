@@ -30,6 +30,7 @@ struct PromotionSlotView: View {
 struct FkeySlotView: View {
     let n: Int
     let vm: ConnectionViewModel
+    let keybarSettings: KeybarSettingsStore
     @Environment(\.theme) private var theme
     var body: some View {
         Text("F\(n)").font(.caption).foregroundStyle(Color(theme.text.primary))
@@ -37,6 +38,10 @@ struct FkeySlotView: View {
             .background(Color(theme.keybar.slotBg))
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .onInputClickTap { vm.fnTapFKey(n) }   // sends F-key + consumes one-shot Fn (Task 5)
+            .fixedKeySwipes(
+                resolveSecondaries(for: .fkey(n),
+                                   overrides: keybarSettings.settings.fixedKeySecondaries)
+            ) { v in vm.keybar.emitSecondary(v) }
     }
 }
 
