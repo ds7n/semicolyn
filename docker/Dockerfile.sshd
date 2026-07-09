@@ -11,7 +11,8 @@ RUN apk add --no-cache openssh-server openssh-server-pam linux-pam tmux mosh \
     && sed -i 's/^GatewayPorts no/GatewayPorts yes/' /etc/ssh/sshd_config \
     && printf 'UsePAM yes\nKbdInteractiveAuthentication yes\nAllowTcpForwarding yes\nGatewayPorts yes\n' >> /etc/ssh/sshd_config
 COPY sshd-entrypoint.sh /sshd-entrypoint.sh
-RUN chmod +x /sshd-entrypoint.sh
+COPY sshd-legacy-entrypoint.sh /sshd-legacy-entrypoint.sh
+RUN chmod +x /sshd-entrypoint.sh /sshd-legacy-entrypoint.sh
 EXPOSE 22
 ENTRYPOINT ["/sshd-entrypoint.sh"]
 # Alpine ships the PAM-enabled daemon as a separate binary; the plain
