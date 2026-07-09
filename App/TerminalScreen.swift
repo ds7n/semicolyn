@@ -248,7 +248,9 @@ struct TerminalScreen: UIViewRepresentable {
             guard let terminal = recognizer.view as? TerminalView else { return }
             if !terminal.isFirstResponder {
                 let ok = terminal.becomeFirstResponder()
-                DebugLog.shared.log("restoreTap → becomeFirstResponder=\(ok)")
+                // @objc gesture callbacks are delivered on the main thread but are a
+                // nonisolated context; hop onto the main actor for the @MainActor logger.
+                MainActor.assumeIsolated { DebugLog.shared.log("restoreTap → becomeFirstResponder=\(ok)") }
             }
         }
 
@@ -258,7 +260,10 @@ struct TerminalScreen: UIViewRepresentable {
             // SwiftTerm emits. Holding a soft key that auto-repeats should produce
             // repeated send() calls; a single call while held means the OS is not
             // delivering repeat to SwiftTerm. Zero cost when diagnostics is disabled.
-            DebugLog.shared.log("send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
+            // (Delegate callback is a nonisolated context; hop to the main actor.)
+            MainActor.assumeIsolated {
+                DebugLog.shared.log("send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
+            }
             onSend(Array(data))
         }
 

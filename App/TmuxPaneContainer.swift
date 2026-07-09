@@ -288,7 +288,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
             // Diagnostic (build 28, key-repeat investigation) — see TerminalScreen.send.
-            DebugLog.shared.log("tmux send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
+            // (Delegate callback is a nonisolated context; hop to the main actor.)
+            MainActor.assumeIsolated {
+                DebugLog.shared.log("tmux send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
+            }
             send(Array(data))
         }
 
