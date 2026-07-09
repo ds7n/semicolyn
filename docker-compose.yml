@@ -58,9 +58,15 @@ services:
       retries: 30
       start_period: 2s
 
-  # Legacy SSH server that offers only Tier-3 algorithms (Task 3).
+  # Legacy SSH server that offers only Tier-3 algorithms (Task 3). Uses a
+  # minimal entrypoint (host keys only) instead of the modern one, so it does
+  # not race the modern fixture on the shared /testkeys CA file — that race
+  # made ssh-keygen fail "bad permissions" and the container exit 255, which
+  # the old blind probe mislabeled as "sshd not reachable". See
+  # docker/sshd-legacy-entrypoint.sh.
   sshd-legacy:
     image: semicolyn-sshd
+    entrypoint: ["/sshd-legacy-entrypoint.sh"]
     command: ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_legacy.conf"]
     volumes:
       - ./docker/sshd-legacy.conf:/etc/ssh/sshd_legacy.conf:ro
