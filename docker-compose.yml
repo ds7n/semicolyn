@@ -46,6 +46,17 @@ services:
     image: semicolyn-sshd
     volumes:
       - testkeys:/testkeys
+    # Gate readiness on sshd actually listening on :22, not merely on the
+    # container process having been launched. `docker compose up -d --wait`
+    # blocks until this passes, so the downstream probe never races startup.
+    healthcheck:
+      # Alpine image: no bash/`/dev/tcp`, but nc is present. -z = scan without
+      # sending data; succeeds only once sshd is accepting on :22.
+      test: ["CMD", "nc", "-z", "127.0.0.1", "22"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
 
   # Legacy SSH server that offers only Tier-3 algorithms (Task 3).
   sshd-legacy:
@@ -54,6 +65,14 @@ services:
     volumes:
       - ./docker/sshd-legacy.conf:/etc/ssh/sshd_legacy.conf:ro
       - testkeys:/testkeys
+    healthcheck:
+      # Alpine image: no bash/`/dev/tcp`, but nc is present. -z = scan without
+      # sending data; succeeds only once sshd is accepting on :22.
+      test: ["CMD", "nc", "-z", "127.0.0.1", "22"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
 
 volumes:
   cargo-target:
