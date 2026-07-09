@@ -93,7 +93,7 @@ struct KeybarView: View {
     @ViewBuilder private func scrollItemView(_ item: KeybarScrollItem) -> some View {
         switch item {
         case .promotion(let s): PromotionSlotView(slot: s, vm: vm)
-        case .fkey(let n):      FkeySlotView(n: n, vm: vm)
+        case .fkey(let n):      FkeySlotView(n: n, vm: vm, keybarSettings: keybarSettings)
         case .slot(let slot):   slotView(slot)
         }
     }
@@ -103,9 +103,9 @@ struct KeybarView: View {
         case .escPill:        EscPillView(vm: vm, onOpenSettings: { showingSettings = true })
         case .pad:            PadView(vm: vm)
         case .modifier:       ModifierSlotView(ctrl: vm.keybar.modifiers.ctrl, vm: vm)
-        case .tab:            TabSlotView(vm: vm)
+        case .tab:            TabSlotView(vm: vm, keybarSettings: keybarSettings)
         case .fn:             FnSlotView(mode: vm.fnState.mode, vm: vm)
-        case .symbol(let s):  SymbolSlotView(symbol: s, vm: vm)
+        case .symbol(let s):  SymbolSlotView(symbol: s, vm: vm, keybarSettings: keybarSettings)
         case .pinnedMacro(let id):
             if let macro = keybarSettings.settings.library.macro(id) {
                 PinnedMacroSlotView(macro: macro, vm: vm)

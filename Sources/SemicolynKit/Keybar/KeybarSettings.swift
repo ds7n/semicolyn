@@ -19,26 +19,31 @@ public struct KeybarSettings: Equatable, Sendable, Codable {
     /// 4e: hide the keybar entirely when a hardware keyboard is connected. The
     /// predictor strip is governed independently and is unaffected by this.
     public var hideKeybarWithHardwareKeyboard: Bool
+    /// User overrides for fixed-key swipe secondaries (symbol/tab/fkey). Empty = all defaults.
+    public var fixedKeySecondaries: [FixedKeyID: SwipeSecondaries] = [:]
 
-    public init(layout: KeybarLayout, direction: KeybarLayoutDirection,
+    public init(layout: KeybarLayout = .default, direction: KeybarLayoutDirection = .lockedLeft,
                 library: KeybarLibrary = .empty,
-                hideKeybarWithHardwareKeyboard: Bool = false) {
+                hideKeybarWithHardwareKeyboard: Bool = false,
+                fixedKeySecondaries: [FixedKeyID: SwipeSecondaries] = [:]) {
         self.layout = layout
         self.direction = direction
         self.library = library
         self.hideKeybarWithHardwareKeyboard = hideKeybarWithHardwareKeyboard
+        self.fixedKeySecondaries = fixedKeySecondaries
     }
 
     /// The v1 default: stock layout, locked-left, empty library, keybar shown.
     public static let `default` = KeybarSettings(layout: .default, direction: .lockedLeft)
 
     private enum CodingKeys: String, CodingKey {
-        case layout, direction, library, hideKeybarWithHardwareKeyboard
+        case layout, direction, library, hideKeybarWithHardwareKeyboard, fixedKeySecondaries
     }
 
     /// Back-compatible decode: keys added after a user's blob was written default
     /// rather than failing the decode (which would reset the layout). `library`
-    /// (4d-2) → empty; `hideKeybarWithHardwareKeyboard` (4e) → false (shown).
+    /// (4d-2) → empty; `hideKeybarWithHardwareKeyboard` (4e) → false (shown);
+    /// `fixedKeySecondaries` → empty.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         layout = try c.decode(KeybarLayout.self, forKey: .layout)
@@ -46,5 +51,7 @@ public struct KeybarSettings: Equatable, Sendable, Codable {
         library = try c.decodeIfPresent(KeybarLibrary.self, forKey: .library) ?? .empty
         hideKeybarWithHardwareKeyboard =
             try c.decodeIfPresent(Bool.self, forKey: .hideKeybarWithHardwareKeyboard) ?? false
+        fixedKeySecondaries =
+            try c.decodeIfPresent([FixedKeyID: SwipeSecondaries].self, forKey: .fixedKeySecondaries) ?? [:]
     }
 }

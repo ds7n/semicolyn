@@ -20,24 +20,72 @@ private struct SlotChrome<Label: View>: View {
 struct SymbolSlotView: View {
     let symbol: String
     let vm: ConnectionViewModel
+    let keybarSettings: KeybarSettingsStore
     @Environment(\.theme) private var theme
     var body: some View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
             Text(symbol).font(.system(.body, design: .monospaced)).foregroundStyle(Color(theme.text.primary))
         }
         .onInputClickTap { if let c = symbol.first { vm.keybar.tapSymbol(c) } }
+        .fixedKeySwipes(
+            resolveSecondaries(for: .symbol(symbol),
+                               overrides: keybarSettings.settings.fixedKeySecondaries)
+        ) { v in vm.keybar.emitSecondary(v) }
     }
 }
 
 /// Tab slot.
 struct TabSlotView: View {
     let vm: ConnectionViewModel
+    let keybarSettings: KeybarSettingsStore
     @Environment(\.theme) private var theme
     var body: some View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
             Text("⇥").foregroundStyle(Color(theme.text.primary))
         }
         .onInputClickTap { vm.keybar.tapTab() }
+        .fixedKeySwipes(
+            resolveSecondaries(for: .tab,
+                               overrides: keybarSettings.settings.fixedKeySecondaries)
+        ) { v in vm.keybar.emitSecondary(v) }
+    }
+}
+
+// MARK: - Fixed-key swipe secondaries
+
+extension View {
+    @ViewBuilder
+    func fixedKeySwipes(_ secondaries: SwipeSecondaries,
+                        emit: @escaping (SecondaryValue) -> Void) -> some View {
+        self
+            .overlay(alignment: .top) {
+                if let up = secondaries.up { Text(fixedKeyGlyphLabel(up)).font(.system(size: 7)).foregroundStyle(.secondary) }
+            }
+            .overlay(alignment: .bottom) {
+                if let down = secondaries.down { Text(fixedKeyGlyphLabel(down)).font(.system(size: 7)).foregroundStyle(.secondary) }
+            }
+            .gesture(DragGesture(minimumDistance: 12).onEnded { g in
+                if g.translation.height < -12, let up = secondaries.up { emit(up) }
+                else if g.translation.height > 12, let down = secondaries.down { emit(down) }
+            })
+    }
+}
+
+func fixedKeyGlyphLabel(_ v: SecondaryValue) -> String {
+    switch v {
+    case .literal(let s): return s
+    case .key(let input, let mods):
+        switch input {
+        case .tab:         return mods.shift ? "⇤" : "⇥"
+        case .escape:      return "⎋"
+        case .enter:       return "⏎"
+        case .backspace:   return "⌫"
+        case .arrow(let d):
+            let map: [String: String] = ["up": "↑", "down": "↓", "left": "←", "right": "→"]
+            return map[d.rawValue] ?? "→"
+        case .function(let n): return "F\(n)"
+        case .char(let c): return String(c)
+        }
     }
 }
 
