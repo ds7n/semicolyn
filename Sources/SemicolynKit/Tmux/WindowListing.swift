@@ -6,24 +6,31 @@ public struct ParsedWindow: Equatable, Sendable {
     public let id: WindowID
     public let active: Bool
     public let layout: PaneLayout
-    public init(id: WindowID, active: Bool, layout: PaneLayout) {
-        self.id = id; self.active = active; self.layout = layout
+    /// The window's tmux name (`#{window_name}`); empty when the row carried no name
+    /// field (a legacy 3-field row).
+    public let name: String
+    public init(id: WindowID, active: Bool, layout: PaneLayout, name: String = "") {
+        self.id = id; self.active = active; self.layout = layout; self.name = name
     }
 }
 
-/// Parse `list-windows -F "#{window_id} #{window_active} #{window_layout}"` output:
-/// each row is `@<n> <0|1> <layout>`. Best-effort — a row with a bad window token,
-/// a non-`0|1` active flag, or an unparseable layout is skipped (never throws).
-/// Mirrors ``parsePaneCommandListing(_:)``.
+/// Parse `list-windows -F "#{window_id} #{window_active} #{window_layout} #{window_name}"`
+/// output: each row is `@<n> <0|1> <layout> [<name…>]`. The name is the free-form
+/// trailing field (may contain spaces, may be absent). Best-effort — a row with a bad
+/// window token, a non-`0|1` active flag, or an unparseable layout is skipped (never
+/// throws). Mirrors ``parsePaneCommandListing(_:)``.
 public func parseWindowListing(_ lines: [String]) -> [ParsedWindow] {
     var result: [ParsedWindow] = []
     for line in lines {
-        let parts = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
-        guard parts.count == 3,
+        // maxSplits:3 keeps the name whole even when it contains spaces; the layout
+        // string never contains a space, so field 3 (index 3) is the entire name.
+        let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: false)
+        guard parts.count >= 3,
               let id = WindowID(token: parts[0]),
               parts[1] == "0" || parts[1] == "1",
               let layout = PaneLayout.parse(parts[2]) else { continue }
-        result.append(ParsedWindow(id: id, active: parts[1] == "1", layout: layout))
+        let name = parts.count >= 4 ? String(parts[3]) : ""
+        result.append(ParsedWindow(id: id, active: parts[1] == "1", layout: layout, name: name))
     }
     return result
 }
@@ -38,6 +45,11 @@ public func windowListingEvents(_ windows: [ParsedWindow], sessionID: SessionID)
     var active: WindowID?
     for w in windows {
         events.append(.windowAdd(w.id))
+        // A non-empty name → windowRenamed, so the tab strip shows the real name after
+        // a reattach instead of the numeric @id fallback. Skip empty names: renaming to
+        // "" clobbers any name tmux later reports and gains nothing (the strip already
+        // falls back to @id for an empty name).
+        if !w.name.isEmpty { events.append(.windowRenamed(w.id, name: w.name)) }
         events.append(.layoutChange(w.id, layout: w.layout, visible: w.layout, flags: ""))
         // Set the window's active pane from its layout. `list-windows` (unlike a live
         // `%window-pane-changed`) carries no active-pane marker, so we default to the
