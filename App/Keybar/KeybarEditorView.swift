@@ -7,12 +7,14 @@ import SemicolynKit
 private enum KeybarEditorSheet: Identifiable {
     case launcher, createMacro, createSlot
     case editSlot(CustomSlot)
+    case editFixed(FixedKeyID)
     var id: String {
         switch self {
-        case .launcher:        return "launcher"
-        case .createMacro:     return "createMacro"
-        case .createSlot:      return "createSlot"
-        case .editSlot(let s): return "edit-\(s.id.raw)"
+        case .launcher:          return "launcher"
+        case .createMacro:       return "createMacro"
+        case .createSlot:        return "createSlot"
+        case .editSlot(let s):   return "edit-\(s.id.raw)"
+        case .editFixed(let k):  return "editfixed-\(k)"
         }
     }
 }
@@ -86,7 +88,8 @@ struct KeybarEditorView: View {
                 case .launcher:        MacroLibraryView(store: store)
                 case .createMacro:     MacroCreationView(store: store)
                 case .createSlot:      CustomSlotEditorView(store: store, slot: nil)
-                case .editSlot(let s): CustomSlotEditorView(store: store, slot: s)
+                case .editSlot(let s):  CustomSlotEditorView(store: store, slot: s)
+                case .editFixed(let k): FixedKeySecondaryEditorView(store: store, id: k)
                 }
             }
         }
@@ -113,6 +116,13 @@ struct KeybarEditorView: View {
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Edit custom slot")
+            }
+            if let fixedID = fixedKeyID(for: slot) {
+                Button { editorSheet = .editFixed(fixedID) } label: {
+                    Image(systemName: "pencil").font(.footnote)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Edit swipe secondaries")
             }
             if KeybarLayout.canMoveAcrossDivider(slot) {
                 Menu {
@@ -184,6 +194,17 @@ struct KeybarEditorView: View {
     private func apply(_ newLayout: KeybarLayout?) {
         guard let newLayout else { return }
         store.settings.layout = newLayout
+    }
+
+    /// Map a fixed KeybarSlot to its FixedKeyID for the swipe-secondary editor.
+    /// Only symbol + Tab rows are editable here; F-keys come from the Fn slot
+    /// (not a KeybarSlot row) and keep their built-in defaults.
+    private func fixedKeyID(for slot: KeybarSlot) -> FixedKeyID? {
+        switch slot {
+        case .symbol(let s): return .symbol(s)
+        case .tab:           return .tab
+        default:             return nil
+        }
     }
 
     private func slotLabel(_ slot: KeybarSlot) -> String {
