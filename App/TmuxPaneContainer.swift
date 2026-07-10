@@ -255,6 +255,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 baseFontSize = TerminalSettings.clampFont(baseFontSize)
                 recognizer.scale = 1
                 onInvalidateCachedCell?()
+                // Persist the zoomed size so it survives reconnect (and updates the
+                // Settings font-size slider) — mirrors the raw-terminal pinch handler.
+                MainActor.assumeIsolated {
+                    let store = AppStores.shared.terminalSettings
+                    if store.settings.fontSize != baseFontSize {
+                        store.settings.fontSize = baseFontSize
+                    }
+                }
             default:
                 break
             }
