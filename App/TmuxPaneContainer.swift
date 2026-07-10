@@ -30,6 +30,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
     var onTmuxResize: ((Int, Int) -> Void)? = nil
     /// Called when the user taps an ssh:// link; routes to the confirm-connect sheet.
     var onSSHLink: ((URL) -> Void)? = nil
+    /// Whether the active tmux session has more than one window (per-pane gesture
+    /// controller's horizontal-drag-vs-scroll classifier).
+    var onIsMultiWindowTmux: (() -> Bool)? = nil
+    /// Horizontal-drag window switch (clamped, one per drag).
+    var onSwitchWindow: ((Int) -> Void)? = nil
+    /// Long-press on a pane: toggle zoom on the active pane.
+    var onZoomActivePane: (() -> Void)? = nil
+    /// Single tap on a pane: place the cursor at the tapped cell.
+    var onPlaceCursor: ((TerminalView, Int, Int) -> Void)? = nil
     /// The connection view model — passed to each pane's inputAccessory-hosted keybar.
     var vm: ConnectionViewModel
     /// Keybar customization store — passed to each pane's inputAccessory-hosted keybar.
@@ -45,6 +54,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
         c.keybarSettings = keybarSettings
         c.theme = theme
         c.hardwareKeyboardConnected = hardwareKeyboardConnected
+        if let onIsMultiWindowTmux { c.onIsMultiWindowTmux = onIsMultiWindowTmux }
+        if let onSwitchWindow { c.onSwitchWindow = onSwitchWindow }
+        if let onZoomActivePane { c.onZoomActivePane = onZoomActivePane }
+        if let onPlaceCursor { c.onPlaceCursor = onPlaceCursor }
         return c
     }
 
@@ -83,6 +96,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
         }
         // Keep the resize callback current (parent may re-create the closure).
         context.coordinator.onTmuxResize = onTmuxResize
+        // Keep the gesture-controller callbacks current (parent may re-create the closures).
+        if let onIsMultiWindowTmux { context.coordinator.onIsMultiWindowTmux = onIsMultiWindowTmux }
+        if let onSwitchWindow { context.coordinator.onSwitchWindow = onSwitchWindow }
+        if let onZoomActivePane { context.coordinator.onZoomActivePane = onZoomActivePane }
+        if let onPlaceCursor { context.coordinator.onPlaceCursor = onPlaceCursor }
         // Update mouse-active dot visibility and selection gesture state for all panes.
         context.coordinator.updateMouseDots(for: uiView.panes)
     }
@@ -102,6 +120,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
         var selectionLongPresses: [ObjectIdentifier: UILongPressGestureRecognizer] = [:]
         /// Per-pane pinch-zoom gesture recognizers keyed by TerminalView identity.
         private var pinchRecognizers: [ObjectIdentifier: UIPinchGestureRecognizer] = [:]
+        /// Per-pane gesture layer (replaces SwiftTerm's built-ins).
+        private var gestureControllers: [ObjectIdentifier: TerminalGestureController] = [:]
+        /// Callbacks supplied by the container/VM (set at construction, refreshed in
+        /// `updateUIView` — mirrors `onTmuxResize`).
+        var onIsMultiWindowTmux: () -> Bool = { false }
+        var onSwitchWindow: (Int) -> Void = { _ in }
+        var onZoomActivePane: () -> Void = { }
+        var onPlaceCursor: (TerminalView, Int, Int) -> Void = { _, _, _ in }
         /// Baseline font size for pinch-zoom; shared across all panes in this window.
         /// Updated on `.ended`; persists for the window's lifetime only (not stored to host — v1.5+).
         var baseFontSize: Double
@@ -197,12 +223,30 @@ struct TmuxPaneContainer: UIViewRepresentable {
             view.addGestureRecognizer(pinch)
             pinchRecognizers[key] = pinch
 
-            // Cursor placement uses SwiftTerm's native gestures, not a custom controller:
-            // `allowMouseReporting = false` makes its pan a cursor-key scrub and its
-            // tap/long-press do reposition + selection. Panes start non-reporting; the
-            // per-pane value is reconciled in apply()/updateMouseDots (a mouse=a pane
-            // flips it back to true so mouse events forward).
+            // Panes start non-reporting; the per-pane value is reconciled in
+            // apply()/updateMouseDots (a mouse=a pane flips it back to true so mouse
+            // events forward to the app instead of driving our gesture layer).
             view.allowMouseReporting = false
+
+            // Replace SwiftTerm's built-in touch map with ours (per pane). Horizontal
+            // drag switches tmux windows (clamped, one per drag); long-press zooms the
+            // pane; tap places the cursor in this pane.
+            let controller = TerminalGestureController(
+                terminalView: view,
+                callbacks: .init(
+                    isMultiWindowTmux: { [weak self] in self?.onIsMultiWindowTmux() ?? false },
+                    onSwitchWindow:    { [weak self] delta in self?.onSwitchWindow(delta) },
+                    onLongPressZoom:   { [weak self] in self?.onZoomActivePane() },
+                    onPlaceCursor:     { [weak self, weak view] col, row in
+                        guard let view else { return }
+                        self?.onPlaceCursor(view, col, row)
+                    },
+                    mouseReportingActive: { [weak view] in view?.allowMouseReporting ?? false }
+                )
+            )
+            gestureControllers[key] = controller
+            // Re-enable pinch after the controller's sweep disabled pre-existing recognizers.
+            pinch.isEnabled = true
         }
 
         /// Called from ContainerView when a TerminalView is removed.
@@ -218,6 +262,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 view.removeGestureRecognizer(pinch)
                 pinchRecognizers[key] = nil
             }
+            gestureControllers[key]?.detach()
+            gestureControllers[key] = nil
         }
 
         /// Handles pinch-to-zoom across all panes. The baseline (`baseFontSize`) is
