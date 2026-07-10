@@ -81,7 +81,7 @@ public struct TerminalSettings: Equatable, Sendable, Codable {
     public var fontFace: TerminalFont
 
     /// Allowed font-point range (touch-legible floor, sane ceiling).
-    public static let fontRange: ClosedRange<Double> = 9...24
+    public static let fontRange: ClosedRange<Double> = 7...24
     /// Raw-PTY scrollback presets; `Int.max` represents "unlimited".
     public static let scrollbackPresets: [Int] = [1000, 2000, 5000, 10000, Int.max]
 
