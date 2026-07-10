@@ -255,6 +255,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 baseFontSize = TerminalSettings.clampFont(baseFontSize)
                 recognizer.scale = 1
                 onInvalidateCachedCell?()
+                // Persist the zoomed size so it survives reconnect (and updates the
+                // Settings font-size slider) — mirrors the raw-terminal pinch handler.
+                MainActor.assumeIsolated {
+                    let store = AppStores.shared.terminalSettings
+                    if store.settings.fontSize != baseFontSize {
+                        store.settings.fontSize = baseFontSize
+                    }
+                }
             default:
                 break
             }
@@ -470,6 +478,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     // Apply configured font so rendered pane matches the pinch baseline.
                     if let s = coordinator?.settings {
                         t.font = TerminalFontProvider.shared.font(for: s.fontFace, size: CGFloat(s.fontSize))
+                        // Give the pane a scrollback buffer so the user can scroll
+                        // back through session output — the raw-SSH path already does
+                        // this (TerminalScreen.swift); tmux panes were missing it, so
+                        // SwiftTerm's tiny default left nothing to scroll to. (Pre-attach
+                        // history is separate: control mode doesn't replay it — that
+                        // needs tmux copy-mode/capture-pane, a future capability.)
+                        t.getTerminal().options.scrollback = s.scrollbackLines
                     }
                     addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
                     coordinator?.installHalo(on: t)
