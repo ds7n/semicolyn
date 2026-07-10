@@ -288,6 +288,44 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         selectWindow(state.windows[next].id)
     }
 
+    /// Horizontal-drag window switch: step one window with CLAMP (no wrap). No-op at
+    /// the ends of the window list, with <2 windows, or in raw-PTY mode.
+    func selectAdjacentWindowClamped(_ delta: Int) {
+        guard let state = tmuxState,
+              let active = state.activeWindow,
+              let idx = state.windows.firstIndex(where: { $0.id == active }),
+              let next = clampedStepIndex(current: idx, delta: delta, count: state.windows.count)
+        else { return }
+        selectWindow(state.windows[next].id)
+    }
+
+    /// True when the active tmux session has more than one window (drives horizontal
+    /// drag = window switch vs. scroll fall-through).
+    var isMultiWindowTmux: Bool { (tmuxState?.windows.count ?? 0) > 1 }
+
+    /// Single-tap cursor placement inside a tmux pane: emit arrow keys from the pane's
+    /// current cursor to the tapped cell (reuses the pure encoders). Routes through the
+    /// active pane's tmux send path (`sendTerminalInput`, which dispatches to
+    /// `TmuxRuntime.sendInput` while `tmux` is set).
+    func placeTmuxCursor(_ view: TerminalView, toCol: Int, toRow: Int) {
+        let term = view.getTerminal()
+        let cur = term.getCursorLocation()   // .x = col, .y = row
+        let runs = cursorTapArrows(fromCol: cur.x, fromRow: cur.y, toCol: toCol, toRow: toRow)
+        var bytes: [UInt8] = []
+        for run in runs {
+            let tail: [UInt8]
+            switch run.direction {
+            case .up:    tail = [0x1b, 0x5b, 0x41]   // ESC [ A
+            case .down:  tail = [0x1b, 0x5b, 0x42]   // ESC [ B
+            case .right: tail = [0x1b, 0x5b, 0x43]   // ESC [ C
+            case .left:  tail = [0x1b, 0x5b, 0x44]   // ESC [ D
+            }
+            bytes += Array(repeating: tail, count: run.count).flatMap { $0 }
+        }
+        guard !bytes.isEmpty else { return }
+        sendTerminalInput(bytes)
+    }
+
     // MARK: - Hardware-keyboard commands (Phase 4e)
 
     /// Dispatches a resolved hardware-keyboard command to its action. Window/pane

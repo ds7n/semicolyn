@@ -84,13 +84,12 @@ struct TerminalScreen: UIViewRepresentable {
         )
         terminal.addGestureRecognizer(pinch)
 
-        // Cursor placement uses SwiftTerm's OWN gestures, not a custom controller:
-        // with `allowMouseReporting = false`, SwiftTerm turns a pan into cursor-key
-        // commands (drag = scrub) and its native tap/double-tap/long-press give
-        // reposition + word/line select + selection-extend. We flip it back to `true`
-        // in a `mouse=a` pane (see updateMouseDot) so a mouse app gets its events. A
-        // custom pan controller here just fought SwiftTerm's built-in pan (device:
-        // scrub + selection-drag both broke).
+        // Our own `TerminalGestureController` (installed below) owns the pan/tap/
+        // long-press touch map; SwiftTerm's built-in recognizers are disabled by its
+        // sweep. `allowMouseReporting = false` here keeps SwiftTerm from forwarding
+        // mouse events in a non-`mouse=a` pane; it's flipped back to `true` in a
+        // `mouse=a` pane (see updateMouseDot) so a mouse app gets its events, and the
+        // controller reads it via `mouseReportingActive` to yield in that case.
         terminal.allowMouseReporting = false
 
         // Restore the keyboard (and, with it, the keybar — which now rides as the
@@ -105,6 +104,28 @@ struct TerminalScreen: UIViewRepresentable {
         )
         restoreTap.cancelsTouchesInView = false
         terminal.addGestureRecognizer(restoreTap)
+
+        // Install our own gesture layer (replaces SwiftTerm's built-in tap/scrub/select).
+        // Raw PTY: no tmux, so horizontal drag falls through to scroll and long-press
+        // zoom is a no-op.
+        let gestureController = TerminalGestureController(
+            terminalView: terminal,
+            callbacks: .init(
+                isMultiWindowTmux: { false },
+                onSwitchWindow: { _ in },
+                onLongPressZoom: { },
+                onPlaceCursor: { [weak coordinator = context.coordinator, weak terminal] col, row in
+                    guard let terminal else { return }
+                    coordinator?.placeCursor(toCol: col, toRow: row, in: terminal)
+                },
+                mouseReportingActive: { terminal.allowMouseReporting }
+            )
+        )
+        context.coordinator.gestureController = gestureController
+        // The controller's sweep disabled all pre-existing recognizers (SwiftTerm's +
+        // ours-that-aren't). Re-enable the app's own pinch and keyboard-restore taps.
+        pinch.isEnabled = true
+        restoreTap.isEnabled = true
 
         // Render PTY output as it arrives (already hopped to main in the bridge).
         output.onBytes = { [weak terminal] bytes in
@@ -185,6 +206,8 @@ struct TerminalScreen: UIViewRepresentable {
         /// succeed). We don't re-claim on later passes (a user who dismisses the
         /// keyboard isn't fought); `handleRestoreTap` re-shows it on a tap instead.
         var didInitialFocus = false
+        /// Retains the gesture layer for this terminal (replaces SwiftTerm's built-ins).
+        var gestureController: TerminalGestureController?
 
         init(send: @escaping ([UInt8]) -> Void, session: ShellSession?, settings: TerminalSettings, theme: Theme,
              osc52Allowed: Bool = true, onTitle: ((String) -> Void)? = nil) {
@@ -276,6 +299,30 @@ struct TerminalScreen: UIViewRepresentable {
                 DebugLog.shared.log("send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
             }
             onSend(Array(data))
+        }
+
+        /// Place the terminal cursor at (toCol,toRow) by emitting arrow keys from the
+        /// current cursor cell (single-tap cursor placement — reuses the pure encoders).
+        func placeCursor(toCol: Int, toRow: Int, in view: TerminalView) {
+            let term = view.getTerminal()
+            let cur = term.getCursorLocation()   // .x = col, .y = row (see SwiftTermEchoOracle)
+            let runs = cursorTapArrows(fromCol: cur.x, fromRow: cur.y, toCol: toCol, toRow: toRow)
+            for run in runs {
+                let bytes = encodeArrowRun(run)
+                if !bytes.isEmpty { onSend(bytes) }
+            }
+        }
+
+        /// Encode one ArrowRun to its CSI escape bytes, repeated `count` times.
+        private func encodeArrowRun(_ run: ArrowRun) -> [UInt8] {
+            let tail: [UInt8]
+            switch run.direction {
+            case .up:    tail = [0x1b, 0x5b, 0x41]   // ESC [ A
+            case .down:  tail = [0x1b, 0x5b, 0x42]   // ESC [ B
+            case .right: tail = [0x1b, 0x5b, 0x43]   // ESC [ C
+            case .left:  tail = [0x1b, 0x5b, 0x44]   // ESC [ D
+            }
+            return Array(repeating: tail, count: run.count).flatMap { $0 }
         }
 
         // Grid resize (rotation, layout) → remote window-change, debounced.

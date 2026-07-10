@@ -69,6 +69,10 @@ struct SessionView: View {
                             onTitle: { [weak vm] view, t in vm?.setTmuxTitle(from: view, t) },
                             onTmuxResize: { [weak vm] cols, rows in vm?.setTmuxClientSize(cols: cols, rows: rows) },
                             onSSHLink: { [weak vm] url in vm?.presentSSHLink(url) },
+                            onIsMultiWindowTmux: { [weak vm] in vm?.isMultiWindowTmux ?? false },
+                            onSwitchWindow: { [weak vm] delta in vm?.selectAdjacentWindowClamped(delta) },
+                            onZoomActivePane: { [weak vm] in vm?.zoomActivePane() },
+                            onPlaceCursor: { [weak vm] view, col, row in vm?.placeTmuxCursor(view, toCol: col, toRow: row) },
                             vm: vm,
                             keybarSettings: AppStores.shared.keybarSettings,
                             hardwareKeyboardConnected: hardwareKeyboard.isConnected)

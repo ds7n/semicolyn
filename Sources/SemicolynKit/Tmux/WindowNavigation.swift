@@ -11,3 +11,14 @@ public func stepIndex(current: Int, delta: Int, count: Int) -> Int? {
     guard count > 1, current >= 0, current < count else { return nil }
     return ((current + delta) % count + count) % count
 }
+
+/// Clamped destination index for stepping between tmux windows by one (horizontal
+/// drag). Unlike `stepIndex`, this does NOT wrap: at the last window a forward step
+/// and at the first window a backward step both return `nil` (a no-op). Also `nil`
+/// for fewer than two windows or a `current` outside `0..<count`. `delta` is ±1.
+public func clampedStepIndex(current: Int, delta: Int, count: Int) -> Int? {
+    guard count > 1, current >= 0, current < count else { return nil }
+    let target = current + delta
+    guard target >= 0, target < count else { return nil }
+    return target
+}
