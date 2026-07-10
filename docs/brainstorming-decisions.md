@@ -123,6 +123,8 @@ Two complementary input mechanisms central to the differentiation:
 ### Cursor placement
 
 > **SUPERSEDED 2026-07-07** by `docs/superpowers/specs/2026-07-06-cursor-centric-interaction-design.md`. The always-on halo below is replaced by the iOS-native model: **tap = reposition** (same-line reliable), **quick-drag = scrub** the cursor, **hold-then-drag = native selection + loupe**. The cursor itself is the single affordance — no separate halo. The delta/gain/dead-zone movement math (rows below) is RETAINED for the quick-drag scrub (`CursorDragEngine`). In a `mouse=a` pane the tap/drag gestures suspend so touches forward as SGR mouse events (consistent with the Mouse-mode row §"Mouse mode").
+>
+> **SUPERSEDED AGAIN 2026-07-10** by `docs/superpowers/specs/2026-07-10-terminal-gesture-system-design.md`: the **cursor-placement _drag_ (quick-drag scrub) is RETIRED** — single-finger drag now scrolls the scrollback (or switches tmux windows horizontally), and `CursorDragEngine` + its tests were deleted. **Single-tap-to-place-cursor is KEPT** (via `cursorTapArrows`/`CursorArrowStream`). The full touch map (scroll / window-switch / tap-cursor / double-triple-select / long-press pane-zoom / two-finger menu) is now owned by our own `TerminalGestureController`, replacing SwiftTerm's built-in recognizers. The `mouse=a` yield behavior is preserved.
 
 | Topic | Decision (halo model — superseded, see banner) |
 |---|---|

@@ -12,7 +12,7 @@ public struct ArrowRun: Equatable, Sendable {
     }
 }
 
-/// Map a signed `(cols, rows)` cell delta from `CursorDragEngine` into the arrow-key runs to
+/// Map a signed `(cols, rows)` cell delta (e.g. from tap-to-place cursor) into the arrow-key runs to
 /// synthesize: +cols = Right, −cols = Left, +rows = Down, −rows = Up. Horizontal first, then
 /// vertical; zero deltas produce no run. The App encodes each run via `encodeKey(.arrow(…))`.
 public func arrowEvents(cols: Int, rows: Int) -> [ArrowRun] {
