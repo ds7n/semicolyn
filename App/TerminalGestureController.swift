@@ -21,6 +21,7 @@ import SemicolynKit
 /// `terminalView.gestureRecognizers` for recognizers that are not ours, which also
 /// covers its two pan recognizers on the rare case they're already attached at
 /// controller-init time.
+@MainActor
 final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     struct Callbacks {
         let isMultiWindowTmux: () -> Bool
