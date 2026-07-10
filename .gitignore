@@ -34,7 +34,8 @@
 /.code-review/
 /.security-review/
 
-# These are committed project docs here — override the global core.excludesFile
-# (~/.config/git/ignore) that ignores CLAUDE.md / TODO.md by default.
-!/CLAUDE.md
+# TODO.md is a committed project doc here — override the global
+# core.excludesFile (~/.config/git/ignore) that ignores it by default.
+# (CLAUDE.md is intentionally NOT overridden: it stays local-only per the
+# global ignore.)
 !/TODO.md
