@@ -84,13 +84,12 @@ struct TerminalScreen: UIViewRepresentable {
         )
         terminal.addGestureRecognizer(pinch)
 
-        // Cursor placement uses SwiftTerm's OWN gestures, not a custom controller:
-        // with `allowMouseReporting = false`, SwiftTerm turns a pan into cursor-key
-        // commands (drag = scrub) and its native tap/double-tap/long-press give
-        // reposition + word/line select + selection-extend. We flip it back to `true`
-        // in a `mouse=a` pane (see updateMouseDot) so a mouse app gets its events. A
-        // custom pan controller here just fought SwiftTerm's built-in pan (device:
-        // scrub + selection-drag both broke).
+        // Our own `TerminalGestureController` (installed below) owns the pan/tap/
+        // long-press touch map; SwiftTerm's built-in recognizers are disabled by its
+        // sweep. `allowMouseReporting = false` here keeps SwiftTerm from forwarding
+        // mouse events in a non-`mouse=a` pane; it's flipped back to `true` in a
+        // `mouse=a` pane (see updateMouseDot) so a mouse app gets its events, and the
+        // controller reads it via `mouseReportingActive` to yield in that case.
         terminal.allowMouseReporting = false
 
         // Restore the keyboard (and, with it, the keybar — which now rides as the
