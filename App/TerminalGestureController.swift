@@ -243,7 +243,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
 // MARK: UIEditMenuInteractionDelegate
 
-extension TerminalGestureController: UIEditMenuInteractionDelegate {
+extension TerminalGestureController: @preconcurrency UIEditMenuInteractionDelegate {
     func editMenuInteraction(_ interaction: UIEditMenuInteraction,
                              menuFor configuration: UIEditMenuConfiguration,
                              suggestedActions: [UIMenuElement]) -> UIMenu? {

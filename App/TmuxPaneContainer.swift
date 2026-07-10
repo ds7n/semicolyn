@@ -231,22 +231,24 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Replace SwiftTerm's built-in touch map with ours (per pane). Horizontal
             // drag switches tmux windows (clamped, one per drag); long-press zooms the
             // pane; tap places the cursor in this pane.
-            let controller = TerminalGestureController(
-                terminalView: view,
-                callbacks: .init(
-                    isMultiWindowTmux: { [weak self] in self?.onIsMultiWindowTmux() ?? false },
-                    onSwitchWindow:    { [weak self] delta in self?.onSwitchWindow(delta) },
-                    onLongPressZoom:   { [weak self] in self?.onZoomActivePane() },
-                    onPlaceCursor:     { [weak self, weak view] col, row in
-                        guard let view else { return }
-                        self?.onPlaceCursor(view, col, row)
-                    },
-                    mouseReportingActive: { [weak view] in view?.allowMouseReporting ?? false }
+            MainActor.assumeIsolated {
+                let controller = TerminalGestureController(
+                    terminalView: view,
+                    callbacks: .init(
+                        isMultiWindowTmux: { [weak self] in self?.onIsMultiWindowTmux() ?? false },
+                        onSwitchWindow:    { [weak self] delta in self?.onSwitchWindow(delta) },
+                        onLongPressZoom:   { [weak self] in self?.onZoomActivePane() },
+                        onPlaceCursor:     { [weak self, weak view] col, row in
+                            guard let view else { return }
+                            self?.onPlaceCursor(view, col, row)
+                        },
+                        mouseReportingActive: { [weak view] in view?.allowMouseReporting ?? false }
+                    )
                 )
-            )
-            gestureControllers[key] = controller
-            // Re-enable pinch after the controller's sweep disabled pre-existing recognizers.
-            pinch.isEnabled = true
+                gestureControllers[key] = controller
+                // Re-enable pinch after the controller's sweep disabled pre-existing recognizers.
+                pinch.isEnabled = true
+            }
         }
 
         /// Called from ContainerView when a TerminalView is removed.
@@ -262,7 +264,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 view.removeGestureRecognizer(pinch)
                 pinchRecognizers[key] = nil
             }
-            gestureControllers[key]?.detach()
+            MainActor.assumeIsolated {
+                gestureControllers[key]?.detach()
+            }
             gestureControllers[key] = nil
         }
 
