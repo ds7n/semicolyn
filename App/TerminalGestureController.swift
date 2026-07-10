@@ -36,6 +36,9 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     // Our recognizers (kept so we can identify + remove them, and so the delegate can
     // tell ours apart from SwiftTerm's).
     private var ours: [UIGestureRecognizer] = []
+    /// Last cumulative vertical pan translation (points), for computing the per-tick
+    /// scroll delta without resetting the recognizer's translation.
+    private var lastPanY: CGFloat = 0
     private var pan: UIPanGestureRecognizer!
     private var singleTap: UITapGestureRecognizer!
     private var doubleTap: UITapGestureRecognizer!
@@ -131,27 +134,36 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     @objc private func handlePan(_ g: UIPanGestureRecognizer) {
         guard let view = terminalView else { return }
         if callbacks.mouseReportingActive() { return }  // mouse app: SwiftTerm forwards
+        // Cumulative translation since gesture start — GestureClassifier expects this
+        // (it gates on a dead-zone radius from the origin). Never reset it, or the
+        // classifier reclassifies each incremental tick as sub-dead-zone `.none`.
         let t = g.translation(in: view)
         switch g.state {
+        case .began:
+            lastPanY = 0
         case .changed:
-            // Vertical scroll tracks the finger live; horizontal-switch commits on end.
             let decision = GestureClassifier.classify(
                 dx: Double(t.x), dy: Double(t.y),
                 isMultiWindowTmux: callbacks.isMultiWindowTmux())
             if case .scrollVertical = decision {
+                // Apply only the delta since the last tick so scroll tracks the finger
+                // live while the cumulative value keeps feeding the classifier.
+                let dy = t.y - lastPanY
                 var offset = view.contentOffset
                 // Dragging down (finger moves down) reveals earlier scrollback → offset up.
-                offset.y = max(0, offset.y - g.translation(in: view).y)
+                offset.y = max(0, offset.y - dy)
                 view.setContentOffset(offset, animated: false)
-                g.setTranslation(.zero, in: view)   // incremental
             }
+            lastPanY = t.y
         case .ended, .cancelled:
+            // Decide window-switch from the full cumulative translation (one-per-drag).
             let decision = GestureClassifier.classify(
                 dx: Double(t.x), dy: Double(t.y),
                 isMultiWindowTmux: callbacks.isMultiWindowTmux())
             if case .switchWindow(let delta) = decision {
                 callbacks.onSwitchWindow(delta)
             }
+            lastPanY = 0
         default:
             break
         }
