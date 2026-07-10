@@ -13,8 +13,8 @@ final class TerminalSettingsTests: XCTestCase {
     }
 
     func testFontClampBoundaries() {
-        XCTAssertEqual(TerminalSettings.clampFont(8), 9)    // min-1 → min
-        XCTAssertEqual(TerminalSettings.clampFont(9), 9)    // min
+        XCTAssertEqual(TerminalSettings.clampFont(6), 7)    // min-1 → min
+        XCTAssertEqual(TerminalSettings.clampFont(7), 7)    // min
         XCTAssertEqual(TerminalSettings.clampFont(24), 24)  // max
         XCTAssertEqual(TerminalSettings.clampFont(25), 24)  // max+1 → max
         XCTAssertEqual(TerminalSettings.clampFont(13), 13)  // interior
