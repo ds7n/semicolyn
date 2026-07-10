@@ -235,6 +235,17 @@ struct TerminalScreen: UIViewRepresentable {
                 // re-clamp and reset scale defensively.
                 baseSize = TerminalSettings.clampFont(baseSize)
                 recognizer.scale = 1
+                // Persist the zoomed size so it survives reconnect (and updates the
+                // Settings font-size slider). The store is @MainActor; this @objc
+                // callback is delivered on the main thread but is a nonisolated
+                // context, so assume isolation. Guard so a no-op pinch doesn't churn
+                // the persisted store.
+                MainActor.assumeIsolated {
+                    let store = AppStores.shared.terminalSettings
+                    if store.settings.fontSize != baseSize {
+                        store.settings.fontSize = baseSize
+                    }
+                }
             default:
                 break
             }
