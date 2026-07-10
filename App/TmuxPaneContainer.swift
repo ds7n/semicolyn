@@ -383,40 +383,54 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// grid we report to tmux as the client size AND to place panes from the tmux
         /// layout (`paneRects`).
         ///
-        /// The cell is derived PURELY FROM THE FONT — `"W"` advance width and the font's
-        /// `lineHeight` — never from a pane's `bounds ÷ getTerminal().cols`. That earlier
-        /// readback scheme was the blank-panes / 1×N-collapse root cause: a *zoomed*
-        /// multi-pane window has a pane reporting very few cols, so `bounds ÷ cols` yields
-        /// a giant cell → `terminalGrid` floors the container to ~1 col → we send
-        /// `refresh-client -C 1x…` → tmux tiles every window into 1 column → the layout is
-        /// now genuinely `…,1x3,0,0[…]` and the collapse self-reinforces (verified against
-        /// tmux 3.4 layout strings + the on-device `%layout-change … 1x3 … *Z` capture).
-        ///
-        /// A font-only cell can never be poisoned by a pane's col count, so the feedback
-        /// loop cannot form. `font.lineHeight` is the row advance (the height axis) and
-        /// `"W"` measures the monospace advance closely enough for the client size; tmux
-        /// re-tiles to whatever cols/rows we report, so sub-pixel width error only shifts
-        /// the grid by at most a cell, never collapses it. Cached until the font changes
-        /// (`invalidateCachedCell()` on a pinch).
+        /// The cell is read back from SwiftTerm's own `cellDimension` via
+        /// `getOptimalFrameSize() ÷ (cols, rows)` (see body) so our reported grid matches
+        /// exactly what SwiftTerm renders. A prior fix derived the cell from the font
+        /// (`"W".size()` + `lineHeight`) to break the 1×N-collapse feedback loop, but that
+        /// formula differs from SwiftTerm's (`ceil("W".width·scale)/scale`,
+        /// `ceil(ascent+descent+leading)·lineSpacing`), leaving the reported grid 1–2 cols
+        /// off. Reading SwiftTerm's cell back is both exact and loop-immune — the old
+        /// collapse came from `viewBounds ÷ cols` (bounds and cols disagree mid-zoom);
+        /// here the `cols` cancels out of `cellDimension·cols ÷ cols`, so zoom state can't
+        /// poison it. Cached until the font changes (`invalidateCachedCell()` on a pinch).
         private func resolvedCell() -> (w: Double, h: Double) {
             if let cached = cachedCell { return cached }
-            // Prefer a live pane's font (reflects a pinch); before any pane exists fall
-            // back to the configured font. Both are pure font measurements — no bounds,
-            // no cols — so a zoomed pane can never corrupt the cell.
-            let paneFont = panes.values.first?.font
-            let font = paneFont
-                ?? coordinator.map { TerminalFontProvider.shared.font(for: $0.settings.fontFace,
-                                                                       size: CGFloat($0.baseFontSize)) }
+            // Simplest correct source: ask SwiftTerm for the cell it actually renders
+            // with. `getOptimalFrameSize()` returns `cellDimension × (cols, rows)`, so
+            // dividing back out by `cols`/`rows` recovers SwiftTerm's own snapped cell
+            // EXACTLY — no re-deriving it from `"W".size()` + lineHeight, which differs
+            // from SwiftTerm's `ceil("W".width·scale)/scale` and `ceil(ascent+descent+
+            // leading)`; that mismatch left the reported grid 1–2 cols off.
+            //
+            // This is NOT the old `bounds ÷ cols` readback that caused the 1×N collapse:
+            // there the numerator was the pane's *view bounds* (which disagree with cols
+            // during a zoom transient → poisoned cell). Here numerator and denominator
+            // are `cellDimension·cols` and `cols` — the `cols` cancels, yielding
+            // `cellDimension` regardless of zoom state. Loop-immune by construction.
+            if let pane = panes.values.first {
+                let optimal = pane.getOptimalFrameSize()
+                let term = pane.getTerminal()
+                let cols = Double(term.cols), rows = Double(term.rows)
+                if cols > 0, rows > 0 {
+                    let w = Double(optimal.width) / cols
+                    let h = Double(optimal.height) / rows
+                    if w > 0, h > 0 {
+                        cachedCell = (w: w, h: h)
+                        return (w: w, h: h)
+                    }
+                }
+            }
+            // Before any pane exists we can't ask SwiftTerm yet; fall back to the
+            // configured font's measurement (left UNcached so the next pass upgrades to
+            // SwiftTerm's real cell). Pure font math — no bounds, no cols — so a zoomed
+            // pane can never corrupt this path either.
+            let font = coordinator.map { TerminalFontProvider.shared.font(for: $0.settings.fontFace,
+                                                                          size: CGFloat($0.baseFontSize)) }
                 ?? UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
             let w = Double("W".size(withAttributes: [.font: font]).width)
             let h = Double(font.lineHeight)
             guard w > 0, h > 0 else { return (8, 16) }
-            let metrics = (w: w, h: h)
-            // Only cache once measured from a REAL pane's font. The pre-pane fallback is
-            // left uncached so we upgrade to the pane's actual font on the next pass (the
-            // two normally match, but a stale pre-pane cache would otherwise stick).
-            if paneFont != nil { cachedCell = metrics }
-            return metrics
+            return (w: w, h: h)
         }
 
         func apply(state: TmuxSessionState,
