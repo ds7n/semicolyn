@@ -5,9 +5,10 @@ import SwiftTerm
 import SemicolynKit
 
 /// Owns the terminal touch map for a single `TerminalView`, replacing SwiftTerm's
-/// built-in recognizers. Single-finger vertical drag scrolls (`contentOffset`);
-/// horizontal drag switches tmux windows (one per drag, on release, via
-/// `GestureClassifier` + the mount's clamp); single tap places the cursor;
+/// built-in tap/long-press recognizers. Single-finger vertical drag scrolls via the
+/// terminal's NATIVE `UIScrollView` pan (kept enabled — we do not fight it); a
+/// horizontal drag on that same native pan switches tmux windows (one per drag, on
+/// release, via `GestureClassifier` + the mount's clamp); single tap places the cursor;
 /// double/triple-tap word/line-select; long-press zooms the tmux pane; two-finger
 /// tap shows the edit menu. A mouse-reporting pane (`mouse=a`) yields: we set
 /// `allowMouseReporting = true` and let SwiftTerm forward events (our recognizers
@@ -35,12 +36,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private let callbacks: Callbacks
 
     // Our recognizers (kept so we can identify + remove them, and so the delegate can
-    // tell ours apart from SwiftTerm's).
+    // tell ours apart from SwiftTerm's). Note: vertical scroll is NOT one of ours — it
+    // stays on the terminal's native UIScrollView pan; we only add ourselves as an extra
+    // target on it (see `handleScrollViewPan`) for the horizontal window-switch.
     private var ours: [UIGestureRecognizer] = []
-    /// Last cumulative vertical pan translation (points), for computing the per-tick
-    /// scroll delta without resetting the recognizer's translation.
-    private var lastPanY: CGFloat = 0
-    private var pan: UIPanGestureRecognizer!
     private var singleTap: UITapGestureRecognizer!
     private var doubleTap: UITapGestureRecognizer!
     private var tripleTap: UITapGestureRecognizer!
@@ -59,22 +58,25 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     // MARK: Setup
 
     private func disableSwiftTermRecognizers(on view: TerminalView) {
-        // SwiftTerm's tap/double/triple/long-press/pan recognizers are attached via
-        // plain `addGestureRecognizer` calls with no public stored handle → disable
-        // everything currently attached that is NOT ours. Ours aren't installed yet
-        // at this point, so every existing recognizer here is SwiftTerm's (or a
-        // sibling like pinch, which the mount installs AFTER this controller — order
-        // matters, see mount).
-        for gr in view.gestureRecognizers ?? [] where !ours.contains(gr) {
+        // SwiftTerm's tap/double/triple/long-press recognizers are attached via plain
+        // `addGestureRecognizer` calls with no public stored handle → disable everything
+        // currently attached that is NOT ours. Ours aren't installed yet at this point,
+        // so every existing recognizer here is SwiftTerm's (or a sibling like pinch,
+        // which the mount installs AFTER this controller — order matters, see mount).
+        //
+        // CRUCIAL EXCEPTION: `TerminalView` is a `UIScrollView` and scrolls via its
+        // INHERITED `panGestureRecognizer`. We must NOT disable it — doing so kills
+        // native scrolling AND leaves `isTracking` false, so SwiftTerm's
+        // `syncYDispFromContentOffset` (gated on `isTracking`) never updates scrollback.
+        // We keep native scroll and ride this same recognizer for the window-switch
+        // decision (see `handleScrollViewPan`).
+        for gr in view.gestureRecognizers ?? []
+        where !ours.contains(gr) && gr !== view.panGestureRecognizer {
             gr.isEnabled = false
         }
     }
 
     private func installOurRecognizers(on view: TerminalView) {
-        pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-        pan.maximumNumberOfTouches = 1
-        pan.delegate = self
-
         singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
         singleTap.delegate = self
 
@@ -95,18 +97,34 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         twoFingerTap.delegate = self
 
         // Tap disambiguation: single waits for double to fail, double waits for triple.
+        // single-tap deliberately requires ONLY double (not triple) — so cursor
+        // placement resolves after a single failed-double window, not the full
+        // single→double→triple chain. Keeps all three gestures.
         singleTap.require(toFail: doubleTap)
         doubleTap.require(toFail: tripleTap)
 
         editMenu = UIEditMenuInteraction(delegate: self)
         view.addInteraction(editMenu)
 
-        ours = [pan, singleTap, doubleTap, tripleTap, longPress, twoFingerTap]
+        ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap]
         for gr in ours { view.addGestureRecognizer(gr) }
+
+        // Vertical scrolling stays NATIVE (the inherited UIScrollView pan, kept enabled
+        // by the sweep). We ride that same recognizer to detect a horizontal drag =
+        // tmux window switch, so we never fight the scroll view with a competing pan.
+        view.panGestureRecognizer.addTarget(self, action: #selector(handleScrollViewPan(_:)))
+
+        // Tap snappiness: UIScrollView delays content-touch delivery (~150ms) to first
+        // decide whether a touch is the start of a scroll, which made single-tap cursor
+        // placement feel sluggish. Deliver touches immediately — our tap recognizers no
+        // longer wait on the scroll-detection window. (The pan still recognizes a drag
+        // fine; only the initial delivery delay is removed.)
+        view.delaysContentTouches = false
     }
 
     func detach() {
         guard let view = terminalView else { return }
+        view.panGestureRecognizer.removeTarget(self, action: #selector(handleScrollViewPan(_:)))
         for gr in ours { view.removeGestureRecognizer(gr) }
         view.removeInteraction(editMenu)
         ours = []
@@ -132,41 +150,22 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: Handlers
 
-    @objc private func handlePan(_ g: UIPanGestureRecognizer) {
+    /// Rides the terminal's NATIVE UIScrollView pan (we added ourselves as an extra
+    /// target). Vertical drags are handled by the scroll view itself (native scroll,
+    /// inertia, correct `isTracking`/scrollback) — we do nothing for them. We only look
+    /// for a horizontal-dominant drag in multi-window tmux and, on release, fire a
+    /// one-per-drag window switch. `GestureClassifier` decides from the cumulative
+    /// translation; a vertical or single-window drag classifies as scroll and we no-op.
+    @objc private func handleScrollViewPan(_ g: UIPanGestureRecognizer) {
         guard let view = terminalView else { return }
         if callbacks.mouseReportingActive() { return }  // mouse app: SwiftTerm forwards
-        // Cumulative translation since gesture start — GestureClassifier expects this
-        // (it gates on a dead-zone radius from the origin). Never reset it, or the
-        // classifier reclassifies each incremental tick as sub-dead-zone `.none`.
+        guard g.state == .ended || g.state == .cancelled else { return }
         let t = g.translation(in: view)
-        switch g.state {
-        case .began:
-            lastPanY = 0
-        case .changed:
-            let decision = GestureClassifier.classify(
-                dx: Double(t.x), dy: Double(t.y),
-                isMultiWindowTmux: callbacks.isMultiWindowTmux())
-            if case .scrollVertical = decision {
-                // Apply only the delta since the last tick so scroll tracks the finger
-                // live while the cumulative value keeps feeding the classifier.
-                let dy = t.y - lastPanY
-                var offset = view.contentOffset
-                // Dragging down (finger moves down) reveals earlier scrollback → offset up.
-                offset.y = max(0, offset.y - dy)
-                view.setContentOffset(offset, animated: false)
-            }
-            lastPanY = t.y
-        case .ended, .cancelled:
-            // Decide window-switch from the full cumulative translation (one-per-drag).
-            let decision = GestureClassifier.classify(
-                dx: Double(t.x), dy: Double(t.y),
-                isMultiWindowTmux: callbacks.isMultiWindowTmux())
-            if case .switchWindow(let delta) = decision {
-                callbacks.onSwitchWindow(delta)
-            }
-            lastPanY = 0
-        default:
-            break
+        let decision = GestureClassifier.classify(
+            dx: Double(t.x), dy: Double(t.y),
+            isMultiWindowTmux: callbacks.isMultiWindowTmux())
+        if case .switchWindow(let delta) = decision {
+            callbacks.onSwitchWindow(delta)
         }
     }
 
