@@ -32,6 +32,9 @@ final class DebugLog: ObservableObject {
     private let cap = 200
     private let logger = Logger(subsystem: "dev.truepositive.semicolyn", category: "debug")
     private var start: TimeInterval?
+    /// Optional off-device stream. Set from Diagnostics when remote logging is enabled;
+    /// nil disables forwarding. Each recorded line is also sent here.
+    private var remote: RemoteLogSink?
 
     private init() {}
 
@@ -46,6 +49,12 @@ final class DebugLog: ObservableObject {
         lines.append(line)
         if lines.count > cap { lines.removeFirst(lines.count - cap) }
         logger.debug("\(line, privacy: .public)")
+        remote?.send(line)
+    }
+
+    func setRemote(_ sink: RemoteLogSink?) {
+        remote?.stop()
+        remote = sink
     }
 
     /// Panel-driven refresh: publish a redraw for the current buffer. Called on a

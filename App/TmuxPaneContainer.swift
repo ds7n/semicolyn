@@ -248,6 +248,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 gestureControllers[key] = controller
                 // Re-enable pinch after the controller's sweep disabled pre-existing recognizers.
                 pinch.isEnabled = true
+                DebugLog.shared.log("scroll:init isScrollEnabled=\(view.isScrollEnabled) nativePan=\(view.panGestureRecognizer.isEnabled) contentSize=\(view.contentSize) offset=\(view.contentOffset)")
             }
         }
 
@@ -496,6 +497,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                    unregister: (PaneID) -> Void,
                    activeBorderColor: UIColor,
                    inactiveBorderColor: UIColor) {
+            DebugLog.shared.log("tmux:render active=\(String(describing: state.activeWindow)) windows=\(state.windows.count) panes=\(state.windows.first { $0.id == state.activeWindow }?.visibleLayout?.panes.count ?? -1)")
             guard let win = state.activeWindow, let window = state.window(win),
                   let layout = window.visibleLayout else { return }
 
