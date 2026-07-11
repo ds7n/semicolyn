@@ -248,14 +248,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     // MARK: - Pane registry + tmux commands
 
-    /// Called by TmuxPaneContainer when a pane's view is created. Flushes any
-    /// bytes that arrived before the view existed.
+    /// Called by TmuxPaneContainer when a pane's view is created. Seeds history for
+    /// the pane, then flushes any bytes that arrived before the view existed —
+    /// THROUGH the seeder, so that pre-view output is buffered by `PaneSeedState`
+    /// (it's `.seeding` after `paneDidAppear`) and replayed AFTER the captured
+    /// history, preserving the history-before-live-output ordering. Feeding the
+    /// pending bytes directly here would race the async capture and land live output
+    /// on-screen before history (then an out-of-order scrollback-clear).
     func registerPane(_ pane: PaneID, _ view: TerminalView) {
         paneViews[pane] = view
-        if let buffered = pendingPaneBytes[pane] {
-            view.feed(byteArray: buffered[...]); pendingPaneBytes[pane] = nil
-        }
         historySeeder?.paneDidAppear(pane)
+        if let buffered = pendingPaneBytes[pane] {
+            pendingPaneBytes[pane] = nil
+            let toFeed = historySeeder?.routeOutput(pane, buffered) ?? buffered
+            if !toFeed.isEmpty { view.feed(byteArray: toFeed[...]) }
+        }
         DebugLog.shared.log("scroll:postseed pane=%\(pane.raw) contentSize=\(view.contentSize)")
     }
 
