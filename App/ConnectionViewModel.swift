@@ -151,6 +151,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private var rawWriter: SerialByteWriter?
     /// Non-nil while a tmux control-mode session is active.
     private var tmux: TmuxRuntime?
+    /// Seeds each tmux pane's scrollback history (capture-pane) before live output.
+    private var historySeeder: PaneHistorySeeder?
     /// Shared output sink; the terminal view wires `onBytes` to render into itself.
     let output = TerminalShellOutput()
 
@@ -253,6 +255,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         if let buffered = pendingPaneBytes[pane] {
             view.feed(byteArray: buffered[...]); pendingPaneBytes[pane] = nil
         }
+        historySeeder?.paneDidAppear(pane)
+        DebugLog.shared.log("scroll:postseed pane=%\(pane.raw) contentSize=\(view.contentSize)")
     }
 
     func unregisterPane(_ pane: PaneID) { paneViews[pane] = nil; pendingPaneBytes[pane] = nil; paneLastTitles[pane] = nil }
@@ -787,6 +791,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private func attachTmux(conn: Connection) async throws {
         DebugLog.shared.log("attachTmux: ENTER session=\(tmuxSessionNameForConnection)")
         let runtime = TmuxRuntime(sessionName: tmuxSessionNameForConnection)
+        let seeder = PaneHistorySeeder(
+            runtime: runtime,
+            scrollbackLines: { AppStores.shared.terminalSettings.settings.scrollbackLines },
+            viewForPane: { [weak self] pane in self?.paneViews[pane] })
+        self.historySeeder = seeder
         guard let startCmd = runtime.makeStartCommand() else {
             // Controller couldn't build a start command (e.g. an invalid resolved
             // session name — which a Defaults-level value can be, since the Defaults
@@ -800,7 +809,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         runtime.onPaneBytes = { [weak self] pane, bytes in
             guard let self else { return }
             if let view = self.paneViews[pane] {
-                view.feed(byteArray: bytes[...])
+                let toFeed = self.historySeeder?.routeOutput(pane, Array(bytes)) ?? Array(bytes)
+                if !toFeed.isEmpty { view.feed(byteArray: toFeed[...]) }
             } else if self.renderablePanes.contains(pane) {
                 self.pendingPaneBytes[pane, default: []].append(contentsOf: bytes)
             } else {
