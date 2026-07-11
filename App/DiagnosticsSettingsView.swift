@@ -16,6 +16,10 @@ struct DiagnosticsSettingsView: View {
 
     @State private var testResult: String?
     @State private var showKeystrokeNag = false
+    /// True only for the single `keystrokeContent` change that the nag's "Turn On"
+    /// causes, so that confirmation doesn't re-trigger the nag (which re-set the value
+    /// to off and re-showed the dialog — the "popup re-pops after Turn On" bug).
+    @State private var confirmedKeystroke = false
 
     private var transport: LogTransport { LogTransport(rawValue: transportRaw) ?? .tls }
 
@@ -59,7 +63,19 @@ struct DiagnosticsSettingsView: View {
             Section {
                 Toggle("Log keystroke content", isOn: $keystrokeContent)
                     .onChange(of: keystrokeContent) { _, on in
-                        if on { keystrokeContent = false; showKeystrokeNag = true }  // require confirm
+                        // The dialog's "Turn On" sets `keystrokeContent = true`, which
+                        // re-fires this onChange. `confirmedKeystroke` suppresses that one
+                        // re-entry so confirming actually sticks instead of re-popping the
+                        // nag. A genuine user toggle-on (confirmedKeystroke == false) resets
+                        // to off and shows the dialog.
+                        if on {
+                            if confirmedKeystroke {
+                                confirmedKeystroke = false   // consume the confirmation
+                            } else {
+                                keystrokeContent = false
+                                showKeystrokeNag = true
+                            }
+                        }
                     }
             } footer: {
                 Text("Off: only structural key events (lengths, backspace) are logged. On: the "
@@ -70,7 +86,10 @@ struct DiagnosticsSettingsView: View {
         .navigationTitle("Diagnostics")
         .onAppear { DebugLog.shared.enabled = showDebugPanel; rebuildSink() }
         .confirmationDialog("Log keystroke content?", isPresented: $showKeystrokeNag, titleVisibility: .visible) {
-            Button("Turn On", role: .destructive) { keystrokeContent = true }
+            Button("Turn On", role: .destructive) {
+                confirmedKeystroke = true      // let the resulting onChange pass through
+                keystrokeContent = true
+            }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Diagnostic traces will include the actual keys you type, including anything "
