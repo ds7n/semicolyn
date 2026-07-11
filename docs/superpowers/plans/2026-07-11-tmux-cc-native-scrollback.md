@@ -331,11 +331,79 @@ Ask the user (or, if a tmux host is reachable, run) a real control-mode capture.
 `capture-pane -p -e -S -50 -t %<somePane>`
 issued inside a `tmux -CC` session with some colored scrollback. Look for the `%begin N`/`%end N` framing and whether body lines contain literal `\033[` escape bytes.
 
-- [ ] **Step 2: Record the finding**
+- [ ] **Step 2: Record the finding — CONFIRMED against a real tmux 3.4 host (2026-07-11)**
 
-Write the confirmed answer into the plan's Task 4/5 assumptions (edit this file): specifically **how `[String]` body lines → `[UInt8]` history** — the working assumption is **join lines with `"\n"` and UTF-8 encode**, because `capture-pane -p` emits one screen row per line and the control stream is line-framed. If the real capture shows a different framing (e.g. a trailing blank line, or CR handling), adjust the join in Task 5 accordingly. If a host is not reachable at plan-execution time, proceed with the `"\n"`-join assumption and flag it as device-verified (the diagnostics trace will show whether history renders correctly).
+A real `capture-pane -p -e -S -50 -t captest | cat -v` returned:
+```
+^[[31mred line^[[39m
+^[[32mgreen line^[[39m
+plain line
+<~35 trailing BLANK lines>
+```
+Confirmed:
+- **Escapes pass through** (`-e` works): `^[[31m` = `ESC[31m`. tmux resets with `ESC[39m` (default-fg), not `ESC[0m` — SwiftTerm handles both. So body lines carry literal escape bytes; feed them as-is.
+- **One screen row per body line**, `\n`-separable → the `[String]` block body joins with `"\n"`.
+- **`capture-pane` pads with TRAILING BLANK LINES** to the full pane height (empty bottom rows are returned as blank lines). These are screen padding, NOT scrollback — feeding them as history would push real content up and leave a blank gap. **So: trim trailing blank/whitespace-only lines from the body before joining.** (This is why the reconstruction is a tested pure helper, Task 3 Step 3, not an inline join.)
 
-- [ ] **Step 3: No commit** (investigation only; any doc edit rides with Task 5).
+- [ ] **Step 3: Add a pure `reconstructHistory` helper (Linux-tested)**
+
+Because the reconstruction (join + trailing-blank trim) is real logic, make it pure and tested rather than inline App code. Add to `Sources/SemicolynKit/Tmux/CapturePaneCommand.swift`:
+
+```swift
+/// Reconstruct feedable history bytes from a `capture-pane` control-block body. tmux
+/// returns one screen row per line and pads the bottom of the pane with trailing blank
+/// lines; those are screen padding, not scrollback, so they are trimmed. Remaining lines
+/// are joined with "\n" (with a trailing "\n" if any content remains) and UTF-8 encoded.
+/// Body lines carry literal escape sequences (`capture-pane -e`) which pass through
+/// unchanged. Empty input → empty bytes.
+public func reconstructHistory(fromLines lines: [String]) -> [UInt8] {
+    var end = lines.count
+    while end > 0, lines[end - 1].allSatisfy(\.isWhitespace) { end -= 1 }
+    guard end > 0 else { return [] }
+    return Array((lines[0..<end].joined(separator: "\n") + "\n").utf8)
+}
+```
+
+Add tests to `Tests/SemicolynKitTests/CapturePaneCommandTests.swift`:
+```swift
+    // Reconstruct: joins content lines with \n + trailing \n; escapes preserved.
+    func testReconstructJoinsContentLines() {
+        let out = reconstructHistory(fromLines: ["\u{1b}[31mred\u{1b}[39m", "plain"])
+        XCTAssertEqual(out, Array("\u{1b}[31mred\u{1b}[39m\nplain\n".utf8))
+    }
+
+    // Trailing blank lines (capture-pane bottom padding) are trimmed.
+    func testReconstructTrimsTrailingBlanks() {
+        let out = reconstructHistory(fromLines: ["a", "b", "", "   ", ""])
+        XCTAssertEqual(out, Array("a\nb\n".utf8))
+    }
+
+    // All-blank input → empty (no spurious newline).
+    func testReconstructAllBlankIsEmpty() {
+        XCTAssertEqual(reconstructHistory(fromLines: ["", "  "]), [])
+    }
+
+    // Empty input → empty.
+    func testReconstructEmptyIsEmpty() {
+        XCTAssertEqual(reconstructHistory(fromLines: []), [])
+    }
+
+    // Interior blank lines are KEPT (only trailing trimmed).
+    func testReconstructKeepsInteriorBlanks() {
+        let out = reconstructHistory(fromLines: ["a", "", "b"])
+        XCTAssertEqual(out, Array("a\n\nb\n".utf8))
+    }
+```
+
+Run: `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm dev swift test --filter CapturePaneCommandTests`
+Expected: PASS (6 original + 5 new = 11).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add Sources/SemicolynKit/Tmux/CapturePaneCommand.swift Tests/SemicolynKitTests/CapturePaneCommandTests.swift docs/superpowers/plans/2026-07-11-tmux-cc-native-scrollback.md
+git commit -m "feat(tmux): reconstructHistory — join capture body + trim trailing blanks (pure)"
+```
 
 ---
 
@@ -382,9 +450,9 @@ In the `for resolved in out.resolved { … }` loop (alongside the `contextPollID
 ```swift
             } else if let pane = historyCaptureIDs.removeValue(forKey: resolved.id) {
                 if case .ok(let lines) = resolved.outcome {
-                    // capture-pane -p emits one screen row per body line; rejoin with \n
-                    // and UTF-8 encode to feedable bytes (see Task 3 framing note).
-                    let bytes = Array(lines.joined(separator: "\n").utf8)
+                    // Reconstruct feedable bytes: join body rows + trim capture-pane's
+                    // trailing blank padding (see Task 3 — confirmed vs real tmux 3.4).
+                    let bytes = reconstructHistory(fromLines: lines)
                     DebugLog.shared.log("tmux capture REPLY: pane=%\(pane.raw) lines=\(lines.count) bytes=\(bytes.count)")
                     onHistoryCaptured?(pane, bytes)
                 } else {
@@ -530,47 +598,100 @@ git commit -m "feat(app): PaneHistorySeeder — seed tmux history before live ou
 
 ---
 
-## Task 6: Wire the seeder into `TmuxPaneContainer` + stop fighting native scroll (App, macOS-CI-only)
+## Task 6: Wire the seeder into `ConnectionViewModel.attachTmux` + confirm native scroll (App, macOS-CI-only)
 
 > **Not Linux-buildable.** macOS CI is the gate; device via diagnostics.
+>
+> **Re-scoped (2026-07-11):** the original plan targeted `TmuxPaneContainer.swift`, but the
+> `TmuxRuntime`, the `%output`→feed closure (`runtime.onPaneBytes`), the `paneViews` map, and
+> the pane-first-appears hook (`registerPane`) ALL live in `App/ConnectionViewModel.swift` —
+> `TmuxPaneContainer` never sees the runtime. So the seeder is constructed and wired there.
 
 **Files:**
-- Modify: `App/TmuxPaneContainer.swift`
+- Modify: `App/ConnectionViewModel.swift`
 
 **Interfaces:**
-- Consumes: `PaneHistorySeeder` (Task 5); the existing pane-render path (`installHalo(on:)`, the `%output`→`feed` path).
+- Consumes: `PaneHistorySeeder(runtime:scrollbackLines:viewForPane:)` (Task 5); the existing
+  `attachTmux(conn:)` (constructs `let runtime = TmuxRuntime(...)` ~line 789), the
+  `runtime.onPaneBytes = { pane, bytes in … view.feed(byteArray: bytes[...]) }` closure
+  (~line 800-816), the `paneViews: [PaneID: TerminalView]` map (~line 111), and
+  `registerPane(_ pane:_ view:)` (~line 252, where a pane's view first appears).
 - Produces: seeded panes; native scroll owns the drag.
 
-- [ ] **Step 1: Construct the seeder + seed on first render**
+- [ ] **Step 1: Hold a seeder + construct it in `attachTmux`**
 
-In `TmuxPaneContainer`'s coordinator, hold a `PaneHistorySeeder` (built with the runtime, a `scrollbackLines` closure from `TerminalSettings`, and a `viewForPane` lookup into the existing pane→view map). In the pane-render path (`installHalo(on:)`, where a pane's `TerminalView` first appears, ~line 199/542), call `seeder.paneDidAppear(paneID)` for that pane.
-
-- [ ] **Step 2: Route pane output through the seeder**
-
-Where `%output` bytes are currently fed to a pane's `TerminalView` (`view.feed(...)`), route through the seeder first:
+Add a stored property near `private var tmux: TmuxRuntime?` (~line 153):
 ```swift
-        let toFeed = seeder.routeOutput(paneID, bytes)
-        if !toFeed.isEmpty { view.feed(byteArray: toFeed[...]) }
+    /// Seeds each tmux pane's scrollback history (capture-pane) before live output.
+    private var historySeeder: PaneHistorySeeder?
 ```
-So output that races the seed is held and flushed after history.
+In `attachTmux(conn:)`, right after `let runtime = TmuxRuntime(...)` (~line 789) and before the
+`onPaneBytes` closure, construct the seeder (a `TerminalSettings` source is already used at
+pane registration — reuse the same settings the VM reads; if the VM holds
+`AppStores.shared.terminalSettings`, read `.settings.scrollbackLines`):
+```swift
+        let seeder = PaneHistorySeeder(
+            runtime: runtime,
+            scrollbackLines: { AppStores.shared.terminalSettings.settings.scrollbackLines },
+            viewForPane: { [weak self] pane in self?.paneViews[pane] })
+        self.historySeeder = seeder
+```
+(Verify the exact `scrollbackLines` accessor on macOS CI — mirror how `registerPane`/the pane
+setup already reads `scrollbackLines` in this file; if it comes from a different store, use
+that. The value must be the same setting the local buffer is sized from.)
 
-- [ ] **Step 3: Stop fighting native scroll**
+- [ ] **Step 2: Route `%output` through the seeder in `onPaneBytes`**
 
-The pane's `TerminalView` (a `UIScrollView`) now has real content once seeded, so its **native** scroll must own the vertical drag. Ensure NOTHING in the tmux pane path repurposes the native pan for a custom scroll or zeroes `contentOffset`. Concretely: confirm the `TerminalGestureController` on tmux panes no longer drives scroll (it shouldn't after PR #78, which already moved to native scroll) and that `installHalo` doesn't disable `isScrollEnabled`. Leave the `handleScrollViewPan` window-switch target and `mouseReportingActive` gate in place (reworked in Spec B). Add a diagnostic after seeding so we can confirm on device:
+In the `runtime.onPaneBytes = { [weak self] pane, bytes in … }` closure (~line 800), wrap the
+feed so output racing the seed is buffered. The current body feeds `view.feed(byteArray: bytes[...])`
+for a visible pane; change the visible-pane branch to route first:
+```swift
+            if let view = self.paneViews[pane] {
+                let toFeed = self.historySeeder?.routeOutput(pane, Array(bytes)) ?? Array(bytes)
+                if !toFeed.isEmpty { view.feed(byteArray: toFeed[...]) }
+            } else if self.renderablePanes.contains(pane) {
+                self.pendingPaneBytes[pane, default: []].append(contentsOf: bytes)
+            } else {
+                return
+            }
+```
+Leave the `passwordDetector.noteOutput(bytes)` call and the other branches unchanged (the
+password gate still sees the raw bytes). `bytes` is an `ArraySlice<UInt8>`; `Array(bytes)`
+converts for `routeOutput(_:[UInt8])`.
+
+- [ ] **Step 3: Seed on a pane's first render (`registerPane`)**
+
+In `registerPane(_ pane:_ view:)` (~line 252, where `paneViews[pane] = view` and any pending
+bytes are flushed), call the seeder AFTER the view is registered so `viewForPane` can find it:
+```swift
+        historySeeder?.paneDidAppear(pane)
+```
+Place it after `paneViews[pane] = view` and the existing pending-bytes flush. (The seeder's
+`paneDidAppear` only issues a capture when the pane `needsSeed`, so re-registration is safe.)
+
+- [ ] **Step 4: Confirm native scroll + add the post-seed diagnostic**
+
+Native scroll ownership is already intact (Task 6 investigation confirmed: no `isScrollEnabled
+= false`, no `contentOffset` manipulation in the tmux path; `handleScrollViewPan` only gates on
+`mouseReportingActive()`). Do NOT change the gesture controller, the mouse gate, or
+window-switch (Spec B). Add a diagnostic in `registerPane` (after `paneDidAppear`) so the device
+trace confirms `contentSize` grows once history is fed:
 ```swift
         MainActor.assumeIsolated {
-            DebugLog.shared.log("scroll:postseed pane=%\(paneID.raw) contentSize=\(view.contentSize) lines=\(view.getTerminal().buffer.linesCount)")
+            DebugLog.shared.log("scroll:postseed pane=%\(pane.raw) contentSize=\(view.contentSize)")
         }
 ```
-(Use the real line-count accessor; if `buffer.linesCount` isn't public, log just `contentSize` — the goal is to confirm `contentSize` is now non-zero.)
+`registerPane` runs on the main actor already (it mutates `@MainActor` VM state); if the
+compiler flags isolation, this `MainActor.assumeIsolated` wrap is harmless. (Log only
+`contentSize` — the goal is to confirm it becomes non-zero after seeding.)
 
-- [ ] **Step 4: Verify (macOS CI)** — commit; Task 8 gate.
+- [ ] **Step 5: Verify (macOS CI)** — commit; Task 8 gate.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add App/TmuxPaneContainer.swift
-git commit -m "feat(app): seed pane history on render + let native scroll own the drag"
+git add App/ConnectionViewModel.swift
+git commit -m "feat(app): wire PaneHistorySeeder into attachTmux (seed history before live output)"
 ```
 
 ---
