@@ -69,26 +69,41 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
         host.view.backgroundColor = .clear
         host.view.translatesAutoresizingMaskIntoConstraints = false
         addSubview(host.view)
+        // Pin leading/trailing/top only — NOT bottom. Pinning the bottom too would
+        // force host.view to fill the input view's (seeded 88pt) height, and since
+        // `intrinsicContentSize` below measures host.view, that made the measurement
+        // circular: input height ← intrinsicContentSize ← host.view height ← input
+        // height (88 seed) → the bar rendered double-high with a blank second row
+        // (build-32 #4). Leaving the bottom free lets host.view size to its content,
+        // and the input view hugs that via `intrinsicContentSize`.
         NSLayoutConstraint.activate([
             host.view.leadingAnchor.constraint(equalTo: leadingAnchor),
             host.view.trailingAnchor.constraint(equalTo: trailingAnchor),
             host.view.topAnchor.constraint(equalTo: topAnchor),
-            host.view.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// Hug the SwiftUI content instead of a hardcoded height: measure the hosting
-    /// controller's compressed fitting size so the input view sits flush against the
-    /// keyboard (no phantom row) and tracks the predictor strip / hidden-keybar states.
+    /// The SwiftUI content's own ideal height at the current width. Uses
+    /// `UIHostingController.sizeThatFits(in:)` — which asks SwiftUI directly "how tall
+    /// is your content at this width?" — instead of `systemLayoutSizeFitting` on
+    /// `host.view`. The latter resolved against host.view's Auto Layout constraints,
+    /// which (when the bottom edge was pinned to the input view) collapsed to the input
+    /// view's seed height rather than the content height. `sizeThatFits` is immune to
+    /// that: it measures the SwiftUI graph, not the container frame.
+    private func contentHeight() -> CGFloat {
+        let width = bounds.width > 0 ? bounds.width : UIScreen.main.bounds.width
+        let fitted = host.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+        return fitted.height > 0 ? fitted.height : Self.seedHeight
+    }
+
+    /// Hug the SwiftUI content instead of a hardcoded height so the input view sits flush
+    /// against the keyboard (no phantom row) and tracks the predictor strip /
+    /// hidden-keybar states.
     override var intrinsicContentSize: CGSize {
-        let fitted = host.view.systemLayoutSizeFitting(
-            UIView.layoutFittingCompressedSize,
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel)
-        let height = fitted.height > 0 ? fitted.height : Self.seedHeight
+        let height = contentHeight()
         lastMeasuredHeight = height
         return CGSize(width: UIView.noIntrinsicMetric, height: height)
     }
@@ -98,12 +113,7 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     /// invalidate when the height actually changed, so we don't spin a layout loop.
     override func layoutSubviews() {
         super.layoutSubviews()
-        let fitted = host.view.systemLayoutSizeFitting(
-            UIView.layoutFittingCompressedSize,
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel)
-        let height = fitted.height > 0 ? fitted.height : Self.seedHeight
-        if abs(height - lastMeasuredHeight) > 0.5 {
+        if abs(contentHeight() - lastMeasuredHeight) > 0.5 {
             invalidateIntrinsicContentSize()
         }
     }
