@@ -49,6 +49,13 @@ final class TmuxRuntime {
     private var contextPollIDs: Set<UInt64> = []
     /// In-flight `list-windows` (attach-prime) submission ids awaiting their reply.
     private var primeWindowIDs: Set<UInt64> = []
+    /// Correlation ids for in-flight `capture-pane` history seeds, keyed to the pane.
+    private var historyCaptureIDs: [UInt64: PaneID] = [:]
+    /// Fired when a capture response resolves: (pane, reconstructed history bytes).
+    var onHistoryCaptured: ((PaneID, [UInt8]) -> Void)?
+    /// Fired when a pane's history may be stale (%pause/%continue, reconnect, resize
+    /// desync) — the seeder should mark affected panes unseeded and re-capture.
+    var onResyncAll: (() -> Void)?
     /// The repeating poll task; cancelled on teardown via `stop()`.
     private var pollTask: Task<Void, Never>?
 
@@ -81,6 +88,15 @@ final class TmuxRuntime {
         // discover the current windows (tmux emits none spontaneously on attach to
         // an existing session — the blank-panes bug). Send refresh-client (a nudge)
         // + a tracked list-windows whose reply we parse below.
+        if !out.attachedPrimeCommands.isEmpty {
+            // The `.attaching → .attached` edge fires exactly once per attach — first
+            // connect AND every reattach/reconnect (a fresh TmuxRuntime is built each
+            // time). No `%pause`/`%continue` event exists in the control-mode parser
+            // yet, so this is the highest-value resync trigger reachable from here:
+            // any pane history captured before this attach may now be stale.
+            DebugLog.shared.log("tmux prime: attach edge → onResyncAll")
+            onResyncAll?()
+        }
         for cmd in out.attachedPrimeCommands {
             if cmd == TmuxCommand.listWindowsForLayout() {
                 if let id = writeTracked(cmd) { primeWindowIDs.insert(id); DebugLog.shared.log("tmux prime: sent list-windows (req \(id))") }
@@ -108,6 +124,17 @@ final class TmuxRuntime {
                     if applied { onStateChanged?(controller.state) }
                 } else {
                     DebugLog.shared.log("tmux prime REPLY: NOT .ok (list-windows errored)")
+                }
+            } else if let pane = historyCaptureIDs.removeValue(forKey: resolved.id) {
+                if case .ok(let lines) = resolved.outcome {
+                    // Reconstruct feedable bytes: join body rows + trim capture-pane's
+                    // trailing blank padding (see Task 3 — confirmed vs real tmux 3.4).
+                    let bytes = reconstructHistory(fromLines: lines)
+                    DebugLog.shared.log("tmux capture REPLY: pane=%\(pane.raw) lines=\(lines.count) bytes=\(bytes.count)")
+                    onHistoryCaptured?(pane, bytes)
+                } else {
+                    DebugLog.shared.log("tmux capture REPLY: pane=%\(pane.raw) NOT .ok (capture errored)")
+                    onHistoryCaptured?(pane, [])   // fail toward live-only
                 }
             }
         }
@@ -198,6 +225,17 @@ final class TmuxRuntime {
         guard let sub = controller.submit(line), let writer else { return nil }
         writer.enqueue(sub.wire)
         return sub.id
+    }
+
+    /// Send a `capture-pane` history seed for `pane` (N = scrollback setting). Tracks
+    /// the correlation id so the response can be routed back. No-op / nil if seeding is
+    /// disabled (lines <= 0) or not attached.
+    func captureHistory(pane: PaneID, lines: Int) -> UInt64? {
+        guard let cmd = capturePaneCommand(paneID: pane, lines: lines),
+              let id = writeTracked(cmd) else { return nil }
+        historyCaptureIDs[id] = pane
+        DebugLog.shared.log("tmux capture: pane=%\(pane.raw) lines=\(lines) id=\(id)")
+        return id
     }
 
     /// Begin polling `pane_current_command` once control mode is attached.
