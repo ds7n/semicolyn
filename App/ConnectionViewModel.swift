@@ -269,7 +269,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
     }
 
-    func selectWindow(_ id: WindowID) { tmux?.selectWindow(id) }
+    func selectWindow(_ id: WindowID) {
+        DebugLog.shared.log("win:select id=\(id) activeBefore=\(String(describing: tmuxState?.activeWindow))")
+        tmux?.selectWindow(id)
+    }
 
     /// Toggle zoom on the active pane (Pad tap). No-op in raw-PTY mode.
     func zoomActivePane() { tmux?.zoomActivePane() }
@@ -302,6 +305,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// True when the active tmux session has more than one window (drives horizontal
     /// drag = window switch vs. scroll fall-through).
     var isMultiWindowTmux: Bool { (tmuxState?.windows.count ?? 0) > 1 }
+
+    /// Whether the in-progress input line looks like a password/secret entry, per
+    /// `passwordDetector`'s verdict (used ONLY to gate diagnostic key-content logging —
+    /// see `TerminalScreen.Coordinator.send`; has no effect on predictor learning, which
+    /// reads the detector directly).
+    func currentLineIsPassword() -> Bool { !passwordDetector.shouldLearnCommittedLine() }
 
     /// Single-tap cursor placement inside a tmux pane: emit arrow keys from the pane's
     /// current cursor to the tapped cell (reuses the pure encoders). Routes through the
