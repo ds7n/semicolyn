@@ -30,11 +30,23 @@ final class PaneHistorySeeder {
     }
 
     /// Call when a pane first renders. Issues the capture if the pane still needs one.
+    /// If seeding is disabled or the capture can't be sent (`captureHistory` returns
+    /// nil — e.g. `scrollbackLines <= 0`), transition straight to `.seeded` so live
+    /// output passes through instead of being buffered forever (a blank pane). This is
+    /// the spec's "0 → skip, show live-only" behavior; `completeSeed(history: [])` from
+    /// `.unseeded` flushes any already-buffered output and marks the pane seeded.
     func paneDidAppear(_ pane: PaneID) {
         var state = states[pane] ?? PaneSeedState()
         if state.needsSeed {
             if runtime.captureHistory(pane: pane, lines: scrollbackLines()) != nil {
                 state.beginSeeding()
+            } else {
+                // No capture will arrive → don't strand output. Feed any buffered bytes
+                // straight to the view and mark seeded (live-only).
+                let flush = state.completeSeed(history: [])
+                if !flush.isEmpty, let view = viewForPane(pane) {
+                    view.feed(byteArray: flush[...])
+                }
             }
         }
         states[pane] = state

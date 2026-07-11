@@ -816,7 +816,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         runtime.onPaneBytes = { [weak self] pane, bytes in
             guard let self else { return }
             if let view = self.paneViews[pane] {
-                let toFeed = self.historySeeder?.routeOutput(pane, Array(bytes)) ?? Array(bytes)
+                let toFeed = self.historySeeder?.routeOutput(pane, bytes) ?? bytes
                 if !toFeed.isEmpty { view.feed(byteArray: toFeed[...]) }
             } else if self.renderablePanes.contains(pane) {
                 self.pendingPaneBytes[pane, default: []].append(contentsOf: bytes)
