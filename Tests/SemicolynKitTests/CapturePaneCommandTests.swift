@@ -41,4 +41,32 @@ final class CapturePaneCommandTests: XCTestCase {
         let cmd = capturePaneCommand(paneID: PaneID(raw: 1), lines: 100) ?? ""
         XCTAssertFalse(cmd.contains("-J"), "capture must not join wrapped lines: \(cmd)")
     }
+
+    // Reconstruct: joins content lines with \n + trailing \n; escapes preserved.
+    func testReconstructJoinsContentLines() {
+        let out = reconstructHistory(fromLines: ["\u{1b}[31mred\u{1b}[39m", "plain"])
+        XCTAssertEqual(out, Array("\u{1b}[31mred\u{1b}[39m\nplain\n".utf8))
+    }
+
+    // Trailing blank lines (capture-pane bottom padding) are trimmed.
+    func testReconstructTrimsTrailingBlanks() {
+        let out = reconstructHistory(fromLines: ["a", "b", "", "   ", ""])
+        XCTAssertEqual(out, Array("a\nb\n".utf8))
+    }
+
+    // All-blank input → empty (no spurious newline).
+    func testReconstructAllBlankIsEmpty() {
+        XCTAssertEqual(reconstructHistory(fromLines: ["", "  "]), [])
+    }
+
+    // Empty input → empty.
+    func testReconstructEmptyIsEmpty() {
+        XCTAssertEqual(reconstructHistory(fromLines: []), [])
+    }
+
+    // Interior blank lines are KEPT (only trailing trimmed).
+    func testReconstructKeepsInteriorBlanks() {
+        let out = reconstructHistory(fromLines: ["a", "", "b"])
+        XCTAssertEqual(out, Array("a\n\nb\n".utf8))
+    }
 }
