@@ -44,6 +44,7 @@ struct TerminalScreen: UIViewRepresentable {
         let c = Coordinator(send: send, session: session, settings: settings, theme: theme, osc52Allowed: osc52Allowed, onTitle: onTitle)
         c.onSSHLink = onSSHLink
         c.onResize = onResize
+        c.vm = vm
         // Build + retain the keybar audio-feedback accessory for this terminal.
         c.keybarAccessory = KeybarInputAccessory(vm: vm, keybarSettings: keybarSettings,
                                                  theme: theme,
@@ -126,6 +127,9 @@ struct TerminalScreen: UIViewRepresentable {
         // ours-that-aren't). Re-enable the app's own pinch and keyboard-restore taps.
         pinch.isEnabled = true
         restoreTap.isEnabled = true
+        MainActor.assumeIsolated {
+            DebugLog.shared.log("scroll:init isScrollEnabled=\(terminal.isScrollEnabled) nativePan=\(terminal.panGestureRecognizer.isEnabled) contentSize=\(terminal.contentSize) offset=\(terminal.contentOffset)")
+        }
 
         // Render PTY output as it arrives (already hopped to main in the bridge).
         output.onBytes = { [weak terminal] bytes in
@@ -208,6 +212,10 @@ struct TerminalScreen: UIViewRepresentable {
         var didInitialFocus = false
         /// Retains the gesture layer for this terminal (replaces SwiftTerm's built-ins).
         var gestureController: TerminalGestureController?
+        /// The connection view model, weakly referenced so the coordinator doesn't
+        /// extend its lifetime. Used only to source the password-line flag for the
+        /// diagnostic keystroke-content gate in `send`.
+        weak var vm: ConnectionViewModel?
 
         init(send: @escaping ([UInt8]) -> Void, session: ShellSession?, settings: TerminalSettings, theme: Theme,
              osc52Allowed: Bool = true, onTitle: ((String) -> Void)? = nil) {
@@ -284,19 +292,26 @@ struct TerminalScreen: UIViewRepresentable {
                 let ok = terminal.becomeFirstResponder()
                 // @objc gesture callbacks are delivered on the main thread but are a
                 // nonisolated context; hop onto the main actor for the @MainActor logger.
-                MainActor.assumeIsolated { DebugLog.shared.log("restoreTap → becomeFirstResponder=\(ok)") }
+                MainActor.assumeIsolated { DebugLog.shared.log("key:firstResponder becomeFirstResponder=\(ok) isFirstResponder=\(terminal.isFirstResponder)") }
             }
         }
 
         // Keystrokes / pasted bytes from the user → remote (tmux or raw PTY).
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
-            // Diagnostic (build 28, key-repeat investigation): log each byte batch
-            // SwiftTerm emits. Holding a soft key that auto-repeats should produce
-            // repeated send() calls; a single call while held means the OS is not
-            // delivering repeat to SwiftTerm. Zero cost when diagnostics is disabled.
+            // Diagnostic (build 28, key-repeat investigation): classify + gate-log each
+            // byte batch SwiftTerm emits. Holding a soft key that auto-repeats should
+            // produce repeated send() calls; a single call while held means the OS is
+            // not delivering repeat to SwiftTerm. Zero cost when diagnostics is disabled.
             // (Delegate callback is a nonisolated context; hop to the main actor.)
             MainActor.assumeIsolated {
-                DebugLog.shared.log("send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
+                let logContent = UserDefaults.standard.bool(forKey: RemoteLogConfig.keystrokeContentKey)
+                let isBackspace = data.count == 1 && (data.first == 0x7f || data.first == 0x08)
+                let event = isBackspace ? "deleteBackward" : "insertText"
+                // Best-effort content as UTF-8 for the gate; password-line flag sourced
+                // from the VM's passwordDetector when the coordinator's weak ref is alive.
+                let content = String(decoding: Array(data), as: UTF8.self)
+                let isPwd = vm?.currentLineIsPassword() ?? false
+                DebugLog.shared.log("key:\(keystrokeLogDecision(event: event, content: content, logContent: logContent, isPasswordLine: isPwd))")
             }
             onSend(Array(data))
         }
