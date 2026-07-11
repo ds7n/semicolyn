@@ -29,7 +29,7 @@ struct DiagnosticsSettingsView: View {
                      + "diagnostic log with a Copy button. For troubleshooting; leave off for normal use.")
             }
 
-            Section("Stream logs to a server") {
+            Section {
                 Toggle("Enable remote log stream", isOn: $remoteEnabled)
                     .onChange(of: remoteEnabled) { _, _ in rebuildSink() }
                 if remoteEnabled {
@@ -48,6 +48,8 @@ struct DiagnosticsSettingsView: View {
                     Button("Test connection") { runTest() }
                     if let testResult { Text(testResult).font(.footnote).foregroundStyle(.secondary) }
                 }
+            } header: {
+                Text("Stream logs to a server")
             } footer: {
                 Text("Streams the verbose diagnostic trace off-device as RFC 5424 syslog. "
                      + "Receiver setup: see tools/syslog-sink (docker compose up). "
