@@ -41,14 +41,17 @@ final class RemoteLogSink {
                 tls.securityProtocolOptions,
                 { _, _, complete in complete(true) },   // accept any certificate
                 queue)
-            return NWParameters(tls: tls)
+            return NWParameters(tls: tls, tcp: .init())
         }
     }
 
     private func start() {
-        let conn = NWConnection(host: host, port: port, using: makeParameters())
-        conn.start(queue: queue)
-        connection = conn
+        queue.async { [weak self] in
+            guard let self else { return }
+            let conn = NWConnection(host: self.host, port: self.port, using: self.makeParameters())
+            conn.start(queue: self.queue)
+            self.connection = conn
+        }
     }
 
     /// Frame the line and send it fire-and-forget. UDP is datagram-per-line; TCP/TLS are
@@ -63,9 +66,21 @@ final class RemoteLogSink {
     }
 
     /// Connect (if needed) and send a probe line, reporting whether the connection
-    /// reached `.ready`. Used by the Diagnostics "Test connection" button.
+    /// reached `.ready`. Used by the Diagnostics "Test connection" button. Resolves to
+    /// `false` on failure, cancellation, `.waiting` (no viable path — e.g. unreachable /
+    /// firewalled host), or a 5s timeout — so it never hangs the UI.
     func test(_ completion: @escaping (Bool) -> Void) {
         let probe = NWConnection(host: host, port: port, using: makeParameters())
+        var finished = false
+        // Serialize `finished` on `queue`; call the user completion at most once.
+        func finish(_ ok: Bool) {
+            queue.async {
+                guard !finished else { return }
+                finished = true
+                probe.cancel()
+                completion(ok)
+            }
+        }
         probe.stateUpdateHandler = { state in
             switch state {
             case .ready:
@@ -73,15 +88,20 @@ final class RemoteLogSink {
                                          hostname: self.hostname,
                                          timestamp: Self.timestamp(), transport: self.transport)
                 probe.send(content: framed.data(using: .utf8), completion: .contentProcessed { _ in
-                    probe.cancel(); completion(true)
+                    finish(true)
                 })
             case .failed, .cancelled:
-                probe.cancel(); completion(false)
+                finish(false)
+            case .waiting:
+                // No viable path (unreachable/firewalled) — fail fast rather than retry forever.
+                finish(false)
             default:
                 break
             }
         }
         probe.start(queue: queue)
+        // Defensive timeout: nothing can leave the probe hanging.
+        queue.asyncAfter(deadline: .now() + 5) { finish(false) }
     }
 
     func stop() {
