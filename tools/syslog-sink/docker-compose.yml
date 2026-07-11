@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-only
+services:
+  syslog:
+    image: balabit/syslog-ng:4.8.0
+    command: ["--foreground", "-f", "/etc/syslog-ng/syslog-ng.conf"]
+    ports:
+      - "514:514/udp"
+      - "514:514/tcp"
+      - "6514:6514/tcp"
+    volumes:
+      - ./syslog-ng.conf:/etc/syslog-ng/syslog-ng.conf:ro
+      - ./cert:/etc/syslog-ng/cert:ro
+      - ./logs:/var/log/semicolyn
