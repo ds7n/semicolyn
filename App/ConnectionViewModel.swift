@@ -151,6 +151,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private var rawWriter: SerialByteWriter?
     /// Non-nil while a tmux control-mode session is active.
     private var tmux: TmuxRuntime?
+    /// Seeds each tmux pane's scrollback history (capture-pane) before live output.
+    private var historySeeder: PaneHistorySeeder?
     /// Shared output sink; the terminal view wires `onBytes` to render into itself.
     let output = TerminalShellOutput()
 
@@ -246,13 +248,22 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     // MARK: - Pane registry + tmux commands
 
-    /// Called by TmuxPaneContainer when a pane's view is created. Flushes any
-    /// bytes that arrived before the view existed.
+    /// Called by TmuxPaneContainer when a pane's view is created. Seeds history for
+    /// the pane, then flushes any bytes that arrived before the view existed —
+    /// THROUGH the seeder, so that pre-view output is buffered by `PaneSeedState`
+    /// (it's `.seeding` after `paneDidAppear`) and replayed AFTER the captured
+    /// history, preserving the history-before-live-output ordering. Feeding the
+    /// pending bytes directly here would race the async capture and land live output
+    /// on-screen before history (then an out-of-order scrollback-clear).
     func registerPane(_ pane: PaneID, _ view: TerminalView) {
         paneViews[pane] = view
+        historySeeder?.paneDidAppear(pane)
         if let buffered = pendingPaneBytes[pane] {
-            view.feed(byteArray: buffered[...]); pendingPaneBytes[pane] = nil
+            pendingPaneBytes[pane] = nil
+            let toFeed = historySeeder?.routeOutput(pane, buffered) ?? buffered
+            if !toFeed.isEmpty { view.feed(byteArray: toFeed[...]) }
         }
+        DebugLog.shared.log("scroll:postseed pane=%\(pane.raw) contentSize=\(view.contentSize)")
     }
 
     func unregisterPane(_ pane: PaneID) { paneViews[pane] = nil; pendingPaneBytes[pane] = nil; paneLastTitles[pane] = nil }
@@ -787,6 +798,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private func attachTmux(conn: Connection) async throws {
         DebugLog.shared.log("attachTmux: ENTER session=\(tmuxSessionNameForConnection)")
         let runtime = TmuxRuntime(sessionName: tmuxSessionNameForConnection)
+        let seeder = PaneHistorySeeder(
+            runtime: runtime,
+            scrollbackLines: { AppStores.shared.terminalSettings.settings.scrollbackLines },
+            viewForPane: { [weak self] pane in self?.paneViews[pane] })
+        self.historySeeder = seeder
         guard let startCmd = runtime.makeStartCommand() else {
             // Controller couldn't build a start command (e.g. an invalid resolved
             // session name — which a Defaults-level value can be, since the Defaults
@@ -800,7 +816,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         runtime.onPaneBytes = { [weak self] pane, bytes in
             guard let self else { return }
             if let view = self.paneViews[pane] {
-                view.feed(byteArray: bytes[...])
+                let toFeed = self.historySeeder?.routeOutput(pane, bytes) ?? bytes
+                if !toFeed.isEmpty { view.feed(byteArray: toFeed[...]) }
             } else if self.renderablePanes.contains(pane) {
                 self.pendingPaneBytes[pane, default: []].append(contentsOf: bytes)
             } else {
