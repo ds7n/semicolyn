@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2026 True Positive LLC
 # SPDX-License-Identifier: GPL-3.0-only
 
+# Diagnostics syslog sink — local cert + captured logs (never commit)
+/tools/syslog-sink/logs/
+/tools/syslog-sink/cert/
+
 # Rust / Cargo
 /target/
 # Cargo.lock IS committed — this crate ships into a shipped app binary.
