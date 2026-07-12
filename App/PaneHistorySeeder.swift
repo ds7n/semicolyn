@@ -66,9 +66,24 @@ final class PaneHistorySeeder {
         var state = states[pane] ?? PaneSeedState()
         let flush = state.completeSeed(history: history)
         states[pane] = state
-        guard let view = viewForPane(pane) else { return }
+        guard let view = viewForPane(pane) else {
+            DebugLog.shared.log("seed applyHistory pane=%\(pane.raw) NO VIEW (dropped \(flush.count)B)")
+            return
+        }
+        let t = view.getTerminal()
+        // Public-API-only proxies (buffer.lines/yBase are internal to SwiftTerm):
+        //   contentSize.height = lines.count × cellHeight (drives scrollability directly);
+        //   getTopVisibleRow() > 0 iff there IS scrollback above the viewport;
+        //   frame confirms the view is laid out (cellDimension 0 → contentSize 0).
+        DebugLog.shared.log("seed applyHistory pane=%\(pane.raw) flush=\(flush.count)B "
+            + "pre: rows=\(t.rows) topRow=\(t.getTopVisibleRow()) "
+            + "contentSize=\(view.contentSize) frame=\(view.frame.size)")
         clearScrollback(view)
         if !flush.isEmpty { view.feed(byteArray: flush[...]) }
+        // Post-feed snapshot: distinguishes "fed but into viewport (contentSize≈frame →
+        // no scrollback)" from "view not laid out (frame/contentSize 0)" from "fed OK".
+        DebugLog.shared.log("seed applyHistory pane=%\(pane.raw) "
+            + "post: rows=\(t.rows) topRow=\(t.getTopVisibleRow()) contentSize=\(view.contentSize)")
     }
 
     private func resyncAll() {
