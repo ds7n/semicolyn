@@ -427,6 +427,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Nil'd by `invalidateCachedCell()` after a pinch font change.
         private var cachedCell: (w: Double, h: Double)?
 
+        /// Last-applied render signature. `apply(state:)` skips the (expensive) pane re-layout
+        /// when the new state's signature matches — the SwiftUI `updateUIView` pass fires far
+        /// more often than the rendered layout actually changes (the render storm).
+        private var lastRenderSignature: RenderSignature?
+
         /// Clears the cached cell metrics so `resolvedCell()` re-measures on the next
         /// layout pass. Called by the coordinator's `onInvalidateCachedCell` hook after
         /// a pinch-zoom font change, ensuring pane rects reflect the new font geometry.
@@ -506,7 +511,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
                    unregister: (PaneID) -> Void,
                    activeBorderColor: UIColor,
                    inactiveBorderColor: UIColor) {
-            DebugLog.shared.log("tmux:render active=\(String(describing: state.activeWindow)) windows=\(state.windows.count) panes=\(state.windows.first { $0.id == state.activeWindow }?.visibleLayout?.panes.count ?? -1)")
+            let sig = RenderSignature(state)
+            guard sig != lastRenderSignature else { return }   // unchanged → skip re-layout
+            let reason = renderChangeReason(old: lastRenderSignature, new: sig, state: state)
+            lastRenderSignature = sig
+            DebugLog.shared.log(.render, "render:panes reason=\(reason) active=\(state.activeWindow.map { "@\($0.raw)" } ?? "nil") windows=\(state.windows.count) panes=\(state.activeWindow.flatMap { state.window($0) }?.visibleLayout?.panes.count ?? -1)")
             guard let win = state.activeWindow, let window = state.window(win),
                   let layout = window.visibleLayout else { return }
 
@@ -572,6 +581,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     view.layer.borderWidth = singlePane ? 0 : 0.5
                 }
             }
+        }
+
+        /// Why a render fired — for the `.render` diagnostic. Compares the previous signature-
+        /// bearing state to the new one via cheap field checks. Best-effort labeling.
+        private func renderChangeReason(old: RenderSignature?, new: RenderSignature, state: TmuxSessionState) -> String {
+            old == nil ? "initial" : "changed"
         }
     }
 }
