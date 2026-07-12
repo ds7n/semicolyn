@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 True Positive LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# TEMPLATE for a LOCAL-ONLY pre-commit overlay. `install.sh` copies this to
+# .git/hooks/pre-commit.local (which is NOT tracked). Edit the `terms` list with
+# YOUR OWN name/handles/home paths — they stay local so they never enter this
+# public repo. Sourced by the tracked scripts/hooks/pre-commit. This scans staged
+# CONTENT and blocks the commit on a match. Bypass with `git commit --no-verify`.
+set -euo pipefail
+
+red() { printf '\033[31m%s\033[0m\n' "$1"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$1"; }
+
+# >>> EDIT THESE for your machine (placeholders — replace with your identifiers) <<<
+terms=(
+    'your-username'
+    'your-name'
+    '/home/your-username'
+    '/Users/your-username'
+)
+allow=()   # substrings that are legitimate even if they contain a term
+
+mapfile -d '' -t staged < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+hits=()
+for f in "${staged[@]:-}"; do
+    [[ -z "$f" ]] && continue
+    if git diff --cached --numstat -- "$f" | grep -qE '^-\s+-\s'; then continue; fi   # binary
+    added="$(git diff --cached -U0 -- "$f" | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
+    [[ -z "$added" ]] && continue
+    for t in "${terms[@]}"; do
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            skip=0
+            for a in "${allow[@]:-}"; do [[ -n "$a" && "$line" == *"$a"* ]] && skip=1; done
+            ((skip)) && continue
+            hits+=("$f: $line")
+        done < <(printf '%s\n' "$added" | grep -iF "$t" || true)
+    done
+done
+
+if ((${#hits[@]})); then
+    red "✗ pre-commit(local): staged content contains a personal identifier:"
+    printf '%s\n' "${hits[@]}" | sort -u | sed 's/^/    /' | head -30
+    yellow "Scrub it before committing, or 'git commit --no-verify' to override."
+    exit 1
+fi
+exit 0
