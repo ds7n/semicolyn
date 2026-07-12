@@ -281,7 +281,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     }
 
     func selectWindow(_ id: WindowID) {
-        DebugLog.shared.log("win:select id=\(id) activeBefore=\(String(describing: tmuxState?.activeWindow))")
+        DebugLog.shared.log(.tmux, "tmux:selectWindow id=@\(id.raw) activeBefore=\(tmuxState?.activeWindow.map { "@\($0.raw)" } ?? "nil")")
         tmux?.selectWindow(id)
     }
 
@@ -841,6 +841,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.pendingPaneBytes = self.pendingPaneBytes.filter { live.contains($0.key) }
             let oldActive = self.tmuxState?.activeWindow.flatMap { self.tmuxState?.window($0)?.activePane }
             self.tmuxState = state
+            DebugLog.shared.log(.tmux, "tmux:activeWindow=\(state.activeWindow.map { "@\($0.raw)" } ?? "nil") wins=\(state.windows.count)")
             let newActive = state.activeWindow.flatMap { state.window($0)?.activePane }
             if oldActive != newActive {
                 // Active pane changed (e.g. ⌘]) — re-publish the new active pane's

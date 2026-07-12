@@ -176,6 +176,7 @@ final class TmuxRuntime {
 
     /// Make `id` the active window (tmux will emit the layout/active events).
     func selectWindow(_ id: WindowID) {
+        DebugLog.shared.log(.tmux, "tmux:send select-window target=@\(id.raw)")
         write(TmuxCommand.selectWindow(target: id))
     }
 
