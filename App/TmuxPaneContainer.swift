@@ -311,6 +311,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // Persist the zoomed size so it survives reconnect (and updates the
                 // Settings font-size slider) — mirrors the raw-terminal pinch handler.
                 MainActor.assumeIsolated {
+                    DebugLog.shared.log(.gesture, "gesture:pinch fontSize=\(baseFontSize)")
                     let store = AppStores.shared.terminalSettings
                     if store.settings.fontSize != baseFontSize {
                         store.settings.fontSize = baseFontSize
