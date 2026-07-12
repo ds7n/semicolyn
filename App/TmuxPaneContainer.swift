@@ -250,7 +250,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 gestureControllers[key] = controller
                 // Re-enable pinch after the controller's sweep disabled pre-existing recognizers.
                 pinch.isEnabled = true
-                DebugLog.shared.log("scroll:init isScrollEnabled=\(view.isScrollEnabled) nativePan=\(view.panGestureRecognizer.isEnabled) contentSize=\(view.contentSize) offset=\(view.contentOffset)")
+                DebugLog.shared.log(.seed, "scroll:init isScrollEnabled=\(view.isScrollEnabled) nativePan=\(view.panGestureRecognizer.isEnabled) contentSize=\(view.contentSize) offset=\(view.contentOffset)")
             }
         }
 
@@ -358,7 +358,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Diagnostic (build 28, key-repeat investigation) — see TerminalScreen.send.
             // (Delegate callback is a nonisolated context; hop to the main actor.)
             MainActor.assumeIsolated {
-                DebugLog.shared.log("tmux send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
+                DebugLog.shared.log(.tmux, "tmux send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
             }
             send(Array(data))
         }
@@ -538,7 +538,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             for rect in rects {
                 let existed = panes[rect.pane] != nil
                 let view = panes[rect.pane] ?? {
-                    DebugLog.shared.log("pane \(rect.pane) CREATE TerminalView (reattach makes a fresh view)")
+                    DebugLog.shared.log(.tmux, "pane \(rect.pane) CREATE TerminalView (reattach makes a fresh view)")
                     let t = TerminalView(frame: .zero)
                     t.terminalDelegate = coordinator
                     // Our keybar IS this pane's input accessory view (a real UIInputView
@@ -572,9 +572,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     if !singlePane { view.layer.borderColor = activeBorderColor.cgColor }
                     if !view.isFirstResponder {
                         let ok = view.becomeFirstResponder()
-                        DebugLog.shared.log("pane \(rect.pane) ACTIVE existed=\(existed) inWindow=\(view.window != nil) becomeFirstResponder→\(ok) isFR=\(view.isFirstResponder)")
+                        DebugLog.shared.log(.tmux, "pane \(rect.pane) ACTIVE existed=\(existed) inWindow=\(view.window != nil) becomeFirstResponder→\(ok) isFR=\(view.isFirstResponder)")
                     } else {
-                        DebugLog.shared.log("pane \(rect.pane) ACTIVE already firstResponder")
+                        DebugLog.shared.log(.tmux, "pane \(rect.pane) ACTIVE already firstResponder")
                     }
                 } else {
                     view.layer.borderColor = inactiveBorderColor.cgColor
