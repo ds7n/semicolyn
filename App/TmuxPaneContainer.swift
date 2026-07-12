@@ -67,6 +67,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
         // Wire the coordinator's cache-invalidation hook so a pinch font change
         // forces pane-rect metrics to recompute on the next layout pass.
         context.coordinator.onInvalidateCachedCell = { [weak v] in v?.invalidateCachedCell() }
+        // Refresh mouse-dot visibility immediately on a mode transition, rather than
+        // waiting for the next SwiftUI `updateUIView` pass.
+        context.coordinator.modeTracker.onChange = { [weak v] _, _ in
+            guard let v else { return }
+            v.coordinator?.updateMouseDots(for: v.panes)
+        }
         return v
     }
 
@@ -127,6 +133,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
         var onSwitchWindow: (Int) -> Void = { _ in }
         var onZoomActivePane: () -> Void = { }
         var onPlaceCursor: (TerminalView, Int, Int) -> Void = { _, _, _ in }
+        /// Tracks each pane's `InteractionMode`, recomputed from `PaneTerminalView`'s
+        /// `bufferActivated`/`mouseModeChanged` overrides (event-driven, replaces the
+        /// old render-time poll in `updateMouseDots`).
+        let modeTracker = PaneModeTracker()
         /// Baseline font size for pinch-zoom; shared across all panes in this window.
         /// Updated on `.ended`; persists for the window's lifetime only (not stored to host — v1.5+).
         var baseFontSize: Double
@@ -326,24 +336,24 @@ struct TmuxPaneContainer: UIViewRepresentable {
             pinchRecognizers[key]?.view as? TerminalView
         }
 
-        /// Poll mouse mode for each visible pane and update dot + gesture state.
+        /// Update dot + gesture state for each visible pane from the event-driven
+        /// `modeTracker` (no longer polls terminal state here — `PaneTerminalView`'s
+        /// `bufferActivated`/`mouseModeChanged` overrides keep `modeTracker` current).
         ///
         /// Called from `updateUIView` on each SwiftUI pass.
         ///
         /// Mouse-forward gate: forward a drag to the app as a mouse event ONLY when the
-        /// pane's foreground app is on the ALTERNATE screen (vim/htop/less) — those apps
+        /// pane's mode is `.appOwnsInput` (alt-screen app: vim/htop/less) — those apps
         /// genuinely want the mouse. A NORMAL-screen app that merely turned mouse mode on
-        /// (a shell, a scrolling `tmux -CC` pane) must NOT capture the drag, or the finger
-        /// swipe is sent to tmux as SGR mouse reports (`ESC[<32;…M`) instead of scrolling
-        /// the local scrollback we seeded. Gating on `mouseMode != .off` alone (the old
-        /// behavior) stole every drag from any mouse-mode app and broke local scroll.
-        /// Matches iTerm2/WezTerm; `isCurrentBufferAlternate` is the same public SwiftTerm
-        /// API used by `SwiftTermEchoOracle`.
+        /// (a shell, a scrolling `tmux -CC` pane, `.mouseReporting`) must NOT capture the
+        /// drag, or the finger swipe is sent to tmux as SGR mouse reports
+        /// (`ESC[<32;…M`) instead of scrolling the local scrollback we seeded. Matches
+        /// iTerm2/WezTerm.
         func updateMouseDots(for panes: [PaneID: TerminalView]) {
-            for (_, view) in panes {
-                let terminal = view.getTerminal()
-                let forwardMouse = terminal.mouseMode != .off && terminal.isCurrentBufferAlternate
-                mouseDots[ObjectIdentifier(view)]?.isHidden = !forwardMouse
+            for (id, view) in panes {
+                let mode = modeTracker.mode(for: id)
+                let forwardMouse = (mode == .appOwnsInput)
+                mouseDots[ObjectIdentifier(view)]?.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
                 // Alt-screen mouse app → let SwiftTerm forward mouse events; otherwise keep
                 // it off so a drag scrolls the local buffer and tap/long-press do
                 // reposition/selection (cursor-centric model).
@@ -545,7 +555,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 let existed = panes[rect.pane] != nil
                 let view = panes[rect.pane] ?? {
                     DebugLog.shared.log(.tmux, "pane \(rect.pane) CREATE TerminalView (reattach makes a fresh view)")
-                    let t = TerminalView(frame: .zero)
+                    let t = PaneTerminalView(frame: .zero)
                     t.terminalDelegate = coordinator
                     // Our keybar IS this pane's input accessory view (a real UIInputView
                     // audio-feedback context, so `playInputClick()` fires). iOS shows the
@@ -562,8 +572,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         // needs tmux copy-mode/capture-pane, a future capability.)
                         t.getTerminal().options.scrollback = s.scrollbackLines
                     }
+                    // Event-driven InteractionMode: `pane` (this pane's PaneID) is
+                    // captured directly by the closure — no reverse `paneID(for:)`
+                    // lookup needed, since this view is created for exactly this pane.
+                    let pane = rect.pane
+                    t.onModeRelevantChange = { [weak coordinator] term in
+                        coordinator?.modeTracker.recompute(for: pane, terminal: term)
+                    }
                     addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
                     coordinator?.installHalo(on: t)
+                    // Prime once at mount so a pane reattaching into a running
+                    // alt-screen app (vim/Claude) is correct from frame one.
+                    coordinator?.modeTracker.recompute(for: pane, terminal: t.getTerminal())
                     return t
                 }()
                 view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)

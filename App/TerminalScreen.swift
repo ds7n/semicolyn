@@ -53,8 +53,16 @@ struct TerminalScreen: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> TerminalView {
-        let terminal = TerminalView(frame: .zero)
+        let terminal = PaneTerminalView(frame: .zero)
         terminal.terminalDelegate = context.coordinator
+        // Event-driven InteractionMode: recompute on every alt-screen / mouse-mode
+        // transition (single-pane mount → nil key), then refresh the dot immediately.
+        terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] term in
+            coordinator?.modeTracker.recompute(terminal: term)
+        }
+        // Prime once at mount so a terminal that starts on the alt-screen (reattach
+        // into a running vim/Claude) is correct from frame one.
+        context.coordinator.modeTracker.recompute(terminal: terminal.getTerminal())
         // Our keybar IS the terminal's input accessory view now (a real UIInputView
         // audio-feedback context, so `playInputClick()` fires). This replaces both
         // SwiftTerm's built-in bar and the old `.safeAreaInset` keybar mount.
@@ -212,6 +220,10 @@ struct TerminalScreen: UIViewRepresentable {
         var didInitialFocus = false
         /// Retains the gesture layer for this terminal (replaces SwiftTerm's built-ins).
         var gestureController: TerminalGestureController?
+        /// Tracks this pane's `InteractionMode`, recomputed from `PaneTerminalView`'s
+        /// `bufferActivated`/`mouseModeChanged` overrides (event-driven, replaces the
+        /// old render-time poll in `updateMouseDot`).
+        let modeTracker = PaneModeTracker()
         /// The connection view model, weakly referenced so the coordinator doesn't
         /// extend its lifetime. Used only to source the password-line flag for the
         /// diagnostic keystroke-content gate in `send`.
@@ -236,6 +248,11 @@ struct TerminalScreen: UIViewRepresentable {
             self.mouseDot = dot
             super.init()
             halo.configure(color: UIColor(Color(theme.bell.edge)))
+            // Refresh the dot immediately on a mode transition, rather than waiting
+            // for the next SwiftUI `updateUIView` pass.
+            modeTracker.onChange = { [weak self] _, mode in
+                self?.mouseDot.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
+            }
         }
 
         /// Handles pinch-to-zoom on the TerminalView.
@@ -361,18 +378,20 @@ struct TerminalScreen: UIViewRepresentable {
             }
         }
 
-        /// Poll mouse mode from the terminal and update dot visibility / gesture state.
+        /// Update dot visibility / gesture state for `terminalView` from the
+        /// event-driven `modeTracker` (no longer polls terminal state here —
+        /// `PaneTerminalView`'s `bufferActivated`/`mouseModeChanged` overrides keep
+        /// `modeTracker` current).
         ///
         /// Called from `updateUIView` on each SwiftUI pass. Forward a drag as a mouse
-        /// event ONLY when the foreground app is on the ALTERNATE screen (vim/htop/less);
-        /// a normal-screen app that merely enabled mouse mode must not capture the drag,
-        /// or a swipe is sent as SGR mouse reports instead of scrolling locally. Mirrors
-        /// the tmux path (`TmuxPaneContainer.updateMouseDots`); `isCurrentBufferAlternate`
-        /// is the same public SwiftTerm API used by `SwiftTermEchoOracle`.
+        /// event ONLY when the mode is `.appOwnsInput` (alt-screen app: vim/htop/less);
+        /// a normal-screen app that merely enabled mouse mode (`.mouseReporting`) must
+        /// not capture the drag, or a swipe is sent as SGR mouse reports instead of
+        /// scrolling locally. Mirrors the tmux path (`TmuxPaneContainer.updateMouseDots`).
         func updateMouseDot(from terminalView: TerminalView) {
-            let terminal = terminalView.getTerminal()
-            let forwardMouse = terminal.mouseMode != .off && terminal.isCurrentBufferAlternate
-            mouseDot.isHidden = !forwardMouse
+            let mode = modeTracker.mode
+            let forwardMouse = (mode == .appOwnsInput)
+            mouseDot.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
             // Alt-screen mouse app → forward mouse events. Otherwise keep off so SwiftTerm's
             // pan scrolls and tap/long-press do reposition + selection (cursor-centric model).
             terminalView.allowMouseReporting = forwardMouse
