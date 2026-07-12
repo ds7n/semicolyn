@@ -68,13 +68,21 @@ updated on transition, not re-sampled") was unachievable because `isCurrentBuffe
 - `TerminalDelegate.mouseModeChanged(source:)` — *"invoked when the mouseMode property has
   changed."*
 
-Both are real delegate **events**. `getTerminal()` is public, and the tmux mount **already** sets
-the coordinator as the emulator's `terminalDelegate` (`TmuxPaneContainer.swift:549`). We simply do
-not implement those two methods yet — we ignore the events and poll on SwiftUI render instead. The
-fix for defect B is therefore the *opposite* of reverting to polling: **implement the two
-callbacks that already fire.** (Nuance: the *view*-level `TerminalViewDelegate` does not forward
-these two; the *emulator*-level `TerminalDelegate` does — that is the layer we hook, and it is the
-layer we are already on.)
+Both are real emulator-delegate **events** — the fix for defect B is event-driven, not polling.
+
+**Where we hook them (corrected 2026-07-12 by the Task 4 foundation gate).** These two methods
+belong to the *emulator* protocol `TerminalDelegate` (`Terminal.swift`), NOT the app-facing
+`TerminalViewDelegate` our mount coordinators conform to. SwiftTerm wires the emulator's delegate
+slot (`tdel`) to the `TerminalView` **instance itself** (`Terminal(delegate: self, …)`), and it is
+not reassignable from app code — so implementing these methods on the coordinator would be dead
+code (verified against SwiftTerm `main` + v1.14.0: `TerminalViewDelegate` does not declare either
+method; `TerminalView` provides `open func bufferActivated`/`mouseModeChanged` doing internal-only
+work with no forwarding). **SwiftTerm's intended extension point is to subclass `TerminalView` and
+override those `open` methods.** So the hook is a thin `final class PaneTerminalView: TerminalView`
+that overrides both, calls `super` first (preserving SwiftTerm's own scroller / mouse-pan side
+effects), then forwards to the pane's `PaneModeTracker.recompute(...)`. Both mounts already
+construct `TerminalView(frame:)` at a single site each and type their pane registries as
+`TerminalView`, so substituting the subclass is a contained change.
 
 The critique's remaining findings were valid and are folded into this design (see §6).
 
@@ -105,10 +113,12 @@ public func resolveMode(isAltScreen: Bool, mouseReporting: Bool) -> InteractionM
 This one pure function is the **single source of truth**, called from both mount sites and the
 controller — killing the duplicated derivation and satisfying rule 3.
 
-**Mode updates via events, not polling (fixes defect B):** each mount's coordinator implements
-`bufferActivated(source:)` and `mouseModeChanged(source:)`. Each recomputes `resolveMode(...)`
-for the affected pane, stores it, and pushes it to that pane's gesture controller and mouse-dot.
-The render-time polling in `updateMouseDots` / `updateMouseDot` is deleted.
+**Mode updates via events, not polling (fixes defect B):** the `PaneTerminalView` subclass (see
+§2.1) overrides `bufferActivated(source:)` and `mouseModeChanged(source:)`; each override
+`super`-calls, then invokes `PaneModeTracker.recompute(...)` for that pane. The tracker recomputes
+`resolveMode(...)`, stores it, and (on a real transition) pushes it to that pane's gesture
+controller and mouse-dot. The render-time polling in `updateMouseDots` / `updateMouseDot` is
+deleted.
 
 **Per-pane storage:** the tmux path holds mode keyed by pane (it already keys views by pane); the
 raw-SSH path holds a single mode. The controller reads the *stored* mode for its pane and
@@ -177,9 +187,10 @@ Per the repo's core rule (pure logic in Kit, Linux-tested; App = thin wiring).
 
 | Unit | Change |
 |---|---|
+| `PaneTerminalView.swift` *(new)* | `final class PaneTerminalView: TerminalView` overriding `open func bufferActivated`/`mouseModeChanged`: `super`-call, then a `onModeRelevantChange: (Terminal) -> Void` closure the mount wires to `PaneModeTracker.recompute`. The event seam SwiftTerm actually delivers to (see §2.1). |
 | `TerminalGestureController.swift` | Replace the single `mouseReportingActive()` guard with a `mode: () -> InteractionMode` provider + begin-time snapshot. Handlers `switch` on mode. Add `.changed`-phase arrow emission for `appOwnsInput`. Flip `isScrollEnabled` on transition. Add a byte-send callback for arrows/mouse. |
-| `TmuxPaneContainer.swift` | Implement `bufferActivated` / `mouseModeChanged` → recompute + store per-pane mode → push to that pane's controller. Delete the render-time mode-polling in `updateMouseDots` (keep only the mouse-dot *visual*, now sourced from the stored mode). |
-| `TerminalScreen.swift` | Same, single-pane. |
+| `TmuxPaneContainer.swift` | Construct panes as `PaneTerminalView`; wire each view's `onModeRelevantChange` → `modeTracker.recompute(for:terminal:)`; prime once at mount. Delete the render-time mode-polling in `updateMouseDots` (keep only the mouse-dot *visual*, now sourced from the stored mode). |
+| `TerminalScreen.swift` | Same, single-pane (`PaneTerminalView` + prime + delete `updateMouseDot` poll). |
 
 ### Shared helper (prevents mount-site divergence)
 

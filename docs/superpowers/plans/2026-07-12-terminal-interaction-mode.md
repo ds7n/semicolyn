@@ -354,18 +354,27 @@ Expected: PASS (all SemicolynKit + SeedKit tests). This is the last Linux-verifi
 
 ---
 
-## Task 4: Wire mode from delegate events (App) — the empirical foundation checkpoint
+## Task 4: Wire mode from `bufferActivated`/`mouseModeChanged` via a `PaneTerminalView` subclass (App) — the empirical foundation checkpoint
+
+> **CORRECTION (2026-07-12, from this task's own foundation gate):** the original plan
+> implemented `bufferActivated`/`mouseModeChanged` on the mount *coordinator*. That is
+> WRONG — verified against SwiftTerm `main` + v1.14.0: those two methods belong to the
+> *emulator* `TerminalDelegate`, whose slot SwiftTerm wires to the `TerminalView` INSTANCE
+> itself (not reassignable from app code). `TerminalViewDelegate` (what our coordinators
+> conform to) does not declare them. SwiftTerm's intended extension point is to **subclass
+> `TerminalView` and override the `open` methods**. This task now does that.
 
 **Files:**
 - Create: `App/PaneModeTracker.swift`
-- Modify: `App/TmuxPaneContainer.swift` (coordinator delegate methods; the `t.terminalDelegate = coordinator` site is already present ~line 549)
-- Modify: `App/TerminalScreen.swift` (coordinator delegate methods)
+- Create: `App/PaneTerminalView.swift` (`final class PaneTerminalView: TerminalView`)
+- Modify: `App/TmuxPaneContainer.swift` (construct `PaneTerminalView`; wire `onModeRelevantChange` → tracker; prime; delete poll)
+- Modify: `App/TerminalScreen.swift` (same, single-pane)
 
 **Interfaces:**
 - Consumes: `resolveMode(isAltScreen:mouseReporting:)`, `InteractionMode` (Task 1); `PaneID` (`struct PaneID: Hashable, Sendable { let raw: UInt32; init(raw:) }` — UInt32-backed, so a negative sentinel is impossible; the raw single-pane mount is keyed by `nil`).
-- Produces: `@MainActor final class PaneModeTracker` keyed by `PaneID?` (nil = single raw pane) with `func mode(for pane: PaneID?) -> InteractionMode`, `func recompute(for pane: PaneID?, terminal: Terminal)`, and an `onChange: (PaneID?, InteractionMode) -> Void` hook; plus single-pane conveniences `var mode` / `func recompute(terminal:)` that pass `nil`.
+- Produces: `@MainActor final class PaneModeTracker` keyed by `PaneID?` (nil = single raw pane) with `func mode(for pane: PaneID?) -> InteractionMode`, `func recompute(for pane: PaneID?, terminal: Terminal)`, and an `onChange: (PaneID?, InteractionMode) -> Void` hook; plus single-pane conveniences `var mode` / `func recompute(terminal:)` that pass `nil`. Also `final class PaneTerminalView: TerminalView` with `var onModeRelevantChange: ((Terminal) -> Void)?`.
 
-**Purpose of this task:** prove the delegate-event foundation *before* building routing on it. After this task, a device trace must show the mode flipping on entering/leaving Claude. If `bufferActivated`/`mouseModeChanged` do NOT fire in our build, stop and reassess here — cheaply — rather than after Tasks 5–8.
+**Purpose of this task:** prove the event foundation *before* building routing on it. After this task, a device trace must show the mode flipping on entering/leaving Claude. If the overrides do NOT fire in our build, stop and reassess here — cheaply — rather than after Tasks 5–8.
 
 - [ ] **Step 1: Create `PaneModeTracker`**
 
@@ -377,9 +386,10 @@ import SwiftTerm
 import SemicolynKit
 
 /// Holds each pane's tracked `InteractionMode`, recomputed from terminal state on
-/// `bufferActivated` / `mouseModeChanged` delegate events (NOT render-polling).
-/// Both mount-site coordinators embed one so the mode derivation lives in exactly
-/// one place. `PaneID` for tmux; the raw single-terminal mount uses the sentinel.
+/// `bufferActivated` / `mouseModeChanged` (delivered via the `PaneTerminalView`
+/// subclass overrides, NOT render-polling). Both mount sites own one so the mode
+/// derivation lives in exactly one place. Keyed by `PaneID?` — nil = the single raw
+/// (non-tmux) pane.
 @MainActor
 final class PaneModeTracker {
     // Keyed by PaneID? — nil is the single raw (non-tmux) pane. PaneID is UInt32-backed
@@ -409,34 +419,61 @@ final class PaneModeTracker {
 }
 ```
 
-- [ ] **Step 2: Implement the two delegate methods in the tmux coordinator**
+- [ ] **Step 2: Create the `PaneTerminalView` subclass (the real event seam)**
 
-In `App/TmuxPaneContainer.swift`, in the `Coordinator: NSObject, TerminalViewDelegate` (which is also set as each pane's `terminalDelegate` at ~line 549), add a `let modeTracker = PaneModeTracker()` stored property, and implement (map `source` → its `PaneID` via the existing pane/view registry):
+`App/PaneTerminalView.swift`:
 ```swift
-// MARK: TerminalDelegate — mode transitions (event-driven, replaces render-poll)
-func bufferActivated(source: Terminal) {
-    guard let pane = paneID(for: source) else { return }
-    modeTracker.recompute(for: pane, terminal: source)
-}
-func mouseModeChanged(source: Terminal) {
-    guard let pane = paneID(for: source) else { return }
-    modeTracker.recompute(for: pane, terminal: source)
+// SPDX-FileCopyrightText: 2026 True Positive LLC
+// SPDX-License-Identifier: GPL-3.0-only
+import SwiftTerm
+
+/// SwiftTerm delivers `bufferActivated` / `mouseModeChanged` (the alt-screen and
+/// mouse-mode transition events) to the `TerminalView` INSTANCE via the emulator
+/// `TerminalDelegate` — NOT to the app's `TerminalViewDelegate`. `TerminalView`
+/// declares them `open` for exactly this: subclass and override. We `super`-call
+/// first (preserve SwiftTerm's own scroller / mouse-pan-gesture side effects), then
+/// hand the live `Terminal` to `onModeRelevantChange`, which each mount wires to its
+/// `PaneModeTracker.recompute(...)`.
+final class PaneTerminalView: TerminalView {
+    /// Set by the mount right after construction. Called on every alt-screen or
+    /// mouse-mode transition with this view's emulator terminal.
+    var onModeRelevantChange: ((Terminal) -> Void)?
+
+    override func bufferActivated(source: Terminal) {
+        super.bufferActivated(source: source)
+        onModeRelevantChange?(source)
+    }
+    override func mouseModeChanged(source: Terminal) {
+        super.mouseModeChanged(source: source)
+        onModeRelevantChange?(source)
+    }
 }
 ```
-> `paneID(for: Terminal)` — add a small reverse lookup from the existing `paneViews: [PaneID: TerminalView]` map (`first { $0.value.getTerminal() === source }?.key`). If a helper already maps view→pane, reuse it.
+> Verify the two override signatures against the pinned SwiftTerm (`iOSTerminalView.swift`): they are `open func bufferActivated(source: Terminal)` / `open func mouseModeChanged(source: Terminal)`. Match them exactly (including the `source` label). If the pinned version's signature differs, match what's there and note it — do NOT invent a signature.
 
-- [ ] **Step 3: Implement the two delegate methods in the raw coordinator**
+- [ ] **Step 3: Construct `PaneTerminalView` at both mount sites + wire the tracker**
 
-In `App/TerminalScreen.swift`'s `Coordinator`, add `let modeTracker = PaneModeTracker()` and:
+Both mounts currently do `TerminalView(frame:)` at one site each (`TerminalScreen.swift:56`, `TmuxPaneContainer.swift:548`) and type pane registries as `[PaneID: TerminalView]`. Change the construction to `PaneTerminalView(frame:)` (subtyping covers every `TerminalView`-typed site — no registry retyping needed). Add `let modeTracker = PaneModeTracker()` to each mount's coordinator. Right after constructing each pane view, wire:
+
 ```swift
-func bufferActivated(source: Terminal) { modeTracker.recompute(terminal: source) }
-func mouseModeChanged(source: Terminal) { modeTracker.recompute(terminal: source) }
+// tmux (TmuxPaneContainer, where the pane view + PaneID are both in scope):
+let view = PaneTerminalView(frame: .zero)
+view.onModeRelevantChange = { [weak coordinator] term in
+    coordinator?.modeTracker.recompute(for: pane, terminal: term)   // `pane` = this pane's PaneID
+}
 ```
-> Confirm the raw mount sets the coordinator as the emulator delegate too (grep `terminalDelegate =` in this file). If it only relies on `TerminalViewDelegate`, add `terminalView.getTerminal().terminalDelegate = coordinator` at mount — the view delegate does NOT forward `bufferActivated`/`mouseModeChanged`; only the emulator delegate does.
+```swift
+// raw (TerminalScreen.makeUIView):
+let terminal = PaneTerminalView(frame: .zero)
+terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] term in
+    coordinator?.modeTracker.recompute(terminal: term)   // single-pane → nil key
+}
+```
+> `recompute` is `@MainActor`; the override runs on the main thread (SwiftTerm UI callbacks are main-thread), so a direct call is fine. If the compiler flags actor isolation, wrap in `MainActor.assumeIsolated { … }` following the existing pattern in `TmuxPaneContainer` (~line 360). Do NOT introduce a `paneID(for: Terminal)` reverse lookup — the tmux closure captures its own `pane` directly (each view knows which pane it is at construction).
 
 - [ ] **Step 4: Prime the mode once at pane mount**
 
-Delegate events only fire on *changes*. At each pane's mount (after the terminal exists), call `modeTracker.recompute(...)` once so a pane that starts on the alt-screen (reattach into a running vim) is correct from frame one. Tmux: in the pane-creation path where `t.terminalDelegate = coordinator` is set. Raw: in `makeUIView` after the terminal is built.
+The overrides only fire on *changes*. Right after wiring `onModeRelevantChange`, call `modeTracker.recompute(...)` once with the view's terminal (`view.getTerminal()`) so a pane that starts on the alt-screen (reattach into a running vim/Claude) is correct from frame one. Tmux: in the pane-creation path. Raw: in `makeUIView` after the terminal is built.
 
 - [ ] **Step 5: Delete the render-time mode poll (keep the mouse-dot visual)**
 
@@ -449,13 +486,13 @@ Push the branch; the `macos` CI job (~15–18 min) is the only compile signal. E
 - [ ] **Step 7: Device trace — PROVE the events fire (foundation gate)**
 
 On device with Diagnostics→gesture enabled: attach a tmux session, open a plain shell pane (expect `mode -> localScroll`), launch Claude Code (expect `mode -> appOwnsInput`), quit Claude (expect `mode -> localScroll`), run `htop` (expect `appOwnsInput`). Confirm the `mode[…] ->` log lines appear at each transition.
-Expected: transitions logged. **If no transition logs appear, STOP** — the emulator delegate isn't wired to fire; resolve that (Step 3 note) before proceeding.
+Expected: transitions logged. **If no transition logs appear, STOP** — the `PaneTerminalView` overrides aren't firing (wrong signature, or the constructed view isn't the subclass); re-check Step 2's signature match and Step 3's construction before proceeding.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add App/PaneModeTracker.swift App/TmuxPaneContainer.swift App/TerminalScreen.swift
-git commit -m "feat(terminal): event-driven InteractionMode via bufferActivated/mouseModeChanged (retire render-poll)"
+git add App/PaneModeTracker.swift App/PaneTerminalView.swift App/TmuxPaneContainer.swift App/TerminalScreen.swift
+git commit -m "feat(terminal): event-driven InteractionMode via PaneTerminalView override (retire render-poll)"
 ```
 
 ---
