@@ -242,7 +242,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
                             guard let view else { return }
                             self?.onPlaceCursor(view, col, row)
                         },
-                        mouseReportingActive: { [weak view] in view?.allowMouseReporting ?? false }
+                        mouseReportingActive: { [weak view] in view?.allowMouseReporting ?? false },
+                        hasSelection: { [weak view] in view?.selectionActive ?? false },
+                        clearSelection: { [weak view] in view?.selectNone() }
                     )
                 )
                 gestureControllers[key] = controller

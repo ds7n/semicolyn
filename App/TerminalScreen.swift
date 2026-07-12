@@ -119,7 +119,9 @@ struct TerminalScreen: UIViewRepresentable {
                     guard let terminal else { return }
                     coordinator?.placeCursor(toCol: col, toRow: row, in: terminal)
                 },
-                mouseReportingActive: { terminal.allowMouseReporting }
+                mouseReportingActive: { terminal.allowMouseReporting },
+                hasSelection: { [weak terminal] in terminal?.selectionActive ?? false },
+                clearSelection: { [weak terminal] in terminal?.selectNone() }
             )
         )
         context.coordinator.gestureController = gestureController
