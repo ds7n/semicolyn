@@ -329,17 +329,24 @@ struct TmuxPaneContainer: UIViewRepresentable {
         ///
         /// Called from `updateUIView` on each SwiftUI pass.
         ///
-        /// - Assumption: `TerminalView.getTerminal().mouseMode` returns a value that
-        ///   compares unequal to `.off` when mouse reporting is active.
-        ///   This is the best-known SwiftTerm 1.x public API; not verifiable on Linux.
+        /// Mouse-forward gate: forward a drag to the app as a mouse event ONLY when the
+        /// pane's foreground app is on the ALTERNATE screen (vim/htop/less) — those apps
+        /// genuinely want the mouse. A NORMAL-screen app that merely turned mouse mode on
+        /// (a shell, a scrolling `tmux -CC` pane) must NOT capture the drag, or the finger
+        /// swipe is sent to tmux as SGR mouse reports (`ESC[<32;…M`) instead of scrolling
+        /// the local scrollback we seeded. Gating on `mouseMode != .off` alone (the old
+        /// behavior) stole every drag from any mouse-mode app and broke local scroll.
+        /// Matches iTerm2/WezTerm; `isCurrentBufferAlternate` is the same public SwiftTerm
+        /// API used by `SwiftTermEchoOracle`.
         func updateMouseDots(for panes: [PaneID: TerminalView]) {
             for (_, view) in panes {
-                let mouseActive = view.getTerminal().mouseMode != .off
-                mouseDots[ObjectIdentifier(view)]?.isHidden = !mouseActive
-                // Mouse-reporting pane → allow SwiftTerm to forward mouse events; else keep
-                // it off so SwiftTerm's pan is a cursor-key scrub + its tap/long-press do
-                // reposition/selection (cursor-centric model). A tap in a mouse app clicks.
-                view.allowMouseReporting = mouseActive
+                let terminal = view.getTerminal()
+                let forwardMouse = terminal.mouseMode != .off && terminal.isCurrentBufferAlternate
+                mouseDots[ObjectIdentifier(view)]?.isHidden = !forwardMouse
+                // Alt-screen mouse app → let SwiftTerm forward mouse events; otherwise keep
+                // it off so a drag scrolls the local buffer and tap/long-press do
+                // reposition/selection (cursor-centric model).
+                view.allowMouseReporting = forwardMouse
             }
         }
 
