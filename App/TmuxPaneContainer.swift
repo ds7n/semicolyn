@@ -550,6 +550,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             for (id, view) in panes where !live.contains(id) {
                 view.resignFirstResponder()
                 coordinator?.removeHalo(from: view)
+                coordinator?.modeTracker.forget(id)
                 view.removeFromSuperview(); unregister(id); panes[id] = nil
             }
 

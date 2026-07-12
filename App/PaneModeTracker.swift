@@ -34,4 +34,11 @@ final class PaneModeTracker {
     // Single-pane conveniences for the raw mount.
     var mode: InteractionMode { mode(for: nil) }
     func recompute(terminal: Terminal) { recompute(for: nil, terminal: terminal) }
+
+    /// Drop a destroyed pane's tracked mode so a later pane reusing the same
+    /// `PaneID` recomputes from scratch (the dedup in `recompute` must not compare
+    /// against a dead pane's stale value). Call from the mount's pane-removal path.
+    func forget(_ pane: PaneID?) {
+        modes[pane] = nil
+    }
 }
