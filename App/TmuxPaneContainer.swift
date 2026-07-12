@@ -357,9 +357,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
             // Diagnostic (build 28, key-repeat investigation) — see TerminalScreen.send.
+            // Redacted the same way as the raw-SSH path: `.input` category (default OFF),
+            // gated by the keystrokeContent toggle, with password lines never logged.
             // (Delegate callback is a nonisolated context; hop to the main actor.)
             MainActor.assumeIsolated {
-                DebugLog.shared.log(.tmux, "tmux send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
+                let logContent = UserDefaults.standard.bool(forKey: RemoteLogConfig.keystrokeContentKey)
+                let isBackspace = data.count == 1 && (data.first == 0x7f || data.first == 0x08)
+                let event = isBackspace ? "deleteBackward" : "insertText"
+                let content = String(decoding: Array(data), as: UTF8.self)
+                let isPwd = self.vm?.currentLineIsPassword() ?? false
+                DebugLog.shared.log(.input, "key:\(keystrokeLogDecision(event: event, content: content, logContent: logContent, isPasswordLine: isPwd))")
             }
             send(Array(data))
         }
