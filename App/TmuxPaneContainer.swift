@@ -242,13 +242,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
                             guard let view else { return }
                             self?.onPlaceCursor(view, col, row)
                         },
-                        mouseReportingActive: { [weak view] in view?.allowMouseReporting ?? false }
+                        mouseReportingActive: { [weak view] in view?.allowMouseReporting ?? false },
+                        hasSelection: { [weak view] in view?.selectionActive ?? false },
+                        clearSelection: { [weak view] in view?.selectNone() }
                     )
                 )
                 gestureControllers[key] = controller
                 // Re-enable pinch after the controller's sweep disabled pre-existing recognizers.
                 pinch.isEnabled = true
-                DebugLog.shared.log("scroll:init isScrollEnabled=\(view.isScrollEnabled) nativePan=\(view.panGestureRecognizer.isEnabled) contentSize=\(view.contentSize) offset=\(view.contentOffset)")
+                DebugLog.shared.log(.seed, "scroll:init isScrollEnabled=\(view.isScrollEnabled) nativePan=\(view.panGestureRecognizer.isEnabled) contentSize=\(view.contentSize) offset=\(view.contentOffset)")
             }
         }
 
@@ -309,6 +311,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // Persist the zoomed size so it survives reconnect (and updates the
                 // Settings font-size slider) — mirrors the raw-terminal pinch handler.
                 MainActor.assumeIsolated {
+                    DebugLog.shared.log(.gesture, "gesture:pinch fontSize=\(baseFontSize)")
                     let store = AppStores.shared.terminalSettings
                     if store.settings.fontSize != baseFontSize {
                         store.settings.fontSize = baseFontSize
@@ -354,9 +357,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
             // Diagnostic (build 28, key-repeat investigation) — see TerminalScreen.send.
+            // Redacted the same way as the raw-SSH path: `.input` category (default OFF),
+            // gated by the keystrokeContent toggle, with password lines never logged.
             // (Delegate callback is a nonisolated context; hop to the main actor.)
             MainActor.assumeIsolated {
-                DebugLog.shared.log("tmux send[\(data.count)B]: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
+                let logContent = UserDefaults.standard.bool(forKey: RemoteLogConfig.keystrokeContentKey)
+                let isBackspace = data.count == 1 && (data.first == 0x7f || data.first == 0x08)
+                let event = isBackspace ? "deleteBackward" : "insertText"
+                let content = String(decoding: Array(data), as: UTF8.self)
+                let isPwd = self.vm?.currentLineIsPassword() ?? false
+                DebugLog.shared.log(.input, "key:\(keystrokeLogDecision(event: event, content: content, logContent: logContent, isPasswordLine: isPwd))")
             }
             send(Array(data))
         }
@@ -424,6 +434,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Cached cell metrics so we don't re-measure the font on every layout pass.
         /// Nil'd by `invalidateCachedCell()` after a pinch font change.
         private var cachedCell: (w: Double, h: Double)?
+
+        /// Last-applied render signature. `apply(state:)` skips the (expensive) pane re-layout
+        /// when the new state's signature matches — the SwiftUI `updateUIView` pass fires far
+        /// more often than the rendered layout actually changes (the render storm).
+        private var lastRenderSignature: RenderSignature?
 
         /// Clears the cached cell metrics so `resolvedCell()` re-measures on the next
         /// layout pass. Called by the coordinator's `onInvalidateCachedCell` hook after
@@ -504,7 +519,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
                    unregister: (PaneID) -> Void,
                    activeBorderColor: UIColor,
                    inactiveBorderColor: UIColor) {
-            DebugLog.shared.log("tmux:render active=\(String(describing: state.activeWindow)) windows=\(state.windows.count) panes=\(state.windows.first { $0.id == state.activeWindow }?.visibleLayout?.panes.count ?? -1)")
+            let sig = RenderSignature(state)
+            guard sig != lastRenderSignature else { return }   // unchanged → skip re-layout
+            let reason = renderChangeReason(old: lastRenderSignature, new: sig, state: state)
+            lastRenderSignature = sig
+            DebugLog.shared.log(.render, "render:panes reason=\(reason) active=\(state.activeWindow.map { "@\($0.raw)" } ?? "nil") windows=\(state.windows.count) panes=\(state.activeWindow.flatMap { state.window($0) }?.visibleLayout?.panes.count ?? -1)")
             guard let win = state.activeWindow, let window = state.window(win),
                   let layout = window.visibleLayout else { return }
 
@@ -527,7 +546,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             for rect in rects {
                 let existed = panes[rect.pane] != nil
                 let view = panes[rect.pane] ?? {
-                    DebugLog.shared.log("pane \(rect.pane) CREATE TerminalView (reattach makes a fresh view)")
+                    DebugLog.shared.log(.tmux, "pane \(rect.pane) CREATE TerminalView (reattach makes a fresh view)")
                     let t = TerminalView(frame: .zero)
                     t.terminalDelegate = coordinator
                     // Our keybar IS this pane's input accessory view (a real UIInputView
@@ -561,15 +580,21 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     if !singlePane { view.layer.borderColor = activeBorderColor.cgColor }
                     if !view.isFirstResponder {
                         let ok = view.becomeFirstResponder()
-                        DebugLog.shared.log("pane \(rect.pane) ACTIVE existed=\(existed) inWindow=\(view.window != nil) becomeFirstResponder→\(ok) isFR=\(view.isFirstResponder)")
+                        DebugLog.shared.log(.tmux, "pane \(rect.pane) ACTIVE existed=\(existed) inWindow=\(view.window != nil) becomeFirstResponder→\(ok) isFR=\(view.isFirstResponder)")
                     } else {
-                        DebugLog.shared.log("pane \(rect.pane) ACTIVE already firstResponder")
+                        DebugLog.shared.log(.tmux, "pane \(rect.pane) ACTIVE already firstResponder")
                     }
                 } else {
                     view.layer.borderColor = inactiveBorderColor.cgColor
                     view.layer.borderWidth = singlePane ? 0 : 0.5
                 }
             }
+        }
+
+        /// Why a render fired — for the `.render` diagnostic. Compares the previous signature-
+        /// bearing state to the new one via cheap field checks. Best-effort labeling.
+        private func renderChangeReason(old: RenderSignature?, new: RenderSignature, state: TmuxSessionState) -> String {
+            old == nil ? "initial" : "changed"
         }
     }
 }

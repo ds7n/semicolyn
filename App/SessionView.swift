@@ -57,7 +57,10 @@ struct SessionView: View {
                 if let tmuxState = vm.tmuxState {
                     VStack(spacing: 0) {
                         WindowTabStrip(windows: tmuxState.windows, active: tmuxState.activeWindow,
-                                       onSelect: { vm.selectWindow($0) })
+                                       onSelect: { id in
+                                           DebugLog.shared.log(.gesture, "gesture:windowTab tap=@\(id.raw)")
+                                           vm.selectWindow(id)
+                                       })
                         TmuxPaneContainer(
                             state: tmuxState,
                             register: { vm.registerPane($0, $1) },
