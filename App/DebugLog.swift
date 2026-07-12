@@ -38,10 +38,34 @@ final class DebugLog: ObservableObject {
 
     private init() {}
 
-    /// Record one diagnostic line — but ONLY when enabled. The message is an
-    /// autoclosure, so when disabled nothing is evaluated (zero sacred-path cost).
-    func log(_ message: @autoclosure () -> String) {
-        guard enabled else { return }
+    /// Categories currently enabled (cached; refreshed by `refreshEnabledCategories`).
+    /// Seeded from each category's `@AppStorage` value, falling back to its default.
+    private var enabledCategories: Set<LogCategory> = {
+        var set = Set<LogCategory>()
+        for c in LogCategory.allCases {
+            let key = c.storageKey
+            let on = UserDefaults.standard.object(forKey: key) as? Bool ?? c.defaultOn
+            if on { set.insert(c) }
+        }
+        return set
+    }()
+
+    /// Re-read every category toggle from UserDefaults. Call when the Diagnostics
+    /// category settings change (e.g. `DiagnosticsSettingsView.onAppear` / onChange).
+    func refreshEnabledCategories() {
+        var set = Set<LogCategory>()
+        for c in LogCategory.allCases {
+            let on = UserDefaults.standard.object(forKey: c.storageKey) as? Bool ?? c.defaultOn
+            if on { set.insert(c) }
+        }
+        enabledCategories = set
+    }
+
+    /// Record one diagnostic line in `category` — ONLY when diagnostics is enabled AND the
+    /// category is on. The message is an autoclosure: nothing is evaluated when gated out
+    /// (zero sacred-path cost). `category` defaults to `.lifecycle` for legacy call sites.
+    func log(_ category: LogCategory = .lifecycle, _ message: @autoclosure () -> String) {
+        guard enabled, enabledCategories.contains(category) else { return }
         let now = Date().timeIntervalSinceReferenceDate
         if start == nil { start = now }
         let t = now - (start ?? now)
