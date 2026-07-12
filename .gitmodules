@@ -1,3 +1,9 @@
 [submodule "extern/mosh"]
 	path = extern/mosh
 	url = https://github.com/blinksh/mosh.git
+[submodule "extern/eternaltermlib"]
+	path = extern/eternaltermlib
+	url = https://github.com/ds7n/eternaltermlib.git
+[submodule "extern/swift-sodium"]
+	path = extern/swift-sodium
+	url = https://github.com/jedisct1/swift-sodium.git
