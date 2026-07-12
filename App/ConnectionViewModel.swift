@@ -1077,6 +1077,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         for b in bytes where b == 0x0d || b == 0x0a {
             predictorVM.setSuggestions([])   // line committed → clear stale chips immediately
+            // This closure runs on the main queue and touches @MainActor state (passwordDetector,
+            // pendingLineTokens) and the @MainActor DebugLog directly — legal via the closure's
+            // inferred main-actor isolation. If ever extracted to a @Sendable/non-capturing form,
+            // the DebugLog + self accesses need an explicit MainActor.assumeIsolated/await.
             DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(10)) { [weak self] in
                 guard let self else { return }
                 let echoConfirmed = self.passwordDetector.shouldLearnCommittedLine()
