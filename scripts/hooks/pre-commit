@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 True Positive LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Pre-commit guard. Blocks the commit when a STAGED path matches a known
+# "should never be committed" pattern — the strays that a broad `git add -A`
+# has swept in before (harness bind-mounts, an unexpanded `$TMPDIR` path, scratch
+# screenshots, MCP/IDE/shell-rc dotfiles). Catches them even when `.gitignore` is
+# bypassed with `git add -f`.
+#
+# Install once per clone:  git config core.hooksPath scripts/hooks
+# (or run scripts/hooks/install.sh). Bypass a false positive with `git commit --no-verify`.
+#
+# A LOCAL, gitignored overlay at .git/hooks/pre-commit.local (if present and
+# executable) is run first — that's where per-user checks (e.g. a personal-name
+# scan) live, so they never enter the tracked/public repo.
+set -euo pipefail
+
+red() { printf '\033[31m%s\033[0m\n' "$1"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$1"; }
+
+# 1) Run the optional local overlay first (per-user, gitignored). Reference it via
+#    the real .git dir — NOT `git rev-parse --git-path hooks/...`, which resolves
+#    against core.hooksPath (i.e. scripts/hooks/) once that's set, so it would never
+#    find the overlay in .git/hooks/.
+git_dir="$(git rev-parse --git-dir)"
+local_hook="$git_dir/hooks/pre-commit.local"
+if [[ -x "$local_hook" ]]; then
+    "$local_hook" || exit 1
+fi
+
+# 2) Junk-path patterns (basic regex, matched against each staged path).
+#    Anchored to the repo root (^) where these strays land.
+patterns=(
+    '^\.mcp\.json$'
+    '^\.claude/'
+    '^\.idea($|/)'
+    '^\.vscode($|/)'
+    '^\.bashrc$' '^\.bash_profile$' '^\.bash_login$' '^\.profile$'
+    '^\.zshrc$' '^\.zprofile$' '^\.gitconfig$' '^\.ripgreprc$'
+    '^\.netrc$' '^\.npmrc$'
+    '\$TMPDIR'                                   # literal unexpanded $TMPDIR anywhere
+    '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\.png$'  # UUID screenshot
+    '\.DS_Store$'
+    '\.swp$' '\.orig$'
+)
+
+# Staged file paths (added/copied/modified/renamed), NUL-safe.
+mapfile -d '' -t staged < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+blocked=()
+for f in "${staged[@]:-}"; do
+    [[ -z "$f" ]] && continue
+    for p in "${patterns[@]}"; do
+        if [[ "$f" =~ $p ]]; then
+            blocked+=("$f")
+            break
+        fi
+    done
+done
+
+if ((${#blocked[@]})); then
+    red "✗ pre-commit: refusing to commit files that must never be tracked:"
+    for f in "${blocked[@]}"; do printf '    %s\n' "$f"; done
+    yellow "These are usually scratch/harness/dev-local files swept in by 'git add -A'."
+    yellow "Unstage them:  git restore --staged <file>   (or 'git rm --cached' if already tracked)"
+    yellow "If this is a deliberate exception:  git commit --no-verify"
+    exit 1
+fi
+
+exit 0
