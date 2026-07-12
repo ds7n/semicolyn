@@ -5,10 +5,13 @@ import SwiftTerm
 import SemicolynKit
 
 /// Owns the terminal touch map for a single `TerminalView`, replacing SwiftTerm's
-/// built-in tap/long-press recognizers. Single-finger vertical drag scrolls via the
-/// terminal's NATIVE `UIScrollView` pan (kept enabled — we do not fight it); a
-/// horizontal drag on that same native pan switches tmux windows (one per drag, on
-/// release, via `GestureClassifier` + the mount's clamp); single tap places the cursor;
+/// built-in tap/long-press recognizers. In `.localScroll` a single-finger vertical
+/// drag scrolls via the terminal's NATIVE `UIScrollView` pan (kept enabled — we do
+/// not fight it); in `.appOwnsInput` (alt-screen) the mount parks that pan
+/// (`isScrollEnabled = false`) and this controller streams the drag to the app as
+/// arrow-key runs. A horizontal drag on the native pan switches tmux windows (one per
+/// drag, on release, via `GestureClassifier` + the mount's clamp); single tap places
+/// the cursor (in `.localScroll`; other modes yield the tap to the app);
 /// double/triple-tap word/line-select; long-press zooms the tmux pane; two-finger
 /// tap shows the edit menu. Routing is mode-driven: the mount tracks each pane's
 /// `InteractionMode` (`.localScroll` / `.appOwnsInput` / `.mouseReporting`) and this
@@ -32,8 +35,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let onSwitchWindow: (Int) -> Void
         let onLongPressZoom: () -> Void
         let onPlaceCursor: (_ toCol: Int, _ toRow: Int) -> Void
-        /// The pane's current `InteractionMode`, snapshotted once at drag `.began` /
-        /// read fresh on each tap (replaces the old binary `mouseReportingActive` gate).
+        /// The pane's current `InteractionMode`: snapshotted once at drag `.began`,
+        /// and read fresh on each tap. The single source of truth for gesture routing.
         let currentMode: () -> InteractionMode
         /// DECCKM (application-cursor-keys) state, snapshotted at drag `.began` so a
         /// single drag encodes consistently even if the app flips the mode mid-drag.
