@@ -28,6 +28,24 @@
 .env
 /data/
 
+# Local dev/tooling state that must NEVER be committed — these are the user's
+# shell rc files, IDE dirs, MCP registration, and Claude Code harness placeholders
+# that a `git add -A` swept in once (commit 54465ba). Ignore so they can't recur.
+/.mcp.json
+/.claude/
+/.idea/
+/.vscode/
+/.bashrc
+/.bash_profile
+/.bash_login
+/.profile
+/.zshrc
+/.zprofile
+/.gitconfig
+/.ripgreprc
+/.netrc
+/.npmrc
+
 # Build-time seed artifacts (produced by scripts/build-seed.sh; bundled later)
 /seeds/
 
