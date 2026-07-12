@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 import Network
+import UIKit
 import SemicolynKit
 
 /// Streams diagnostic lines to a developer-run syslog server over UDP/TCP/TLS.
@@ -23,8 +24,14 @@ final class RemoteLogSink {
         self.host = NWEndpoint.Host(host)
         self.port = NWEndpoint.Port(rawValue: UInt16(clamping: port)) ?? 6514
         self.transport = transport
-        // Device name as syslog HOSTNAME; trimmed to a reasonable token.
-        self.hostname = ProcessInfo.processInfo.hostName
+        // Syslog HOSTNAME token. MUST NOT use `ProcessInfo.hostName` / `UIDevice.name`:
+        // on iOS those do a synchronous mDNS/reverse-DNS lookup that blocks the main
+        // thread for seconds AND triggers the Local Network permission prompt (Apple:
+        // the local-network alert is triggered by `-[NSProcessInfo hostName]`). This
+        // ran in `.onAppear` → opening Diagnostics froze the app. `identifierForVendor`
+        // + model are local, instant, and never touch the network.
+        let vendorID = UIDevice.current.identifierForVendor?.uuidString.prefix(8) ?? "device"
+        self.hostname = "\(UIDevice.current.model)-\(vendorID)"
         start()
     }
 
