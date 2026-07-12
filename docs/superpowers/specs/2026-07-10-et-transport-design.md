@@ -10,6 +10,10 @@ SPDX-License-Identifier: GPL-3.0-only
 (`eternaltermlib`) is SHIPPED + CI-green in `ds7n/eternaltermlib`;** the remaining work (§2–§5)
 is semicolyn-side (xcframework build, `libetios` wrapper, russh bootstrap, probe/fallback,
 Transport picker).
+**Priority (2026-07-12):** ET is the user's **primary/targeted connection mode** (over raw SSH
+or Mosh), so it is prioritized **ahead of roadmap Tracks 1 & 2** (previously "one track at a
+time, T1→T2→T3"). The **no-Auto decision** (§5) removes ET's only dependency on Track 2, so ET
+can proceed independently.
 **Related:** transport/tmux roadmap Track 3 (`docs/brainstorming-decisions.md`; memory
 `mosh-tmux-et-modes-roadmap`, `et-transport-brainstorm`); the Mosh integration this mirrors
 (`docs/superpowers/specs/*mosh*`, `extern/mosh/`, `App/Mosh/MoshSession.mm`,
@@ -250,19 +254,50 @@ Mirroring the Mosh `onFirstFrame`/`onEnd` degradation we already ship:
 
 Today a Mosh-enabled host **silently wins** — `ConnectionViewModel` returns on the Mosh path
 before tmux/SSH is considered. With three transports this is untenable (a panes+roaming user
-would silently get Mosh, which has no panes). So:
+would silently get Mosh, which has no panes). The fix is an **explicit, exclusive per-host
+choice** — no auto-selection.
 
-- Add an explicit per-host **Transport** field: **Auto / SSH / Mosh / ET** (Auto default).
-- A non-Auto choice forces that transport (and falls back per §4 if it can't connect).
-- **Auto**'s exact precedence is deferred to coordinate with roadmap **Track 2** (the per-host
-  "Startup command" / connection-model rework) so Transport + Startup-command land as one
-  coherent host-connection UI, not two bolted-on fields.
+**Decision (2026-07-12): NO Auto mode.** The user picks exactly one transport per host —
+**SSH / Mosh / ET** — to the exclusion of the others. Rationale:
+
+- **Auto's cost is disproportionate to its value.** The only thing that forced ET to depend on
+  Track 2 was defining Auto's precedence; dropping Auto removes that coupling entirely. Auto's
+  precedence is genuinely hard (capability-max? configured-first? probe-and-rank?), interacts
+  with fallback, and produces "why did it connect with X?" confusion.
+- **Transport choice has real, user-visible tradeoffs the user wants to own** (ET needs
+  `etserver`; Mosh has no panes; SSH roams poorly). A silent Auto that guesses wrong is exactly
+  the current Mosh-silently-wins bug we're fixing.
+- **Fallback ≠ Auto.** Graceful degradation stays without Auto: an explicit "ET" that can't
+  connect still falls back to SSH + a banner (§4). Only the up-front *guessing* is removed.
+
+Design:
+
+- Per-host **Transport** field: **SSH / Mosh / ET**, exactly one selected. **Default: SSH** (the
+  universally-available baseline — no `etserver`/`etterminal`, no UDP). Per-host transport is a
+  **first-class feature**, not an afterthought: the user deliberately opts a host up to ET or
+  Mosh.
+- The chosen transport is attempted; on failure it falls back to SSH per §4 (banner, no
+  dead-end). No silent cross-transport selection.
+- **UI must surface each transport's pros/cons inline** so the choice is informed (not a bare
+  segmented control). Guidance to convey per option:
+  - **SSH** — works everywhere; native `tmux -CC` panes; **does not survive roaming** (drops on
+    IP change / sleep).
+  - **Mosh** — survives roaming; **no native panes** (`tmux -CC` can't run over Mosh); needs
+    `mosh-server` + a UDP port range.
+  - **ET** — **panes *and* roaming together**; needs `etserver`/`etterminal` on the host + TCP
+    2022 reachable; falls back to SSH if unavailable.
+- Pure resolution logic (selected transport → attempt/fallback decision) lives in
+  `Sources/SemicolynKit/` as Linux-tested helpers, replacing the implicit Mosh-wins branch in
+  `ConnectionViewModel`.
+- **No dependency on Track 2.** (Previously Auto's precedence was deferred to coordinate with
+  the Track-2 Startup-command rework; with Auto gone, the Transport picker is independent and
+  ET no longer waits on Track 2.)
 
 ## Data flow
 
 ```
 connect → russh SSH session established
-        → [Transport picker] ET selected (or Auto→ET)
+        → [Transport picker] ET selected (explicit per-host choice; no Auto)
         → probe etterminal + plant '<id>/<passkey>_<TERM>' | etterminal   (§3)
         → libetios builds et_config → et_connect(&cfg, &cbs, ctx)          (§1)
         → ET TCP stream established (libsodium secretbox)
@@ -336,7 +371,9 @@ observable values, negative tests assert the *specific* failure):
 
 ## Open items (deferred to implementation / plan)
 
-- **Auto-precedence order** (Transport=Auto) — coordinate with Track 2. *(still open)*
+- ~~Auto-precedence order (Transport=Auto) — coordinate with Track 2~~ **RESOLVED 2026-07-12:
+  Auto dropped** (explicit exclusive SSH/Mosh/ET per host, default SSH). Removes the Track-2
+  coupling; ET no longer waits on Track 2.
 - ~~Exact final `libet` C-ABI function list~~ **RESOLVED** — the shipped `eternaltermlib` ABI is
   fixed (see §1): `et_connect(&cfg,&cbs,ctx)` / `et_send` / `et_set_window_size` / `et_close`.
 - ~~`libet` repo scaffolding: name, license, CI shape~~ **RESOLVED** — `ds7n/eternaltermlib`,
