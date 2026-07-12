@@ -14,6 +14,9 @@ public struct RenderSignature: Equatable, Sendable {
     private let windowIDs: [WindowID]
     private let activeName: String?
     private let activeVisibleLayout: PaneLayout?
+    /// The active window's active pane. Included because the renderer draws a border on the
+    /// active pane, so a focus move within the active window changes the rendered output.
+    private let activePane: PaneID?
 
     public init(_ state: TmuxSessionState) {
         self.activeWindow = state.activeWindow
@@ -21,5 +24,6 @@ public struct RenderSignature: Equatable, Sendable {
         let active = state.activeWindow.flatMap { state.window($0) }
         self.activeName = active?.name
         self.activeVisibleLayout = active?.visibleLayout
+        self.activePane = active?.activePane
     }
 }
