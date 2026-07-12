@@ -34,8 +34,9 @@ final class PredictorEngineTests: XCTestCase {
         e.harvest(output: "\u{1b}[38;2;122;162;247muser\u{1b}[0m@host")
         // The visible text is suggestable with the color codes gone. The reset
         // `\u{1b}[0m` between `user` and `@host` is stripped, so they fuse into
-        // one contiguous token (correct — no whitespace ever separated them).
-        XCTAssertEqual(e.suggestions(forPrefix: "djm"), ["user@host"])
+        // one contiguous token (correct — no whitespace ever separated them), and
+        // that token surfaces when its own visible prefix is typed.
+        XCTAssertEqual(e.suggestions(forPrefix: "user"), ["user@host"])
         // Crucially, nothing beginning with an escape or its SGR numeric params is
         // suggestable — the escape codes never entered the vocabulary.
         XCTAssertTrue(e.suggestions(forPrefix: "\u{1b}").isEmpty,

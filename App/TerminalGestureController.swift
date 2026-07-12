@@ -144,10 +144,15 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let cellW = view.bounds.width / CGFloat(cols)
         let cellH = view.bounds.height / CGFloat(rows)
         guard cellW > 0, cellH > 0 else { return (0, 0) }
+        // `point` is `gesture.location(in: view)`. SwiftTerm's own tap-hit math
+        // (`calculateTapHit`) maps this DIRECTLY: row = point.y / cellHeight, with NO
+        // `contentOffset` arithmetic — the gesture point is already in the coordinate
+        // space SwiftTerm's selection/cursor APIs expect. The previous `+ contentOffset.y`
+        // / `- Int(contentOffset.y / cellH)` juggling double-counted the offset and left a
+        // rounding residue that grew with scroll distance (device bug: double/triple-tap
+        // selected a row far above the tap once the buffer had scrolled). Match SwiftTerm.
         let col = min(cols - 1, max(0, Int(point.x / cellW)))
-        // Account for scrollback offset: the visible top row is contentOffset.y / cellH.
-        let visualRow = Int((point.y + view.contentOffset.y) / cellH)
-        let row = min(rows - 1, max(0, visualRow - Int(view.contentOffset.y / cellH)))
+        let row = min(rows - 1, max(0, Int(point.y / cellH)))
         return (col, row)
     }
 
