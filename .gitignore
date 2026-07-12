@@ -46,6 +46,15 @@
 /.netrc
 /.npmrc
 
+# Scratch files that have been accidentally dropped in the repo root before: a
+# UUID-named screenshot (5019F3B4-…png) and a literal "$TMPDIR/scan.py". Ignore
+# root-level screenshots + the stray temp-script names so they can't recur.
+/[0-9A-Fa-f]*-[0-9A-Fa-f]*-*.png
+/"$TMPDIR"
+/*.swp
+/*.orig
+.DS_Store
+
 # Build-time seed artifacts (produced by scripts/build-seed.sh; bundled later)
 /seeds/
 
