@@ -154,7 +154,10 @@ struct PinnedMacroSlotView: View {
             Text(macro.name).font(.caption).lineLimit(1)
                 .foregroundStyle(Color(theme.text.primary))
         }
-        .onInputClickTap { vm.keybar.fireMacro(macro.body) }
+        .onInputClickTap {
+            DebugLog.shared.log(.keybar, "keybar:macroResolved events=\(macro.body.count)")
+            vm.keybar.fireMacro(macro.body)
+        }
     }
 }
 
@@ -176,6 +179,7 @@ struct CustomSlotView: View {
     private func fire(_ gesture: CustomSlotGesture) {
         guard let binding = slot.binding(for: gesture),
               let body = library.macro(binding.macro)?.body else { return }
+        DebugLog.shared.log(.keybar, "keybar:macroResolved events=\(body.count)")
         vm.keybar.fireMacro(body)
     }
 

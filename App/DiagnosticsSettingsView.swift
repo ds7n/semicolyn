@@ -82,9 +82,24 @@ struct DiagnosticsSettingsView: View {
                      + "actual keys are logged too — password/prompt lines are still redacted "
                      + "(shown as REDACTED, never dropped). Off by default.")
             }
+
+            Section {
+                ForEach(LogCategory.allCases, id: \.self) { cat in
+                    Toggle(cat.label, isOn: categoryBinding(cat))
+                }
+            } header: {
+                Text("Log categories")
+            } footer: {
+                Text("Which diagnostic categories are recorded. Low-volume categories are on "
+                     + "by default; render/input/predictor/keybar are verbose and off by default.")
+            }
         }
         .navigationTitle("Diagnostics")
-        .onAppear { DebugLog.shared.enabled = showDebugPanel; rebuildSink() }
+        .onAppear {
+            DebugLog.shared.enabled = showDebugPanel
+            rebuildSink()
+            DebugLog.shared.refreshEnabledCategories()
+        }
         .confirmationDialog("Log keystroke content?", isPresented: $showKeystrokeNag, titleVisibility: .visible) {
             Button("Turn On", role: .destructive) {
                 confirmedKeystroke = true      // let the resulting onChange pass through
@@ -96,6 +111,14 @@ struct DiagnosticsSettingsView: View {
                  + "sensitive, and stream to your configured host if remote logging is on. "
                  + "Password/prompt lines are still redacted.")
         }
+    }
+
+    private func categoryBinding(_ cat: LogCategory) -> Binding<Bool> {
+        Binding(
+            get: { UserDefaults.standard.object(forKey: cat.storageKey) as? Bool ?? cat.defaultOn },
+            set: { UserDefaults.standard.set($0, forKey: cat.storageKey)
+                   DebugLog.shared.refreshEnabledCategories() }
+        )
     }
 
     /// Recreate the sink from current config, or clear it when disabled/host empty.

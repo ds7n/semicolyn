@@ -30,6 +30,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let onLongPressZoom: () -> Void
         let onPlaceCursor: (_ toCol: Int, _ toRow: Int) -> Void
         let mouseReportingActive: () -> Bool
+        let hasSelection: () -> Bool
+        let clearSelection: () -> Void
     }
 
     private weak var terminalView: TerminalView?
@@ -74,7 +76,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         where !ours.contains(gr) && gr !== view.panGestureRecognizer {
             gr.isEnabled = false
         }
-        DebugLog.shared.log("sweep: disabled \(view.gestureRecognizers?.filter { !$0.isEnabled }.count ?? 0) recognizers; nativePan kept=\(view.panGestureRecognizer.isEnabled)")
+        DebugLog.shared.log(.gesture, "sweep: disabled \(view.gestureRecognizers?.filter { !$0.isEnabled }.count ?? 0) recognizers; nativePan kept=\(view.panGestureRecognizer.isEnabled)")
     }
 
     private func installOurRecognizers(on view: TerminalView) {
@@ -160,7 +162,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     @objc private func handleScrollViewPan(_ g: UIPanGestureRecognizer) {
         guard let view = terminalView else { return }
         if callbacks.mouseReportingActive() { return }  // mouse app: SwiftTerm forwards
-        DebugLog.shared.log("gr:scrollPan state=\(g.state.rawValue) t=\(g.translation(in: view)) mouseReporting=\(callbacks.mouseReportingActive())")
+        DebugLog.shared.log(.gesture, "gr:scrollPan state=\(g.state.rawValue) t=\(g.translation(in: view)) mouseReporting=\(callbacks.mouseReportingActive())")
         guard g.state == .ended || g.state == .cancelled else { return }
         let t = g.translation(in: view)
         let decision = GestureClassifier.classify(
@@ -173,48 +175,55 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     @objc private func handleSingleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
-        DebugLog.shared.log("gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
         if callbacks.mouseReportingActive() { return }
-        let p = g.location(in: view)
-        let target = cell(at: p, in: view)
-        callbacks.onPlaceCursor(target.col, target.row)
+        let action = tapAction(hasSelection: callbacks.hasSelection())
+        switch action {
+        case .clearSelection:
+            callbacks.clearSelection()
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=clear")
+        case .placeCursor:
+            let p = g.location(in: view)
+            let target = cell(at: p, in: view)
+            callbacks.onPlaceCursor(target.col, target.row)
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=place at=(\(target.col),\(target.row))")
+        }
     }
 
     @objc private func handleDoubleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
-        DebugLog.shared.log("gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
+        DebugLog.shared.log(.gesture, "gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
         let p = g.location(in: view)
         let (col, row) = cell(at: p, in: view)
         // Word-select: expand from the tapped cell across non-space runs on that row.
         let (start, end) = wordBounds(col: col, row: row, in: view)
-        DebugLog.shared.log("sel:before hasActive=\(view.hasActiveSelection)")
+        DebugLog.shared.log(.gesture, "sel:before hasActive=\(view.hasActiveSelection)")
         view.setSelectionRange(start: Position(col: start, row: row), end: Position(col: end, row: row))
-        DebugLog.shared.log("sel:after set (\(start),\(row))-(\(end),\(row)) hasActive=\(view.hasActiveSelection)")
+        DebugLog.shared.log(.gesture, "sel:after set (\(start),\(row))-(\(end),\(row)) hasActive=\(view.hasActiveSelection)")
         presentEditMenu(at: p, in: view)
     }
 
     @objc private func handleTripleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
-        DebugLog.shared.log("gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
+        DebugLog.shared.log(.gesture, "gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
         let p = g.location(in: view)
         let (_, row) = cell(at: p, in: view)
         let cols = max(view.getTerminal().cols, 1)
-        DebugLog.shared.log("sel:before hasActive=\(view.hasActiveSelection)")
+        DebugLog.shared.log(.gesture, "sel:before hasActive=\(view.hasActiveSelection)")
         view.setSelectionRange(start: Position(col: 0, row: row),
                                end: Position(col: cols - 1, row: row))
-        DebugLog.shared.log("sel:after set (0,\(row))-(\(cols - 1),\(row)) hasActive=\(view.hasActiveSelection)")
+        DebugLog.shared.log(.gesture, "sel:after set (0,\(row))-(\(cols - 1),\(row)) hasActive=\(view.hasActiveSelection)")
         presentEditMenu(at: p, in: view)
     }
 
     @objc private func handleLongPress(_ g: UILongPressGestureRecognizer) {
-        DebugLog.shared.log("gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: g.view))")
+        DebugLog.shared.log(.gesture, "gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: g.view))")
         guard g.state == .began else { return }
         callbacks.onLongPressZoom()
     }
 
     @objc private func handleTwoFingerTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
-        DebugLog.shared.log("gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
+        DebugLog.shared.log(.gesture, "gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
         presentEditMenu(at: g.location(in: view), in: view)
     }
 

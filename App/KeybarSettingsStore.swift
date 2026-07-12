@@ -75,5 +75,6 @@ import SemicolynKit
     private func persist() {
         guard let data = try? JSONEncoder().encode(settings) else { return }
         UserDefaults.standard.set(data, forKey: Self.defaultsKey)
+        DebugLog.shared.log(.keybar, "keybar:settingsApplied bytes=\(data.count)")
     }
 }
