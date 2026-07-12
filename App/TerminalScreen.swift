@@ -362,19 +362,19 @@ struct TerminalScreen: UIViewRepresentable {
 
         /// Poll mouse mode from the terminal and update dot visibility / gesture state.
         ///
-        /// Called from `updateUIView` on each SwiftUI pass. Best-effort: if SwiftTerm
-        /// changes the `mouseMode` API this will need updating.
-        ///
-        /// - Assumption: `TerminalView.getTerminal().mouseMode` returns a value that
-        ///   compares unequal to `.off` (or equivalent) when mouse reporting is active.
-        ///   This is the best-known SwiftTerm 1.x public API; not verifiable on Linux.
+        /// Called from `updateUIView` on each SwiftUI pass. Forward a drag as a mouse
+        /// event ONLY when the foreground app is on the ALTERNATE screen (vim/htop/less);
+        /// a normal-screen app that merely enabled mouse mode must not capture the drag,
+        /// or a swipe is sent as SGR mouse reports instead of scrolling locally. Mirrors
+        /// the tmux path (`TmuxPaneContainer.updateMouseDots`); `isCurrentBufferAlternate`
+        /// is the same public SwiftTerm API used by `SwiftTermEchoOracle`.
         func updateMouseDot(from terminalView: TerminalView) {
-            let mouseActive = terminalView.getTerminal().mouseMode != .off
-            mouseDot.isHidden = !mouseActive
-            // Mouse-reporting app → let SwiftTerm forward mouse events (allowMouseReporting
-            // = true). Otherwise keep it false so SwiftTerm's pan is cursor-key scrub and
-            // its tap/long-press do reposition + selection (cursor-centric model).
-            terminalView.allowMouseReporting = mouseActive
+            let terminal = terminalView.getTerminal()
+            let forwardMouse = terminal.mouseMode != .off && terminal.isCurrentBufferAlternate
+            mouseDot.isHidden = !forwardMouse
+            // Alt-screen mouse app → forward mouse events. Otherwise keep off so SwiftTerm's
+            // pan scrolls and tap/long-press do reposition + selection (cursor-centric model).
+            terminalView.allowMouseReporting = forwardMouse
         }
 
         // Visual bell: pulse halo + optional haptic (throttled by BellStateMachine).
