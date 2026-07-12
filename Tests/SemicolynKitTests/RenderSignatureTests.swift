@@ -87,4 +87,17 @@ final class RenderSignatureTests: XCTestCase {
         let b = state(base + [.layoutChange(WindowID(raw: 2), layout: layoutB, visible: layoutB, flags: "")])
         XCTAssertEqual(RenderSignature(a), RenderSignature(b))
     }
+
+    // Active window's active pane changed (focus moved within the same layout) → signatures
+    // differ (the renderer draws a border on the active pane, so this changes the screen).
+    func testActivePaneChangeDiffers() {
+        let base: [ControlModeEvent] = [
+            .sessionChanged(SessionID(raw: 0), name: "s"),
+            .windowAdd(WindowID(raw: 1)),
+            .sessionWindowChanged(SessionID(raw: 0), active: WindowID(raw: 1)),
+        ]
+        let a = state(base + [.windowPaneChanged(WindowID(raw: 1), active: PaneID(raw: 5))])
+        let b = state(base + [.windowPaneChanged(WindowID(raw: 1), active: PaneID(raw: 6))])
+        XCTAssertNotEqual(RenderSignature(a), RenderSignature(b))
+    }
 }
