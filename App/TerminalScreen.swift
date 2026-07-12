@@ -339,23 +339,12 @@ struct TerminalScreen: UIViewRepresentable {
         func placeCursor(toCol: Int, toRow: Int, in view: TerminalView) {
             let term = view.getTerminal()
             let cur = term.getCursorLocation()   // .x = col, .y = row (see SwiftTermEchoOracle)
+            let appCursor = term.applicationCursor
             let runs = cursorTapArrows(fromCol: cur.x, fromRow: cur.y, toCol: toCol, toRow: toRow)
             for run in runs {
-                let bytes = encodeArrowRun(run)
+                let bytes = encodeArrowRun(run, applicationCursorKeys: appCursor)  // Kit encoder
                 if !bytes.isEmpty { onSend(bytes) }
             }
-        }
-
-        /// Encode one ArrowRun to its CSI escape bytes, repeated `count` times.
-        private func encodeArrowRun(_ run: ArrowRun) -> [UInt8] {
-            let tail: [UInt8]
-            switch run.direction {
-            case .up:    tail = [0x1b, 0x5b, 0x41]   // ESC [ A
-            case .down:  tail = [0x1b, 0x5b, 0x42]   // ESC [ B
-            case .right: tail = [0x1b, 0x5b, 0x43]   // ESC [ C
-            case .left:  tail = [0x1b, 0x5b, 0x44]   // ESC [ D
-            }
-            return Array(repeating: tail, count: run.count).flatMap { $0 }
         }
 
         // Grid resize (rotation, layout) → remote window-change, debounced.
