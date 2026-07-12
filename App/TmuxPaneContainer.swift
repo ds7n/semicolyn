@@ -68,10 +68,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
         // forces pane-rect metrics to recompute on the next layout pass.
         context.coordinator.onInvalidateCachedCell = { [weak v] in v?.invalidateCachedCell() }
         // Refresh mouse-dot visibility immediately on a mode transition, rather than
-        // waiting for the next SwiftUI `updateUIView` pass.
-        context.coordinator.modeTracker.onChange = { [weak v] _, _ in
+        // waiting for the next SwiftUI `updateUIView` pass. Also flip ownership of the
+        // drag/tap axis for the transitioning pane: native scroll only in `.localScroll`,
+        // mouse-forwarding in `.mouseReporting`/`.appOwnsInput`.
+        context.coordinator.modeTracker.onChange = { [weak v] pane, mode in
             guard let v else { return }
             v.coordinator?.updateMouseDots(for: v.panes)
+            if let pane, let view = v.panes[pane] {
+                view.isScrollEnabled = (mode == .localScroll)
+                view.allowMouseReporting = (mode == .mouseReporting || mode == .appOwnsInput)
+            }
         }
         return v
     }
@@ -204,7 +210,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
         // MARK: - Halo + mouse dot lifecycle
 
         /// Called from ContainerView when a TerminalView is first created.
-        func installHalo(on view: TerminalView) {
+        /// `pane` is this pane's ID, captured by the installed gesture controller's
+        /// `currentMode` closure so it can read `modeTracker.mode(for: pane)` directly
+        /// (no reverse `paneID(for:)` lookup needed).
+        func installHalo(on view: TerminalView, pane: PaneID) {
             let key = ObjectIdentifier(view)
             guard haloViews[key] == nil else { return }
             let halo = BellHaloView(frame: view.bounds)
@@ -250,7 +259,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
                             guard let view else { return }
                             self?.onPlaceCursor(view, col, row)
                         },
-                        mouseReportingActive: { [weak view] in view?.allowMouseReporting ?? false },
+                        currentMode: { [weak self] in self?.modeTracker.mode(for: pane) ?? .localScroll },
+                        applicationCursorKeys: { [weak view] in view?.getTerminal().applicationCursor ?? false },
+                        sendBytes: { [weak self] bytes in self?.send(bytes) },
                         hasSelection: { [weak view] in view?.selectionActive ?? false },
                         clearSelection: { [weak view] in view?.selectNone() }
                     )
@@ -336,28 +347,20 @@ struct TmuxPaneContainer: UIViewRepresentable {
             pinchRecognizers[key]?.view as? TerminalView
         }
 
-        /// Update dot + gesture state for each visible pane from the event-driven
+        /// Update the mouse-dot *visual* for each visible pane from the event-driven
         /// `modeTracker` (no longer polls terminal state here — `PaneTerminalView`'s
         /// `bufferActivated`/`mouseModeChanged` overrides keep `modeTracker` current).
+        /// `isScrollEnabled` / `allowMouseReporting` ownership flips live in
+        /// `modeTracker.onChange` (see `makeUIView`), not here — this used to also
+        /// reassign `allowMouseReporting` on every SwiftUI `updateUIView` pass, which
+        /// would have clobbered the `onChange` flip's `.mouseReporting` case back to
+        /// `false` on the very next render.
         ///
         /// Called from `updateUIView` on each SwiftUI pass.
-        ///
-        /// Mouse-forward gate: forward a drag to the app as a mouse event ONLY when the
-        /// pane's mode is `.appOwnsInput` (alt-screen app: vim/htop/less) — those apps
-        /// genuinely want the mouse. A NORMAL-screen app that merely turned mouse mode on
-        /// (a shell, a scrolling `tmux -CC` pane, `.mouseReporting`) must NOT capture the
-        /// drag, or the finger swipe is sent to tmux as SGR mouse reports
-        /// (`ESC[<32;…M`) instead of scrolling the local scrollback we seeded. Matches
-        /// iTerm2/WezTerm.
         func updateMouseDots(for panes: [PaneID: TerminalView]) {
             for (id, view) in panes {
                 let mode = modeTracker.mode(for: id)
-                let forwardMouse = (mode == .appOwnsInput)
                 mouseDots[ObjectIdentifier(view)]?.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
-                // Alt-screen mouse app → let SwiftTerm forward mouse events; otherwise keep
-                // it off so a drag scrolls the local buffer and tap/long-press do
-                // reposition/selection (cursor-centric model).
-                view.allowMouseReporting = forwardMouse
             }
         }
 
@@ -580,7 +583,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         coordinator?.modeTracker.recompute(for: pane, terminal: term)
                     }
                     addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
-                    coordinator?.installHalo(on: t)
+                    coordinator?.installHalo(on: t, pane: pane)
                     // Prime once at mount so a pane reattaching into a running
                     // alt-screen app (vim/Claude) is correct from frame one.
                     coordinator?.modeTracker.recompute(for: pane, terminal: t.getTerminal())
