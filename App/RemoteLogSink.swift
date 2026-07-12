@@ -5,6 +5,29 @@ import Network
 import UIKit
 import SemicolynKit
 
+/// One-line build/OS/device identifier, emitted as the first log line when the remote
+/// stream connects. Replaces the old syslog HOSTNAME field: it stamps every trace with
+/// the build that produced it WITHOUT an mDNS lookup (which blocked the main thread and
+/// prompted for Local Network access). e.g. `semicolyn 0.1.0 (build 36) · iOS 18.5 · iPhone15,2`.
+enum BuildBanner {
+    static let line: String = {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        let os = UIDevice.current.systemName + " " + UIDevice.current.systemVersion
+        return "semicolyn \(version) (build \(build)) · \(os) · \(deviceModel())"
+    }()
+
+    /// Hardware model identifier (e.g. "iPhone15,2") via `uname` — a local syscall, no
+    /// network, unlike the user-facing `UIDevice.name` which can also prompt.
+    private static func deviceModel() -> String {
+        var sysinfo = utsname()
+        uname(&sysinfo)
+        let raw = withUnsafeBytes(of: &sysinfo.machine) { Data($0) }
+        return String(bytes: raw.prefix { $0 != 0 }, encoding: .utf8) ?? UIDevice.current.model
+    }
+}
+
 /// Streams diagnostic lines to a developer-run syslog server over UDP/TCP/TLS.
 /// Fire-and-forget: `send` never blocks the caller (the log path); a line is dropped if
 /// the connection isn't ready. The local `DebugLog` buffer retains everything regardless.
@@ -16,7 +39,6 @@ final class RemoteLogSink {
     private let host: NWEndpoint.Host
     private let port: NWEndpoint.Port
     private let transport: LogTransport
-    private let hostname: String
     private let queue = DispatchQueue(label: "dev.truepositive.semicolyn.remotelog")
     private var connection: NWConnection?
 
@@ -24,14 +46,6 @@ final class RemoteLogSink {
         self.host = NWEndpoint.Host(host)
         self.port = NWEndpoint.Port(rawValue: UInt16(clamping: port)) ?? 6514
         self.transport = transport
-        // Syslog HOSTNAME token. MUST NOT use `ProcessInfo.hostName` / `UIDevice.name`:
-        // on iOS those do a synchronous mDNS/reverse-DNS lookup that blocks the main
-        // thread for seconds AND triggers the Local Network permission prompt (Apple:
-        // the local-network alert is triggered by `-[NSProcessInfo hostName]`). This
-        // ran in `.onAppear` → opening Diagnostics froze the app. `identifierForVendor`
-        // + model are local, instant, and never touch the network.
-        let vendorID = UIDevice.current.identifierForVendor?.uuidString.prefix(8) ?? "device"
-        self.hostname = "\(UIDevice.current.model)-\(vendorID)"
         start()
     }
 
@@ -56,6 +70,12 @@ final class RemoteLogSink {
         queue.async { [weak self] in
             guard let self else { return }
             let conn = NWConnection(host: self.host, port: self.port, using: self.makeParameters())
+            // Emit the build banner as the first framed line once the link is ready, so
+            // every stream (including one started mid-session or after a reconnect) is
+            // stamped with the build/OS/device that produced the trace.
+            conn.stateUpdateHandler = { [weak self] state in
+                if case .ready = state { self?.sendRaw(BuildBanner.line) }
+            }
             conn.start(queue: self.queue)
             self.connection = conn
         }
@@ -64,12 +84,14 @@ final class RemoteLogSink {
     /// Frame the line and send it fire-and-forget. UDP is datagram-per-line; TCP/TLS are
     /// octet-counted so the receiver can deframe a continuous stream.
     func send(_ line: String) {
-        let framed = syslogFrame(message: line, hostname: hostname,
-                                 timestamp: Self.timestamp(), transport: transport)
+        queue.async { [weak self] in self?.sendRaw(line) }
+    }
+
+    /// Frame `line` and write it on `queue` (caller must already be on `queue`).
+    private func sendRaw(_ line: String) {
+        let framed = syslogFrame(message: line, timestamp: Self.timestamp(), transport: transport)
         guard let data = framed.data(using: .utf8) else { return }
-        queue.async { [weak self] in
-            self?.connection?.send(content: data, completion: .idempotent)
-        }
+        connection?.send(content: data, completion: .idempotent)
     }
 
     /// Connect (if needed) and send a probe line, reporting whether the connection
@@ -91,8 +113,7 @@ final class RemoteLogSink {
         probe.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                let framed = syslogFrame(message: "semicolyn diagnostics test",
-                                         hostname: self.hostname,
+                let framed = syslogFrame(message: "semicolyn diagnostics test — \(BuildBanner.line)",
                                          timestamp: Self.timestamp(), transport: self.transport)
                 probe.send(content: framed.data(using: .utf8), completion: .contentProcessed { _ in
                     finish(true)
