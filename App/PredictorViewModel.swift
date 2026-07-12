@@ -12,5 +12,8 @@ final class PredictorViewModel: ObservableObject {
     /// Top-K predictor chips for the current input token (empty → strip hidden).
     @Published private(set) var suggestions: [String] = []
 
-    func setSuggestions(_ s: [String]) { suggestions = s }
+    func setSuggestions(_ s: [String]) {
+        suggestions = s
+        DebugLog.shared.log(.predictor, "predictor:surface count=\(s.count)")
+    }
 }

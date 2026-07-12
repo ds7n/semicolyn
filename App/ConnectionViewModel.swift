@@ -172,7 +172,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// in flight per handshake; if a stale continuation somehow remains, resolve
     /// it as rejected (the safe direction) rather than leaking its task.
     func present(_ prompt: HostKeyPrompt) async -> Bool {
-        DebugLog.shared.log("hostkey: prompt shown (\(String(describing: prompt).prefix(60)))")
+        DebugLog.shared.log(.connect, "hostkey: prompt shown (\(String(describing: prompt).prefix(60)))")
         return await withCheckedContinuation { cont in
             promptContinuation?.resume(returning: false)
             promptContinuation = cont
@@ -182,7 +182,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     /// Called by the view when the user taps a modal button.
     func resolvePrompt(_ trusted: Bool) {
-        DebugLog.shared.log("hostkey: prompt resolved trusted=\(trusted)")
+        DebugLog.shared.log(.connect, "hostkey: prompt resolved trusted=\(trusted)")
         pendingPrompt = nil
         promptContinuation?.resume(returning: trusted)
         promptContinuation = nil
@@ -192,7 +192,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     func fnTap() { fnState.tap() }
     /// Send an F-key and clear a one-shot Fn arm.
-    func fnTapFKey(_ n: Int) { keybar.tapFKey(n); fnState.fireFKey() }
+    func fnTapFKey(_ n: Int) {
+        keybar.tapFKey(n)
+        fnState.fireFKey()
+        DebugLog.shared.log(.input, "input:fnKey n=\(n)")
+    }
 
     /// Characters typed on the terminal keyboard (SwiftTerm delegate). Routed
     /// through the keybar router so an armed Ctrl/Alt/Shift applies to real keyboard
@@ -200,6 +204,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Unmodified input passes straight through unchanged.
     func terminalKeyboardInput(_ bytes: [UInt8]) {
         keybar.keyboardInput(bytes)
+        DebugLog.shared.log(.input, "input:keyboard bytes=\(bytes.count)")
     }
 
     /// Route terminal keystrokes: through tmux `send-keys` when control mode is
@@ -220,7 +225,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // ── after the write: diagnostics (gated no-op) + forked observation ───────
         // `log` is an @autoclosure that is a no-op unless diagnostics is enabled, so
         // this string is not even built in normal use.
-        DebugLog.shared.log("input[\(bytes.count)B] → \(moshSession != nil ? "MOSH" : (tmux != nil ? "TMUX" : "RAW"))")
+        DebugLog.shared.log(.input, "input[\(bytes.count)B] → \(moshSession != nil ? "MOSH" : (tmux != nil ? "TMUX" : "RAW"))")
         observePredictorInput(bytes)
     }
 
@@ -263,7 +268,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             let toFeed = historySeeder?.routeOutput(pane, buffered) ?? buffered
             if !toFeed.isEmpty { view.feed(byteArray: toFeed[...]) }
         }
-        DebugLog.shared.log("scroll:postseed pane=%\(pane.raw) contentSize=\(view.contentSize)")
+        DebugLog.shared.log(.seed, "scroll:postseed pane=%\(pane.raw) contentSize=\(view.contentSize)")
     }
 
     func unregisterPane(_ pane: PaneID) { paneViews[pane] = nil; pendingPaneBytes[pane] = nil; paneLastTitles[pane] = nil }
@@ -281,7 +286,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     }
 
     func selectWindow(_ id: WindowID) {
-        DebugLog.shared.log("win:select id=\(id) activeBefore=\(String(describing: tmuxState?.activeWindow))")
+        DebugLog.shared.log(.tmux, "tmux:selectWindow id=@\(id.raw) activeBefore=\(tmuxState?.activeWindow.map { "@\($0.raw)" } ?? "nil")")
         tmux?.selectWindow(id)
     }
 
@@ -352,6 +357,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// commands no-op in raw-PTY mode (no `tmux`); presentation commands publish a
     /// `presentedSheet` intent for `SessionView`.
     func perform(_ command: KeyboardCommand) {
+        DebugLog.shared.log(.input, "input:command \(command)")
         switch command {
         case .newWindow:           tmux?.newWindow()
         case .closeWindow:         tmux?.closeActiveWindow()
@@ -387,7 +393,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     /// Re-run the last saved-host connect (`⇧⌘R`). No-op if nothing connected yet.
     func reconnect() {
-        guard let host = lastSavedHost else { return }
+        guard let host = lastSavedHost else {
+            DebugLog.shared.log(.connect, "reconnect: ABORT no lastSavedHost")
+            return
+        }
+        DebugLog.shared.log(.connect, "reconnect: triggered for \(host.hostName)")
         connect(savedHost: host, password: lastPassword ?? "")
     }
 
@@ -402,6 +412,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// host list. Flushes the predictor first (teardown already does), so learning
     /// survives an explicit disconnect just like a backgrounded one.
     func disconnect() {
+        DebugLog.shared.log(.lifecycle, "disconnect: user-initiated teardown → .idle")
         teardown()
         state = .idle
     }
@@ -464,17 +475,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // key isn't stored on this device).
             if let key = try AppStores.shared.identities.privateKeyOpenSSH(for: identityID) {
                 // No silent fallback: a present-but-rejected key returns its outcome.
-                DebugLog.shared.log("authenticate: publickey (identity=\(identityID))")
+                DebugLog.shared.log(.connect, "authenticate: publickey (identity=\(identityID))")
                 let outcome = try await conn.authenticatePublickey(user: user, privateKeyOpenssh: key)
-                DebugLog.shared.log("authenticate: publickey → \(String(describing: outcome))")
+                DebugLog.shared.log(.connect, "authenticate: publickey → \(String(describing: outcome))")
                 return outcome
             }
-            DebugLog.shared.log("authenticate: identity \(identityID) has no stored key → password fallback")
+            DebugLog.shared.log(.connect, "authenticate: identity \(identityID) has no stored key → password fallback")
         } else {
-            DebugLog.shared.log("authenticate: no identity resolved → password")
+            DebugLog.shared.log(.connect, "authenticate: no identity resolved → password")
         }
         let outcome = try await conn.authenticatePassword(user: user, password: password)
-        DebugLog.shared.log("authenticate: password → \(String(describing: outcome))")
+        DebugLog.shared.log(.connect, "authenticate: password → \(String(describing: outcome))")
         return outcome
     }
 
@@ -527,7 +538,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let probeSession = try? await conn.openExec(command: "tmux -V", term: "xterm-256color",
                                                     cols: 80, rows: 24, output: sink)
         guard probeSession != nil else {
-            DebugLog.shared.log("probeTmuxVersion: exec FAILED to open → nil")
+            DebugLog.shared.log(.tmux, "probeTmuxVersion: exec FAILED to open → nil")
             return nil
         }
         defer { if let probeSession { Task { try? await probeSession.close() } } }
@@ -545,14 +556,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             group.cancelAll()
         }
         let text = String(decoding: captured, as: UTF8.self)
-        DebugLog.shared.log("probeTmuxVersion: got \(text.isEmpty ? "EMPTY (nil)" : text.trimmingCharacters(in: .whitespacesAndNewlines))")
+        DebugLog.shared.log(.tmux, "probeTmuxVersion: got \(text.isEmpty ? "EMPTY (nil)" : text.trimmingCharacters(in: .whitespacesAndNewlines))")
         return text.isEmpty ? nil : text
     }
 
     /// Open a raw PTY shell: the original pre-tmux path. Sets `connection`,
     /// `session`, and `state = .shell`.
     private func openRawShell(conn: Connection) async throws {
-        DebugLog.shared.log("openRawShell: opening PTY shell")
+        DebugLog.shared.log(.lifecycle, "openRawShell: opening PTY shell")
         let sess = try await conn.openShell(
             term: "xterm-256color", cols: 80, rows: 24, output: output)
         connection = conn
@@ -567,7 +578,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // typed-command echo (record) + seed only. (predictor-suggestion-hygiene spec, Fix 1.)
             self.passwordDetector.noteOutput(bytes)
         }
-        DebugLog.shared.log("openRawShell: shell opened, state=.shell")
+        DebugLog.shared.log(.lifecycle, "openRawShell: shell opened, state=.shell")
         state = .shell
     }
 
@@ -578,14 +589,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private func attachSSHShell(conn: Connection, host: Host, defaults: Defaults) async throws {
         let allow = resolveTmuxAttemptControlMode(host: host, defaults: defaults)
         let probe = allow ? await probeTmuxVersion(conn: conn) : nil
-        DebugLog.shared.log("attachSSHShell: allowControlMode=\(allow) probe=\(probe ?? "nil")")
+        DebugLog.shared.log(.lifecycle, "attachSSHShell: allowControlMode=\(allow) probe=\(probe ?? "nil")")
         switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
         case .attach:
-            DebugLog.shared.log("attachSSHShell: decision=ATTACH tmux")
+            DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=ATTACH tmux")
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
             try await attachTmux(conn: conn)
         case .degrade(let reason):
-            DebugLog.shared.log("attachSSHShell: decision=DEGRADE(\(String(describing: reason))) → raw shell")
+            DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=DEGRADE(\(String(describing: reason))) → raw shell")
             degraded = reason
             try await openRawShell(conn: conn)
         }
@@ -606,7 +617,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let sess = try? await conn.openExec(command: command, term: "xterm-256color",
                                             cols: 80, rows: 24, output: sink)
         guard sess != nil else {
-            DebugLog.shared.log("mosh: bootstrap exec FAILED to open (openExec returned nil)")
+            DebugLog.shared.log(.connect, "mosh: bootstrap exec FAILED to open (openExec returned nil)")
             return ""
         }
         defer { if let sess { Task { try? await sess.close() } } }
@@ -624,7 +635,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// back (the caller then runs the existing tmux/raw branch).
     private func attachMoshIfPossible(conn: Connection, host: Host, defaults: Defaults) async -> Bool {
         guard resolveMoshEnabled(host: host, defaults: defaults) else {
-            DebugLog.shared.log("mosh: disabled for this host → SSH/tmux path")
+            DebugLog.shared.log(.connect, "mosh: disabled for this host → SSH/tmux path")
             return false
         }
         // Effective config for the argv (port range, server path, prediction mode).
@@ -632,20 +643,20 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let cfg = resolveOptional(host.mosh, defaults.mosh) ?? MoshConfig(enabled: true)
         let command = moshServerCommand(cfg).joined(separator: " ")
         let stdout = await captureMoshBootstrap(conn: conn, command: command)
-        DebugLog.shared.log("mosh: bootstrap captured \(stdout.count)B")
+        DebugLog.shared.log(.connect, "mosh: bootstrap captured \(stdout.count)B")
         switch moshBranchOutcome(stdout: stdout, enabled: true) {
         case let .mosh(port, key):
-            DebugLog.shared.log("mosh: bootstrap OK port=\(port) keyLen=\(key.count) → starting UDP session")
+            DebugLog.shared.log(.connect, "mosh: bootstrap OK port=\(port) keyLen=\(key.count) → starting UDP session")
             // mosh-client's getaddrinfo uses AI_NUMERICHOST (numeric IP only, NO DNS),
             // so it rejects a hostname. Resolve host.hostName to a numeric IP here
             // (SSH already reached the host, so it resolves). If we can't resolve, don't
             // hand mosh a name it will reject — fall back to SSH with a clear reason.
             guard let moshIP = MoshHostResolver.numericAddress(for: host.hostName) else {
-                DebugLog.shared.log("mosh: could not resolve \(host.hostName) to an IP → SSH fallback")
+                DebugLog.shared.log(.connect, "mosh: could not resolve \(host.hostName) to an IP → SSH fallback")
                 moshFallback = "Mosh: couldn't resolve \(host.hostName) — using SSH"
                 return false
             }
-            DebugLog.shared.log("mosh: resolved \(host.hostName) → \(moshIP)")
+            DebugLog.shared.log(.connect, "mosh: resolved \(host.hostName) → \(moshIP)")
             let predict = cfg.predictionMode?.rawValue ?? "adaptive"
             // Seeded at 80×24: the terminal view hasn't laid out yet at connect time,
             // so the real grid isn't known here. The first debounced resize from
@@ -676,10 +687,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // longer the exit discriminator (that's reason+elapsed now), but it
                 // still records that a frame arrived; cancelling the watchdog here is
                 // the important effect — the loop signalled life, so don't SSH-fall-back.
-                DebugLog.shared.log("mosh: onFirstFrame — UDP handshake up, frames flowing")
+                DebugLog.shared.log(.connect, "mosh: onFirstFrame — UDP handshake up, frames flowing")
                 self?.moshFirstFrameSeen = true
                 self?.moshWatchdog?.cancel(); self?.moshWatchdog = nil
-                DebugLog.shared.log("mosh: watchdog cancelled (onFirstFrame)")
+                DebugLog.shared.log(.connect, "mosh: watchdog cancelled (onFirstFrame)")
             }
             // Stamp the start time BEFORE the onEnd closure literal so the closure can
             // capture it (Swift resolves captures at declaration order, not runtime).
@@ -693,18 +704,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // via an onEnd dispatch that was enqueued before the watchdog niled it.
                 // Bail so we don't clobber the watchdog's SSH shell with a stale banner.
                 if self.moshResolved {
-                    DebugLog.shared.log("mosh: onEnd after watchdog already resolved → ignored")
+                    DebugLog.shared.log(.connect, "mosh: onEnd after watchdog already resolved → ignored")
                     return
                 }
                 self.moshResolved = true
-                DebugLog.shared.log("mosh: onEnd firstFrameSeen=\(self.moshFirstFrameSeen) reason=\(reason ?? "nil")")
+                DebugLog.shared.log(.connect, "mosh: onEnd firstFrameSeen=\(self.moshFirstFrameSeen) reason=\(reason ?? "nil")")
                 let elapsed = ProcessInfo.processInfo.systemUptime - moshStartedAt
                 switch moshExitDecision(reason: reason, elapsed: elapsed) {
                 case .crashBanner:
                     self.moshSession?.stop()
                     self.moshSession = nil
                     self.moshFirstFrameSeen = false
-                    DebugLog.shared.log("mosh: exit crashBanner (elapsed=\(String(format: "%.2f", elapsed))s) → crash banner")
+                    DebugLog.shared.log(.connect, "mosh: exit crashBanner (elapsed=\(String(format: "%.2f", elapsed))s) → crash banner")
                     self.crashBanner = .tmuxEnded
                     return
                 case .ended:
@@ -713,7 +724,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     self.moshSession?.stop()
                     self.moshSession = nil
                     self.moshFirstFrameSeen = false
-                    DebugLog.shared.log("mosh: exit ended (clean, elapsed=\(String(format: "%.2f", elapsed))s) → session ended")
+                    DebugLog.shared.log(.connect, "mosh: exit ended (clean, elapsed=\(String(format: "%.2f", elapsed))s) → session ended")
                     self.crashBanner = .tmuxEnded
                     return
                 case .fallbackSSH:
@@ -723,19 +734,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     // "Mosh failed: Crypto: … — using SSH") when we have it; the bridge
                     // falls back to a generic string only when nothing was captured.
                     self.moshFallback = reason ?? "Mosh connection failed — using SSH"
-                    DebugLog.shared.log("mosh: exit fallbackSSH (elapsed=\(String(format: "%.2f", elapsed))s) → SSH fallback")
+                    DebugLog.shared.log(.connect, "mosh: exit fallbackSSH (elapsed=\(String(format: "%.2f", elapsed))s) → SSH fallback")
                     Task { [weak self] in
                         guard let self else { return }
                         do {
                             try await self.attachSSHShell(conn: conn, host: host, defaults: defaults)
                         } catch {
-                            DebugLog.shared.log("mosh: SSH fallback THREW \(String(describing: error)) → .failed")
+                            DebugLog.shared.log(.connect, "mosh: SSH fallback THREW \(String(describing: error)) → .failed")
                             self.state = .failed(String(describing: error))
                         }
                     }
                 }
             }
-            DebugLog.shared.log("mosh: sess.start() — UDP session launching, state=.shell")
+            DebugLog.shared.log(.connect, "mosh: sess.start() — UDP session launching, state=.shell")
             sess.start()
             moshSession = sess
             connection = conn
@@ -750,21 +761,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // clobbering this SSH shell.
                 if self.moshResolved { return }
                 self.moshResolved = true
-                DebugLog.shared.log("mosh: watchdog fired (no frame/exit in 10s) → SSH fallback")
+                DebugLog.shared.log(.connect, "mosh: watchdog fired (no frame/exit in 10s) → SSH fallback")
                 self.moshSession?.stop()
                 self.moshSession = nil
                 self.moshFallback = "Mosh didn't connect — using SSH"
                 do {
                     try await self.attachSSHShell(conn: conn, host: host, defaults: defaults)
                 } catch {
-                    DebugLog.shared.log("mosh: watchdog SSH fallback THREW \(String(describing: error)) → .failed")
+                    DebugLog.shared.log(.connect, "mosh: watchdog SSH fallback THREW \(String(describing: error)) → .failed")
                     self.state = .failed(String(describing: error))
                 }
             }
             state = .shell
             return true
         case let .fallback(reason):
-            DebugLog.shared.log("mosh: bootstrap FALLBACK (\(reason)) → caller runs SSH/tmux")
+            DebugLog.shared.log(.connect, "mosh: bootstrap FALLBACK (\(reason)) → caller runs SSH/tmux")
             moshFallback = reason   // pre-handoff banner; caller runs the SSH/tmux path
             return false
         }
@@ -796,7 +807,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Attach tmux control mode: open the `-CC` exec, pump its bytes into a
     /// `TmuxRuntime`, and route the active pane's output into the terminal view.
     private func attachTmux(conn: Connection) async throws {
-        DebugLog.shared.log("attachTmux: ENTER session=\(tmuxSessionNameForConnection)")
+        DebugLog.shared.log(.lifecycle, "attachTmux: ENTER session=\(tmuxSessionNameForConnection)")
         let runtime = TmuxRuntime(sessionName: tmuxSessionNameForConnection)
         let seeder = PaneHistorySeeder(
             runtime: runtime,
@@ -808,7 +819,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // session name — which a Defaults-level value can be, since the Defaults
             // editor has no per-field validation). Surface it via the degraded
             // banner instead of silently dropping to a raw shell everywhere.
-            DebugLog.shared.log("attachTmux: makeStartCommand nil (bad session name) → degraded raw shell")
+            DebugLog.shared.log(.lifecycle, "attachTmux: makeStartCommand nil (bad session name) → degraded raw shell")
             degraded = .couldNotStart
             try await openRawShell(conn: conn)
             return
@@ -837,10 +848,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 (state.activeWindow.flatMap { state.window($0) }?.visibleLayout?.panes.map(\.pane)) ?? []
             )
             self.renderablePanes = live
-            DebugLog.shared.log("onStateChanged: wins=\(state.windows.count) active=\(state.activeWindow.map(String.init(describing:)) ?? "nil") panes=\(live.count)")
+            DebugLog.shared.log(.tmux, "onStateChanged: wins=\(state.windows.count) active=\(state.activeWindow.map(String.init(describing:)) ?? "nil") panes=\(live.count)")
             self.pendingPaneBytes = self.pendingPaneBytes.filter { live.contains($0.key) }
             let oldActive = self.tmuxState?.activeWindow.flatMap { self.tmuxState?.window($0)?.activePane }
             self.tmuxState = state
+            DebugLog.shared.log(.tmux, "tmux:activeWindow=\(state.activeWindow.map { "@\($0.raw)" } ?? "nil") wins=\(state.windows.count)")
             let newActive = state.activeWindow.flatMap { state.window($0)?.activePane }
             if oldActive != newActive {
                 // Active pane changed (e.g. ⌘]) — re-publish the new active pane's
@@ -859,7 +871,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.refreshFnAutoEngage()
         }
         runtime.onExit = { [weak self] reason in
-            DebugLog.shared.log("tmux onExit: reason=\(reason ?? "nil") → .failed")
+            DebugLog.shared.log(.lifecycle, "tmux onExit: reason=\(reason ?? "nil") → .failed")
             self?.state = .failed(reason ?? "tmux session ended")
         }
         // DIAGNOSTIC (temporary): surface what the runtime sees on attach so a blank
@@ -876,7 +888,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 Task { await self.recoverFromTmuxCrash(conn: conn) }
             }
         }
-        DebugLog.shared.log("attachTmux: openExec startCmd=\(startCmd.prefix(60))")
+        DebugLog.shared.log(.tmux, "attachTmux: openExec startCmd=\(startCmd.prefix(60))")
         let sess = try await conn.openExec(command: startCmd, term: "xterm-256color",
                                            cols: 80, rows: 24, output: sink)
         runtime.session = sess
@@ -884,7 +896,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         session = sess
         self.tmux = runtime   // retain to keep control mode alive
         state = .shell
-        DebugLog.shared.log("attachTmux: exec opened, tmux SET, state=.shell — awaiting tmux output")
+        DebugLog.shared.log(.lifecycle, "attachTmux: exec opened, tmux SET, state=.shell — awaiting tmux output")
         runtime.startContextPolling()
     }
 
@@ -893,7 +905,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Tmux crashed: reuse the live connection for a raw shell, then show the
     /// persistent crash banner. If the connection is also gone, surface a failure.
     private func recoverFromTmuxCrash(conn: Connection) async {
-        DebugLog.shared.log("recoverFromTmuxCrash: tmux crashed → raw shell on live conn")
+        DebugLog.shared.log(.lifecycle, "recoverFromTmuxCrash: tmux crashed → raw shell on live conn")
         tmux?.stop(); tmux = nil
         do {
             try await openRawShell(conn: conn)   // sets session/rawWriter, tmuxState=nil, state=.shell
@@ -902,10 +914,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             paneViews.removeAll()
             pendingPaneBytes.removeAll()
             renderablePanes.removeAll()
-            DebugLog.shared.log("recoverFromTmuxCrash: raw shell up → crash banner")
+            DebugLog.shared.log(.lifecycle, "recoverFromTmuxCrash: raw shell up → crash banner")
             crashBanner = .tmuxEnded
         } catch {
-            DebugLog.shared.log("recoverFromTmuxCrash: raw shell THREW \(String(describing: error)) → .failed")
+            DebugLog.shared.log(.lifecycle, "recoverFromTmuxCrash: raw shell THREW \(String(describing: error)) → .failed")
             state = .failed("tmux ended and the connection is no longer reachable.")
         }
     }
@@ -914,12 +926,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// new-session -A` attaches to the server-side session if it survived, else
     /// creates a fresh one.
     func reattachTmux() {
-        DebugLog.shared.log("reattachTmux: conn=\(connection == nil ? "NIL" : "alive") tmux=\(tmux == nil ? "nil" : "SET") rawWriter=\(rawWriter == nil ? "nil" : "SET") tmuxState=\(tmuxState == nil ? "nil" : "set")")
-        guard let conn = connection else { DebugLog.shared.log("reattachTmux: ABORT no connection"); return }
+        DebugLog.shared.log(.lifecycle, "reattachTmux: conn=\(connection == nil ? "NIL" : "alive") tmux=\(tmux == nil ? "nil" : "SET") rawWriter=\(rawWriter == nil ? "nil" : "SET") tmuxState=\(tmuxState == nil ? "nil" : "set")")
+        guard let conn = connection else { DebugLog.shared.log(.lifecycle, "reattachTmux: ABORT no connection"); return }
         crashBanner = nil
         Task {
             do { try await attachTmux(conn: conn) }
-            catch { DebugLog.shared.log("reattachTmux: attach THREW → .failed"); state = .failed("Could not reattach: the connection is no longer reachable.") }
+            catch { DebugLog.shared.log(.lifecycle, "reattachTmux: attach THREW → .failed"); state = .failed("Could not reattach: the connection is no longer reachable.") }
         }
     }
 
@@ -928,14 +940,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// distinct fresh-session naming is a follow-up).
     func startNewTmux() {
         guard let conn = connection else {
-            DebugLog.shared.log("startNewTmux: ABORT no connection")
+            DebugLog.shared.log(.lifecycle, "startNewTmux: ABORT no connection")
             return
         }
         crashBanner = nil
         Task {
             do { try await attachTmux(conn: conn) }
             catch {
-                DebugLog.shared.log("startNewTmux: attach THREW → .failed")
+                DebugLog.shared.log(.lifecycle, "startNewTmux: attach THREW → .failed")
                 state = .failed("Could not start tmux: the connection is no longer reachable.")
             }
         }
@@ -962,6 +974,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Forget the most-recently-typed line's un-graduated tokens (surgical L7 tool).
     /// Surfaced by the predictor strip's eraser. No-op when the predictor is off.
     func forgetLastLine() {
+        DebugLog.shared.log(.predictor, "predictor:forgetLastLine")
         Task { [predictor] in await predictor?.forgetLastLine() }
         // Ephemeral drop — nothing to persist; suggestions refresh on next input.
     }
@@ -972,6 +985,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// in-memory learned state before the on-disk store is deleted. No-op when the
     /// predictor is off (incognito).
     func purgeLearnedEngine() {
+        DebugLog.shared.log(.predictor, "predictor:purge")
         Task { [predictor] in await predictor?.purgeLearned() }
     }
 
@@ -1063,6 +1077,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         for b in bytes where b == 0x0d || b == 0x0a {
             predictorVM.setSuggestions([])   // line committed → clear stale chips immediately
+            // This closure runs on the main queue and touches @MainActor state (passwordDetector,
+            // pendingLineTokens) and the @MainActor DebugLog directly — legal via the closure's
+            // inferred main-actor isolation. If ever extracted to a @Sendable/non-capturing form,
+            // the DebugLog + self accesses need an explicit MainActor.assumeIsolated/await.
             DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(10)) { [weak self] in
                 guard let self else { return }
                 let echoConfirmed = self.passwordDetector.shouldLearnCommittedLine()
@@ -1070,10 +1088,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // engine still folds echo/opt-out/L5 into the L7 confidence tier.
                 if !optedOut, echoConfirmed {
                     let toLearn = self.pendingLineTokens
+                    DebugLog.shared.log(.predictor,
+                        "predictor:record tokens=\(toLearn.count) echo=\(echoConfirmed) optedOut=\(optedOut)")
                     Task { [predictor = self.predictor] in
                         await predictor?.beginLine()
                         await predictor?.record(toLearn, echoConfirmed: echoConfirmed, optedOut: optedOut)
                     }
+                } else {
+                    DebugLog.shared.log(.predictor,
+                        "predictor:recordSuppressed echo=\(echoConfirmed) optedOut=\(optedOut)")
                 }
                 self.pendingLineTokens.removeAll(keepingCapacity: true)
                 self.passwordDetector.resetLine()
@@ -1094,7 +1117,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         Task { [weak self] in
             let raw = await predictor.suggestions(forPrefix: prefix, after: prev)
             let chips = predictorChips(current: prefix, suggestions: raw)
-            await MainActor.run { self?.predictorVM.setSuggestions(chips) }
+            await MainActor.run {
+                DebugLog.shared.log(.predictor, "predictor:suggest prefixLen=\(prefix.count) results=\(raw.count)")
+                self?.predictorVM.setSuggestions(chips)
+            }
         }
     }
 
@@ -1118,7 +1144,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// field cannot be resolved.
     func connect(savedHost: Host, password: String) {
         if state == .connecting || state == .shell {
-            DebugLog.shared.log("connect(saved): IGNORED — already \(state == .connecting ? "connecting" : "in shell")")
+            DebugLog.shared.log(.connect, "connect(saved): IGNORED — already \(state == .connecting ? "connecting" : "in shell")")
             return
         }
         lastSavedHost = savedHost
@@ -1131,21 +1157,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         do {
             user = try resolveUser(host: savedHost, defaults: defaults)
         } catch ResolutionError.userUnset {
-            DebugLog.shared.log("connect(saved): user unset → .failed (pre-connect)")
+            DebugLog.shared.log(.connect, "connect(saved): user unset → .failed (pre-connect)")
             state = .failed("Set a user for this host or in Defaults to connect.")
             return
         } catch {
-            DebugLog.shared.log("connect(saved): resolveUser THREW \(String(describing: error)) → .failed")
+            DebugLog.shared.log(.connect, "connect(saved): resolveUser THREW \(String(describing: error)) → .failed")
             state = .failed(String(describing: error))
             return
         }
         let port = resolvePort(host: savedHost, defaults: defaults)
         let addr = "\(savedHost.hostName):\(port)"
         output.onExit = { [weak self] exit in
-            DebugLog.shared.log("connect(saved): output.onExit → .failed(\(exit.error ?? "Session closed"))")
+            DebugLog.shared.log(.connect, "connect(saved): output.onExit → .failed(\(exit.error ?? "Session closed"))")
             self?.state = .failed(exit.error ?? "Session closed")
         }
-        DebugLog.shared.log("connect(saved): START addr=\(addr) user=\(user)")
+        DebugLog.shared.log(.connect, "connect(saved): START addr=\(addr) user=\(user)")
         Task {
             do {
                 let verifier = TofuHostKeyVerifier(
@@ -1155,13 +1181,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     addr: addr, allowLegacy: false, allowDeprecated: false,
                     keepalive: keepaliveConfig(host: savedHost, defaults: defaults),
                     verifier: verifier)
-                DebugLog.shared.log("connect(saved): TCP+handshake OK, authenticating")
+                DebugLog.shared.log(.connect, "connect(saved): TCP+handshake OK, authenticating")
                 let outcome = try await authenticate(conn: conn, user: user, host: savedHost, defaults: defaults, password: password)
                 switch outcome {
                 case .success:
-                    DebugLog.shared.log("connect(saved): auth SUCCESS")
+                    DebugLog.shared.log(.connect, "connect(saved): auth SUCCESS")
                 default:
-                    DebugLog.shared.log("connect(saved): auth FAILED (\(String(describing: outcome))) → .failed")
+                    DebugLog.shared.log(.connect, "connect(saved): auth FAILED (\(String(describing: outcome))) → .failed")
                     state = .failed("Authentication failed")
                     return
                 }
@@ -1171,19 +1197,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 startPredictor(host: savedHost, defaults: defaults2)
                 // Mosh takes precedence over tmux when enabled + bootstrappable.
                 if await attachMoshIfPossible(conn: conn, host: savedHost, defaults: defaults2) {
-                    DebugLog.shared.log("connect(saved): went MOSH path")
+                    DebugLog.shared.log(.connect, "connect(saved): went MOSH path")
                     return
                 }
-                DebugLog.shared.log("connect(saved): → attachSSHShell (tmux/raw)")
+                DebugLog.shared.log(.lifecycle, "connect(saved): → attachSSHShell (tmux/raw)")
                 try await attachSSHShell(conn: conn, host: savedHost, defaults: defaults2)
             } catch ConnectError.HostKeyRejected {
-                DebugLog.shared.log("connect(saved): HostKeyRejected → .failed")
+                DebugLog.shared.log(.connect, "connect(saved): HostKeyRejected → .failed")
                 state = .failed("Host key not trusted")
             } catch ConnectError.Timeout {
-                DebugLog.shared.log("connect(saved): Timeout → .failed")
+                DebugLog.shared.log(.connect, "connect(saved): Timeout → .failed")
                 state = .failed("Couldn't reach host — connection timed out")
             } catch {
-                DebugLog.shared.log("connect(saved): THREW \(String(describing: error)) → .failed")
+                DebugLog.shared.log(.connect, "connect(saved): THREW \(String(describing: error)) → .failed")
                 state = .failed(String(describing: error))
             }
         }
@@ -1193,7 +1219,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     func connect(host: String, port: String, user: String, password: String) {
         if state == .connecting || state == .shell {
-            DebugLog.shared.log("connect(adhoc): IGNORED — already \(state == .connecting ? "connecting" : "in shell")")
+            DebugLog.shared.log(.connect, "connect(adhoc): IGNORED — already \(state == .connecting ? "connecting" : "in shell")")
             return
         }
         teardown()
@@ -1201,10 +1227,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         degraded = nil
         let addr = "\(host):\(port.isEmpty ? "22" : port)"
         output.onExit = { [weak self] exit in
-            DebugLog.shared.log("connect(adhoc): output.onExit → .failed(\(exit.error ?? "Session closed"))")
+            DebugLog.shared.log(.connect, "connect(adhoc): output.onExit → .failed(\(exit.error ?? "Session closed"))")
             self?.state = .failed(exit.error ?? "Session closed")
         }
-        DebugLog.shared.log("connect(adhoc): START addr=\(addr) user=\(user)")
+        DebugLog.shared.log(.connect, "connect(adhoc): START addr=\(addr) user=\(user)")
         Task {
             do {
                 let portNum = Int(port) ?? 22
@@ -1217,13 +1243,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     addr: addr, allowLegacy: false, allowDeprecated: false,
                     keepalive: keepaliveConfig(host: hostRecord, defaults: defaults),
                     verifier: verifier)
-                DebugLog.shared.log("connect(adhoc): TCP+handshake OK, authenticating")
+                DebugLog.shared.log(.connect, "connect(adhoc): TCP+handshake OK, authenticating")
                 let outcome = try await authenticate(conn: conn, user: user, host: hostRecord, defaults: defaults, password: password)
                 switch outcome {
                 case .success:
-                    DebugLog.shared.log("connect(adhoc): auth SUCCESS")
+                    DebugLog.shared.log(.connect, "connect(adhoc): auth SUCCESS")
                 default:
-                    DebugLog.shared.log("connect(adhoc): auth FAILED (\(String(describing: outcome))) → .failed")
+                    DebugLog.shared.log(.connect, "connect(adhoc): auth FAILED (\(String(describing: outcome))) → .failed")
                     state = .failed("Authentication failed")
                     return
                 }
@@ -1233,19 +1259,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 startPredictor(host: hostRecord, defaults: defaults2)
                 // Mosh takes precedence over tmux when enabled + bootstrappable.
                 if await attachMoshIfPossible(conn: conn, host: hostRecord, defaults: defaults2) {
-                    DebugLog.shared.log("connect(adhoc): went MOSH path")
+                    DebugLog.shared.log(.connect, "connect(adhoc): went MOSH path")
                     return
                 }
-                DebugLog.shared.log("connect(adhoc): → attachSSHShell (tmux/raw)")
+                DebugLog.shared.log(.lifecycle, "connect(adhoc): → attachSSHShell (tmux/raw)")
                 try await attachSSHShell(conn: conn, host: hostRecord, defaults: defaults2)
             } catch ConnectError.HostKeyRejected {
-                DebugLog.shared.log("connect(adhoc): HostKeyRejected → .failed")
+                DebugLog.shared.log(.connect, "connect(adhoc): HostKeyRejected → .failed")
                 state = .failed("Host key not trusted")
             } catch ConnectError.Timeout {
-                DebugLog.shared.log("connect(adhoc): Timeout → .failed")
+                DebugLog.shared.log(.connect, "connect(adhoc): Timeout → .failed")
                 state = .failed("Couldn't reach host — connection timed out")
             } catch {
-                DebugLog.shared.log("connect(adhoc): THREW \(String(describing: error)) → .failed")
+                DebugLog.shared.log(.connect, "connect(adhoc): THREW \(String(describing: error)) → .failed")
                 state = .failed(String(describing: error))
             }
         }

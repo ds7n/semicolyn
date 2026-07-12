@@ -119,7 +119,9 @@ struct TerminalScreen: UIViewRepresentable {
                     guard let terminal else { return }
                     coordinator?.placeCursor(toCol: col, toRow: row, in: terminal)
                 },
-                mouseReportingActive: { terminal.allowMouseReporting }
+                mouseReportingActive: { terminal.allowMouseReporting },
+                hasSelection: { [weak terminal] in terminal?.selectionActive ?? false },
+                clearSelection: { [weak terminal] in terminal?.selectNone() }
             )
         )
         context.coordinator.gestureController = gestureController
@@ -128,7 +130,7 @@ struct TerminalScreen: UIViewRepresentable {
         pinch.isEnabled = true
         restoreTap.isEnabled = true
         MainActor.assumeIsolated {
-            DebugLog.shared.log("scroll:init isScrollEnabled=\(terminal.isScrollEnabled) nativePan=\(terminal.panGestureRecognizer.isEnabled) contentSize=\(terminal.contentSize) offset=\(terminal.contentOffset)")
+            DebugLog.shared.log(.seed, "scroll:init isScrollEnabled=\(terminal.isScrollEnabled) nativePan=\(terminal.panGestureRecognizer.isEnabled) contentSize=\(terminal.contentSize) offset=\(terminal.contentOffset)")
         }
 
         // Render PTY output as it arrives (already hopped to main in the bridge).
@@ -272,6 +274,7 @@ struct TerminalScreen: UIViewRepresentable {
                 // context, so assume isolation. Guard so a no-op pinch doesn't churn
                 // the persisted store.
                 MainActor.assumeIsolated {
+                    DebugLog.shared.log(.gesture, "gesture:pinch fontSize=\(baseSize)")
                     let store = AppStores.shared.terminalSettings
                     if store.settings.fontSize != baseSize {
                         store.settings.fontSize = baseSize
@@ -292,7 +295,7 @@ struct TerminalScreen: UIViewRepresentable {
                 let ok = terminal.becomeFirstResponder()
                 // @objc gesture callbacks are delivered on the main thread but are a
                 // nonisolated context; hop onto the main actor for the @MainActor logger.
-                MainActor.assumeIsolated { DebugLog.shared.log("key:firstResponder becomeFirstResponder=\(ok) isFirstResponder=\(terminal.isFirstResponder)") }
+                MainActor.assumeIsolated { DebugLog.shared.log(.input, "key:firstResponder becomeFirstResponder=\(ok) isFirstResponder=\(terminal.isFirstResponder)") }
             }
         }
 
@@ -311,7 +314,7 @@ struct TerminalScreen: UIViewRepresentable {
                 // from the VM's passwordDetector when the coordinator's weak ref is alive.
                 let content = String(decoding: Array(data), as: UTF8.self)
                 let isPwd = vm?.currentLineIsPassword() ?? false
-                DebugLog.shared.log("key:\(keystrokeLogDecision(event: event, content: content, logContent: logContent, isPasswordLine: isPwd))")
+                DebugLog.shared.log(.input, "key:\(keystrokeLogDecision(event: event, content: content, logContent: logContent, isPasswordLine: isPwd))")
             }
             onSend(Array(data))
         }

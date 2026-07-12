@@ -96,7 +96,9 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     private func contentHeight() -> CGFloat {
         let width = bounds.width > 0 ? bounds.width : UIScreen.main.bounds.width
         let fitted = host.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
-        return fitted.height > 0 ? fitted.height : Self.seedHeight
+        let h = fitted.height > 0 ? fitted.height : Self.seedHeight
+        DebugLog.shared.log(.keybar, "keybar:contentHeight h=\(h)")
+        return h
     }
 
     /// Hug the SwiftUI content instead of a hardcoded height so the input view sits flush
@@ -105,6 +107,7 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     override var intrinsicContentSize: CGSize {
         let height = contentHeight()
         lastMeasuredHeight = height
+        DebugLog.shared.log(.keybar, "keybar:intrinsic h=\(height)")
         return CGSize(width: UIView.noIntrinsicMetric, height: height)
     }
 
@@ -113,7 +116,9 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     /// invalidate when the height actually changed, so we don't spin a layout loop.
     override func layoutSubviews() {
         super.layoutSubviews()
-        if abs(contentHeight() - lastMeasuredHeight) > 0.5 {
+        let h = contentHeight()
+        if abs(h - lastMeasuredHeight) > 0.5 {
+            DebugLog.shared.log(.keybar, "keybar:invalidate h=\(h) prev=\(lastMeasuredHeight)")
             invalidateIntrinsicContentSize()
         }
     }

@@ -192,7 +192,11 @@ struct KeybarEditorView: View {
 
     /// Commits a mutation that may have been refused (nil) by a sticky rule.
     private func apply(_ newLayout: KeybarLayout?) {
-        guard let newLayout else { return }
+        guard let newLayout else {
+            DebugLog.shared.log(.keybar, "keybar:layoutApply refused")
+            return
+        }
+        DebugLog.shared.log(.keybar, "keybar:layoutApply locked=\(newLayout.locked.count) scroll=\(newLayout.scroll.count)")
         store.settings.layout = newLayout
     }
 
