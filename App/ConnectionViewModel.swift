@@ -192,7 +192,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     func fnTap() { fnState.tap() }
     /// Send an F-key and clear a one-shot Fn arm.
-    func fnTapFKey(_ n: Int) { keybar.tapFKey(n); fnState.fireFKey() }
+    func fnTapFKey(_ n: Int) {
+        keybar.tapFKey(n)
+        fnState.fireFKey()
+        DebugLog.shared.log(.input, "input:fnKey n=\(n)")
+    }
 
     /// Characters typed on the terminal keyboard (SwiftTerm delegate). Routed
     /// through the keybar router so an armed Ctrl/Alt/Shift applies to real keyboard
@@ -200,6 +204,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Unmodified input passes straight through unchanged.
     func terminalKeyboardInput(_ bytes: [UInt8]) {
         keybar.keyboardInput(bytes)
+        DebugLog.shared.log(.input, "input:keyboard bytes=\(bytes.count)")
     }
 
     /// Route terminal keystrokes: through tmux `send-keys` when control mode is
@@ -352,6 +357,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// commands no-op in raw-PTY mode (no `tmux`); presentation commands publish a
     /// `presentedSheet` intent for `SessionView`.
     func perform(_ command: KeyboardCommand) {
+        DebugLog.shared.log(.input, "input:command \(command)")
         switch command {
         case .newWindow:           tmux?.newWindow()
         case .closeWindow:         tmux?.closeActiveWindow()
@@ -968,6 +974,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Forget the most-recently-typed line's un-graduated tokens (surgical L7 tool).
     /// Surfaced by the predictor strip's eraser. No-op when the predictor is off.
     func forgetLastLine() {
+        DebugLog.shared.log(.predictor, "predictor:forgetLastLine")
         Task { [predictor] in await predictor?.forgetLastLine() }
         // Ephemeral drop — nothing to persist; suggestions refresh on next input.
     }
@@ -978,6 +985,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// in-memory learned state before the on-disk store is deleted. No-op when the
     /// predictor is off (incognito).
     func purgeLearnedEngine() {
+        DebugLog.shared.log(.predictor, "predictor:purge")
         Task { [predictor] in await predictor?.purgeLearned() }
     }
 
@@ -1076,10 +1084,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // engine still folds echo/opt-out/L5 into the L7 confidence tier.
                 if !optedOut, echoConfirmed {
                     let toLearn = self.pendingLineTokens
+                    DebugLog.shared.log(.predictor,
+                        "predictor:record tokens=\(toLearn.count) echo=\(echoConfirmed) optedOut=\(optedOut)")
                     Task { [predictor = self.predictor] in
                         await predictor?.beginLine()
                         await predictor?.record(toLearn, echoConfirmed: echoConfirmed, optedOut: optedOut)
                     }
+                } else {
+                    DebugLog.shared.log(.predictor,
+                        "predictor:recordSuppressed echo=\(echoConfirmed) optedOut=\(optedOut)")
                 }
                 self.pendingLineTokens.removeAll(keepingCapacity: true)
                 self.passwordDetector.resetLine()
@@ -1100,7 +1113,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         Task { [weak self] in
             let raw = await predictor.suggestions(forPrefix: prefix, after: prev)
             let chips = predictorChips(current: prefix, suggestions: raw)
-            await MainActor.run { self?.predictorVM.setSuggestions(chips) }
+            await MainActor.run {
+                DebugLog.shared.log(.predictor, "predictor:suggest prefixLen=\(prefix.count) results=\(raw.count)")
+                self?.predictorVM.setSuggestions(chips)
+            }
         }
     }
 

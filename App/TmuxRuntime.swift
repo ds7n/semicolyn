@@ -183,17 +183,20 @@ final class TmuxRuntime {
     /// Toggle zoom on the active pane (tmux emits the layout change).
     func zoomActivePane() {
         guard let pane = activePane else { return }
+        DebugLog.shared.log(.tmux, "tmux:send zoom-pane target=%\(pane.raw)")
         write(TmuxCommand.zoomPane(target: pane))
     }
 
     /// Open a new tmux window (Phase 4e `⌘T`).
     func newWindow() {
+        DebugLog.shared.log(.tmux, "tmux:send new-window")
         write(TmuxCommand.newWindow())
     }
 
     /// Kill the active window (Phase 4e `⌘W`). No-op until a window exists.
     func closeActiveWindow() {
         guard let win = controller.state.activeWindow else { return }
+        DebugLog.shared.log(.tmux, "tmux:send kill-window target=@\(win.raw)")
         write(TmuxCommand.killWindow(target: win))
     }
 
@@ -201,17 +204,20 @@ final class TmuxRuntime {
     /// `⌘D`/`⌘|` side-by-side, `⇧⌘D`/`⌘-` stacked).
     func splitActivePane(direction: SplitDirection) {
         guard let pane = activePane else { return }
+        DebugLog.shared.log(.tmux, "tmux:send split-window target=%\(pane.raw) direction=\(direction)")
         write(TmuxCommand.splitWindow(target: pane, direction: direction))
     }
 
     /// Move to the next/previous pane in the active window (Phase 4e `⌘[`/`⌘]`).
     func selectPaneRelative(next: Bool) {
+        DebugLog.shared.log(.tmux, "tmux:send select-pane next=\(next)")
         write(TmuxCommand.selectPaneRelative(next: next))
     }
 
     /// Tell tmux the client size in cells so it re-tiles; ignored if degenerate.
     func setClientSize(cols: Int, rows: Int) {
         guard let line = TmuxCommand.refreshClientSize(width: cols, height: rows) else { return }
+        DebugLog.shared.log(.tmux, "tmux:send refresh-client size=\(cols)x\(rows)")
         write(line)
     }
 
