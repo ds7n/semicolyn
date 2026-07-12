@@ -30,6 +30,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let onLongPressZoom: () -> Void
         let onPlaceCursor: (_ toCol: Int, _ toRow: Int) -> Void
         let mouseReportingActive: () -> Bool
+        let hasSelection: () -> Bool
+        let clearSelection: () -> Void
     }
 
     private weak var terminalView: TerminalView?
@@ -173,11 +175,18 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     @objc private func handleSingleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
-        DebugLog.shared.log("gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
         if callbacks.mouseReportingActive() { return }
-        let p = g.location(in: view)
-        let target = cell(at: p, in: view)
-        callbacks.onPlaceCursor(target.col, target.row)
+        let action = tapAction(hasSelection: callbacks.hasSelection())
+        switch action {
+        case .clearSelection:
+            callbacks.clearSelection()
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=clear")
+        case .placeCursor:
+            let p = g.location(in: view)
+            let target = cell(at: p, in: view)
+            callbacks.onPlaceCursor(target.col, target.row)
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=place at=(\(target.col),\(target.row))")
+        }
     }
 
     @objc private func handleDoubleTap(_ g: UITapGestureRecognizer) {
