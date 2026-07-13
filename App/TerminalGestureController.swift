@@ -100,6 +100,33 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         DebugLog.shared.log(.gesture, "sweep: disabled \(view.gestureRecognizers?.filter { !$0.isEnabled }.count ?? 0) recognizers; nativePan kept=\(view.panGestureRecognizer.isEnabled)")
     }
 
+    /// Disable SwiftTerm's LAZILY-created selection/mouse pan recognizers.
+    ///
+    /// The init-time `disableSwiftTermRecognizers` sweep is a one-time snapshot, but
+    /// SwiftTerm creates its `panSelectionGesture` (and `panMouseGesture`) on demand —
+    /// `enableSelectionPanGesture()` runs the first time a selection becomes active, i.e.
+    /// AFTER our sweep. That recognizer (an extra `UIPanGestureRecognizer` that is neither
+    /// ours nor the inherited scroll pan) then hijacks every subsequent drag as a text
+    /// selection (device trace 2026-07-13: sweep count flipped 12↔13 as it came and went,
+    /// and drag-selections produced no `sel:` log because the driver was SwiftTerm's own
+    /// recognizer, not our tap handlers). It's `internal`, so we can't call
+    /// `disableSelectionPanGesture()`; instead we re-scan and disable any such stray pan
+    /// at drag start. Cheap (a handful of recognizers) and idempotent.
+    private func disableStraySwiftTermPans(on view: TerminalView) {
+        var killed = 0
+        for gr in view.gestureRecognizers ?? [] where
+            gr is UIPanGestureRecognizer
+            && gr !== view.panGestureRecognizer   // keep the scroll pan
+            && !ours.contains(gr)                 // keep ours (none are pans anyway)
+            && gr.isEnabled {
+            gr.isEnabled = false
+            killed += 1
+        }
+        if killed > 0 {
+            DebugLog.shared.log(.gesture, "sweep2: disabled \(killed) stray SwiftTerm pan(s) (selection/mouse)")
+        }
+    }
+
     private func installOurRecognizers(on view: TerminalView) {
         singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
         singleTap.delegate = self
@@ -200,6 +227,20 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             dragMode = callbacks.currentMode()
             dragAppCursor = callbacks.applicationCursorKeys()
             emittedCells = 0
+            // Defense-in-depth (on top of the Kit simultaneity policy): the moment a
+            // real drag starts, force-cancel any long-press by bouncing its `isEnabled`.
+            // A long-press that recognized just before the pan was turning the held-then-
+            // drag into a text selection (device trace 2026-07-13). This guarantees a
+            // drag can never leave a live long-press behind, independent of recognizer
+            // race ordering. It re-enables immediately so the next still-finger press
+            // still zooms.
+            if longPress.state == .began || longPress.state == .changed {
+                longPress.isEnabled = false
+                longPress.isEnabled = true
+            }
+            // Kill any lazily-created SwiftTerm selection/mouse pan before it can turn
+            // this drag into a text selection (the one-time init sweep can't catch it).
+            disableStraySwiftTermPans(on: view)
             DebugLog.shared.log(.gesture, "gr:scrollPan began mode=\(dragMode) appCursor=\(dragAppCursor)")
         case .changed:
             guard dragMode == .appOwnsInput else { return }
@@ -319,11 +360,27 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: UIGestureRecognizerDelegate
 
-    // Let our recognizers coexist with the mount's pinch (pinch is 2-finger, our pan is
-    // 1-finger; allow simultaneous so a stray second finger doesn't kill scroll).
+    /// Map a recognizer to its pure `GestureRole` so the simultaneity policy is a
+    /// Linux-tested decision (`gesturesMayRecognizeSimultaneously`). The scroll pan is
+    /// the terminal view's inherited `UIScrollView.panGestureRecognizer`, NOT one of
+    /// ours; identity-match it. `longPress` is ours; pinch is a `UIPinchGestureRecognizer`
+    /// installed by the mount; everything else is a tap or unmodeled.
+    private func role(of g: UIGestureRecognizer) -> GestureRole {
+        if g === terminalView?.panGestureRecognizer { return .scrollPan }
+        if g === longPress { return .longPress }
+        if g is UIPinchGestureRecognizer { return .pinch }
+        if g is UITapGestureRecognizer { return .tap }
+        return .other
+    }
+
+    // Simultaneity policy lives in Kit (`gesturesMayRecognizeSimultaneously`): pinch
+    // coexists with the 1-finger pan/taps, but the long-press must NOT co-recognize
+    // with the scroll pan — otherwise a moving-finger drag was treated as a held-touch
+    // text selection (device trace 2026-07-13: every drag started a selection). Making
+    // that one pairing exclusive lets the pan cancel the long-press on movement.
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        return true
+        return gesturesMayRecognizeSimultaneously(role(of: g), role(of: other))
     }
 }
 
