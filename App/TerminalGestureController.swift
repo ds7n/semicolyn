@@ -112,6 +112,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// recognizer, not our tap handlers). It's `internal`, so we can't call
     /// `disableSelectionPanGesture()`; instead we re-scan and disable any such stray pan
     /// at drag start. Cheap (a handful of recognizers) and idempotent.
+    ///
+    /// NOTE (build 42): this is now DEFENSE-IN-DEPTH, not the primary guard. It only runs
+    /// on the scroll pan's `.began`, which never fires when the selection pan *wins*
+    /// arbitration — that case is what let selection survive. The primary fix is the
+    /// simultaneity delegate (`.selectionPan` mutually-exclusive with `.scrollPan` +
+    /// `shouldRequireFailureOf` subordinating it), which makes the scroll pan win before
+    /// the selection pan can start. This sweep stays as a cheap belt-and-suspenders.
     private func disableStraySwiftTermPans(on view: TerminalView) {
         var killed = 0
         for gr in view.gestureRecognizers ?? [] where
@@ -370,6 +377,12 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         if g === longPress { return .longPress }
         if g is UIPinchGestureRecognizer { return .pinch }
         if g is UITapGestureRecognizer { return .tap }
+        // A pan that is neither the inherited scroll pan nor one of ours (ours are all
+        // taps + a long-press, never pans) is SwiftTerm's lazily-created
+        // selection/mouse pan — the recognizer that hijacks a drag as text selection.
+        // Classifying it as `.selectionPan` makes the simultaneity policy exclude it
+        // from co-recognizing with the scroll pan.
+        if g is UIPanGestureRecognizer { return .selectionPan }
         return .other
     }
 
@@ -381,6 +394,19 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         return gesturesMayRecognizeSimultaneously(role(of: g), role(of: other))
+    }
+
+    /// Make SwiftTerm's selection/mouse pan *lose* to the native scroll pan.
+    ///
+    /// `shouldRecognizeSimultaneouslyWith == false` only stops the two pans from
+    /// co-recognizing; it does not decide WHICH wins, so the selection pan could still
+    /// beat the scroll pan and drive a text selection (build-42 device trace). Requiring
+    /// the selection pan to fail until the scroll pan fails guarantees a plain vertical
+    /// drag scrolls. Delivered to the selection pan (`g`), naming the scroll pan as the
+    /// one it must wait on.
+    func gestureRecognizer(_ g: UIGestureRecognizer,
+                           shouldRequireFailureOf other: UIGestureRecognizer) -> Bool {
+        return role(of: g) == .selectionPan && role(of: other) == .scrollPan
     }
 }
 
