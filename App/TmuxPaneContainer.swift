@@ -240,9 +240,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
             view.addGestureRecognizer(pinch)
             pinchRecognizers[key] = pinch
 
-            // Panes start non-reporting; the per-pane value is reconciled in
-            // apply()/updateMouseDots (a mouse=a pane flips it back to true so mouse
-            // events forward to the app instead of driving our gesture layer).
+            // Panes start non-reporting; the per-pane value is then owned solely by
+            // `modeTracker.onChange`, which flips it to true for `.mouseReporting` /
+            // `.appOwnsInput` panes (fired once at prime time and on every mode
+            // transition) so their events forward to the app instead of our gestures.
             view.allowMouseReporting = false
 
             // Replace SwiftTerm's built-in touch map with ours (per pane). Horizontal
