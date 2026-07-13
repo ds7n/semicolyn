@@ -5,14 +5,20 @@ import SwiftTerm
 import SemicolynKit
 
 /// Owns the terminal touch map for a single `TerminalView`, replacing SwiftTerm's
-/// built-in tap/long-press recognizers. Single-finger vertical drag scrolls via the
-/// terminal's NATIVE `UIScrollView` pan (kept enabled — we do not fight it); a
-/// horizontal drag on that same native pan switches tmux windows (one per drag, on
-/// release, via `GestureClassifier` + the mount's clamp); single tap places the cursor;
+/// built-in tap/long-press recognizers. In `.localScroll` a single-finger vertical
+/// drag scrolls via the terminal's NATIVE `UIScrollView` pan (kept enabled — we do
+/// not fight it); in `.appOwnsInput` (alt-screen) the mount parks that pan
+/// (`isScrollEnabled = false`) and this controller streams the drag to the app as
+/// arrow-key runs. A horizontal drag on the native pan switches tmux windows (one per
+/// drag, on release, via `GestureClassifier` + the mount's clamp); single tap places
+/// the cursor (in `.localScroll`; other modes yield the tap to the app);
 /// double/triple-tap word/line-select; long-press zooms the tmux pane; two-finger
-/// tap shows the edit menu. A mouse-reporting pane (`mouse=a`) yields: we set
-/// `allowMouseReporting = true` and let SwiftTerm forward events (our recognizers
-/// still installed but no-op via the `mouseReportingActive` guard).
+/// tap shows the edit menu. Routing is mode-driven: the mount tracks each pane's
+/// `InteractionMode` (`.localScroll` / `.appOwnsInput` / `.mouseReporting`) and this
+/// controller reads it via `currentMode()` — a `.mouseReporting` or `.appOwnsInput`
+/// pane yields taps to SwiftTerm's mouse forwarding (`allowMouseReporting = true`,
+/// set by the mount), and an `.appOwnsInput` (alt-screen) vertical drag is translated
+/// into arrow-key runs streamed to the app instead of scrolling locally.
 ///
 /// SwiftTerm's own tap/long-press/pan recognizers are added via plain
 /// `addGestureRecognizer` calls but never stored behind a public accessor (its
@@ -29,13 +35,28 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let onSwitchWindow: (Int) -> Void
         let onLongPressZoom: () -> Void
         let onPlaceCursor: (_ toCol: Int, _ toRow: Int) -> Void
-        let mouseReportingActive: () -> Bool
+        /// The pane's current `InteractionMode`: snapshotted once at drag `.began`,
+        /// and read fresh on each tap. The single source of truth for gesture routing.
+        let currentMode: () -> InteractionMode
+        /// DECCKM (application-cursor-keys) state, snapshotted at drag `.began` so a
+        /// single drag encodes consistently even if the app flips the mode mid-drag.
+        let applicationCursorKeys: () -> Bool
+        /// Sends raw bytes to the remote (arrow-key runs from an alt-screen drag).
+        let sendBytes: ([UInt8]) -> Void
         let hasSelection: () -> Bool
         let clearSelection: () -> Void
     }
 
     private weak var terminalView: TerminalView?
     private let callbacks: Callbacks
+
+    // Per-gesture snapshot state, taken once at drag `.began` so mode/DECCKM can't
+    // change mid-drag and split one gesture across two interpretations.
+    private var dragMode: InteractionMode = .localScroll
+    private var dragAppCursor: Bool = false
+    /// Running total of cells already turned into arrows this drag (fed back into
+    /// `AltScreenScroll.arrows` so successive `.changed` samples send only the new delta).
+    private var emittedCells: Int = 0
 
     // Our recognizers (kept so we can identify + remove them, and so the delegate can
     // tell ours apart from SwiftTerm's). Note: vertical scroll is NOT one of ours — it
@@ -77,6 +98,33 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             gr.isEnabled = false
         }
         DebugLog.shared.log(.gesture, "sweep: disabled \(view.gestureRecognizers?.filter { !$0.isEnabled }.count ?? 0) recognizers; nativePan kept=\(view.panGestureRecognizer.isEnabled)")
+    }
+
+    /// Disable SwiftTerm's LAZILY-created selection/mouse pan recognizers.
+    ///
+    /// The init-time `disableSwiftTermRecognizers` sweep is a one-time snapshot, but
+    /// SwiftTerm creates its `panSelectionGesture` (and `panMouseGesture`) on demand —
+    /// `enableSelectionPanGesture()` runs the first time a selection becomes active, i.e.
+    /// AFTER our sweep. That recognizer (an extra `UIPanGestureRecognizer` that is neither
+    /// ours nor the inherited scroll pan) then hijacks every subsequent drag as a text
+    /// selection (device trace 2026-07-13: sweep count flipped 12↔13 as it came and went,
+    /// and drag-selections produced no `sel:` log because the driver was SwiftTerm's own
+    /// recognizer, not our tap handlers). It's `internal`, so we can't call
+    /// `disableSelectionPanGesture()`; instead we re-scan and disable any such stray pan
+    /// at drag start. Cheap (a handful of recognizers) and idempotent.
+    private func disableStraySwiftTermPans(on view: TerminalView) {
+        var killed = 0
+        for gr in view.gestureRecognizers ?? [] where
+            gr is UIPanGestureRecognizer
+            && gr !== view.panGestureRecognizer   // keep the scroll pan
+            && !ours.contains(gr)                 // keep ours (none are pans anyway)
+            && gr.isEnabled {
+            gr.isEnabled = false
+            killed += 1
+        }
+        if killed > 0 {
+            DebugLog.shared.log(.gesture, "sweep2: disabled \(killed) stray SwiftTerm pan(s) (selection/mouse)")
+        }
     }
 
     private func installOurRecognizers(on view: TerminalView) {
@@ -159,38 +207,93 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     // MARK: Handlers
 
     /// Rides the terminal's NATIVE UIScrollView pan (we added ourselves as an extra
-    /// target). Vertical drags are handled by the scroll view itself (native scroll,
-    /// inertia, correct `isTracking`/scrollback) — we do nothing for them. We only look
-    /// for a horizontal-dominant drag in multi-window tmux and, on release, fire a
-    /// one-per-drag window switch. `GestureClassifier` decides from the cumulative
-    /// translation; a vertical or single-window drag classifies as scroll and we no-op.
+    /// target). The mode is snapshotted once at `.began` so a single drag can't
+    /// straddle two interpretations mid-flight:
+    /// - `.localScroll`: we do nothing — the scroll view itself owns the vertical
+    ///   drag (native scroll, inertia, correct `isTracking`/scrollback).
+    /// - `.appOwnsInput` (alt-screen): the mount has set `isScrollEnabled = false`,
+    ///   so native scroll is inert; we translate the drag into arrow-key runs
+    ///   (`AltScreenScroll`) streamed to the app on every `.changed`.
+    /// - `.mouseReporting`: SwiftTerm forwards the drag as a mouse event; we no-op
+    ///   entirely, including the window-switch classify on release.
+    ///
+    /// In ANY mode that lets us own the horizontal axis (i.e. not `.mouseReporting`),
+    /// a horizontal-dominant drag in multi-window tmux still resolves a window switch
+    /// once, on release, via `GestureClassifier` from the cumulative translation.
     @objc private func handleScrollViewPan(_ g: UIPanGestureRecognizer) {
         guard let view = terminalView else { return }
-        if callbacks.mouseReportingActive() { return }  // mouse app: SwiftTerm forwards
-        DebugLog.shared.log(.gesture, "gr:scrollPan state=\(g.state.rawValue) t=\(g.translation(in: view)) mouseReporting=\(callbacks.mouseReportingActive())")
-        guard g.state == .ended || g.state == .cancelled else { return }
-        let t = g.translation(in: view)
-        let decision = GestureClassifier.classify(
-            dx: Double(t.x), dy: Double(t.y),
-            isMultiWindowTmux: callbacks.isMultiWindowTmux())
-        if case .switchWindow(let delta) = decision {
-            callbacks.onSwitchWindow(delta)
+        switch g.state {
+        case .began:
+            dragMode = callbacks.currentMode()
+            dragAppCursor = callbacks.applicationCursorKeys()
+            emittedCells = 0
+            // Defense-in-depth (on top of the Kit simultaneity policy): the moment a
+            // real drag starts, force-cancel any long-press by bouncing its `isEnabled`.
+            // A long-press that recognized just before the pan was turning the held-then-
+            // drag into a text selection (device trace 2026-07-13). This guarantees a
+            // drag can never leave a live long-press behind, independent of recognizer
+            // race ordering. It re-enables immediately so the next still-finger press
+            // still zooms.
+            if longPress.state == .began || longPress.state == .changed {
+                longPress.isEnabled = false
+                longPress.isEnabled = true
+            }
+            // Kill any lazily-created SwiftTerm selection/mouse pan before it can turn
+            // this drag into a text selection (the one-time init sweep can't catch it).
+            disableStraySwiftTermPans(on: view)
+            DebugLog.shared.log(.gesture, "gr:scrollPan began mode=\(dragMode) appCursor=\(dragAppCursor)")
+        case .changed:
+            guard dragMode == .appOwnsInput else { return }
+            let term = view.getTerminal()
+            let cellH = view.bounds.height / CGFloat(max(term.rows, 1))
+            let (runs, newEmitted) = AltScreenScroll.arrows(
+                totalDy: Double(g.translation(in: view).y),
+                cellHeight: Double(cellH),
+                emittedCells: emittedCells)
+            emittedCells = newEmitted
+            for run in runs {
+                let bytes = encodeArrowRun(run, applicationCursorKeys: dragAppCursor)
+                if !bytes.isEmpty { callbacks.sendBytes(bytes) }
+            }
+            if !runs.isEmpty {
+                DebugLog.shared.log(.gesture, "gr:scrollPan altScreen runs=\(runs.count) emittedCells=\(emittedCells)")
+            }
+        case .ended, .cancelled:
+            // Window-switch resolves once, from cumulative translation, in ANY mode
+            // that lets us own the horizontal axis (not mouseReporting).
+            guard dragMode != .mouseReporting else { return }
+            let t = g.translation(in: view)
+            let decision = GestureClassifier.classify(
+                dx: Double(t.x), dy: Double(t.y),
+                isMultiWindowTmux: callbacks.isMultiWindowTmux())
+            if case .switchWindow(let delta) = decision {
+                callbacks.onSwitchWindow(delta)
+            }
+        default: break
         }
     }
 
     @objc private func handleSingleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
-        if callbacks.mouseReportingActive() { return }
-        let action = tapAction(hasSelection: callbacks.hasSelection())
-        switch action {
-        case .clearSelection:
-            callbacks.clearSelection()
-            DebugLog.shared.log(.gesture, "gesture:singleTap action=clear")
-        case .placeCursor:
-            let p = g.location(in: view)
-            let target = cell(at: p, in: view)
-            callbacks.onPlaceCursor(target.col, target.row)
-            DebugLog.shared.log(.gesture, "gesture:singleTap action=place at=(\(target.col),\(target.row))")
+        switch callbacks.currentMode() {
+        case .mouseReporting, .appOwnsInput:
+            // App owns clicks: SwiftTerm forwards the tap as a mouse event (mount sets
+            // `allowMouseReporting = true` in these modes). No-op here so we don't also
+            // place a cursor.
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=appOwns mode=\(callbacks.currentMode())")
+            return
+        case .localScroll:
+            let action = tapAction(hasSelection: callbacks.hasSelection())
+            switch action {
+            case .clearSelection:
+                callbacks.clearSelection()
+                DebugLog.shared.log(.gesture, "gesture:singleTap action=clear")
+            case .placeCursor:
+                let p = g.location(in: view)
+                let target = cell(at: p, in: view)
+                callbacks.onPlaceCursor(target.col, target.row)
+                DebugLog.shared.log(.gesture, "gesture:singleTap action=place at=(\(target.col),\(target.row))")
+            }
         }
     }
 
@@ -257,11 +360,27 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: UIGestureRecognizerDelegate
 
-    // Let our recognizers coexist with the mount's pinch (pinch is 2-finger, our pan is
-    // 1-finger; allow simultaneous so a stray second finger doesn't kill scroll).
+    /// Map a recognizer to its pure `GestureRole` so the simultaneity policy is a
+    /// Linux-tested decision (`gesturesMayRecognizeSimultaneously`). The scroll pan is
+    /// the terminal view's inherited `UIScrollView.panGestureRecognizer`, NOT one of
+    /// ours; identity-match it. `longPress` is ours; pinch is a `UIPinchGestureRecognizer`
+    /// installed by the mount; everything else is a tap or unmodeled.
+    private func role(of g: UIGestureRecognizer) -> GestureRole {
+        if g === terminalView?.panGestureRecognizer { return .scrollPan }
+        if g === longPress { return .longPress }
+        if g is UIPinchGestureRecognizer { return .pinch }
+        if g is UITapGestureRecognizer { return .tap }
+        return .other
+    }
+
+    // Simultaneity policy lives in Kit (`gesturesMayRecognizeSimultaneously`): pinch
+    // coexists with the 1-finger pan/taps, but the long-press must NOT co-recognize
+    // with the scroll pan — otherwise a moving-finger drag was treated as a held-touch
+    // text selection (device trace 2026-07-13: every drag started a selection). Making
+    // that one pairing exclusive lets the pan cancel the long-press on movement.
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        return true
+        return gesturesMayRecognizeSimultaneously(role(of: g), role(of: other))
     }
 }
 
