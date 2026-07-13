@@ -8,20 +8,23 @@ import SemicolynKit
 /// subclass overrides, NOT render-polling). Both mount sites own one so the mode
 /// derivation lives in exactly one place. Keyed by `PaneID?` — nil = the single raw
 /// (non-tmux) pane.
-@MainActor
+/// Not `@MainActor`: this is a plain main-thread-only helper owned by the (nonisolated)
+/// mount `Coordinator`s. Marking it `@MainActor` forced a boundary hop at every access
+/// from those nonisolated coordinators (init, `mode`, `onChange`, `recompute`), which is
+/// noise — the tracker is only ever touched on the main thread as part of SwiftUI /
+/// SwiftTerm view callbacks. Leaving it nonisolated keeps all those call sites clean; the
+/// single `@MainActor` dependency it has (the `DebugLog` logger) is wrapped locally below.
 final class PaneModeTracker {
     // Keyed by PaneID? — nil is the single raw (non-tmux) pane. PaneID is UInt32-backed
     // (no room for a sentinel), so the optional key is the clean single-pane spelling.
     private var modes: [PaneID?: InteractionMode] = [:]
     /// Fired when a pane's mode actually changes (deduped). App wires this to the
-    /// pane's gesture controller (isScrollEnabled + routing) and mouse-dot.
-    var onChange: (PaneID?, InteractionMode) -> Void = { _, _ in }
+    /// pane's gesture controller (isScrollEnabled + routing) and mouse-dot — all
+    /// `@MainActor` UI state, so the closure is `@MainActor`; `recompute` (always on
+    /// the main thread) invokes it via `assumeIsolated`.
+    var onChange: @MainActor (PaneID?, InteractionMode) -> Void = { _, _ in }
 
-    /// `nonisolated` so the non-`@MainActor` mount coordinators can default-initialize
-    /// this as a stored property (`let modeTracker = PaneModeTracker()`). Constructing
-    /// the empty dict + no-op closure touches no main-actor state; every *method* stays
-    /// `@MainActor`-isolated via the class annotation, which is where the real work runs.
-    nonisolated init() {}
+    init() {}
 
     func mode(for pane: PaneID?) -> InteractionMode { modes[pane] ?? .localScroll }
 
@@ -32,8 +35,13 @@ final class PaneModeTracker {
                                mouseReporting: terminal.mouseMode != .off)
         if modes[pane] != next {
             modes[pane] = next
-            DebugLog.shared.log(.gesture, "mode[\(pane.map { "%\($0.raw)" } ?? "raw")] -> \(next)")
-            onChange(pane, next)
+            // recompute is always called on the main thread (SwiftUI/SwiftTerm view
+            // callbacks). Both the @MainActor logger and the @MainActor `onChange`
+            // (which touches isScrollEnabled / mouseDot UI state) run under one hop.
+            MainActor.assumeIsolated {
+                DebugLog.shared.log(.gesture, "mode[\(pane.map { "%\($0.raw)" } ?? "raw")] -> \(next)")
+                onChange(pane, next)
+            }
         }
     }
 
