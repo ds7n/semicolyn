@@ -335,18 +335,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     func placeTmuxCursor(_ view: TerminalView, toCol: Int, toRow: Int) {
         let term = view.getTerminal()
         let cur = term.getCursorLocation()   // .x = col, .y = row
+        let appCursor = term.applicationCursor
         let runs = cursorTapArrows(fromCol: cur.x, fromRow: cur.y, toCol: toCol, toRow: toRow)
         var bytes: [UInt8] = []
-        for run in runs {
-            let tail: [UInt8]
-            switch run.direction {
-            case .up:    tail = [0x1b, 0x5b, 0x41]   // ESC [ A
-            case .down:  tail = [0x1b, 0x5b, 0x42]   // ESC [ B
-            case .right: tail = [0x1b, 0x5b, 0x43]   // ESC [ C
-            case .left:  tail = [0x1b, 0x5b, 0x44]   // ESC [ D
-            }
-            bytes += Array(repeating: tail, count: run.count).flatMap { $0 }
-        }
+        for run in runs { bytes += encodeArrowRun(run, applicationCursorKeys: appCursor) }
         guard !bytes.isEmpty else { return }
         sendTerminalInput(bytes)
     }
