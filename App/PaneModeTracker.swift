@@ -17,6 +17,12 @@ final class PaneModeTracker {
     /// pane's gesture controller (isScrollEnabled + routing) and mouse-dot.
     var onChange: (PaneID?, InteractionMode) -> Void = { _, _ in }
 
+    /// `nonisolated` so the non-`@MainActor` mount coordinators can default-initialize
+    /// this as a stored property (`let modeTracker = PaneModeTracker()`). Constructing
+    /// the empty dict + no-op closure touches no main-actor state; every *method* stays
+    /// `@MainActor`-isolated via the class annotation, which is where the real work runs.
+    nonisolated init() {}
+
     func mode(for pane: PaneID?) -> InteractionMode { modes[pane] ?? .localScroll }
 
     /// Recompute from live terminal state. Idempotent; only fires `onChange` on a
