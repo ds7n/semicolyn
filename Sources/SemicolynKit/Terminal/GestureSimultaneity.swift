@@ -14,6 +14,12 @@ public enum GestureRole: Hashable, Sendable {
     case pinch
     /// A tap (single / double / triple / two-finger).
     case tap
+    /// SwiftTerm's lazily-created selection/mouse pan (`panSelectionGesture` /
+    /// `panMouseGesture`) — an extra `UIPanGestureRecognizer` it attaches on demand
+    /// (first selection / double-tap). It drives text selection on a single-finger
+    /// drag and must lose to the scroll pan, or a plain drag selects instead of
+    /// scrolling.
+    case selectionPan
     /// Any other recognizer we don't model explicitly.
     case other
 }
@@ -30,5 +36,11 @@ public func gesturesMayRecognizeSimultaneously(_ a: GestureRole, _ b: GestureRol
     let pair = Set([a, b])
     // The bug: long-press + scroll pan must be mutually exclusive.
     if pair == Set([.longPress, .scrollPan]) { return false }
+    // The build-42 bug: SwiftTerm's selection/mouse pan + scroll pan must be mutually
+    // exclusive, or a plain vertical drag is driven as a text selection by SwiftTerm's
+    // own recognizer (our handlers never run — zero `.gesture` logs during the drag).
+    // The old `sweep2` disable-on-drag-start couldn't catch this: it's gated on the
+    // scroll pan's `.began`, which never fires when the selection pan wins arbitration.
+    if pair == Set([.selectionPan, .scrollPan]) { return false }
     return true
 }

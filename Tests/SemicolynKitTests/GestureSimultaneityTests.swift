@@ -29,8 +29,26 @@ final class GestureSimultaneityTests: XCTestCase {
         XCTAssertTrue(gesturesMayRecognizeSimultaneously(.tap, .pinch))
     }
 
-    // Only the long-press↔pan pairing is excluded; nothing else is.
-    func testOnlyLongPressPanIsExcluded() {
+    // THE build-42 bug: SwiftTerm's lazily-created selection/mouse pan must NOT
+    // co-recognize with the scroll pan (either order). When it did, a plain vertical
+    // drag was driven as a text selection by SwiftTerm's own pan (device trace
+    // 2026-07-13: zero `.gesture` logs during the drag → our handlers never ran →
+    // the selection pan won arbitration). Excluding the pair lets the scroll pan
+    // cancel it on movement, the same mechanism that fixed long-press.
+    func testSelectionPanAndScrollPanAreMutuallyExclusive() {
+        XCTAssertFalse(gesturesMayRecognizeSimultaneously(.selectionPan, .scrollPan))
+        XCTAssertFalse(gesturesMayRecognizeSimultaneously(.scrollPan, .selectionPan))
+    }
+
+    // The selection pan doesn't fight taps (a tap that activated a selection is fine)
+    // or pinch; only the scroll pan must beat it.
+    func testSelectionPanCoexistsWithTapsAndPinch() {
+        XCTAssertTrue(gesturesMayRecognizeSimultaneously(.selectionPan, .tap))
+        XCTAssertTrue(gesturesMayRecognizeSimultaneously(.selectionPan, .pinch))
+    }
+
+    // Only the two pan-vs-scroll pairings are excluded; nothing else is.
+    func testOnlyPanVsScrollPairingsAreExcluded() {
         XCTAssertTrue(gesturesMayRecognizeSimultaneously(.scrollPan, .scrollPan))
         XCTAssertTrue(gesturesMayRecognizeSimultaneously(.longPress, .pinch))
         XCTAssertTrue(gesturesMayRecognizeSimultaneously(.other, .scrollPan))
