@@ -14,7 +14,34 @@ struct DiagnosticsSettingsView: View {
     @AppStorage(RemoteLogConfig.transportKey) private var transportRaw = RemoteLogConfig.defaultTransport.rawValue
     @AppStorage(RemoteLogConfig.keystrokeContentKey) private var keystrokeContent = false
 
-    @State private var testResult: String?
+    /// Result of the last "Test connection", driving both the label text and its color.
+    enum TestResult {
+        case testing
+        case connected
+        case failed
+        case needsHost
+
+        var text: String {
+            switch self {
+            case .testing: return "Testing…"
+            case .connected: return "✓ Connected"
+            case .failed: return "✗ Failed"
+            case .needsHost: return "Enter a host first."
+            }
+        }
+
+        /// Color-coded but still legible on the grouped-list background: a readable green /
+        /// red for the terminal states, secondary (system gray) for the transient/neutral.
+        var color: Color {
+            switch self {
+            case .connected: return .green
+            case .failed: return .red
+            case .testing, .needsHost: return .secondary
+            }
+        }
+    }
+
+    @State private var testResult: TestResult?
     @State private var showKeystrokeNag = false
     /// True only for the single `keystrokeContent` change that the nag's "Turn On"
     /// causes, so that confirmation doesn't re-trigger the nag (which re-set the value
@@ -50,7 +77,11 @@ struct DiagnosticsSettingsView: View {
                     }
                     .onChange(of: transportRaw) { _, _ in rebuildSink() }
                     Button("Test connection") { runTest() }
-                    if let testResult { Text(testResult).font(.footnote).foregroundStyle(.secondary) }
+                    if let testResult {
+                        Text(testResult.text)
+                            .font(.footnote)
+                            .foregroundStyle(testResult.color)
+                    }
                 }
             } header: {
                 Text("Stream logs to a server")
@@ -135,11 +166,11 @@ struct DiagnosticsSettingsView: View {
     }
 
     private func runTest() {
-        guard !remoteHost.isEmpty else { testResult = "Enter a host first."; return }
-        testResult = "Testing…"
+        guard !remoteHost.isEmpty else { testResult = .needsHost; return }
+        testResult = .testing
         let sink = RemoteLogSink(host: remoteHost, port: remotePort, transport: transport)
         sink.test { ok in
-            DispatchQueue.main.async { testResult = ok ? "✓ Connected" : "✗ Failed" }
+            DispatchQueue.main.async { testResult = ok ? .connected : .failed }
         }
     }
 }
