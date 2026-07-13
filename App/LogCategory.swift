@@ -22,6 +22,22 @@ enum LogCategory: String, CaseIterable, Sendable {
     /// Human label for the settings row.
     var label: String { rawValue.capitalized }
 
+    /// One-line description shown under the toggle in Settings → Diagnostics, so a
+    /// tester knows what each category records before enabling it.
+    var summary: String {
+        switch self {
+        case .lifecycle: return "Connect, attach, disconnect, app foreground/background, transport switch."
+        case .connect:   return "Auth, host-key trust, Mosh fallback, reconnect."
+        case .tmux:      return "tmux control-mode sends, %replies, state-apply, pane registration."
+        case .render:    return "Pane/window render events (logged only on change). Verbose."
+        case .gesture:   return "Tap, pan, long-press, pinch handlers and swipe-vs-scroll classification."
+        case .input:     return "Keystroke structure (length, backspace, modifiers) — never key content. Verbose."
+        case .predictor: return "Suggestion lifecycle and secret-exclusion gates. Verbose."
+        case .keybar:    return "Accessory sizing, macro resolution, live-edit apply. Verbose."
+        case .seed:      return "tmux scrollback history seeding."
+        }
+    }
+
     /// Categories ON by default: low-volume, high-diagnostic-value. The high-volume /
     /// niche ones (render/input/predictor/keybar) default OFF (opt-in when needed).
     static let defaultEnabled: Set<LogCategory> = [.lifecycle, .connect, .tmux, .gesture, .seed]

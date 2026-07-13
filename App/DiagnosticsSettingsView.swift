@@ -85,7 +85,14 @@ struct DiagnosticsSettingsView: View {
 
             Section {
                 ForEach(LogCategory.allCases, id: \.self) { cat in
-                    Toggle(cat.label, isOn: categoryBinding(cat))
+                    Toggle(isOn: categoryBinding(cat)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(cat.label)
+                            Text(cat.summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             } header: {
                 Text("Log categories")
