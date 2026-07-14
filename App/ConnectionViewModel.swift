@@ -116,6 +116,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Panes that currently exist in the active window's visible layout.
     /// Bytes for panes NOT in this set are dropped rather than buffered (bounds memory).
     private var renderablePanes: Set<PaneID> = []
+    /// tmux's `#{alternate_on}` truth for a pane at attach, from
+    /// `TmuxRuntime.onAltScreenReconcile`. May arrive before the pane's `TerminalView` exists
+    /// (the query reply races pane creation), so it's held here and consumed by
+    /// `TmuxPaneContainer` (the owner of `PaneModeTracker`) when the pane mounts.
+    private var pendingAltScreenOverrides: [PaneID: Bool] = [:]
+    /// Set by `TmuxPaneContainer` (the `PaneModeTracker` owner) so a late-arriving
+    /// `onAltScreenReconcile` (reply lands AFTER this pane's TerminalView already
+    /// mounted) is still applied instead of only being consumed via
+    /// `takeAltScreenOverride` at creation time.
+    var altScreenOverrideReady: ((PaneID, Bool, TerminalView) -> Void)?
 
     private var promptContinuation: CheckedContinuation<Bool, Never>?
 
@@ -271,7 +281,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         DebugLog.shared.log(.seed, "scroll:postseed pane=%\(pane.raw) contentSize=\(view.contentSize)")
     }
 
-    func unregisterPane(_ pane: PaneID) { paneViews[pane] = nil; pendingPaneBytes[pane] = nil; paneLastTitles[pane] = nil }
+    func unregisterPane(_ pane: PaneID) {
+        paneViews[pane] = nil
+        pendingPaneBytes[pane] = nil
+        paneLastTitles[pane] = nil
+        pendingAltScreenOverrides[pane] = nil
+    }
+
+    /// The attach-time `#{alternate_on}` truth queued for `pane` (if the query reply
+    /// arrived before or after this pane mounted), consumed once by
+    /// `TmuxPaneContainer` right after it creates the pane's `TerminalView`.
+    func takeAltScreenOverride(for pane: PaneID) -> Bool? {
+        pendingAltScreenOverrides.removeValue(forKey: pane)
+    }
 
     /// Publish an OSC 0/2 title from a tmux pane, keyed to the active pane: cache it
     /// per-pane and only surface the *active* pane's title so a background pane can't
@@ -865,6 +887,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         runtime.onExit = { [weak self] reason in
             DebugLog.shared.log(.lifecycle, "tmux onExit: reason=\(reason ?? "nil") → .failed")
             self?.state = .failed(reason ?? "tmux session ended")
+        }
+        // A pane already on the alternate screen before this -CC client attached
+        // never emits `?1049h` for us to observe live, so `PaneModeTracker` would
+        // otherwise misjudge it as `.localScroll`. Queue tmux's `#{alternate_on}`
+        // truth here; `TmuxPaneContainer` (the modeTracker owner) applies it via
+        // `takeAltScreenOverride` right after the pane's TerminalView is created;
+        // this covers both orderings (query reply before or after pane mount).
+        runtime.onAltScreenReconcile = { [weak self] pane, isAlt in
+            guard let self else { return }
+            self.pendingAltScreenOverrides[pane] = isAlt
+            if let view = self.paneViews[pane] {
+                self.altScreenOverrideReady?(pane, isAlt, view)
+            }
         }
         // DIAGNOSTIC (temporary): surface what the runtime sees on attach so a blank
         // pane grid on device is self-explaining. Remove with the rest of the diag.
