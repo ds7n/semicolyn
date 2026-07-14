@@ -49,6 +49,8 @@ final class TmuxRuntime {
     private var contextPollIDs: Set<UInt64> = []
     /// In-flight `list-windows` (attach-prime) submission ids awaiting their reply.
     private var primeWindowIDs: Set<UInt64> = []
+    /// In-flight `queryAlternateOn` submission ids awaiting their reply.
+    private var altScreenQueryIDs: Set<UInt64> = []
     /// Correlation ids for in-flight `capture-pane` history seeds, keyed to the pane.
     private var historyCaptureIDs: [UInt64: PaneID] = [:]
     /// Fired when a capture response resolves: (pane, reconstructed history bytes).
@@ -56,6 +58,10 @@ final class TmuxRuntime {
     /// Fired when a pane's history may be stale (%pause/%continue, reconnect, resize
     /// desync) — the seeder should mark affected panes unseeded and re-capture.
     var onResyncAll: (() -> Void)?
+    /// Called once per pane at attach with tmux's `#{alternate_on}` truth, so the
+    /// mode tracker can reconcile a pane that was already on the alternate screen
+    /// before this -CC client attached (device trace 2026-07-14).
+    var onAltScreenReconcile: ((PaneID, Bool) -> Void)?
     /// The repeating poll task; cancelled on teardown via `stop()`.
     private var pollTask: Task<Void, Never>?
 
@@ -101,6 +107,9 @@ final class TmuxRuntime {
             if cmd == TmuxCommand.listWindowsForLayout() {
                 if let id = writeTracked(cmd) { primeWindowIDs.insert(id); DebugLog.shared.log(.tmux, "tmux prime: sent list-windows (req \(id))") }
                 else { DebugLog.shared.log(.tmux, "tmux prime: list-windows writeTracked returned NIL") }
+            } else if cmd == TmuxCommand.queryAlternateOn() {
+                if let id = writeTracked(cmd) { altScreenQueryIDs.insert(id); DebugLog.shared.log(.tmux, "tmux prime: sent alternate_on query (req \(id))") }
+                else { DebugLog.shared.log(.tmux, "tmux prime: alternate_on writeTracked returned NIL") }
             } else {
                 DebugLog.shared.log(.tmux, "tmux prime: sent \(cmd.prefix(40))")
                 write(cmd)
@@ -124,6 +133,14 @@ final class TmuxRuntime {
                     if applied { onStateChanged?(controller.state) }
                 } else {
                     DebugLog.shared.log(.tmux, "tmux prime REPLY: NOT .ok (list-windows errored)")
+                }
+            } else if altScreenQueryIDs.remove(resolved.id) != nil {
+                if case .ok(let lines) = resolved.outcome {
+                    let entries = parseAlternateOnListing(lines)
+                    DebugLog.shared.log(.tmux, "tmux alternate_on REPLY: panes=\(entries.count) alt=\(entries.filter { $0.isAlt }.map { "%\($0.pane.raw)" }.joined(separator: ","))")
+                    for e in entries { onAltScreenReconcile?(e.pane, e.isAlt) }
+                } else {
+                    DebugLog.shared.log(.tmux, "tmux alternate_on REPLY: NOT .ok")
                 }
             } else if let pane = historyCaptureIDs.removeValue(forKey: resolved.id) {
                 if case .ok(let lines) = resolved.outcome {

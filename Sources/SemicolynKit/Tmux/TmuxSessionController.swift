@@ -129,7 +129,9 @@ public final class TmuxSessionController {
 
         let justAttached = beforeLifecycle == .attaching && lifecycle == .attached
         let prime = justAttached
-            ? ["refresh-client -C 80x24", TmuxCommand.listWindowsForLayout()]
+            ? ["refresh-client -C 80x24",
+               TmuxCommand.listWindowsForLayout(),
+               TmuxCommand.queryAlternateOn()]
             : []
 
         return TmuxControllerOutput(

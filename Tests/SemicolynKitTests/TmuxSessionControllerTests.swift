@@ -176,10 +176,20 @@ final class TmuxSessionControllerTests: XCTestCase {
         let atEdge = c.feed(bytes("%session-changed $7 semicolyn-a3f7c2e9\n"))
         XCTAssertEqual(atEdge.attachedPrimeCommands,
                        ["refresh-client -C 80x24",
-                        TmuxCommand.listWindowsForLayout()])
+                        TmuxCommand.listWindowsForLayout(),
+                        TmuxCommand.queryAlternateOn()])
         // A later feed does NOT re-emit the prime.
         let after = c.feed(bytes("%window-add @0\n"))
         XCTAssertTrue(after.attachedPrimeCommands.isEmpty)
+    }
+
+    func testAttachPrimeIncludesAlternateOnQuery() {
+        let c = TmuxSessionController()
+        _ = c.start(sessionName: "semicolyn-a3f7c2e9")
+        // The %session-changed that flips .attaching → .attached.
+        let atEdge = c.feed(bytes("%session-changed $7 semicolyn-a3f7c2e9\n"))
+        XCTAssertTrue(atEdge.attachedPrimeCommands.contains(TmuxCommand.queryAlternateOn()),
+                      "attach prime must query alternate_on to reconcile pre-attach alt-screen")
     }
 
     // MARK: applyEvents
