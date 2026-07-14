@@ -183,4 +183,18 @@ final class TmuxCommandTests: XCTestCase {
         XCTAssertEqual(TmuxCommand.listWindowsForLayout(),
                        "list-windows -F \"#{window_id} #{window_active} #{window_layout} #{window_name}\"")
     }
+
+    func testQueryAlternateOnEncodesListPanesWithAltFormat() {
+        // Exact wire form: all panes, format = "<pane_id> <alternate_on>".
+        XCTAssertEqual(
+            TmuxCommand.queryAlternateOn(),
+            "list-panes -a -F \"#{pane_id} #{alternate_on}\"")
+    }
+
+    func testQueryAlternateOnHasNoNewlineFraming() {
+        // Framing safety: the encoder output must never contain CR/LF.
+        let cmd = TmuxCommand.queryAlternateOn()
+        XCTAssertFalse(cmd.contains("\n"))
+        XCTAssertFalse(cmd.contains("\r"))
+    }
 }

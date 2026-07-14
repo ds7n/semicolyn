@@ -173,6 +173,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // tmux window switch, so we never fight the scroll view with a competing pan.
         view.panGestureRecognizer.addTarget(self, action: #selector(handleScrollViewPan(_:)))
 
+        // Bug B diagnosis: observe every non-ours recognizer's state so a drag that
+        // never reaches `handleScrollViewPan` still logs which recognizer won.
+        observeStrayRecognizers(on: view)
+
         // Tap snappiness: UIScrollView delays content-touch delivery (~150ms) to first
         // decide whether a touch is the start of a scroll, which made single-tap cursor
         // placement feel sluggish. Deliver touches immediately — our tap recognizers no
@@ -214,6 +218,31 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: Handlers
 
+    /// Diagnostic (Bug B, device trace 2026-07-14): in `.appOwnsInput` our
+    /// `handleScrollViewPan` never fires because a `delegate=nil` UIKit pan
+    /// (`_UIDragAutoScrollGestureRecognizer` / SwiftTerm's lazy pan) appears to win
+    /// the drag. This logs which recognizer actually transitions, so a device trace
+    /// NAMES the winner before we disable it. Pure observation: no routing change.
+    @objc private func observeRecognizerState(_ g: UIGestureRecognizer) {
+        guard g.state == .began || g.state == .changed else { return }
+        let cls = String(describing: type(of: g))
+        let del = g.delegate.map { String(describing: type(of: $0)) } ?? "nil"
+        DebugLog.shared.log(.gesture, "gr:winner \(cls) delegate=\(del) state=\(g.state.rawValue)")
+    }
+
+    /// Attach `observeRecognizerState` as an extra target on every recognizer on the
+    /// view that is not one of ours, so any of them firing is logged. Idempotent per
+    /// recognizer (UIKit ignores a duplicate identical target/action). Called when a
+    /// pane enters `.appOwnsInput` (the only mode where the drag goes missing).
+    private func observeStrayRecognizers(on view: TerminalView) {
+        for gr in view.gestureRecognizers ?? [] where !ours.contains(gr) && gr !== view.panGestureRecognizer {
+            gr.addTarget(self, action: #selector(observeRecognizerState(_:)))
+        }
+        // Also observe the inherited scroll pan itself, to confirm whether it (our
+        // intended owner) begins or is pre-empted.
+        view.panGestureRecognizer.addTarget(self, action: #selector(observeRecognizerState(_:)))
+    }
+
     /// Rides the terminal's NATIVE UIScrollView pan (we added ourselves as an extra
     /// target). The mode is snapshotted once at `.began` so a single drag can't
     /// straddle two interpretations mid-flight:
@@ -249,6 +278,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             // Kill any lazily-created SwiftTerm selection/mouse pan before it can turn
             // this drag into a text selection (the one-time init sweep can't catch it).
             disableStraySwiftTermPans(on: view)
+            if dragMode == .appOwnsInput { observeStrayRecognizers(on: view) }
             DebugLog.shared.log(.gesture, "gr:scrollPan began mode=\(dragMode) appCursor=\(dragAppCursor)")
         case .changed:
             guard dragMode == .appOwnsInput else { return }

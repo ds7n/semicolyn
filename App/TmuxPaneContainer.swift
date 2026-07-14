@@ -58,6 +58,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
         if let onSwitchWindow { c.onSwitchWindow = onSwitchWindow }
         if let onZoomActivePane { c.onZoomActivePane = onZoomActivePane }
         if let onPlaceCursor { c.onPlaceCursor = onPlaceCursor }
+        // Late-arriving alternate_on reply (pane already mounted by the time tmux
+        // answers the attach-prime query): reconcile straight into modeTracker.
+        // The early-arriving case (reply before mount) is handled at pane-creation
+        // time in ContainerView.apply via vm.takeAltScreenOverride.
+        vm.altScreenOverrideReady = { [weak c] pane, isAlt, view in
+            c?.modeTracker.setAltScreenOverride(for: pane, isAlt: isAlt, terminal: view.getTerminal())
+        }
         return c
     }
 
@@ -594,6 +601,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     // Prime once at mount so a pane reattaching into a running
                     // alt-screen app (vim/Claude) is correct from frame one.
                     coordinator?.modeTracker.recompute(for: pane, terminal: t.getTerminal())
+                    // If tmux's alternate_on query reply for this pane already arrived
+                    // (raced pane creation), apply it now: the live recompute above ran
+                    // before this pane had any output, so it can't yet know the pane is
+                    // mid-alt-screen; the override closes that gap until the emulator's
+                    // own flag is observed (see PaneModeTracker.setAltScreenOverride).
+                    if let isAlt = coordinator?.vm.takeAltScreenOverride(for: pane) {
+                        coordinator?.modeTracker.setAltScreenOverride(for: pane, isAlt: isAlt, terminal: t.getTerminal())
+                    }
                     return t
                 }()
                 view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
