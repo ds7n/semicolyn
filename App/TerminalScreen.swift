@@ -57,8 +57,8 @@ struct TerminalScreen: UIViewRepresentable {
         terminal.terminalDelegate = context.coordinator
         // Event-driven InteractionMode: recompute on every alt-screen / mouse-mode
         // transition (single-pane mount → nil key), then refresh the dot immediately.
-        terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] term in
-            coordinator?.modeTracker.recompute(terminal: term)
+        terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] _, term in
+            coordinator?.modeTracker.recompute(terminal: term, altSource: .rawLive)
         }
         // Flip drag/tap ownership on a mode transition (replaces the init-time
         // dot-only closure — also refreshes the dot alongside). `isScrollEnabled`
@@ -78,7 +78,7 @@ struct TerminalScreen: UIViewRepresentable {
         }
         // Prime once at mount so a terminal that starts on the alt-screen (reattach
         // into a running vim/Claude) is correct from frame one.
-        context.coordinator.modeTracker.recompute(terminal: terminal.getTerminal())
+        context.coordinator.modeTracker.recompute(terminal: terminal.getTerminal(), altSource: .rawLive)
         // Our keybar IS the terminal's input accessory view now (a real UIInputView
         // audio-feedback context, so `playInputClick()` fires). This replaces both
         // SwiftTerm's built-in bar and the old `.safeAreaInset` keybar mount.
