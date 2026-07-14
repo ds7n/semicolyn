@@ -593,14 +593,19 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     // captured directly by the closure — no reverse `paneID(for:)`
                     // lookup needed, since this view is created for exactly this pane.
                     let pane = rect.pane
-                    t.onModeRelevantChange = { [weak coordinator] term in
-                        coordinator?.modeTracker.recompute(for: pane, terminal: term)
+                    t.onModeRelevantChange = { [weak coordinator] event, term in
+                        let src: AltSource
+                        switch event {
+                        case .bufferChanged: src = .liveTransition
+                        case .mouseChanged: src = .keepTracked
+                        }
+                        coordinator?.modeTracker.recompute(for: pane, terminal: term, altSource: src)
                     }
                     addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
                     coordinator?.installHalo(on: t, pane: pane)
                     // Prime once at mount so a pane reattaching into a running
                     // alt-screen app (vim/Claude) is correct from frame one.
-                    coordinator?.modeTracker.recompute(for: pane, terminal: t.getTerminal())
+                    coordinator?.modeTracker.recompute(for: pane, terminal: t.getTerminal(), altSource: .keepTracked)
                     // If tmux's alternate_on query reply for this pane already arrived
                     // (raced pane creation), apply it now: the live recompute above ran
                     // before this pane had any output, so it can't yet know the pane is
