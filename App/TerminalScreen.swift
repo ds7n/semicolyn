@@ -62,12 +62,19 @@ struct TerminalScreen: UIViewRepresentable {
         }
         // Flip drag/tap ownership on a mode transition (replaces the init-time
         // dot-only closure — also refreshes the dot alongside). `isScrollEnabled`
-        // parks SwiftTerm's native pan in `appOwnsInput`; `allowMouseReporting`
-        // lets SwiftTerm forward taps/drags as mouse in `mouseReporting`/`appOwnsInput`.
+        // parks SwiftTerm's native pan in `appOwnsInput`.
+        //
+        // `allowMouseReporting` is ON ONLY in `.mouseReporting`. It must be OFF in
+        // `.appOwnsInput`: with it on, SwiftTerm forwards the finger drag to the app as
+        // SGR mouse events BEFORE our `handleScrollViewPan` can translate it into arrow
+        // keys — so the alt-screen drag→arrows path never runs and Claude/vim panes don't
+        // scroll (device trace, build 44: a drag emitted 98 SGR mouse sends, 0 arrows).
+        // The spec's "tap→mouse in appOwnsInput" is subordinate to drag→arrows here, since
+        // a single SwiftTerm boolean governs both and drag-scroll is the primary need.
         context.coordinator.modeTracker.onChange = { [weak coordinator = context.coordinator, weak terminal] _, mode in
             coordinator?.mouseDot.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
             terminal?.isScrollEnabled = (mode == .localScroll)
-            terminal?.allowMouseReporting = (mode == .mouseReporting || mode == .appOwnsInput)
+            terminal?.allowMouseReporting = (mode == .mouseReporting)
         }
         // Prime once at mount so a terminal that starts on the alt-screen (reattach
         // into a running vim/Claude) is correct from frame one.
