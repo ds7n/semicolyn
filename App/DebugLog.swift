@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 import os
+import SemicolynKit   // LogTransport (used by configureFromDefaults' sink construction)
 
 /// On-device diagnostic sink. A rolling buffer of timestamped lines rendered by the
 /// on-screen panel (Settings → Diagnostics) and mirrored to `os.Logger` (subsystem
