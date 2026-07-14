@@ -10,18 +10,25 @@ import SwiftTerm
 /// first (preserve SwiftTerm's own scroller / mouse-pan-gesture side effects), then
 /// hand the live `Terminal` to `onModeRelevantChange`, which each mount wires to its
 /// `PaneModeTracker.recompute(...)`.
+
+/// Which mode-relevant SwiftTerm event fired. `bufferActivated` is a real alternate-screen
+/// (`?1049`) transition, so the live `isCurrentBufferAlternate` flag is authoritative at that
+/// instant. `mouseModeChanged` is NOT an alt-screen transition, so the tracked alt-state must
+/// be preserved across it (see `PaneModeTracker.AltSource`).
+enum ModeRelevantEvent { case bufferChanged, mouseChanged }
+
 final class PaneTerminalView: TerminalView {
     /// Set by the mount right after construction. Called on every alt-screen or
     /// mouse-mode transition with this view's emulator terminal.
-    var onModeRelevantChange: ((Terminal) -> Void)?
+    var onModeRelevantChange: ((ModeRelevantEvent, Terminal) -> Void)?
 
     override func bufferActivated(source: Terminal) {
         super.bufferActivated(source: source)
-        onModeRelevantChange?(source)
+        onModeRelevantChange?(.bufferChanged, source)
     }
     override func mouseModeChanged(source: Terminal) {
         super.mouseModeChanged(source: source)
-        onModeRelevantChange?(source)
+        onModeRelevantChange?(.mouseChanged, source)
     }
 
     // MARK: Native text-interaction suppression
