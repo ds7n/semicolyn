@@ -18,9 +18,14 @@ import os
 final class DebugLog: ObservableObject {
     static let shared = DebugLog()
 
-    /// Master switch, mirrored from `@AppStorage(DiagnosticsSettingsView.showDebugPanelKey)`.
-    /// When false, `log` is a no-op and its `@autoclosure` message is never evaluated.
-    var enabled = UserDefaults.standard.bool(forKey: DiagnosticsSettingsView.showDebugPanelKey)
+    /// MASTER logging switch, mirrored from
+    /// `@AppStorage(DiagnosticsSettingsView.loggingEnabledKey)`. When false, `log` is a
+    /// no-op and its `@autoclosure` message is never evaluated (zero sacred-path cost).
+    /// This is INDEPENDENT of where logs go: the on-screen panel and the remote stream are
+    /// separate destination toggles. Previously the on-screen-panel switch doubled as the
+    /// master gate, so remote streaming silently required the panel to be on (the "zero
+    /// .gesture lines" trap, build 44) — now decoupled.
+    var enabled = UserDefaults.standard.bool(forKey: DiagnosticsSettingsView.loggingEnabledKey)
 
     /// Newest-last rolling buffer; capped so it can't grow unbounded. Plain (not
     /// `@Published`) so appends never invalidate SwiftUI. The panel reads it on refresh.
@@ -79,6 +84,49 @@ final class DebugLog: ObservableObject {
     func setRemote(_ sink: RemoteLogSink?) {
         remote?.stop()
         remote = sink
+    }
+
+    /// Configure the master gate + remote sink from persisted settings AT LAUNCH, so
+    /// remote streaming works from a cold start without first visiting the Diagnostics
+    /// screen (previously the sink was only attached in `DiagnosticsSettingsView.onAppear`,
+    /// so a session connected before opening Settings streamed nothing — part of the
+    /// build-44 empty-log trap). Idempotent; safe to call once from app `init`.
+    func configureFromDefaults() {
+        let d = UserDefaults.standard
+        enabled = d.bool(forKey: DiagnosticsSettingsView.loggingEnabledKey)
+        refreshEnabledCategories()
+        let remoteOn = d.bool(forKey: RemoteLogConfig.enabledKey)
+        let host = d.string(forKey: RemoteLogConfig.hostKey) ?? ""
+        if remoteOn, !host.isEmpty {
+            let port = d.object(forKey: RemoteLogConfig.portKey) as? Int ?? RemoteLogConfig.defaultPort
+            let transport = (d.string(forKey: RemoteLogConfig.transportKey))
+                .flatMap(LogTransport.init(rawValue:)) ?? RemoteLogConfig.defaultTransport
+            setRemote(RemoteLogSink(host: host, port: port, transport: transport))
+        }
+        logConfig(reason: "launch")
+    }
+
+    /// Emit a one-line snapshot of the effective logging configuration, BYPASSING the
+    /// master gate and category filter so it records even when logging is off. Lets a
+    /// device trace confirm *why* it's empty ("logging=OFF" explains zero lines) instead
+    /// of leaving us guessing (build 44: banner streamed but no gesture lines). Called on
+    /// session connect and when the config changes.
+    func logConfig(reason: String) {
+        let cats = LogCategory.allCases
+            .filter { enabledCategories.contains($0) }
+            .map { "\($0)" }
+            .sorted()
+            .joined(separator: ",")
+        let line = "logConfig(\(reason)): logging=\(enabled ? "ON" : "OFF") "
+            + "remote=\(remote != nil ? "ON" : "off") categories=[\(cats)]"
+        // Record to the on-screen buffer AND the remote stream directly, ungated.
+        let now = Date().timeIntervalSinceReferenceDate
+        if start == nil { start = now }
+        let stamped = String(format: "%7.2f  %@", now - (start ?? now), line)
+        lines.append(stamped)
+        if lines.count > cap { lines.removeFirst(lines.count - cap) }
+        logger.debug("\(stamped, privacy: .public)")
+        remote?.send(stamped)
     }
 
     /// Panel-driven refresh: publish a redraw for the current buffer. Called on a

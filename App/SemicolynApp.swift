@@ -12,6 +12,12 @@ struct SemicolynApp: App {
         // user imports and is the single seam the font provider owns.
         TerminalFontProvider.shared.registerBundledFonts()
         TerminalFontProvider.shared.registerImportedFonts()
+
+        // Configure diagnostics logging + remote sink from persisted settings at launch,
+        // so remote streaming works from a cold start without first opening the
+        // Diagnostics screen (fixes the "connected before visiting Settings → empty
+        // stream" trap).
+        DebugLog.shared.configureFromDefaults()
     }
 
     var body: some Scene {

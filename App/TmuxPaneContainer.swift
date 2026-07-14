@@ -69,14 +69,19 @@ struct TmuxPaneContainer: UIViewRepresentable {
         context.coordinator.onInvalidateCachedCell = { [weak v] in v?.invalidateCachedCell() }
         // Refresh mouse-dot visibility immediately on a mode transition, rather than
         // waiting for the next SwiftUI `updateUIView` pass. Also flip ownership of the
-        // drag/tap axis for the transitioning pane: native scroll only in `.localScroll`,
-        // mouse-forwarding in `.mouseReporting`/`.appOwnsInput`.
+        // drag/tap axis for the transitioning pane: native scroll only in `.localScroll`.
+        // `allowMouseReporting` is ON ONLY in `.mouseReporting` — NOT `.appOwnsInput`.
+        // With it on in `.appOwnsInput`, SwiftTerm forwards the finger drag to the app as
+        // SGR mouse events before our `handleScrollViewPan` can translate it to arrow keys,
+        // so alt-screen panes (Claude/vim) don't scroll (device trace, build 44: a Claude
+        // drag emitted 98+ SGR mouse sends, 0 arrows, and — because SwiftTerm consumed the
+        // touch — 0 of our gesture logs fired). See the twin in TerminalScreen.
         context.coordinator.modeTracker.onChange = { [weak v] pane, mode in
             guard let v else { return }
             v.coordinator?.updateMouseDots(for: v.panes)
             if let pane, let view = v.panes[pane] {
                 view.isScrollEnabled = (mode == .localScroll)
-                view.allowMouseReporting = (mode == .mouseReporting || mode == .appOwnsInput)
+                view.allowMouseReporting = (mode == .mouseReporting)
             }
         }
         return v
