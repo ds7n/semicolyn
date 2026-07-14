@@ -58,9 +58,8 @@ struct DiagnosticsSettingsView: View {
         List {
             Section {
                 Toggle("Enable logging", isOn: $loggingEnabled)
-                    .onChange(of: loggingEnabled) { _, on in
-                        DebugLog.shared.enabled = on
-                        DebugLog.shared.logConfig(reason: "toggle")
+                    .onChange(of: loggingEnabled) { _, _ in
+                        DebugLog.shared.configureFromDefaults(reason: "toggle")
                     }
             } footer: {
                 Text("Master switch. When off, nothing is recorded — to the panel or the "
@@ -148,9 +147,7 @@ struct DiagnosticsSettingsView: View {
         }
         .navigationTitle("Diagnostics")
         .onAppear {
-            DebugLog.shared.enabled = loggingEnabled
-            rebuildSink()
-            DebugLog.shared.refreshEnabledCategories()
+            DebugLog.shared.configureFromDefaults(reason: "diagnostics")
         }
         .confirmationDialog("Log keystroke content?", isPresented: $showKeystrokeNag, titleVisibility: .visible) {
             Button("Turn On", role: .destructive) {
@@ -173,10 +170,11 @@ struct DiagnosticsSettingsView: View {
         )
     }
 
-    /// Recreate the sink from current config, or clear it when disabled/host empty.
+    /// Re-apply the full logging config (master gate + sink + categories) from the just-
+    /// written settings. Routes through the single `configureFromDefaults` path so the
+    /// sink signature stays consistent with the foreground/launch reapply.
     private func rebuildSink() {
-        guard remoteEnabled, !remoteHost.isEmpty else { DebugLog.shared.setRemote(nil); return }
-        DebugLog.shared.setRemote(RemoteLogSink(host: remoteHost, port: remotePort, transport: transport))
+        DebugLog.shared.configureFromDefaults(reason: "settings")
     }
 
     private func runTest() {

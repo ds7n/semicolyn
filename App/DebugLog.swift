@@ -40,6 +40,10 @@ final class DebugLog: ObservableObject {
     /// Optional off-device stream. Set from Diagnostics when remote logging is enabled;
     /// nil disables forwarding. Each recorded line is also sent here.
     private var remote: RemoteLogSink?
+    /// Signature of the currently-attached remote sink's config (`host:port:transport`),
+    /// or nil when no sink. Lets `configureFromDefaults` skip a needless teardown/rebuild
+    /// (and its banner re-send) on a foreground when the settings are unchanged.
+    private var remoteSignature: String?
 
     private init() {}
 
@@ -91,19 +95,30 @@ final class DebugLog: ObservableObject {
     /// screen (previously the sink was only attached in `DiagnosticsSettingsView.onAppear`,
     /// so a session connected before opening Settings streamed nothing — part of the
     /// build-44 empty-log trap). Idempotent; safe to call once from app `init`.
-    func configureFromDefaults() {
+    func configureFromDefaults(reason: String = "launch") {
         let d = UserDefaults.standard
         enabled = d.bool(forKey: DiagnosticsSettingsView.loggingEnabledKey)
         refreshEnabledCategories()
+
         let remoteOn = d.bool(forKey: RemoteLogConfig.enabledKey)
         let host = d.string(forKey: RemoteLogConfig.hostKey) ?? ""
         if remoteOn, !host.isEmpty {
             let port = d.object(forKey: RemoteLogConfig.portKey) as? Int ?? RemoteLogConfig.defaultPort
             let transport = (d.string(forKey: RemoteLogConfig.transportKey))
                 .flatMap(LogTransport.init(rawValue:)) ?? RemoteLogConfig.defaultTransport
-            setRemote(RemoteLogSink(host: host, port: port, transport: transport))
+            let signature = "\(host):\(port):\(transport.rawValue)"
+            // Only tear down + rebuild the sink when the config actually changed — so a
+            // foreground with unchanged settings doesn't needlessly reconnect (and
+            // re-emit the banner) each time.
+            if signature != remoteSignature {
+                setRemote(RemoteLogSink(host: host, port: port, transport: transport))
+                remoteSignature = signature
+            }
+        } else if remoteSignature != nil {
+            setRemote(nil)
+            remoteSignature = nil
         }
-        logConfig(reason: "launch")
+        logConfig(reason: reason)
     }
 
     /// Emit a one-line snapshot of the effective logging configuration, BYPASSING the
