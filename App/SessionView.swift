@@ -46,7 +46,10 @@ struct SessionView: View {
     @State private var quickConnectHost: IdentifiableHost?
     /// Drives the "Disconnect from <host>?" confirmation dialog.
     @State private var confirmingDisconnect = false
-    /// Whether the debug log panel is enabled (Settings → Diagnostics; off by default).
+    /// Master logging switch and the panel destination (Settings → Diagnostics; both off
+    /// by default). The 🐞 panel needs BOTH: logging on (so there's anything to show) and
+    /// the panel destination chosen.
+    @AppStorage(DiagnosticsSettingsView.loggingEnabledKey) private var loggingEnabled = false
     @AppStorage(DiagnosticsSettingsView.showDebugPanelKey) private var diagnosticsPanelEnabled = false
     /// Transient: whether the panel is currently expanded (only meaningful when enabled).
     @State private var showDebugPanel = false
@@ -214,7 +217,7 @@ struct SessionView: View {
         // with Copy/Clear, capturing the connection/tmux/input-routing trace. Gated
         // behind Settings → Diagnostics → "Show debug log panel" (off by default).
         .overlay(alignment: .topLeading) {
-            if case .shell = vm.state, diagnosticsPanelEnabled {
+            if case .shell = vm.state, loggingEnabled, diagnosticsPanelEnabled {
                 Button { InputClickFeedback.play(); showDebugPanel.toggle() } label: {
                     Image(systemName: "ladybug.fill")
                         .font(.system(size: 15))
@@ -236,6 +239,11 @@ struct SessionView: View {
         // session out of the shell, leave the session screen back to the host list.
         .onChange(of: vm.state) { _, newState in
             if case .idle = newState { dismiss() }
+            // Dump the effective logging config once a session goes live, so a device
+            // trace shows whether logging/categories were actually on (build 44: the
+            // stream was empty because the master gate was off — this makes that explicit
+            // instead of leaving us to guess). Ungated: records even when logging is off.
+            if case .shell = newState { DebugLog.shared.logConfig(reason: "connect") }
         }
         // Host-key prompt sheet — mirrors ConnectView exactly.
         // `onDismiss` fails closed: if the sheet is dismissed without an explicit
