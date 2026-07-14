@@ -896,9 +896,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // this covers both orderings (query reply before or after pane mount).
         runtime.onAltScreenReconcile = { [weak self] pane, isAlt in
             guard let self else { return }
-            self.pendingAltScreenOverrides[pane] = isAlt
             if let view = self.paneViews[pane] {
+                // Pane already mounted: apply immediately, do NOT queue (a queued copy
+                // would be replayed against a later remount of a reused PaneID after
+                // tmux window-switch churn, misapplying a stale fact).
                 self.altScreenOverrideReady?(pane, isAlt, view)
+            } else {
+                // Reply arrived before the pane's TerminalView exists: queue for
+                // `takeAltScreenOverride` to drain at mount.
+                self.pendingAltScreenOverrides[pane] = isAlt
             }
         }
         // DIAGNOSTIC (temporary): surface what the runtime sees on attach so a blank
