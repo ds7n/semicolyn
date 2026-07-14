@@ -5,7 +5,11 @@ import SemicolynKit
 
 /// Settings → Diagnostics. Gates the on-screen debug panel AND the off-device log stream.
 struct DiagnosticsSettingsView: View {
+    /// MASTER logging switch. Independent of destination (panel / remote): when off,
+    /// nothing is recorded anywhere.
+    static let loggingEnabledKey = "diagnostics.loggingEnabled"
     static let showDebugPanelKey = "diagnostics.showDebugPanel"
+    @AppStorage(Self.loggingEnabledKey) private var loggingEnabled = false
     @AppStorage(Self.showDebugPanelKey) private var showDebugPanel = false
 
     @AppStorage(RemoteLogConfig.enabledKey) private var remoteEnabled = false
@@ -53,11 +57,20 @@ struct DiagnosticsSettingsView: View {
     var body: some View {
         List {
             Section {
-                Toggle("Show debug log panel", isOn: $showDebugPanel)
-                    .onChange(of: showDebugPanel) { _, on in DebugLog.shared.enabled = on }
+                Toggle("Enable logging", isOn: $loggingEnabled)
+                    .onChange(of: loggingEnabled) { _, _ in
+                        DebugLog.shared.configureFromDefaults(reason: "toggle")
+                    }
             } footer: {
-                Text("Adds a 🐞 button in a connected session that opens a scrollable "
-                     + "diagnostic log with a Copy button. For troubleshooting; leave off for normal use.")
+                Text("Master switch. When off, nothing is recorded — to the panel or the "
+                     + "remote stream. Turn on, then pick destinations below. Off by default.")
+            }
+
+            Section {
+                Toggle("Show debug log panel", isOn: $showDebugPanel)
+            } footer: {
+                Text("A destination for logs (requires \"Enable logging\"). Adds a 🐞 button in "
+                     + "a connected session that opens a scrollable log with a Copy button.")
             }
 
             Section {
@@ -86,9 +99,9 @@ struct DiagnosticsSettingsView: View {
             } header: {
                 Text("Stream logs to a server")
             } footer: {
-                Text("Streams the verbose diagnostic trace off-device as RFC 5424 syslog. "
-                     + "Receiver setup: see tools/syslog-sink (docker compose up). "
-                     + "TLS uses a self-signed cert (verification off).")
+                Text("A destination for logs (requires \"Enable logging\"). Streams the verbose "
+                     + "trace off-device as RFC 5424 syslog. Receiver: see tools/syslog-sink "
+                     + "(docker compose up). TLS uses a self-signed cert (verification off).")
             }
 
             Section {
@@ -134,9 +147,7 @@ struct DiagnosticsSettingsView: View {
         }
         .navigationTitle("Diagnostics")
         .onAppear {
-            DebugLog.shared.enabled = showDebugPanel
-            rebuildSink()
-            DebugLog.shared.refreshEnabledCategories()
+            DebugLog.shared.configureFromDefaults(reason: "diagnostics")
         }
         .confirmationDialog("Log keystroke content?", isPresented: $showKeystrokeNag, titleVisibility: .visible) {
             Button("Turn On", role: .destructive) {
@@ -159,10 +170,11 @@ struct DiagnosticsSettingsView: View {
         )
     }
 
-    /// Recreate the sink from current config, or clear it when disabled/host empty.
+    /// Re-apply the full logging config (master gate + sink + categories) from the just-
+    /// written settings. Routes through the single `configureFromDefaults` path so the
+    /// sink signature stays consistent with the foreground/launch reapply.
     private func rebuildSink() {
-        guard remoteEnabled, !remoteHost.isEmpty else { DebugLog.shared.setRemote(nil); return }
-        DebugLog.shared.setRemote(RemoteLogSink(host: remoteHost, port: remotePort, transport: transport))
+        DebugLog.shared.configureFromDefaults(reason: "settings")
     }
 
     private func runTest() {

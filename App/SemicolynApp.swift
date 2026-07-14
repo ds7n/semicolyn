@@ -12,6 +12,12 @@ struct SemicolynApp: App {
         // user imports and is the single seam the font provider owns.
         TerminalFontProvider.shared.registerBundledFonts()
         TerminalFontProvider.shared.registerImportedFonts()
+
+        // Configure diagnostics logging + remote sink from persisted settings at launch,
+        // so remote streaming works from a cold start without first opening the
+        // Diagnostics screen (fixes the "connected before visiting Settings → empty
+        // stream" trap).
+        DebugLog.shared.configureFromDefaults()
     }
 
     var body: some Scene {
@@ -28,6 +34,7 @@ struct SemicolynApp: App {
 private struct RootView: View {
     @ObservedObject private var appearance = AppStores.shared.appearance
     @ObservedObject private var pro = AppStores.shared.pro
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         HostListView()
@@ -37,5 +44,12 @@ private struct RootView: View {
             // Terminal preferences (font face/size) — the Terminal settings screen
             // and font picker bind to this via @EnvironmentObject.
             .environmentObject(AppStores.shared.terminalSettings)
+            // Re-apply persisted logging config on every foreground (not just cold
+            // launch), so a settings change made and then backgrounded takes effect
+            // without reopening Diagnostics. Root-level so it fires regardless of which
+            // screen is up. Idempotent.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { DebugLog.shared.configureFromDefaults() }
+            }
     }
 }

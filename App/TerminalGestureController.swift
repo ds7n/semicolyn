@@ -15,10 +15,11 @@ import SemicolynKit
 /// double/triple-tap word/line-select; long-press zooms the tmux pane; two-finger
 /// tap shows the edit menu. Routing is mode-driven: the mount tracks each pane's
 /// `InteractionMode` (`.localScroll` / `.appOwnsInput` / `.mouseReporting`) and this
-/// controller reads it via `currentMode()` — a `.mouseReporting` or `.appOwnsInput`
-/// pane yields taps to SwiftTerm's mouse forwarding (`allowMouseReporting = true`,
-/// set by the mount), and an `.appOwnsInput` (alt-screen) vertical drag is translated
-/// into arrow-key runs streamed to the app instead of scrolling locally.
+/// controller reads it via `currentMode()` — a `.mouseReporting` pane yields taps to
+/// SwiftTerm's mouse forwarding (`allowMouseReporting = true`, set by the mount), while
+/// an `.appOwnsInput` (alt-screen) pane keeps `allowMouseReporting = false` so SwiftTerm
+/// does NOT consume the drag as mouse: its vertical drag is translated into arrow-key
+/// runs streamed to the app instead of scrolling locally (its tap yields to the app).
 ///
 /// SwiftTerm's own tap/long-press/pan recognizers are added via plain
 /// `addGestureRecognizer` calls but never stored behind a public accessor (its
@@ -282,11 +283,21 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     @objc private func handleSingleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
+        // A tap always raises the keyboard. We replaced SwiftTerm's own tap recognizer
+        // (which called `becomeFirstResponder`), and PR #90's `editingInteractionConfiguration
+        // = .none` suppressed the system tap-to-focus, so nothing re-presented the keyboard
+        // after a dismiss (device report, build 44). Raise it explicitly here in EVERY mode
+        // — even an alt-screen/mouse-reporting app needs the keyboard to type.
+        if !view.isFirstResponder {
+            let ok = view.becomeFirstResponder()
+            DebugLog.shared.log(.gesture, "gesture:singleTap becomeFirstResponder=\(ok)")
+        }
         switch callbacks.currentMode() {
         case .mouseReporting, .appOwnsInput:
-            // App owns clicks: SwiftTerm forwards the tap as a mouse event (mount sets
-            // `allowMouseReporting = true` in these modes). No-op here so we don't also
-            // place a cursor.
+            // App owns clicks. In `.mouseReporting` SwiftTerm forwards the tap as a mouse
+            // event (`allowMouseReporting = true`). In `.appOwnsInput` we keep mouse
+            // reporting OFF (so the drag reaches our arrow path), so the tap simply yields
+            // — no cursor placement, no mouse. Either way, don't place a cursor here.
             DebugLog.shared.log(.gesture, "gesture:singleTap action=appOwns mode=\(callbacks.currentMode())")
             return
         case .localScroll:
