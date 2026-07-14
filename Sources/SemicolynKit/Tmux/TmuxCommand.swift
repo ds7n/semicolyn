@@ -98,6 +98,17 @@ public enum TmuxCommand {
         "list-panes -a -F \"#{pane_id} #{pane_current_command}\""
     }
 
+    /// List every pane across all windows as `<pane_id> <alternate_on>`, one per
+    /// line, so the runtime can reconcile each pane's alternate-screen state at
+    /// attach. tmux's `#{alternate_on}` is `1` on the alternate screen, else `0`.
+    /// Needed because a `-CC` client attaching into a session whose app is already
+    /// on the alternate screen never receives that app's `?1049h` (device trace
+    /// 2026-07-14). Constant format string (no interpolated input) with no `\n`/`\r`,
+    /// so framing can never be forged.
+    public static func queryAlternateOn() -> String {
+        "list-panes -a -F \"#{pane_id} #{alternate_on}\""
+    }
+
     /// `list-windows` formatted for attach-time layout discovery: each row is
     /// `<window_id> <window_active> <window_layout> <window_name>`
     /// (e.g. `@0 1 abcd,80x24,0,0,0 editor`). `window_name` is LAST because it may
