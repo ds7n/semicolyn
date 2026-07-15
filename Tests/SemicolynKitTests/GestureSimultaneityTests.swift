@@ -47,11 +47,42 @@ final class GestureSimultaneityTests: XCTestCase {
         XCTAssertTrue(gesturesMayRecognizeSimultaneously(.selectionPan, .pinch))
     }
 
-    // Only the two pan-vs-scroll pairings are excluded; nothing else is.
-    func testOnlyPanVsScrollPairingsAreExcluded() {
+    // Our alt-screen drag pan must NOT co-recognize with the long-press (either order):
+    // a held-then-drag on an alt-screen pane must emit arrows, not anchor a selection —
+    // the same hazard the scroll-pan/long-press exclusion fixes. Making the pairing
+    // exclusive lets the alt pan cancel the long-press on motion (build-47 fix).
+    func testAltScreenPanAndLongPressAreMutuallyExclusive() {
+        XCTAssertFalse(gesturesMayRecognizeSimultaneously(.altScreenPan, .longPress))
+        XCTAssertFalse(gesturesMayRecognizeSimultaneously(.longPress, .altScreenPan))
+    }
+
+    // The alt-screen pan and the native scroll pan are never both live (mode-gated:
+    // the alt pan is enabled ONLY in `.appOwnsInput`, where `isScrollEnabled = false`
+    // parks the scroll pan). The policy leaves this pairing permissive because it can't
+    // actually co-occur; assert the current (non-excluded) contract so a future change
+    // to exclude it is a deliberate, test-visible decision.
+    func testAltScreenPanAndScrollPanCoexistInPolicy() {
+        XCTAssertTrue(gesturesMayRecognizeSimultaneously(.altScreenPan, .scrollPan))
+        XCTAssertTrue(gesturesMayRecognizeSimultaneously(.scrollPan, .altScreenPan))
+    }
+
+    // The alt-screen pan doesn't fight taps or pinch (a two-finger pinch-zoom while
+    // alt-screen scrolling, or a tap, must still resolve).
+    func testAltScreenPanCoexistsWithTapsAndPinch() {
+        XCTAssertTrue(gesturesMayRecognizeSimultaneously(.altScreenPan, .tap))
+        XCTAssertTrue(gesturesMayRecognizeSimultaneously(.altScreenPan, .pinch))
+    }
+
+    // Exactly three pairings are excluded; nothing else is.
+    func testOnlyKnownPairingsAreExcluded() {
         XCTAssertTrue(gesturesMayRecognizeSimultaneously(.scrollPan, .scrollPan))
         XCTAssertTrue(gesturesMayRecognizeSimultaneously(.longPress, .pinch))
         XCTAssertTrue(gesturesMayRecognizeSimultaneously(.other, .scrollPan))
         XCTAssertTrue(gesturesMayRecognizeSimultaneously(.longPress, .tap))
+        XCTAssertTrue(gesturesMayRecognizeSimultaneously(.altScreenPan, .other))
+        // The three excluded pairings, for the record:
+        XCTAssertFalse(gesturesMayRecognizeSimultaneously(.longPress, .scrollPan))
+        XCTAssertFalse(gesturesMayRecognizeSimultaneously(.selectionPan, .scrollPan))
+        XCTAssertFalse(gesturesMayRecognizeSimultaneously(.altScreenPan, .longPress))
     }
 }

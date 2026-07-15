@@ -89,6 +89,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
             if let pane, let view = v.panes[pane] {
                 view.isScrollEnabled = (mode == .localScroll)
                 view.allowMouseReporting = (mode == .mouseReporting)
+                // Enable our alt-screen drag pan in lockstep with the isScrollEnabled
+                // flip (owns the drag in `.appOwnsInput`, where the native pan is parked).
+                v.coordinator?.setAltScreenPan(for: view, enabled: mode == .appOwnsInput)
             }
         }
         return v
@@ -377,6 +380,21 @@ struct TmuxPaneContainer: UIViewRepresentable {
             }
         }
 
+        /// Enable/disable a pane's alt-screen drag pan (the arrow-key synthesizer that
+        /// owns the drag in `.appOwnsInput`). Routed through the Coordinator so the
+        /// `gestureControllers` store stays private — the mode-transition handler and the
+        /// pane-install path (different types, same file) both call this rather than
+        /// reaching into the dictionary. Mirrors `updateMouseDots`.
+        func setAltScreenPan(for view: TerminalView, enabled: Bool) {
+            // The controller is `@MainActor`; this method is called from the (nonisolated)
+            // Coordinator but always on the main thread (the `modeTracker.onChange` closure
+            // and the layout-time pane-install path). Assume isolation, matching how
+            // `removeHalo` invokes the controller's `detach()`.
+            MainActor.assumeIsolated {
+                gestureControllers[ObjectIdentifier(view)]?.setAltScreenPanEnabled(enabled)
+            }
+        }
+
         // MARK: - TerminalViewDelegate
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
@@ -613,6 +631,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     // own flag is observed (see PaneModeTracker.setAltScreenOverride).
                     if let isAlt = coordinator?.vm.takeAltScreenOverride(for: pane) {
                         coordinator?.modeTracker.setAltScreenOverride(for: pane, isAlt: isAlt, terminal: t.getTerminal())
+                    }
+                    // Sync our alt-screen pan to this pane's CURRENT mode. The prime /
+                    // override above fire `onChange` only on a mode CHANGE (deduped); a
+                    // pane that resolves straight to `.appOwnsInput` is covered, but this
+                    // guarantees the pan matches the mode regardless of dedup outcome.
+                    if let coordinator {
+                        coordinator.setAltScreenPan(
+                            for: t, enabled: coordinator.modeTracker.mode(for: pane) == .appOwnsInput)
                     }
                     return t
                 }()
