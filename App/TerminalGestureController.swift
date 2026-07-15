@@ -42,6 +42,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         /// DECCKM (application-cursor-keys) state, snapshotted at drag `.began` so a
         /// single drag encodes consistently even if the app flips the mode mid-drag.
         let applicationCursorKeys: () -> Bool
+        /// Which key family an alt-screen drag should emit for THIS pane, resolved once at
+        /// drag `.began` via the pure `altScrollKeys(...)` decider (mode + pane command +
+        /// title). `.arrows` (xterm standard) or `.pageKeys` (PgUp/PgDn for AI-CLI TUIs).
+        let altScrollKeys: () -> AltScrollKeys
         /// Sends raw bytes to the remote (arrow-key runs from an alt-screen drag).
         let sendBytes: ([UInt8]) -> Void
         let hasSelection: () -> Bool
@@ -55,6 +59,9 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     // change mid-drag and split one gesture across two interpretations.
     private var dragMode: InteractionMode = .localScroll
     private var dragAppCursor: Bool = false
+    /// Key family for the in-flight alt-screen drag, snapshotted at `.began` so a single
+    /// drag can't switch arrow↔page mid-flight.
+    private var dragScrollKeys: AltScrollKeys = .arrows
     /// Running total of cells already turned into arrows this drag (fed back into
     /// `AltScreenScroll.arrows` so successive `.changed` samples send only the new delta).
     private var emittedCells: Int = 0
@@ -281,6 +288,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private func beginDrag(_ owner: String, on view: TerminalView) -> InteractionMode {
         dragMode = callbacks.currentMode()
         dragAppCursor = callbacks.applicationCursorKeys()
+        dragScrollKeys = callbacks.altScrollKeys()
         emittedCells = 0
         // Defense-in-depth (on top of the Kit simultaneity policy): the moment a real
         // drag starts, force-cancel any long-press by bouncing its `isEnabled`. A
@@ -356,11 +364,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                 emittedCells: emittedCells)
             emittedCells = newEmitted
             for run in runs {
-                let bytes = encodeArrowRun(run, applicationCursorKeys: dragAppCursor)
+                let bytes = dragScrollKeys == .pageKeys
+                    ? encodePageKeyRun(run)
+                    : encodeArrowRun(run, applicationCursorKeys: dragAppCursor)
                 if !bytes.isEmpty { callbacks.sendBytes(bytes) }
             }
             if !runs.isEmpty {
-                DebugLog.shared.log(.gesture, "gr:altPan runs=\(runs.count) emittedCells=\(emittedCells)")
+                DebugLog.shared.log(.gesture, "gr:altPan keys=\(dragScrollKeys) runs=\(runs.count) emittedCells=\(emittedCells)")
             }
         case .ended, .cancelled:
             resolveWindowSwitch(g, in: view)
