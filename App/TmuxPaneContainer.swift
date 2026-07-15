@@ -91,8 +91,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 view.allowMouseReporting = (mode == .mouseReporting)
                 // Enable our alt-screen drag pan in lockstep with the isScrollEnabled
                 // flip (owns the drag in `.appOwnsInput`, where the native pan is parked).
-                let key = ObjectIdentifier(view)
-                v.coordinator?.gestureControllers[key]?.setAltScreenPanEnabled(mode == .appOwnsInput)
+                v.coordinator?.setAltScreenPan(for: view, enabled: mode == .appOwnsInput)
             }
         }
         return v
@@ -381,6 +380,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
             }
         }
 
+        /// Enable/disable a pane's alt-screen drag pan (the arrow-key synthesizer that
+        /// owns the drag in `.appOwnsInput`). Routed through the Coordinator so the
+        /// `gestureControllers` store stays private — the mode-transition handler and the
+        /// pane-install path (different types, same file) both call this rather than
+        /// reaching into the dictionary. Mirrors `updateMouseDots`.
+        func setAltScreenPan(for view: TerminalView, enabled: Bool) {
+            gestureControllers[ObjectIdentifier(view)]?.setAltScreenPanEnabled(enabled)
+        }
+
         // MARK: - TerminalViewDelegate
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
@@ -623,8 +631,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     // pane that resolves straight to `.appOwnsInput` is covered, but this
                     // guarantees the pan matches the mode regardless of dedup outcome.
                     if let coordinator {
-                        coordinator.gestureControllers[ObjectIdentifier(t)]?
-                            .setAltScreenPanEnabled(coordinator.modeTracker.mode(for: pane) == .appOwnsInput)
+                        coordinator.setAltScreenPan(
+                            for: t, enabled: coordinator.modeTracker.mode(for: pane) == .appOwnsInput)
                     }
                     return t
                 }()
