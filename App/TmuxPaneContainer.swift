@@ -277,6 +277,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         },
                         currentMode: { [weak self] in self?.modeTracker.mode(for: pane) ?? .localScroll },
                         applicationCursorKeys: { [weak view] in view?.getTerminal().applicationCursor ?? false },
+                        altScrollKeys: { [weak self] in
+                            MainActor.assumeIsolated {
+                                guard let self else { return .arrows }
+                                let mode = AppStores.shared.terminalSettings.settings.altScrollMode
+                                let cmd = self.vm.paneContexts[pane]
+                                let title = self.vm.terminalTitle
+                                return altScrollKeys(mode: mode, paneCommand: cmd,
+                                                     windowTitle: title, registry: .bundledDefault)
+                            }
+                        },
                         sendBytes: { [weak self] bytes in self?.send(bytes) },
                         hasSelection: { [weak view] in view?.selectionActive ?? false },
                         clearSelection: { [weak view] in view?.selectNone() }

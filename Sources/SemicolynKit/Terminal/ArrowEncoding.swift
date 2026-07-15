@@ -15,3 +15,22 @@ public func encodeArrowRun(_ run: ArrowRun, applicationCursorKeys: Bool) -> [UIn
     for _ in 0..<run.count { out.append(contentsOf: one) }
     return out
 }
+
+/// Encode one vertical `ArrowRun` as Page Up / Page Down escape bytes, `count` times.
+/// `.up` -> PgUp (`ESC [ 5 ~`), `.down` -> PgDn (`ESC [ 6 ~`); the same finger-direction
+/// convention as `encodeArrowRun` (finger-down reveals content above = scroll back = PgUp).
+/// Horizontal runs have no page-key analog (alt-screen scroll is vertical) -> empty.
+/// Page keys are not affected by DECCKM, so there is no application-cursor variant.
+public func encodePageKeyRun(_ run: ArrowRun) -> [UInt8] {
+    guard run.count > 0 else { return [] }
+    let one: [UInt8]
+    switch run.direction {
+    case .up:   one = [0x1b, 0x5b, 0x35, 0x7e]   // ESC [ 5 ~
+    case .down: one = [0x1b, 0x5b, 0x36, 0x7e]   // ESC [ 6 ~
+    case .left, .right: return []
+    }
+    var out: [UInt8] = []
+    out.reserveCapacity(one.count * run.count)
+    for _ in 0..<run.count { out.append(contentsOf: one) }
+    return out
+}

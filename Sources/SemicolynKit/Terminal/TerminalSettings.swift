@@ -79,6 +79,7 @@ public struct TerminalSettings: Equatable, Sendable, Codable {
     public var cursorBlink: Bool
     public var scrollbackLines: Int
     public var fontFace: TerminalFont
+    public var altScrollMode: AltScrollMode
 
     /// Allowed font-point range (touch-legible floor, sane ceiling).
     public static let fontRange: ClosedRange<Double> = 7...24
@@ -89,12 +90,33 @@ public struct TerminalSettings: Equatable, Sendable, Codable {
                 cursorStyle: CursorStyle = .block,
                 cursorBlink: Bool = false,
                 scrollbackLines: Int = 5000,
-                fontFace: TerminalFont = FontCatalog.default.face) {
+                fontFace: TerminalFont = FontCatalog.default.face,
+                altScrollMode: AltScrollMode = .auto) {
         self.fontSize = TerminalSettings.clampFont(fontSize)
         self.cursorStyle = cursorStyle
         self.cursorBlink = cursorBlink
         self.scrollbackLines = scrollbackLines
         self.fontFace = fontFace
+        self.altScrollMode = altScrollMode
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fontSize, cursorStyle, cursorBlink, scrollbackLines, fontFace, altScrollMode
+    }
+
+    // Backward-compatible decode: older persisted settings predate altScrollMode
+    // (and any other future field). Each existing field falls back to the same
+    // default the memberwise init uses, so a missing key never throws and the
+    // store's `try?` decode never silently wipes a user's saved settings.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let fontSize = try c.decodeIfPresent(Double.self, forKey: .fontSize) ?? 13
+        self.fontSize = TerminalSettings.clampFont(fontSize)
+        self.cursorStyle = try c.decodeIfPresent(CursorStyle.self, forKey: .cursorStyle) ?? .block
+        self.cursorBlink = try c.decodeIfPresent(Bool.self, forKey: .cursorBlink) ?? false
+        self.scrollbackLines = try c.decodeIfPresent(Int.self, forKey: .scrollbackLines) ?? 5000
+        self.fontFace = try c.decodeIfPresent(TerminalFont.self, forKey: .fontFace) ?? FontCatalog.default.face
+        self.altScrollMode = try c.decodeIfPresent(AltScrollMode.self, forKey: .altScrollMode) ?? .auto
     }
 
     /// Clamp a requested font size into the legible range.

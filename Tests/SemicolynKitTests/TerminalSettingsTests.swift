@@ -45,4 +45,46 @@ final class TerminalSettingsTests: XCTestCase {
     func testScrollbackPresetsIncludeSpecValues() {
         XCTAssertEqual(TerminalSettings.scrollbackPresets, [1000, 2000, 5000, 10000, Int.max])
     }
+
+    // altScrollMode defaults to .auto and round-trips through Codable.
+    func testAltScrollModeDefaultsToAuto() {
+        XCTAssertEqual(TerminalSettings().altScrollMode, .auto)
+    }
+
+    func testAltScrollModeCodableRoundTrip() throws {
+        var s = TerminalSettings()
+        s.altScrollMode = .alwaysPageKeys
+        let data = try JSONEncoder().encode(s)
+        let back = try JSONDecoder().decode(TerminalSettings.self, from: data)
+        XCTAssertEqual(back.altScrollMode, .alwaysPageKeys)
+    }
+
+    // Old persisted JSON (pre-altScrollMode) must still decode, defaulting the new
+    // field, without resetting the other previously-saved fields. This is the
+    // anti-regression test: it must FAIL under plain synthesized Codable, because a
+    // missing key would throw and (via the store's `try?`) silently wipe settings.
+    func testDecodesLegacyJSONWithoutAltScrollMode() throws {
+        var s = TerminalSettings()
+        s.fontSize = 15
+        s.cursorStyle = .bar
+        s.cursorBlink = true
+        s.scrollbackLines = 2000
+        s.altScrollMode = .alwaysPageKeys
+
+        let data = try JSONEncoder().encode(s)
+        let object = try JSONSerialization.jsonObject(with: data)
+        guard var dict = object as? [String: Any] else {
+            return XCTFail("expected TerminalSettings to encode as a JSON object")
+        }
+        XCTAssertNotNil(dict.removeValue(forKey: "altScrollMode"), "fixture must actually contain the key being stripped")
+        let legacyData = try JSONSerialization.data(withJSONObject: dict)
+
+        let back = try JSONDecoder().decode(TerminalSettings.self, from: legacyData)
+        XCTAssertEqual(back.altScrollMode, .auto)
+        XCTAssertEqual(back.fontSize, 15)
+        XCTAssertEqual(back.cursorStyle, .bar)
+        XCTAssertTrue(back.cursorBlink)
+        XCTAssertEqual(back.scrollbackLines, 2000)
+        XCTAssertEqual(back.fontFace, s.fontFace)
+    }
 }
