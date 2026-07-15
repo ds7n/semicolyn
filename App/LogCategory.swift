@@ -40,7 +40,12 @@ enum LogCategory: String, CaseIterable, Sendable {
 
     /// Categories ON by default: low-volume, high-diagnostic-value. The high-volume /
     /// niche ones (render/input/predictor/keybar) default OFF (opt-in when needed).
-    static let defaultEnabled: Set<LogCategory> = [.lifecycle, .connect, .tmux, .gesture, .seed]
+    ///
+    /// TEMP (2026-07-15, diag/terminal-sizing): `.keybar` is default-ON for this
+    /// diagnostic build so the new `sizing:tmux` / `sizing:raw` geometry logs are
+    /// captured on device without a manual Settings toggle. REVERT (drop `.keybar`)
+    /// once the #4/#5 root cause is proven from the trace.
+    static let defaultEnabled: Set<LogCategory> = [.lifecycle, .connect, .tmux, .gesture, .seed, .keybar]
 
     var defaultOn: Bool { Self.defaultEnabled.contains(self) }
 }
