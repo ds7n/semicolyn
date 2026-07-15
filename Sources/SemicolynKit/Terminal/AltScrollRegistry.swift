@@ -28,10 +28,10 @@ public struct AltScrollRegistry: Sendable {
     }
 
     /// Word-boundary, case-insensitive token match against an OSC window title (title mode
-    /// only). `"myrepo — claude: fix"` matches; `"unclaudely"` does not.
+    /// only). `"myrepo: claude fix"` matches; `"unclaudely"` does not.
     public func wantsPageKeys(title: String?) -> Bool {
         guard let t = title?.lowercased(), !t.isEmpty else { return false }
-        // Split on any non-alphanumeric so `claude:` / `— claude` tokenize to `claude`.
+        // Split on any non-alphanumeric so `claude:` / `(claude)` tokenize to `claude`.
         let tokens = t.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
         return tokens.contains(where: pageKeyApps.contains)
     }
