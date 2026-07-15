@@ -20,7 +20,7 @@ struct SettingsView: View {
                 row(.launcher, "Launcher", "command") { MacroLibraryView(store: keybarSettings) }
                 row(.defaults, "Connection Defaults", "slider.horizontal.3") { DefaultsEditorView() }
                 row(.privacy, "Privacy", "hand.raised") { PrivacySettingsView() }
-                row(.diagnostics, "Diagnostics", "ladybug") { DiagnosticsSettingsView() }
+                row(.experimental, "Experimental", "flask") { ExperimentalSettingsView() }
             }
             .navigationTitle("Settings")
             .toolbar {
