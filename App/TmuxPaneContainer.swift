@@ -499,7 +499,31 @@ struct TmuxPaneContainer: UIViewRepresentable {
             let cell = resolvedCell()
             guard let grid = terminalGrid(width: Double(bounds.width), height: Double(bounds.height),
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
+            // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15). Log the
+            // full geometry at the grid-computation boundary so a device trace can prove
+            // whether the container bounds already exclude the keybar (inputAccessoryView)
+            // area, or whether the grid is computed from pre-keyboard-avoidance bounds.
+            // `si` = safeAreaInsets; a nonzero `.bottom` = the system reserved space (home
+            // indicator / keyboard). `kb` = the active pane's keybar accessory height.
+            let si = safeAreaInsets
+            let kbH = firstResponderKeybarHeight()
+            DebugLog.shared.log(.keybar,
+                "sizing:tmux bounds=\(Int(bounds.width))x\(Int(bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) cell=\(String(format: "%.1f", cell.w))x\(String(format: "%.1f", cell.h)) kbH=\(String(format: "%.1f", kbH)) grid=\(grid.cols)x\(grid.rows)")
             coordinator?.noteClientSize(cols: grid.cols, rows: grid.rows)
+        }
+
+        /// Sizing-diagnostic helper: the keybar (`inputAccessoryView`) height of whichever
+        /// pane is currently first responder (iOS shows exactly that pane's accessory).
+        /// Returns -1 if no pane is first responder (keyboard down → no accessory shown).
+        /// Reads `KeybarInputAccessory.intrinsicContentSize` so it reflects the live
+        /// self-sized height, not the seed. Cheap; used only inside the gated `.keybar` log.
+        private func firstResponderKeybarHeight() -> CGFloat {
+            for view in panes.values where view.isFirstResponder {
+                if let acc = view.inputAccessoryView as? KeybarInputAccessory {
+                    return acc.intrinsicContentSize.height
+                }
+            }
+            return -1
         }
 
         /// Cell metrics (monospace → uniform cell), used both to compute the container

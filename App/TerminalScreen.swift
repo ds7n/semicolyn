@@ -385,6 +385,14 @@ struct TerminalScreen: UIViewRepresentable {
 
         // Grid resize (rotation, layout) → remote window-change, debounced.
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+            // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15): log the
+            // terminal's geometry when SwiftTerm recomputes its grid, so a device trace
+            // proves whether the view bounds already exclude the keybar (inputAccessoryView)
+            // area. `si.bottom` nonzero = system-reserved space; `kbH` = the keybar height.
+            let si = source.safeAreaInsets
+            let kbH = (source.inputAccessoryView as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1
+            DebugLog.shared.log(.keybar,
+                "sizing:raw bounds=\(Int(source.bounds.width))x\(Int(source.bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) kbH=\(String(format: "%.1f", kbH)) grid=\(newCols)x\(newRows)")
             resizeDebounce.note(cols: newCols, rows: newRows, at: Date())
             let session = self.session
             let onResize = self.onResize
