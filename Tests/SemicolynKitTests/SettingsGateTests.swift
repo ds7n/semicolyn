@@ -33,8 +33,11 @@ final class SettingsGateTests: XCTestCase {
     func testDiagnosticsEnabledPreConnect() {
         XCTAssertTrue(SettingsGate.isEnabled(.diagnostics, in: .preConnect))
     }
+    func testExperimentalEnabledPreConnect() {
+        XCTAssertTrue(SettingsGate.isEnabled(.experimental, in: .preConnect))
+    }
     // Section vocabulary is stable (guards accidental add/remove).
     func testSectionCount() {
-        XCTAssertEqual(SettingsSection.allCases.count, 7)
+        XCTAssertEqual(SettingsSection.allCases.count, 8)
     }
 }

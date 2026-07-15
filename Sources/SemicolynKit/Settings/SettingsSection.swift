@@ -9,7 +9,7 @@ public enum SettingsContext: Equatable, Sendable {
 
 /// The sections of the unified Settings screen.
 public enum SettingsSection: String, CaseIterable, Sendable {
-    case appearance, terminal, keybar, launcher, defaults, privacy, diagnostics
+    case appearance, terminal, keybar, launcher, defaults, privacy, diagnostics, experimental
 }
 
 /// Decides which Settings sections are interactive in a given context. Keybar and
