@@ -89,6 +89,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
             if let pane, let view = v.panes[pane] {
                 view.isScrollEnabled = (mode == .localScroll)
                 view.allowMouseReporting = (mode == .mouseReporting)
+                // Enable our alt-screen drag pan in lockstep with the isScrollEnabled
+                // flip (owns the drag in `.appOwnsInput`, where the native pan is parked).
+                let key = ObjectIdentifier(view)
+                v.coordinator?.gestureControllers[key]?.setAltScreenPanEnabled(mode == .appOwnsInput)
             }
         }
         return v
@@ -613,6 +617,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     // own flag is observed (see PaneModeTracker.setAltScreenOverride).
                     if let isAlt = coordinator?.vm.takeAltScreenOverride(for: pane) {
                         coordinator?.modeTracker.setAltScreenOverride(for: pane, isAlt: isAlt, terminal: t.getTerminal())
+                    }
+                    // Sync our alt-screen pan to this pane's CURRENT mode. The prime /
+                    // override above fire `onChange` only on a mode CHANGE (deduped); a
+                    // pane that resolves straight to `.appOwnsInput` is covered, but this
+                    // guarantees the pan matches the mode regardless of dedup outcome.
+                    if let coordinator {
+                        coordinator.gestureControllers[ObjectIdentifier(t)]?
+                            .setAltScreenPanEnabled(coordinator.modeTracker.mode(for: pane) == .appOwnsInput)
                     }
                     return t
                 }()

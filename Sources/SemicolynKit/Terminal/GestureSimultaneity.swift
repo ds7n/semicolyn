@@ -20,6 +20,12 @@ public enum GestureRole: Hashable, Sendable {
     /// drag and must lose to the scroll pan, or a plain drag selects instead of
     /// scrolling.
     case selectionPan
+    /// OUR alt-screen drag pan — a `UIPanGestureRecognizer` we own, enabled ONLY in
+    /// `.appOwnsInput` (where the native scroll pan is parked via `isScrollEnabled =
+    /// false`). It translates a vertical drag into arrow-key runs to the foreground app
+    /// (xterm Alternate-Scroll). Never live at the same time as `scrollPan` (mode-gated),
+    /// but must be mutually exclusive with the long-press for the same held-drag hazard.
+    case altScreenPan
     /// Any other recognizer we don't model explicitly.
     case other
 }
@@ -42,5 +48,10 @@ public func gesturesMayRecognizeSimultaneously(_ a: GestureRole, _ b: GestureRol
     // The old `sweep2` disable-on-drag-start couldn't catch this: it's gated on the
     // scroll pan's `.began`, which never fires when the selection pan wins arbitration.
     if pair == Set([.selectionPan, .scrollPan]) { return false }
+    // Our alt-screen drag pan must NOT co-recognize with the long-press, for the same
+    // held-then-drag hazard as the scroll pan: a long-press that fires as the finger
+    // starts moving would anchor a text selection instead of letting the drag emit
+    // arrows. Making the pairing exclusive lets the pan cancel the long-press on motion.
+    if pair == Set([.altScreenPan, .longPress]) { return false }
     return true
 }
