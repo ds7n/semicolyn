@@ -386,7 +386,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// pane-install path (different types, same file) both call this rather than
         /// reaching into the dictionary. Mirrors `updateMouseDots`.
         func setAltScreenPan(for view: TerminalView, enabled: Bool) {
-            gestureControllers[ObjectIdentifier(view)]?.setAltScreenPanEnabled(enabled)
+            // The controller is `@MainActor`; this method is called from the (nonisolated)
+            // Coordinator but always on the main thread (the `modeTracker.onChange` closure
+            // and the layout-time pane-install path). Assume isolation, matching how
+            // `removeHalo` invokes the controller's `detach()`.
+            MainActor.assumeIsolated {
+                gestureControllers[ObjectIdentifier(view)]?.setAltScreenPanEnabled(enabled)
+            }
         }
 
         // MARK: - TerminalViewDelegate
