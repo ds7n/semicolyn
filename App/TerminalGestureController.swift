@@ -70,6 +70,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private var longPress: UILongPressGestureRecognizer!
     private var twoFingerTap: UITapGestureRecognizer!
     private var editMenu: UIEditMenuInteraction!
+    /// OUR alt-screen drag pan. Enabled ONLY while the pane is in `.appOwnsInput`
+    /// (toggled by the mount via `setAltScreenPanEnabled` in the same mode-transition
+    /// handler that flips `isScrollEnabled`). It exists because in `.appOwnsInput` the
+    /// mount sets `isScrollEnabled = false`, which DISABLES the inherited
+    /// `UIScrollView.panGestureRecognizer` — so our `handleScrollViewPan` target on that
+    /// recognizer never fires there (device-proven, build 47: `gr:scrollPan began
+    /// mode=appOwnsInput` = 0). This pan survives that flip because it is our own,
+    /// independent recognizer. Gating it on the mode guarantees exactly ONE live
+    /// drag-recognizer per mode (native pan in `.localScroll`, this one in
+    /// `.appOwnsInput`) — no straddle.
+    private var altScreenPan: UIPanGestureRecognizer!
 
     init(terminalView: TerminalView, callbacks: Callbacks) {
         self.terminalView = terminalView
@@ -165,12 +176,22 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         editMenu = UIEditMenuInteraction(delegate: self)
         view.addInteraction(editMenu)
 
-        ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap]
+        // OUR alt-screen drag pan. Starts DISABLED — the pane mounts in `.localScroll`
+        // where the native scroll pan owns the drag. The mount enables it on transition
+        // into `.appOwnsInput` (see `setAltScreenPanEnabled`), where `isScrollEnabled =
+        // false` has parked the native pan and this is the only live drag-owner.
+        altScreenPan = UIPanGestureRecognizer(target: self, action: #selector(handleAltScreenPan(_:)))
+        altScreenPan.delegate = self
+        altScreenPan.isEnabled = false
+
+        ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap, altScreenPan]
         for gr in ours { view.addGestureRecognizer(gr) }
 
         // Vertical scrolling stays NATIVE (the inherited UIScrollView pan, kept enabled
-        // by the sweep). We ride that same recognizer to detect a horizontal drag =
-        // tmux window switch, so we never fight the scroll view with a competing pan.
+        // by the sweep) in `.localScroll`. We ride that same recognizer to detect a
+        // horizontal drag = tmux window switch, so we never fight the scroll view with a
+        // competing pan there. (In `.appOwnsInput` that recognizer is disabled by
+        // `isScrollEnabled = false`; `altScreenPan` above takes over.)
         view.panGestureRecognizer.addTarget(self, action: #selector(handleScrollViewPan(_:)))
 
         // Bug B diagnosis: observe every non-ours recognizer's state so a drag that
@@ -191,6 +212,16 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         for gr in ours { view.removeGestureRecognizer(gr) }
         view.removeInteraction(editMenu)
         ours = []
+    }
+
+    /// Enable OUR alt-screen drag pan (arrow-key synthesis) for exactly the
+    /// `.appOwnsInput` mode, and disable it otherwise. Called by the mount from the
+    /// `modeTracker.onChange` handler — the same place it flips `view.isScrollEnabled` —
+    /// so the two toggles stay in lockstep: native scroll pan and our pan are never both
+    /// live. `enabled == (mode == .appOwnsInput)` at the call site.
+    func setAltScreenPanEnabled(_ enabled: Bool) {
+        altScreenPan?.isEnabled = enabled
+        DebugLog.shared.log(.gesture, "altPan enabled=\(enabled)")
     }
 
     // MARK: Cell geometry
@@ -243,44 +274,79 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         view.panGestureRecognizer.addTarget(self, action: #selector(observeRecognizerState(_:)))
     }
 
+    /// Snapshot mode + DECCKM once at a drag's `.began`, and clean up recognizers that
+    /// could hijack the drag. Shared by both drag handlers so a single gesture can't
+    /// straddle two interpretations mid-flight. Returns the snapshotted mode.
+    @discardableResult
+    private func beginDrag(_ owner: String, on view: TerminalView) -> InteractionMode {
+        dragMode = callbacks.currentMode()
+        dragAppCursor = callbacks.applicationCursorKeys()
+        emittedCells = 0
+        // Defense-in-depth (on top of the Kit simultaneity policy): the moment a real
+        // drag starts, force-cancel any long-press by bouncing its `isEnabled`. A
+        // long-press that recognized just before the pan was turning the held-then-drag
+        // into a text selection (device trace 2026-07-13). This guarantees a drag can
+        // never leave a live long-press behind, independent of recognizer race ordering.
+        // It re-enables immediately so the next still-finger press still zooms.
+        if longPress.state == .began || longPress.state == .changed {
+            longPress.isEnabled = false
+            longPress.isEnabled = true
+        }
+        // Kill any lazily-created SwiftTerm selection/mouse pan before it can turn this
+        // drag into a text selection (the one-time init sweep can't catch it).
+        disableStraySwiftTermPans(on: view)
+        if dragMode == .appOwnsInput { observeStrayRecognizers(on: view) }
+        DebugLog.shared.log(.gesture, "gr:\(owner) began mode=\(dragMode) appCursor=\(dragAppCursor)")
+        return dragMode
+    }
+
+    /// Resolve a one-shot tmux window-switch from the drag's cumulative translation
+    /// (`GestureClassifier` axis-locks horizontal-dominant → switch). Called on
+    /// `.ended`/`.cancelled` from whichever pan owned the drag.
+    private func resolveWindowSwitch(_ g: UIPanGestureRecognizer, in view: TerminalView) {
+        let t = g.translation(in: view)
+        let decision = GestureClassifier.classify(
+            dx: Double(t.x), dy: Double(t.y),
+            isMultiWindowTmux: callbacks.isMultiWindowTmux())
+        if case .switchWindow(let delta) = decision {
+            callbacks.onSwitchWindow(delta)
+        }
+    }
+
     /// Rides the terminal's NATIVE UIScrollView pan (we added ourselves as an extra
-    /// target). The mode is snapshotted once at `.began` so a single drag can't
-    /// straddle two interpretations mid-flight:
-    /// - `.localScroll`: we do nothing — the scroll view itself owns the vertical
-    ///   drag (native scroll, inertia, correct `isTracking`/scrollback).
-    /// - `.appOwnsInput` (alt-screen): the mount has set `isScrollEnabled = false`,
-    ///   so native scroll is inert; we translate the drag into arrow-key runs
-    ///   (`AltScreenScroll`) streamed to the app on every `.changed`.
-    /// - `.mouseReporting`: SwiftTerm forwards the drag as a mouse event; we no-op
-    ///   entirely, including the window-switch classify on release.
-    ///
-    /// In ANY mode that lets us own the horizontal axis (i.e. not `.mouseReporting`),
-    /// a horizontal-dominant drag in multi-window tmux still resolves a window switch
-    /// once, on release, via `GestureClassifier` from the cumulative translation.
+    /// target). This recognizer is only LIVE in `.localScroll` (in `.appOwnsInput` the
+    /// mount sets `isScrollEnabled = false`, which disables it — `altScreenPan` owns the
+    /// drag there instead; in `.mouseReporting` SwiftTerm forwards the drag as a mouse
+    /// event). So here the scroll view itself owns the vertical drag (native scroll,
+    /// inertia, correct `isTracking`/scrollback) and we only resolve a horizontal-drag
+    /// tmux window-switch, once, on release.
     @objc private func handleScrollViewPan(_ g: UIPanGestureRecognizer) {
         guard let view = terminalView else { return }
         switch g.state {
         case .began:
-            dragMode = callbacks.currentMode()
-            dragAppCursor = callbacks.applicationCursorKeys()
-            emittedCells = 0
-            // Defense-in-depth (on top of the Kit simultaneity policy): the moment a
-            // real drag starts, force-cancel any long-press by bouncing its `isEnabled`.
-            // A long-press that recognized just before the pan was turning the held-then-
-            // drag into a text selection (device trace 2026-07-13). This guarantees a
-            // drag can never leave a live long-press behind, independent of recognizer
-            // race ordering. It re-enables immediately so the next still-finger press
-            // still zooms.
-            if longPress.state == .began || longPress.state == .changed {
-                longPress.isEnabled = false
-                longPress.isEnabled = true
-            }
-            // Kill any lazily-created SwiftTerm selection/mouse pan before it can turn
-            // this drag into a text selection (the one-time init sweep can't catch it).
-            disableStraySwiftTermPans(on: view)
-            if dragMode == .appOwnsInput { observeStrayRecognizers(on: view) }
-            DebugLog.shared.log(.gesture, "gr:scrollPan began mode=\(dragMode) appCursor=\(dragAppCursor)")
+            beginDrag("scrollPan", on: view)
+        case .ended, .cancelled:
+            // Native pan is only live in `.localScroll`; guard defensively anyway.
+            guard dragMode != .mouseReporting else { return }
+            resolveWindowSwitch(g, in: view)
+        default: break
+        }
+    }
+
+    /// OUR alt-screen drag pan — enabled ONLY in `.appOwnsInput` (via
+    /// `setAltScreenPanEnabled`). The mount has parked the native scroll pan
+    /// (`isScrollEnabled = false`) there, so this is the single live drag-owner: it
+    /// translates the vertical drag into arrow-key runs (`AltScreenScroll`) streamed to
+    /// the app on every `.changed` (xterm Alternate-Scroll model), and resolves a
+    /// horizontal-drag tmux window-switch once on release.
+    @objc private func handleAltScreenPan(_ g: UIPanGestureRecognizer) {
+        guard let view = terminalView else { return }
+        switch g.state {
+        case .began:
+            beginDrag("altPan", on: view)
         case .changed:
+            // The pan is only enabled in `.appOwnsInput`, but re-check the snapshot so a
+            // mid-mount edge (enabled just as the mode left) can't emit stray arrows.
             guard dragMode == .appOwnsInput else { return }
             let term = view.getTerminal()
             let cellH = view.bounds.height / CGFloat(max(term.rows, 1))
@@ -294,19 +360,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                 if !bytes.isEmpty { callbacks.sendBytes(bytes) }
             }
             if !runs.isEmpty {
-                DebugLog.shared.log(.gesture, "gr:scrollPan altScreen runs=\(runs.count) emittedCells=\(emittedCells)")
+                DebugLog.shared.log(.gesture, "gr:altPan runs=\(runs.count) emittedCells=\(emittedCells)")
             }
         case .ended, .cancelled:
-            // Window-switch resolves once, from cumulative translation, in ANY mode
-            // that lets us own the horizontal axis (not mouseReporting).
-            guard dragMode != .mouseReporting else { return }
-            let t = g.translation(in: view)
-            let decision = GestureClassifier.classify(
-                dx: Double(t.x), dy: Double(t.y),
-                isMultiWindowTmux: callbacks.isMultiWindowTmux())
-            if case .switchWindow(let delta) = decision {
-                callbacks.onSwitchWindow(delta)
-            }
+            resolveWindowSwitch(g, in: view)
         default: break
         }
     }
@@ -415,14 +472,15 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// installed by the mount; everything else is a tap or unmodeled.
     private func role(of g: UIGestureRecognizer) -> GestureRole {
         if g === terminalView?.panGestureRecognizer { return .scrollPan }
+        if g === altScreenPan { return .altScreenPan }
         if g === longPress { return .longPress }
         if g is UIPinchGestureRecognizer { return .pinch }
         if g is UITapGestureRecognizer { return .tap }
-        // A pan that is neither the inherited scroll pan nor one of ours (ours are all
-        // taps + a long-press, never pans) is SwiftTerm's lazily-created
-        // selection/mouse pan — the recognizer that hijacks a drag as text selection.
-        // Classifying it as `.selectionPan` makes the simultaneity policy exclude it
-        // from co-recognizing with the scroll pan.
+        // A pan that is neither the inherited scroll pan, our alt-screen pan, nor one of
+        // our taps/long-press is SwiftTerm's lazily-created selection/mouse pan — the
+        // recognizer that hijacks a drag as text selection. Classifying it as
+        // `.selectionPan` makes the simultaneity policy exclude it from co-recognizing
+        // with the scroll pan.
         if g is UIPanGestureRecognizer { return .selectionPan }
         return .other
     }

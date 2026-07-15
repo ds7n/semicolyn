@@ -75,6 +75,10 @@ struct TerminalScreen: UIViewRepresentable {
             coordinator?.mouseDot.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
             terminal?.isScrollEnabled = (mode == .localScroll)
             terminal?.allowMouseReporting = (mode == .mouseReporting)
+            // Our alt-screen drag pan owns the drag in `.appOwnsInput` (where the native
+            // scroll pan above is parked). Enable it in lockstep with the isScrollEnabled
+            // flip so exactly one drag-recognizer is live per mode.
+            coordinator?.gestureController?.setAltScreenPanEnabled(mode == .appOwnsInput)
         }
         // Prime once at mount so a terminal that starts on the alt-screen (reattach
         // into a running vim/Claude) is correct from frame one.
@@ -155,6 +159,11 @@ struct TerminalScreen: UIViewRepresentable {
         // ours-that-aren't). Re-enable the app's own pinch and keyboard-restore taps.
         pinch.isEnabled = true
         restoreTap.isEnabled = true
+        // Sync our alt-screen pan to the CURRENT mode: the mode was primed above (line
+        // ~81) BEFORE this controller existed, so a terminal that mounts already on the
+        // alternate screen (reattach into a running vim/Claude) needs its pan enabled
+        // now — `onChange` only fires on a future transition, not the prime.
+        gestureController.setAltScreenPanEnabled(context.coordinator.modeTracker.mode == .appOwnsInput)
         MainActor.assumeIsolated {
             DebugLog.shared.log(.seed, "scroll:init isScrollEnabled=\(terminal.isScrollEnabled) nativePan=\(terminal.panGestureRecognizer.isEnabled) contentSize=\(terminal.contentSize) offset=\(terminal.contentOffset)")
         }
