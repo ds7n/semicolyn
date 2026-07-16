@@ -37,8 +37,11 @@ public struct GestureClassifier: Sendable {
 
         // Window-switch only for a CLEARLY horizontal drag (|dx| ≥ ratio·|dy|) in multi-window
         // tmux. Everything else — vertical, diagonal, or gently-horizontal — scrolls.
+        // Direction is content-follows-finger: swiping the content RIGHTWARD (dx>0) reveals
+        // the window to its LEFT (delta −1, previous); swiping left reveals the next window
+        // to the right. (Device retest 2026-07-16: the prior dx>0→+1 mapping felt backwards.)
         if isMultiWindowTmux, abs(dx) >= abs(dy) * switchDominanceRatio {
-            return .switchWindow(delta: dx > 0 ? +1 : -1)
+            return .switchWindow(delta: dx > 0 ? -1 : +1)
         }
         return .scrollVertical
     }
