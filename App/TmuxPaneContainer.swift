@@ -281,7 +281,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
                             MainActor.assumeIsolated {
                                 guard let self else { return .arrows }
                                 let mode = AppStores.shared.terminalSettings.settings.altScrollMode
-                                let cmd = self.vm.paneContexts[pane]
+                                // Read the runtime's COMPLETE context (not the
+                                // renderablePanes-filtered `paneContexts`, which dropped the
+                                // dragged pane and forced arrows — device trace 2026-07-16).
+                                let cmd = self.vm.tmuxPaneCommand(pane)
                                 let title = self.vm.terminalTitle
                                 let keys = altScrollKeys(mode: mode, paneCommand: cmd,
                                                          windowTitle: title, registry: .bundledDefault)

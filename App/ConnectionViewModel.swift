@@ -419,6 +419,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `TmuxPaneContainer` (container bounds ÷ measured cell), debounced there.
     func setTmuxClientSize(cols: Int, rows: Int) { tmux?.setClientSize(cols: cols, rows: rows) }
 
+    /// The foreground command for `pane` from the tmux context poll, read from the
+    /// runtime's COMPLETE map. Unlike `paneContexts` (which is filtered to
+    /// `renderablePanes` for the keybar's Fn auto-engage), this returns the command for
+    /// ANY polled pane. The alt-scroll decider needs it for the pane under the finger,
+    /// which may not be in `renderablePanes` at that instant (device trace 2026-07-16:
+    /// dragging a Claude pane %0 got nil from the filtered map while the poll reported
+    /// `%0:claude`, so the drag fell back to arrows instead of PgUp/PgDn).
+    func tmuxPaneCommand(_ pane: PaneID) -> String? { tmux?.paneContext(pane) }
+
     // MARK: - Teardown
 
     /// User-initiated disconnect (the connected-state Disconnect button). Tears the
