@@ -42,10 +42,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         /// DECCKM (application-cursor-keys) state, snapshotted at drag `.began` so a
         /// single drag encodes consistently even if the app flips the mode mid-drag.
         let applicationCursorKeys: () -> Bool
-        /// Which key family an alt-screen drag should emit for THIS pane, resolved once at
-        /// drag `.began` via the pure `altScrollKeys(...)` decider (mode + pane command +
-        /// title). `.arrows` (xterm standard) or `.pageKeys` (PgUp/PgDn for AI-CLI TUIs).
-        let altScrollKeys: () -> AltScrollKeys
+        /// The resolved alt-screen scroll DECISION for THIS pane (inputs + keys + reason),
+        /// snapshotted once at drag `.began` via the pure `altScrollDecision(...)` decider.
+        /// The controller logs `decision.logLine` verbatim so the line reflects what the
+        /// decider actually saw (not the caller's belief). `.keys` drives arrow-vs-page.
+        let altScrollDecision: () -> AltScrollDecision
         /// Sends raw bytes to the remote (arrow-key runs from an alt-screen drag).
         let sendBytes: ([UInt8]) -> Void
         let hasSelection: () -> Bool
@@ -61,7 +62,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private var dragAppCursor: Bool = false
     /// Key family for the in-flight alt-screen drag, snapshotted at `.began` so a single
     /// drag can't switch arrow↔page mid-flight.
-    private var dragScrollKeys: AltScrollKeys = .arrows
+    private var dragDecision: AltScrollDecision =
+        AltScrollDecision(keys: .arrows, mode: .off, paneCommand: nil, reason: "off")
     /// Running total of cells already turned into arrows this drag (fed back into
     /// `AltScreenScroll.arrows` so successive `.changed` samples send only the new delta).
     private var emittedCells: Int = 0
@@ -259,13 +261,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// Diagnostic (Bug B, device trace 2026-07-14): in `.appOwnsInput` our
     /// `handleScrollViewPan` never fires because a `delegate=nil` UIKit pan
     /// (`_UIDragAutoScrollGestureRecognizer` / SwiftTerm's lazy pan) appears to win
-    /// the drag. This logs which recognizer actually transitions, so a device trace
-    /// NAMES the winner before we disable it. Pure observation: no routing change.
+    /// the drag. Kept attached as a stray-recognizer observer target (see
+    /// `observeStrayRecognizers`); the identifying log line moved into `beginDrag`'s
+    /// `drag-begin winner=...` (self-contained per-drag line), so this handler is now
+    /// a deliberate no-op: a stray recognizer firing still routes here without
+    /// producing a second, redundant log.
     @objc private func observeRecognizerState(_ g: UIGestureRecognizer) {
         guard g.state == .began || g.state == .changed else { return }
-        let cls = String(describing: type(of: g))
-        let del = g.delegate.map { String(describing: type(of: $0)) } ?? "nil"
-        DebugLog.shared.log(.gesture, "gr:winner \(cls) delegate=\(del) state=\(g.state.rawValue)")
     }
 
     /// Attach `observeRecognizerState` as an extra target on every recognizer on the
@@ -288,7 +290,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private func beginDrag(_ owner: String, on view: TerminalView) -> InteractionMode {
         dragMode = callbacks.currentMode()
         dragAppCursor = callbacks.applicationCursorKeys()
-        dragScrollKeys = callbacks.altScrollKeys()
+        dragDecision = callbacks.altScrollDecision()
         emittedCells = 0
         // Defense-in-depth (on top of the Kit simultaneity policy): the moment a real
         // drag starts, force-cancel any long-press by bouncing its `isEnabled`. A
@@ -304,7 +306,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // drag into a text selection (the one-time init sweep can't catch it).
         disableStraySwiftTermPans(on: view)
         if dragMode == .appOwnsInput { observeStrayRecognizers(on: view) }
-        DebugLog.shared.log(.gesture, "gr:\(owner) began mode=\(dragMode) appCursor=\(dragAppCursor)")
+        // `imode=` is the InteractionMode; `dragDecision.logLine` carries its own
+        // `mode=` (the AltScrollMode). Distinct keys so the one line stays unambiguous
+        // (the B retest reads `imode=` to tell mouseReporting from appOwnsInput).
+        DebugLog.shared.log(.gesture,
+            "drag-begin winner=\(owner) imode=\(dragMode) appCursor=\(dragAppCursor) \(dragDecision.logLine)")
         return dragMode
     }
 
@@ -334,6 +340,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         case .began:
             beginDrag("scrollPan", on: view)
         case .ended, .cancelled:
+            DebugLog.shared.log(.gesture,
+                "drag-end owner=scrollPan imode=\(dragMode) outcome=\(dragMode == .localScroll ? "scroll" : "none")")
             // Native pan is only live in `.localScroll`; guard defensively anyway.
             guard dragMode != .mouseReporting else { return }
             resolveWindowSwitch(g, in: view)
@@ -363,16 +371,26 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                 cellHeight: Double(cellH),
                 emittedCells: emittedCells)
             emittedCells = newEmitted
+            var sent = 0
             for run in runs {
-                let bytes = dragScrollKeys == .pageKeys
+                let bytes = dragDecision.keys == .pageKeys
                     ? encodePageKeyRun(run)
                     : encodeArrowRun(run, applicationCursorKeys: dragAppCursor)
-                if !bytes.isEmpty { callbacks.sendBytes(bytes) }
+                if !bytes.isEmpty { callbacks.sendBytes(bytes); sent += run.count }
             }
             if !runs.isEmpty {
-                DebugLog.shared.log(.gesture, "gr:altPan keys=\(dragScrollKeys) runs=\(runs.count) emittedCells=\(emittedCells)")
+                DebugLog.shared.log(.gesture,
+                    "drag-move keys=\(dragDecision.keys) runs=\(runs.count) sent=\(sent) total=\(emittedCells)")
             }
         case .ended, .cancelled:
+            let outcome: String
+            if emittedCells > 0 {
+                outcome = dragDecision.keys == .pageKeys ? "pageKeys" : "arrows"
+            } else {
+                outcome = "none"
+            }
+            DebugLog.shared.log(.gesture,
+                "drag-end owner=altPan imode=\(dragMode) emitted=\(emittedCells) outcome=\(outcome)")
             resolveWindowSwitch(g, in: view)
         default: break
         }

@@ -269,7 +269,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     terminalView: view,
                     callbacks: .init(
                         isMultiWindowTmux: { [weak self] in self?.onIsMultiWindowTmux() ?? false },
-                        onSwitchWindow:    { [weak self] delta in self?.onSwitchWindow(delta) },
+                        onSwitchWindow:    { [weak self] delta in
+                            DebugLog.shared.log(.lifecycle, "user-action: window-switch delta=\(delta)")
+                            self?.onSwitchWindow(delta)
+                        },
                         onLongPressZoom:   { [weak self] in self?.onZoomActivePane() },
                         onPlaceCursor:     { [weak self, weak view] col, row in
                             guard let view else { return }
@@ -277,22 +280,27 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         },
                         currentMode: { [weak self] in self?.modeTracker.mode(for: pane) ?? .localScroll },
                         applicationCursorKeys: { [weak view] in view?.getTerminal().applicationCursor ?? false },
-                        altScrollKeys: { [weak self] in
+                        altScrollDecision: { [weak self] in
                             MainActor.assumeIsolated {
-                                guard let self else { return .arrows }
+                                guard let self else {
+                                    return AltScrollDecision(keys: .arrows, mode: .off,
+                                                             paneCommand: nil, reason: "off")
+                                }
                                 let mode = AppStores.shared.terminalSettings.settings.altScrollMode
-                                let cmd = self.vm.paneContexts[pane]
+                                // Read the runtime's COMPLETE context (not the
+                                // renderablePanes-filtered `paneContexts`, which dropped the
+                                // dragged pane and forced arrows: device trace 2026-07-16).
+                                let cmd = self.vm.tmuxPaneCommand(pane)
                                 let title = self.vm.terminalTitle
-                                let keys = altScrollKeys(mode: mode, paneCommand: cmd,
-                                                         windowTitle: title, registry: .bundledDefault)
-                                // #B diagnostic (2026-07-16): log the DRAGGED pane, the
-                                // command paneContexts resolved for it (nil = the pane was
-                                // absent from the list-panes -a poll, the bug), and the
-                                // decision. Pairs with "tmux context REPLY" to show whether
-                                // the dragged pane is even in the polled set.
+                                let decision = altScrollDecision(mode: mode, paneCommand: cmd,
+                                                                 windowTitle: title, registry: .bundledDefault)
+                                // The App prepends the pane id; the decider does not know it.
+                                // This single line supersedes the old "altScroll decide" line;
+                                // drag-begin logs decision.logLine, so this confirms the pane
+                                // -> command resolution at snapshot time.
                                 DebugLog.shared.log(.gesture,
-                                    "altScroll decide pane=%\(pane.raw) cmd=\(cmd ?? "nil") mode=\(mode) -> \(keys)")
-                                return keys
+                                    "alt-scroll pane=%\(pane.raw) \(decision.logLine)")
+                                return decision
                             }
                         },
                         sendBytes: { [weak self] bytes in self?.send(bytes) },
@@ -364,7 +372,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // Persist the zoomed size so it survives reconnect (and updates the
                 // Settings font-size slider) — mirrors the raw-terminal pinch handler.
                 MainActor.assumeIsolated {
-                    DebugLog.shared.log(.gesture, "gesture:pinch fontSize=\(baseFontSize)")
+                    DebugLog.shared.log(.lifecycle, "user-action: zoom pinch → font=\(baseFontSize)")
                     let store = AppStores.shared.terminalSettings
                     if store.settings.fontSize != baseFontSize {
                         store.settings.fontSize = baseFontSize
