@@ -640,8 +640,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
             }
 
             // Create/position each pane; border the active one.
+            // Track whether this apply CREATED any pane (window-switch/reattach): if so, we
+            // re-query tmux `#{alternate_on}` after the loop so a re-created pane's alt-state
+            // is re-seeded authoritatively (Bug 2). `forget()` above wiped it, and the fresh
+            // view's live flag is unreliable (tmux never replays `?1049h`).
+            var createdAnyPane = false
             for rect in rects {
                 let existed = panes[rect.pane] != nil
+                if !existed { createdAnyPane = true }
                 let view = panes[rect.pane] ?? {
                     DebugLog.shared.log(.tmux, "pane \(rect.pane) CREATE TerminalView (reattach makes a fresh view)")
                     let t = PaneTerminalView(frame: .zero)
@@ -716,6 +722,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     view.layer.borderColor = inactiveBorderColor.cgColor
                     view.layer.borderWidth = singlePane ? 0 : 0.5
                 }
+            }
+
+            // A pane was (re-)created this apply (window-switch/reattach). Re-query tmux's
+            // authoritative `#{alternate_on}` so the fresh pane's tracked alt-state is
+            // re-seeded via onAltScreenReconcile -> setAltScreenOverride, instead of falling
+            // through to the unreliable live emulator flag (Bug 2: a re-created Claude pane
+            // misclassified as .mouseReporting -> drag became a stuck selection).
+            if createdAnyPane {
+                coordinator?.vm.requeryAltScreenState()
             }
         }
 
