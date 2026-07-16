@@ -61,7 +61,7 @@ final class DebugLog: ObservableObject {
     }()
 
     /// Re-read every category toggle from UserDefaults. Call when the Diagnostics
-    /// category settings change (e.g. `DiagnosticsSettingsView.onAppear` / onChange).
+    /// category settings change (e.g. `DiagnosticsContent.onAppear` / onChange).
     func refreshEnabledCategories() {
         var set = Set<LogCategory>()
         for c in LogCategory.allCases {
