@@ -149,13 +149,13 @@ struct TerminalScreen: UIViewRepresentable {
                 },
                 currentMode: { [weak coordinator = context.coordinator] in coordinator?.modeTracker.mode ?? .localScroll },
                 applicationCursorKeys: { [weak terminal] in terminal?.getTerminal().applicationCursor ?? false },
-                altScrollKeys: { [weak coordinator = context.coordinator] in
+                altScrollDecision: { [weak coordinator = context.coordinator] in
                     MainActor.assumeIsolated {
                         let mode = AppStores.shared.terminalSettings.settings.altScrollMode
                         // Raw/mosh single pane: no tmux pane_current_command.
                         let title = coordinator?.vm?.terminalTitle
-                        return altScrollKeys(mode: mode, paneCommand: nil,
-                                             windowTitle: title, registry: .bundledDefault)
+                        return altScrollDecision(mode: mode, paneCommand: nil,
+                                                 windowTitle: title, registry: .bundledDefault)
                     }
                 },
                 sendBytes: { [weak coordinator = context.coordinator] bytes in coordinator?.send(bytes) },
