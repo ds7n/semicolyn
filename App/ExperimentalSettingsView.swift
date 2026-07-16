@@ -6,7 +6,13 @@ import SemicolynKit
 /// The "Experimental (advanced, may be unreliable)" settings screen. Hosts the
 /// alt-screen scroll mode radio and links to Diagnostics (relocated here).
 struct ExperimentalSettingsView: View {
-    @EnvironmentObject private var store: TerminalSettingsStore
+    // Read the shared store DIRECTLY rather than via `@EnvironmentObject`. An
+    // `@EnvironmentObject` that was never injected is a `fatalError` by design, and
+    // Settings is presented as a sheet/cover from several sites (in-session via
+    // SessionView/KeybarView) that do NOT propagate the app-root injection, which crashed
+    // the app when this screen opened. `AppStores.shared.terminalSettings` is a global
+    // singleton, so this can never be missing and no presentation path can crash.
+    @ObservedObject private var store = AppStores.shared.terminalSettings
 
     var body: some View {
         List {
