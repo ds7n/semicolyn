@@ -271,6 +271,26 @@ final class TmuxRuntime {
         return id
     }
 
+    /// Re-issue the `#{alternate_on}` query (the attach-prime one) on demand, tracking its
+    /// reply through the same `altScreenQueryIDs` → `onAltScreenReconcile` path. Called when
+    /// the pane container re-creates panes after a tmux window-switch: switching away
+    /// `forget()`s the off-screen pane's tracked alt-state, and window-return re-creates the
+    /// pane with no fresh alt-state, so it fell through to the (unreliable, often false) live
+    /// emulator flag and a Claude/vim pane misclassified as `.mouseReporting` -> the drag
+    /// became a stuck SwiftTerm selection (device trace 2026-07-16, Bug 2). Re-querying tmux
+    /// re-seeds the authoritative flag, and is correct even if the pane genuinely left the
+    /// alternate screen while off-screen. No-op / nil if not attached.
+    @discardableResult
+    func requeryAlternateOn() -> UInt64? {
+        guard let id = writeTracked(TmuxCommand.queryAlternateOn()) else {
+            DebugLog.shared.log(.tmux, "tmux requery alternate_on: writeTracked NIL (not attached)")
+            return nil
+        }
+        altScreenQueryIDs.insert(id)
+        DebugLog.shared.log(.tmux, "tmux requery: sent alternate_on query (req \(id))")
+        return id
+    }
+
     /// Begin polling `pane_current_command` once control mode is attached.
     func startContextPolling() {
         guard pollTask == nil else { return }

@@ -429,6 +429,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// command is also un-debounced, so a drag works the instant the first poll lands.
     func tmuxPaneCommand(_ pane: PaneID) -> String? { tmux?.paneRawCommand(pane) }
 
+    /// Re-query tmux's `#{alternate_on}` for all panes. Called by the pane container when a
+    /// window-switch/reattach re-creates panes, so each fresh pane's tracked alt-screen state
+    /// is re-seeded authoritatively (via `onAltScreenReconcile`) instead of the unreliable
+    /// live emulator flag (Bug 2, 2026-07-16). No-op if not attached.
+    func requeryAltScreenState() { tmux?.requeryAlternateOn() }
+
     // MARK: - Teardown
 
     /// User-initiated disconnect (the connected-state Disconnect button). Tears the
