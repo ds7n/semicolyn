@@ -8,8 +8,10 @@ public enum PanGesture: Equatable, Sendable {
     case none
     /// Scroll the scrollback (vertical drag, or horizontal fall-through).
     case scrollVertical
-    /// Switch tmux window by `delta` (+1 next / −1 previous). Only produced for a
-    /// horizontal-dominant drag in multi-window tmux.
+    /// Switch tmux window by a relative `delta` (+1 = the window after the current in index
+    /// order, −1 = the window before). Only produced for a horizontal-dominant drag in
+    /// multi-window tmux. See `classify` for the swipe-direction → delta mapping
+    /// (content-follows-finger: rightward swipe → −1).
     case switchWindow(delta: Int)
 }
 
