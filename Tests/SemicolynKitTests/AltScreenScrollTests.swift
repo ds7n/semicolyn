@@ -13,14 +13,14 @@ final class AltScreenScrollTests: XCTestCase {
     var gain: Double { AltScreenScroll.scrollGain }
 
     // BVA: a drag small enough that even after gain it is below one cell -> nothing.
-    // At gain 2.5 and cell 16, the threshold is 16/2.5 = 6.4pt; 6pt stays sub-cell.
+    // At gain 1.8 and cell 16, the threshold is 16/1.8 = 8.9pt; 6pt stays sub-cell.
     func testSubCellDragEmitsNothing() {
         let r = AltScreenScroll.arrows(totalDy: 6, cellHeight: cell, emittedCells: 0)
         XCTAssertEqual(r.runs, [])
         XCTAssertEqual(r.newEmittedCells, 0)
     }
     // Boundary: exactly one cell of drag -> `Int(gain)` UP arrows (natural scroll,
-    // amplified by gain). At gain 2.5 that is 2 arrows for a 16pt drag.
+    // amplified by gain). At gain 1.8 that is Int(1.8) = 1 arrow for a 16pt drag.
     func testOneCellDownEmitsGainedUpArrows() {
         let r = AltScreenScroll.arrows(totalDy: 16, cellHeight: cell, emittedCells: 0)
         let expected = Int(1.0 * gain)   // cells = Int(totalDy*gain/cell) = Int(gain)
@@ -28,7 +28,7 @@ final class AltScreenScrollTests: XCTestCase {
         XCTAssertEqual(r.newEmittedCells, expected)
     }
     // Direction: dragging up -> DOWN arrows, gained. A 2-cell up-drag (-32pt) at gain
-    // 2.5 = Int(2*2.5) = 5 down arrows.
+    // 1.8 = Int(2*1.8) = 3 down arrows.
     func testDragUpEmitsGainedDownArrows() {
         let r = AltScreenScroll.arrows(totalDy: -32, cellHeight: cell, emittedCells: 0)
         let expected = Int(2.0 * gain)
@@ -47,12 +47,14 @@ final class AltScreenScrollTests: XCTestCase {
         XCTAssertEqual(second.runs, [ArrowRun(direction: .up, count: total - firstCells)])
         XCTAssertEqual(second.newEmittedCells, total)
     }
-    // No further movement since last emit -> nothing.
+    // No further movement since last emit -> nothing. Gain-agnostic: emit for a 1-cell
+    // drag, then re-sample the SAME drag -> gained target unchanged -> delta 0 -> nothing
+    // (whatever the gain constant is).
     func testNoNewCellsEmitsNothing() {
-        // 8pt at gain 2.5 = Int(8*2.5/16) = Int(1.25) = 1 gained cell; already emitted 1.
-        let r = AltScreenScroll.arrows(totalDy: 8, cellHeight: cell, emittedCells: 1)
+        let first = AltScreenScroll.arrows(totalDy: 16, cellHeight: cell, emittedCells: 0)
+        let r = AltScreenScroll.arrows(totalDy: 16, cellHeight: cell, emittedCells: first.newEmittedCells)
         XCTAssertEqual(r.runs, [])
-        XCTAssertEqual(r.newEmittedCells, 1)
+        XCTAssertEqual(r.newEmittedCells, first.newEmittedCells)
     }
     // Anti-flood: a huge flick is CLAMPED to maxCellsPerEmit per call (gain does not
     // bypass the cap).
