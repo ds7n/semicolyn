@@ -328,7 +328,7 @@ struct TerminalScreen: UIViewRepresentable {
                 // context, so assume isolation. Guard so a no-op pinch doesn't churn
                 // the persisted store.
                 MainActor.assumeIsolated {
-                    DebugLog.shared.log(.gesture, "gesture:pinch fontSize=\(baseSize)")
+                    DebugLog.shared.log(.lifecycle, "user-action: zoom pinch → font=\(baseSize)")
                     let store = AppStores.shared.terminalSettings
                     if store.settings.fontSize != baseSize {
                         store.settings.fontSize = baseSize

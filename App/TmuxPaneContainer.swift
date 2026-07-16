@@ -269,7 +269,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     terminalView: view,
                     callbacks: .init(
                         isMultiWindowTmux: { [weak self] in self?.onIsMultiWindowTmux() ?? false },
-                        onSwitchWindow:    { [weak self] delta in self?.onSwitchWindow(delta) },
+                        onSwitchWindow:    { [weak self] delta in
+                            DebugLog.shared.log(.lifecycle, "user-action: window-switch delta=\(delta)")
+                            self?.onSwitchWindow(delta)
+                        },
                         onLongPressZoom:   { [weak self] in self?.onZoomActivePane() },
                         onPlaceCursor:     { [weak self, weak view] col, row in
                             guard let view else { return }
@@ -369,7 +372,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // Persist the zoomed size so it survives reconnect (and updates the
                 // Settings font-size slider) — mirrors the raw-terminal pinch handler.
                 MainActor.assumeIsolated {
-                    DebugLog.shared.log(.gesture, "gesture:pinch fontSize=\(baseFontSize)")
+                    DebugLog.shared.log(.lifecycle, "user-action: zoom pinch → font=\(baseFontSize)")
                     let store = AppStores.shared.terminalSettings
                     if store.settings.fontSize != baseFontSize {
                         store.settings.fontSize = baseFontSize

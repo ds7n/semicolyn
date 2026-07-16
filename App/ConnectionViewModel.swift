@@ -831,6 +831,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `TmuxRuntime`, and route the active pane's output into the terminal view.
     private func attachTmux(conn: Connection) async throws {
         DebugLog.shared.log(.lifecycle, "attachTmux: ENTER session=\(tmuxSessionNameForConnection)")
+        // Self-narrating anchor for a device trace: build + session so a pasted log
+        // fragment is self-locating (paired with the per-drag decision lines).
+        // No clean transport symbol is in scope here (attachTmux runs for both
+        // SSH-from-start and post-mosh-fallback SSH; moshSession is already nil
+        // by the time this executes), so that field is intentionally omitted.
+        let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
+        DebugLog.shared.log(.lifecycle,
+            "=== session-start build=\(build) session=\(tmuxSessionNameForConnection) ===")
         let runtime = TmuxRuntime(sessionName: tmuxSessionNameForConnection)
         let seeder = PaneHistorySeeder(
             runtime: runtime,
