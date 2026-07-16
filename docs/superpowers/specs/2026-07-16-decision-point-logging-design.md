@@ -130,19 +130,25 @@ public func altScrollKeys(mode:paneCommand:windowTitle:registry:) -> AltScrollKe
 
 The `altScrollKeys` callback becomes an `altScrollDecision` callback (returns the decision,
 not just the keys). The controller then emits **three self-contained lines per drag**, all
-under `.gesture`, replacing the scattered `gr:*` / `altPan enabled=` lines:
+under `.gesture`, replacing the scattered `gr:*` / `altPan enabled=` lines. The pane id is
+NOT repeated on each drag line: the mount closure logs it once on an adjacent
+`alt-scroll pane=%N <decision.logLine>` line at snapshot time, and every drag line belongs to
+that same pane/drag. The `imode=` key is the `InteractionMode`; it is intentionally distinct
+from the `mode=` inside `<decision.logLine>` (which is the `AltScrollMode`), so the two never
+collide on one line.
 
 - **`.began`:**
-  `drag-begin pane=%N <decision.logLine> winner=<recognizer> appCursor=<bool>`
-  (The App prepends `pane=%N`; `winner=` folds in the old `gr:winner` line; `<decision.logLine>`
-  carries mode+app+keys+reason from the Kit decider verbatim.)
+  `drag-begin winner=<recognizer> imode=<InteractionMode> appCursor=<bool> <decision.logLine>`
+  (`winner=` folds in the old `gr:winner` line; `<decision.logLine>` carries
+  mode+app+keys+reason from the Kit decider verbatim.)
 - **each emitting `.changed`:**
-  `drag-move pane=%N Δ=<cells> → sent=<pageDown×n | down×n> total=<emittedCells>`
+  `drag-move keys=<arrows|pageKeys> runs=<n> sent=<cells> total=<emittedCells>`
 - **`.ended`:**
-  `drag-end pane=%N emitted=<n> outcome=<scroll|pageKeys|arrows|select|mouse|none>`
-  `outcome` is computed from what actually happened this drag (keys emitted vs. a selection
-  created vs. nothing), so `drag-end` alone answers "did this drag do what the mode intended"
-  — the exact signal the B-bug retest needs.
+  `drag-end owner=<altPan|scrollPan> imode=<InteractionMode> emitted=<n> outcome=<scroll|pageKeys|arrows|none>`
+  `outcome` is computed from what actually happened this drag (`altPan`: `pageKeys`/`arrows`
+  when `emitted>0` else `none`; `scrollPan`: `scroll` in `.localScroll` else `none`), so
+  `drag-end` alone answers "did this drag do what the mode intended": the exact signal the
+  B-bug retest needs.
 
 **Removed / folded:** `gr:<owner> began mode=`, `altPan enabled=`, `gr:altPan keys=`,
 `gr:winner` -> subsumed by the three lines above.

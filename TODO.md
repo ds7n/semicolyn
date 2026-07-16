@@ -40,12 +40,12 @@ Self-contained decision-point logging shipped (spec `docs/superpowers/specs/2026
 === session-start build=N session=… ===
 user-action: mode-switch <mode>
 alt-scroll pane=%N mode=… app=… → keys=… reason=…
-drag-begin winner=… mode=… mode=… app=… → keys=… reason=…
+drag-begin winner=… imode=… mode=… app=… → keys=… reason=…
 drag-move keys=… runs=… sent=… total=…
-drag-end owner=… mode=… emitted=… outcome=<scroll|pageKeys|arrows|none>
+drag-end owner=… imode=… emitted=… outcome=<scroll|pageKeys|arrows|none>
 ```
 
-Confirms B mode-classification (mouseReporting vs appOwnsInput) from `drag-begin mode=` + `alt-scroll … reason=`. THEN fix B-remainder (mouseReporting + AI-CLI → PgUp/PgDn), C-momentum (flick/inertia), D-width (quantize zoom). Deferred sweep (§4c): adopt `decisionLine(...)` at tmux-grid / context-poll / transport boundaries.
+Confirms B mode-classification (mouseReporting vs appOwnsInput) from `drag-begin imode=` + `alt-scroll … reason=`. THEN fix B-remainder (mouseReporting + AI-CLI → PgUp/PgDn), C-momentum (flick/inertia), D-width (quantize zoom). Deferred sweep (§4c): adopt `decisionLine(...)` at tmux-grid / context-poll / transport boundaries.
 
 ### ⏸ In progress — resume here (paused 2026-07-07 for context-clear)
 

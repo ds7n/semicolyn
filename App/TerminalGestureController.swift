@@ -306,8 +306,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // drag into a text selection (the one-time init sweep can't catch it).
         disableStraySwiftTermPans(on: view)
         if dragMode == .appOwnsInput { observeStrayRecognizers(on: view) }
+        // `imode=` is the InteractionMode; `dragDecision.logLine` carries its own
+        // `mode=` (the AltScrollMode). Distinct keys so the one line stays unambiguous
+        // (the B retest reads `imode=` to tell mouseReporting from appOwnsInput).
         DebugLog.shared.log(.gesture,
-            "drag-begin winner=\(owner) mode=\(dragMode) appCursor=\(dragAppCursor) \(dragDecision.logLine)")
+            "drag-begin winner=\(owner) imode=\(dragMode) appCursor=\(dragAppCursor) \(dragDecision.logLine)")
         return dragMode
     }
 
@@ -338,7 +341,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             beginDrag("scrollPan", on: view)
         case .ended, .cancelled:
             DebugLog.shared.log(.gesture,
-                "drag-end owner=scrollPan mode=\(dragMode) outcome=\(dragMode == .localScroll ? "scroll" : "none")")
+                "drag-end owner=scrollPan imode=\(dragMode) outcome=\(dragMode == .localScroll ? "scroll" : "none")")
             // Native pan is only live in `.localScroll`; guard defensively anyway.
             guard dragMode != .mouseReporting else { return }
             resolveWindowSwitch(g, in: view)
@@ -387,7 +390,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                 outcome = "none"
             }
             DebugLog.shared.log(.gesture,
-                "drag-end owner=altPan mode=\(dragMode) emitted=\(emittedCells) outcome=\(outcome)")
+                "drag-end owner=altPan imode=\(dragMode) emitted=\(emittedCells) outcome=\(outcome)")
             resolveWindowSwitch(g, in: view)
         default: break
         }
