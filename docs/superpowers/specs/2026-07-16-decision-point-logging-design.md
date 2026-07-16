@@ -39,9 +39,11 @@ result.
 
 ## Section 1 — The standard
 
-Two parts, deliberately lightweight (a format + a convention; NOT a logging framework). A
-uniform App-tier string helper is a natural third part but is **deferred to the follow-up
-sweep** (§4c) — nothing in the gesture path consumes it, so this spec stays lean.
+Three parts, deliberately lightweight (a format + a convention + one string helper; NOT a
+logging framework). The gesture path does not *consume* the helper (it logs
+`decision.logLine` directly), but the helper is **built and tested in this spec** anyway so
+the standard ships complete and ready — a deferred-but-unused helper would quietly never get
+written.
 
 ### 1a. Format
 
@@ -67,14 +69,26 @@ bug (the filtered-`paneContexts` bug, where the caller's belief differed from th
 input). The `reason` is derived *inside* the decider (which branch fired), so it can never
 disagree with the output.
 
-### 1c. App-tier uniformity helper (deferred to the sweep)
+### 1c. App-tier uniformity helper
 
 For App-tier boundaries that call `DebugLog` directly (grid sizing, context poll), a tiny
-free `decisionLine(event, inputs:, outputs:, reason:) -> String` renders the same format so
-every line is uniform. It is **not needed for the gesture path** (which logs
-`decision.logLine` + interpolation), so it is deferred to the follow-up sweep (§4c) and
-introduced when the first App-tier boundary adopts the standard. Noted here only so the
-standard's shape is complete.
+free function renders the same format so every line is uniform:
+
+```swift
+func decisionLine(_ event: String,
+                  inputs: [(String, String)],
+                  outputs: [(String, String)],
+                  reason: String? = nil) -> String
+```
+
+It returns the string only (caller passes it to `DebugLog.shared.log(.<cat>, …)`), so gating
+stays autoclosure-cheap. Rendered as `event a=1 b=2 → x=9 reason=…`. Lives in Kit as a pure
+string function so it is Linux-testable.
+
+**Built and tested in this spec**, even though the gesture path does not consume it (the
+gesture lines log `decision.logLine` + interpolation). Shipping it now — proven, ready — is
+deliberate: a deferred helper with no consumer would quietly never be written. The follow-up
+sweep (§4c) then just *calls* an already-tested helper.
 
 ## Section 2 — Applying the standard to the gesture / alt-scroll path
 
@@ -181,6 +195,8 @@ default because they are at `.lifecycle`, not `.gesture`.
   `.pageKeys` in `.auto`.
 - **`altScrollKeys(...)` wrapper** — round-trip: for every mode/input, assert it equals
   `altScrollDecision(...).keys` (guards the wrapper from drifting from the decider).
+- **`decisionLine(...)`** — exact-format assertion (input order, `→`, output order, optional
+  reason present/absent). Kit-testable (pure string function).
 - **App-tier gesture lines / markers** — not Linux-testable; validated on device by the
   retest (the whole point), and App code compiles only on macOS CI.
 
@@ -191,8 +207,8 @@ pageKeys").
 ### 4c. Scope boundary (NOT in this spec)
 
 The other decision boundaries named in memory adopt the standard in a **follow-up sweep**,
-each a small independent change. The App-tier `decisionLine(...)` uniformity helper (§1c) is
-introduced with the first of these:
+each a small independent change. They *call* the already-built, already-tested App-tier
+`decisionLine(...)` helper (§1c):
 
 - tmux grid sizing (`ContainerView.layoutSubviews` / `noteClientSize` / `terminalGrid`)
 - context poll -> `paneContexts`
@@ -205,14 +221,12 @@ the B/C/D retest.
 ## Deliverables
 
 1. `AltScrollMode.swift`: `AltScrollDecision` + `altScrollDecision(...)` + behavior-preserving `altScrollKeys(...)` wrapper (Kit).
-2. `TerminalGestureController`: three self-contained drag lines (`drag-begin`/`drag-move`/`drag-end`); `gr:winner` folded into `drag-begin`; callback switched keys -> decision.
-3. Session + user-action markers at `.lifecycle` call sites (attach start; mode-switch; pinch-zoom; settings-change; window-switch).
-4. `LogCategory.swift`: `.gesture` removed from `defaultEnabled`.
-5. Kit tests: `AltScrollDecision` (EP+BVA+negative), wrapper round-trip.
-6. Retest note (in the plan / TODO): enable `gesture` (and any other needed category) before the scripted drag; markers make the trace self-narrating.
-
-Deferred to the follow-up sweep (§4c): the `decisionLine(...)` App-tier uniformity helper +
-its format test, introduced with the first non-gesture boundary that adopts the standard.
+2. `decisionLine(...)` helper + short format doc-comment (Kit, pure string; built now, gesture path doesn't consume it — ready for the §4c sweep).
+3. `TerminalGestureController`: three self-contained drag lines (`drag-begin`/`drag-move`/`drag-end`); `gr:winner` folded into `drag-begin`; callback switched keys -> decision.
+4. Session + user-action markers at `.lifecycle` call sites (attach start; mode-switch; pinch-zoom; settings-change; window-switch).
+5. `LogCategory.swift`: `.gesture` removed from `defaultEnabled`.
+6. Kit tests: `AltScrollDecision` (EP+BVA+negative), wrapper round-trip, `decisionLine` format.
+7. Retest note (in the plan / TODO): enable `gesture` (and any other needed category) before the scripted drag; markers make the trace self-narrating.
 
 ## Non-goals
 
