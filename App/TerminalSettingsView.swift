@@ -6,7 +6,11 @@ import SemicolynKit
 /// Minimal Terminal settings: font size + font face picker. Anchor for the
 /// (otherwise deferred) Terminal settings tree.
 struct TerminalSettingsView: View {
-    @EnvironmentObject private var store: TerminalSettingsStore
+    // Read the shared store directly, not via `@EnvironmentObject` (which `fatalError`s
+    // if the injection is missing). Settings is presented as a sheet/cover from sites
+    // that do not propagate the app-root injection, so an env-object read could crash.
+    // The singleton is always present. See ExperimentalSettingsView for the full rationale.
+    @ObservedObject private var store = AppStores.shared.terminalSettings
 
     var body: some View {
         List {

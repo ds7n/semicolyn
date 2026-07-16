@@ -119,7 +119,16 @@ final class TmuxRuntime {
             if contextPollIDs.remove(resolved.id) != nil {
                 if case .ok(let lines) = resolved.outcome {
                     let now = ProcessInfo.processInfo.systemUptime
-                    if !contextStore.observe(parsePaneCommandListing(lines), at: now).isEmpty {
+                    let parsed = parsePaneCommandListing(lines)
+                    // Sizing/coverage diagnostic (#B, 2026-07-16): the alt-scroll decider
+                    // reads paneContexts[pane] for the DRAGGED pane; a device trace showed
+                    // the dragged pane (e.g. %16 in a non-@0 window) was ABSENT from this
+                    // reply, so paneCommand was nil -> arrows. Log the FULL parsed pane set
+                    // (not the 80-char rx preview) so the next trace shows exactly which
+                    // panes `list-panes -a` returns vs. which pane the drag targets.
+                    DebugLog.shared.log(.tmux,
+                        "tmux context REPLY: lines=\(lines.count) panes=[\(parsed.map { "%\($0.0.raw):\($0.1)" }.joined(separator: " "))]")
+                    if !contextStore.observe(parsed, at: now).isEmpty {
                         onContextsChanged?()
                     }
                 }

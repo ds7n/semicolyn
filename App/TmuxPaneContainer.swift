@@ -283,8 +283,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
                                 let mode = AppStores.shared.terminalSettings.settings.altScrollMode
                                 let cmd = self.vm.paneContexts[pane]
                                 let title = self.vm.terminalTitle
-                                return altScrollKeys(mode: mode, paneCommand: cmd,
-                                                     windowTitle: title, registry: .bundledDefault)
+                                let keys = altScrollKeys(mode: mode, paneCommand: cmd,
+                                                         windowTitle: title, registry: .bundledDefault)
+                                // #B diagnostic (2026-07-16): log the DRAGGED pane, the
+                                // command paneContexts resolved for it (nil = the pane was
+                                // absent from the list-panes -a poll, the bug), and the
+                                // decision. Pairs with "tmux context REPLY" to show whether
+                                // the dragged pane is even in the polled set.
+                                DebugLog.shared.log(.gesture,
+                                    "altScroll decide pane=%\(pane.raw) cmd=\(cmd ?? "nil") mode=\(mode) -> \(keys)")
+                                return keys
                             }
                         },
                         sendBytes: { [weak self] bytes in self?.send(bytes) },
@@ -517,7 +525,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // indicator / keyboard). `kb` = the active pane's keybar accessory height.
             let si = safeAreaInsets
             let kbH = firstResponderKeybarHeight()
-            DebugLog.shared.log(.keybar,
+            // Logged under `.tmux` (default-ON) rather than `.keybar` (off): the
+            // grid/client-size mismatch (#D: we send tmux 80 cols while the window is
+            // laid out at 89) is a tmux-sizing concern, and it must capture on a device
+            // build without a manual toggle.
+            DebugLog.shared.log(.tmux,
                 "sizing:tmux bounds=\(Int(bounds.width))x\(Int(bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) cell=\(String(format: "%.1f", cell.w))x\(String(format: "%.1f", cell.h)) kbH=\(String(format: "%.1f", kbH)) grid=\(grid.cols)x\(grid.rows)")
             coordinator?.noteClientSize(cols: grid.cols, rows: grid.rows)
         }

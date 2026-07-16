@@ -15,11 +15,19 @@ public struct AltScreenScroll: Sendable {
     /// total advances by at most this per emit.
     public static let maxCellsPerEmit: Int = 24
 
+    /// Scroll gain: how many arrow presses one cell-height of finger travel produces.
+    /// A 1.0 mapping (drag one line-height to scroll exactly one line) felt heavy and
+    /// sludgy on device (2026-07-16) because content moved no faster than the finger.
+    /// >1 makes content outpace the finger, closer to native touch-scroll / mouse-wheel
+    /// feel. Feel-tuned; adjust here to taste. The `maxCellsPerEmit` cap still bounds a
+    /// fast flick, so gain cannot flood the remote.
+    public static let scrollGain: Double = 2.5
+
     public static func arrows(totalDy: Double,
                               cellHeight: Double,
                               emittedCells: Int) -> (runs: [ArrowRun], newEmittedCells: Int) {
         guard cellHeight > 0 else { return ([], emittedCells) }
-        let target = Int(totalDy / cellHeight)
+        let target = Int(totalDy * scrollGain / cellHeight)
         var delta = target - emittedCells
         if delta == 0 { return ([], emittedCells) }
         // Clamp magnitude to the per-emit cap (preserve sign).
