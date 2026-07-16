@@ -7,7 +7,10 @@ import SemicolynKit
 /// Font-face picker: system + bundled Nerd Fonts, plus user-imported faces.
 /// Each row previews sample letters and a couple of Nerd Font icons in that face.
 struct TerminalFontPickerView: View {
-    @EnvironmentObject private var store: TerminalSettingsStore
+    // Direct singleton read, not `@EnvironmentObject` (which crashes if uninjected). This
+    // picker is pushed from TerminalSettingsView, which is reached via a Settings sheet
+    // that does not propagate the app-root injection. See ExperimentalSettingsView.
+    @ObservedObject private var store = AppStores.shared.terminalSettings
     @State private var importing = false
     @State private var importedFaces: [TerminalFont] = []
 
