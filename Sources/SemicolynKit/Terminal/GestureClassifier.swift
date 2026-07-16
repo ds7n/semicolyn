@@ -8,8 +8,10 @@ public enum PanGesture: Equatable, Sendable {
     case none
     /// Scroll the scrollback (vertical drag, or horizontal fall-through).
     case scrollVertical
-    /// Switch tmux window by `delta` (+1 next / −1 previous). Only produced for a
-    /// horizontal-dominant drag in multi-window tmux.
+    /// Switch tmux window by a relative `delta` (+1 = the window after the current in index
+    /// order, −1 = the window before). Only produced for a horizontal-dominant drag in
+    /// multi-window tmux. See `classify` for the swipe-direction → delta mapping
+    /// (content-follows-finger: rightward swipe → −1).
     case switchWindow(delta: Int)
 }
 
@@ -37,8 +39,11 @@ public struct GestureClassifier: Sendable {
 
         // Window-switch only for a CLEARLY horizontal drag (|dx| ≥ ratio·|dy|) in multi-window
         // tmux. Everything else — vertical, diagonal, or gently-horizontal — scrolls.
+        // Direction is content-follows-finger: swiping the content RIGHTWARD (dx>0) reveals
+        // the window to its LEFT (delta −1, previous); swiping left reveals the next window
+        // to the right. (Device retest 2026-07-16: the prior dx>0→+1 mapping felt backwards.)
         if isMultiWindowTmux, abs(dx) >= abs(dy) * switchDominanceRatio {
-            return .switchWindow(delta: dx > 0 ? +1 : -1)
+            return .switchWindow(delta: dx > 0 ? -1 : +1)
         }
         return .scrollVertical
     }
