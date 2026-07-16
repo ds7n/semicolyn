@@ -30,6 +30,23 @@ The canonical status + pending-work list. Architecture and the spec/plan map liv
 
 ## Next (unblocked dev work)
 
+### 🔜 Logging rework retest (decision-point logging, branch `fix/altscroll-b-context-and-logging`)
+
+Self-contained decision-point logging shipped (spec `docs/superpowers/specs/2026-07-16-decision-point-logging-design.md`, plan `docs/superpowers/plans/2026-07-16-decision-point-logging.md`). Each gesture/alt-scroll decision now emits ONE self-contained line (inputs + output + reason); session/user-action markers added; `gesture` category is now default-OFF.
+
+**Before the scripted drag retest**, enable in Settings → Diagnostics: **Gesture** (Tmux + Lifecycle are already on). Then run the scripted actions. The trace should read top-to-bottom without narration:
+
+```
+=== session-start build=N session=… ===
+user-action: mode-switch <mode>
+alt-scroll pane=%N mode=… app=… → keys=… reason=…
+drag-begin winner=… mode=… mode=… app=… → keys=… reason=…
+drag-move keys=… runs=… sent=… total=…
+drag-end owner=… mode=… emitted=… outcome=<scroll|pageKeys|arrows|none>
+```
+
+Confirms B mode-classification (mouseReporting vs appOwnsInput) from `drag-begin mode=` + `alt-scroll … reason=`. THEN fix B-remainder (mouseReporting + AI-CLI → PgUp/PgDn), C-momentum (flick/inertia), D-width (quantize zoom). Deferred sweep (§4c): adopt `decisionLine(...)` at tmux-grid / context-poll / transport boundaries.
+
 ### ⏸ In progress — resume here (paused 2026-07-07 for context-clear)
 
 - **Device-testing round (build 21, `0.1.0`) — 4 fixes SHIPPED + CONFIRMED on device; 1 fix awaiting re-test; 2 topics OPEN.** A device pass on build 20 surfaced bugs; all root-caused via an on-screen debug panel (now gated in Settings → Diagnostics, off by default).
@@ -85,6 +102,16 @@ The canonical status + pending-work list. Architecture and the spec/plan map liv
 - **Nerd Fonts** — patched glyph fonts (powerline/dev icons) in the terminal renderer, if users hit missing glyphs. Ties into a Phase-4 Terminal Settings font picker.
 - **Pull-down / per-key secondary character (keybar) — FUTURE BRAINSTORM (requested 2026-07-06).** Explore giving each keybar key a "pull-down" secondary input (iOS-keyboard style: a short downward drag / long-press on a key emits an alternate character or sequence — e.g. a number-row key pulling down to a symbol, or a letter to its punctuation). Brainstorm scope: which keys get a secondary, how the secondary is chosen/configured (fixed vs user-editable, cf. the existing custom-slot editor), the gesture (pull-down vs long-press vs both) and its interaction with the existing keybar gestures (Fn tap/double-tap, promotion slots, cursor-drag), and the pure input-mapping logic (key + gesture → bytes) that should live in Kit and be Linux-tested. Ties into the Phase-4 keybar (`docs/superpowers/specs` keybar design) and `KeybarLayout`/`MacroTemplate`.
 - **russh host-cert gap** — see footnote ¹; blocked upstream.
+- **tmux -CC hardening backlog (iTerm2-derived, researched 2026-07-14).** iTerm2 is the tmux control-mode reference impl (macOS-only, no iOS port to reuse: we port the *design*). Full set of portable correctness patterns our -CC gateway likely lacks (agent memory: `iterm2-tmux-cc-design-lessons`). Each is a separate future audit/hardening item, NOT part of the current alt-screen fix:
+  1. **Reply-correlation abort-cascade.** We do FIFO reply correlation (`TmuxSessionController.pending`), but a `;`-joined command LIST aborts entirely server-side after the first error and tmux sends NO `%begin` for the skipped commands: the client must synthetically fail the remaining queued commands or the FIFO desyncs permanently. AUDIT: do we ever send `;`-joined lists? If so, add the cascade.
+  2. **`%pause`/`%continue` (tmux >= 3.2) = full per-pane RE-CAPTURE on unpause**, not "resume streaming" (tmux drops buffered output during pause). Opt-in via `refresh-client -fpause-after=<sec>`; on `%continue` re-run the whole per-pane attach fan-out. Ties into `tmux-cc-scrollback-architecture` memory.
+  3. **No-resume reattach architecture.** Clean detach and server death both surface as `%exit` (indistinguishable): wipe queue, close panes, fail pending callbacks; make full re-attach cheap + idempotent; persist UI state server-side as tmux user options (`@semicolyn_*`). tmux 3.2+ needs a `\n` nudge after `%exit` to close the pipe.
+  4. **Scrollback seeding = two decoders + the tmux backslash-escape bug.** History = `capture-pane -peqJ -S -<n>` (`-N` gated >= 3.1, `-a` for the alternate buffer); `-e` output is REAL terminal output to REPLAY THROUGH THE EMULATOR (feed each line through a VT100 instance), not text-with-escapes-to-strip. Live catch-up (`capture-pane -p -P -C`) uses a separate octal parser. THE BUG: tmux escapes control chars but NOT backslashes, so only treat `\NNN` as an escape when the octal value is < 0x20 (a real C0), else literal user backslashes get corrupted; also skip stray `\r` mid-escape.
+  5. **send-keys 3-tier encoding + modifyOtherKeys C0 trap.** `send -l` (ASCII allow-list) / hex `send 0xNN` / literal-byte `send -H NN` (>= 3.0a, for C0). On tmux >= 3.5, plain hex for 0x00..0x1F becomes literal TEXT once a pane enables `modifyOtherKeys` (use `-H` for C0). We already use `send-keys -H <hex>` (good): verify C0 behavior under modifyOtherKeys. Cap commands at 1000 bytes (> 1024 crashes tmux 1.8).
+  6. **Handshake gate for the `%output`-before-pane-exists race.** Dispatch all `%`-notifications only after the initial attach batch completes (iTerm2 `acceptNotifications_`); post-handshake unknown-pane output is a logged no-op, not an error.
+  7. **Layout parsing gotchas** (`%layout-change` / `#{window_layout}`): ignore the 4-hex leading checksum (parse from offset 5); `[` = horizontal, `{` = vertical; manual balanced-bracket scan (regex cannot match nesting); split children on TOP-LEVEL `,` only (leaves contain their own commas); coalesce same-orientation; normalize root to a splitter.
+  8. **Version-encoding for feature gates:** `3.0a -> 3.01`, `3.0b -> 3.02` (suffix -> hundredths); `send-keys -H` is 3.0a not 3.0, so gating must be exact.
+  9. **Hard-won bug notes:** tmux 1.8 `%exit` can arrive with no closing `%end` (synthesize it); unconditional `copy-mode -q` at attach (a broken tmux.conf can leave a fresh session in copy-mode silently eating keystrokes, iTerm2 issue 3193); always unzoom on attach (tmux 2.1 cannot report the zoomed pane); `\t` vs literal `\\t` regressions in `list-windows` TSV on dev tmux snapshots (defensive fallback parsing, not just version-gating).
 
 ## Resolved (recent)
 
