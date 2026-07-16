@@ -419,6 +419,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `TmuxPaneContainer` (container bounds ÷ measured cell), debounced there.
     func setTmuxClientSize(cols: Int, rows: Int) { tmux?.setClientSize(cols: cols, rows: rows) }
 
+    /// The foreground command for `pane` from the tmux context poll, read from the
+    /// runtime's COMPLETE map. Unlike `paneContexts` (which is filtered to
+    /// `renderablePanes` for the keybar's Fn auto-engage), this returns the command for
+    /// ANY polled pane. The alt-scroll decider needs it for the pane under the finger,
+    /// which may not be in `renderablePanes` at that instant (device trace 2026-07-16:
+    /// dragging a Claude pane %0 got nil from the filtered map while the poll reported
+    /// `%0:claude`, so the drag fell back to arrows instead of PgUp/PgDn).
+    func tmuxPaneCommand(_ pane: PaneID) -> String? { tmux?.paneContext(pane) }
+
     // MARK: - Teardown
 
     /// User-initiated disconnect (the connected-state Disconnect button). Tears the
@@ -822,6 +831,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `TmuxRuntime`, and route the active pane's output into the terminal view.
     private func attachTmux(conn: Connection) async throws {
         DebugLog.shared.log(.lifecycle, "attachTmux: ENTER session=\(tmuxSessionNameForConnection)")
+        // Self-narrating anchor for a device trace: build + session so a pasted log
+        // fragment is self-locating (paired with the per-drag decision lines).
+        // No clean transport symbol is in scope here (attachTmux runs for both
+        // SSH-from-start and post-mosh-fallback SSH; moshSession is already nil
+        // by the time this executes), so that field is intentionally omitted.
+        let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
+        DebugLog.shared.log(.lifecycle,
+            "=== session-start build=\(build) session=\(tmuxSessionNameForConnection) ===")
         let runtime = TmuxRuntime(sessionName: tmuxSessionNameForConnection)
         let seeder = PaneHistorySeeder(
             runtime: runtime,
