@@ -283,8 +283,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
                                 let mode = AppStores.shared.terminalSettings.settings.altScrollMode
                                 let cmd = self.vm.paneContexts[pane]
                                 let title = self.vm.terminalTitle
-                                return altScrollKeys(mode: mode, paneCommand: cmd,
-                                                     windowTitle: title, registry: .bundledDefault)
+                                let keys = altScrollKeys(mode: mode, paneCommand: cmd,
+                                                         windowTitle: title, registry: .bundledDefault)
+                                // #B diagnostic (2026-07-16): log the DRAGGED pane, the
+                                // command paneContexts resolved for it (nil = the pane was
+                                // absent from the list-panes -a poll, the bug), and the
+                                // decision. Pairs with "tmux context REPLY" to show whether
+                                // the dragged pane is even in the polled set.
+                                DebugLog.shared.log(.gesture,
+                                    "altScroll decide pane=%\(pane.raw) cmd=\(cmd ?? "nil") mode=\(mode) -> \(keys)")
+                                return keys
                             }
                         },
                         sendBytes: { [weak self] bytes in self?.send(bytes) },
