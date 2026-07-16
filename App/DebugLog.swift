@@ -20,13 +20,13 @@ final class DebugLog: ObservableObject {
     static let shared = DebugLog()
 
     /// MASTER logging switch, mirrored from
-    /// `@AppStorage(DiagnosticsSettingsView.loggingEnabledKey)`. When false, `log` is a
+    /// `@AppStorage(DiagnosticsContent.loggingEnabledKey)`. When false, `log` is a
     /// no-op and its `@autoclosure` message is never evaluated (zero sacred-path cost).
     /// This is INDEPENDENT of where logs go: the on-screen panel and the remote stream are
     /// separate destination toggles. Previously the on-screen-panel switch doubled as the
     /// master gate, so remote streaming silently required the panel to be on (the "zero
     /// .gesture lines" trap, build 44) — now decoupled.
-    var enabled = UserDefaults.standard.bool(forKey: DiagnosticsSettingsView.loggingEnabledKey)
+    var enabled = UserDefaults.standard.bool(forKey: DiagnosticsContent.loggingEnabledKey)
 
     /// Newest-last rolling buffer; capped so it can't grow unbounded. Plain (not
     /// `@Published`) so appends never invalidate SwiftUI. The panel reads it on refresh.
@@ -98,7 +98,7 @@ final class DebugLog: ObservableObject {
     /// build-44 empty-log trap). Idempotent; safe to call once from app `init`.
     func configureFromDefaults(reason: String = "launch") {
         let d = UserDefaults.standard
-        enabled = d.bool(forKey: DiagnosticsSettingsView.loggingEnabledKey)
+        enabled = d.bool(forKey: DiagnosticsContent.loggingEnabledKey)
         refreshEnabledCategories()
 
         let remoteOn = d.bool(forKey: RemoteLogConfig.enabledKey)
