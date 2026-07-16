@@ -294,6 +294,11 @@ final class TmuxRuntime {
     /// The engaged context for `pane`, or nil.
     func paneContext(_ pane: PaneID) -> String? { contextStore.context(for: pane) }
 
+    /// The pane's RAW `pane_current_command` (un-debounced, un-gated): what the alt-scroll
+    /// decider reads. `paneContext` returns the keybar-gated `engagedContext`, which is nil
+    /// for non-keybar apps like claude (Bug 1, 2026-07-16); this reports any command.
+    func paneRawCommand(_ pane: PaneID) -> String? { contextStore.rawContext(for: pane) }
+
     /// The active pane of the active window (nil until the first layout/window event).
     private var activePane: PaneID? {
         guard let win = controller.state.activeWindow else { return nil }
