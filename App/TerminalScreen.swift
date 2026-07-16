@@ -403,7 +403,9 @@ struct TerminalScreen: UIViewRepresentable {
             MainActor.assumeIsolated {
                 let si = source.safeAreaInsets
                 let kbH = (source.inputAccessoryView as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1
-                DebugLog.shared.log(.keybar,
+                // `.tmux` (default-ON) not `.keybar` (off): grid/client-size is a
+                // sizing concern that must capture on device without a manual toggle (#D).
+                DebugLog.shared.log(.tmux,
                     "sizing:raw bounds=\(Int(source.bounds.width))x\(Int(source.bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) kbH=\(String(format: "%.1f", kbH)) grid=\(newCols)x\(newRows)")
             }
             resizeDebounce.note(cols: newCols, rows: newRows, at: Date())

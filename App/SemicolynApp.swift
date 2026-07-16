@@ -41,9 +41,12 @@ private struct RootView: View {
             .environment(\.theme,
                          resolveTheme(selectedID: appearance.selectedThemeID,
                                       isPro: pro.isPro))
-            // Terminal preferences (font face/size) — the Terminal settings screen
-            // and font picker bind to this via @EnvironmentObject.
-            .environmentObject(AppStores.shared.terminalSettings)
+            // NOTE: the Terminal/Experimental settings screens and font picker read
+            // `AppStores.shared.terminalSettings` DIRECTLY (via `@ObservedObject`), not
+            // through an injected `@EnvironmentObject`. A missing env-object is a
+            // `fatalError`, and Settings is presented as a sheet/cover from sites that do
+            // not propagate a root injection, which crashed the app. Direct singleton
+            // access can never be missing, so no injection is needed here.
             // Re-apply persisted logging config on every foreground (not just cold
             // launch), so a settings change made and then backgrounded takes effect
             // without reopening Diagnostics. Root-level so it fires regardless of which
