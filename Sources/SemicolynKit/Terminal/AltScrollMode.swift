@@ -24,6 +24,16 @@ public struct AltScrollDecision: Sendable, Equatable {
     public let paneCommand: String?
     public let reason: String
 
+    /// Explicit public memberwise init: a `public struct`'s synthesized init is `internal`,
+    /// so the App tier (which constructs a default `AltScrollDecision` as the drag snapshot's
+    /// initial value) cannot reach the synthesized one across the module boundary.
+    public init(keys: AltScrollKeys, mode: AltScrollMode, paneCommand: String?, reason: String) {
+        self.keys = keys
+        self.mode = mode
+        self.paneCommand = paneCommand
+        self.reason = reason
+    }
+
     /// Self-contained one-liner (no pane id: the App prepends `pane=%N`, since the pure
     /// decider does not know the pane id). Format: `mode=X app=Y → keys=Z reason=R`.
     public var logLine: String {
