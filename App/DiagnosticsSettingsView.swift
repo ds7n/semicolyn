@@ -3,8 +3,13 @@
 import SwiftUI
 import SemicolynKit
 
-/// Settings → Diagnostics. Gates the on-screen debug panel AND the off-device log stream.
-struct DiagnosticsSettingsView: View {
+/// The Diagnostics sections + their state, factored out of `DiagnosticsSettingsView` so they
+/// can be embedded INLINE in `ExperimentalSettingsView` (one screen, no nested navigation)
+/// while the diagnostics code stays in this file. Owns all diagnostics `@State`/`@AppStorage`;
+/// renders its 5 `Section`s (via `body`) plus the keystroke confirmation dialog. Embed with
+/// `DiagnosticsContent()` directly inside a parent `List` (a `View` inside `List` flattens to
+/// its sections). `DiagnosticsSettingsView` is now a thin standalone wrapper around it.
+struct DiagnosticsContent: View {
     /// MASTER logging switch. Independent of destination (panel / remote): when off,
     /// nothing is recorded anywhere.
     static let loggingEnabledKey = "diagnostics.loggingEnabled"
@@ -54,8 +59,12 @@ struct DiagnosticsSettingsView: View {
 
     private var transport: LogTransport { LogTransport(rawValue: transportRaw) ?? .tls }
 
+    /// The sections only (no enclosing `List`): the parent supplies the `List`/`Form` so this
+    /// can render standalone (via `DiagnosticsSettingsView`) OR inline inside another screen
+    /// (`ExperimentalSettingsView`). The keystroke confirmation dialog + logging reapply ride
+    /// on the section group so they travel with it in both hosts.
     var body: some View {
-        List {
+        Group {
             Section {
                 Toggle("Enable logging", isOn: $loggingEnabled)
                     .onChange(of: loggingEnabled) { _, _ in
@@ -145,7 +154,6 @@ struct DiagnosticsSettingsView: View {
                      + "by default; render/input/predictor/keybar are verbose and off by default.")
             }
         }
-        .navigationTitle("Diagnostics")
         .onAppear {
             DebugLog.shared.configureFromDefaults(reason: "diagnostics")
         }
@@ -184,5 +192,15 @@ struct DiagnosticsSettingsView: View {
         sink.test { ok in
             DispatchQueue.main.async { testResult = ok ? .connected : .failed }
         }
+    }
+}
+
+/// Standalone Settings → Diagnostics screen: the `DiagnosticsContent` sections wrapped in
+/// their own `List` + title. Kept for any direct navigation to Diagnostics; the Experimental
+/// screen embeds `DiagnosticsContent` inline instead of linking here.
+struct DiagnosticsSettingsView: View {
+    var body: some View {
+        List { DiagnosticsContent() }
+            .navigationTitle("Diagnostics")
     }
 }

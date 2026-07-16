@@ -49,8 +49,8 @@ struct SessionView: View {
     /// Master logging switch and the panel destination (Settings → Diagnostics; both off
     /// by default). The 🐞 panel needs BOTH: logging on (so there's anything to show) and
     /// the panel destination chosen.
-    @AppStorage(DiagnosticsSettingsView.loggingEnabledKey) private var loggingEnabled = false
-    @AppStorage(DiagnosticsSettingsView.showDebugPanelKey) private var diagnosticsPanelEnabled = false
+    @AppStorage(DiagnosticsContent.loggingEnabledKey) private var loggingEnabled = false
+    @AppStorage(DiagnosticsContent.showDebugPanelKey) private var diagnosticsPanelEnabled = false
     /// Transient: whether the panel is currently expanded (only meaningful when enabled).
     @State private var showDebugPanel = false
 

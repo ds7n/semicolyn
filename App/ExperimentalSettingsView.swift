@@ -17,6 +17,11 @@ struct ExperimentalSettingsView: View {
     var body: some View {
         List {
             Section {
+                // The picker's own label is hidden: the section header ("Alt-screen scroll")
+                // is the single label for this control. Previously the Picker ALSO carried a
+                // "Alt-screen scroll" title, so the inline picker's title row duplicated the
+                // header and read like a tappable/selectable option row (it isn't). Hiding it
+                // leaves just the four real, selectable mode rows under a plain header.
                 Picker("Alt-screen scroll", selection: $store.settings.altScrollMode) {
                     Text("Off (standard arrow keys)").tag(AltScrollMode.off)
                     Text("Auto (AI CLIs use Page keys)").tag(AltScrollMode.auto)
@@ -24,6 +29,7 @@ struct ExperimentalSettingsView: View {
                     Text("Auto + window-title match (SSH/Mosh)").tag(AltScrollMode.autoPlusTitle)
                 }
                 .pickerStyle(.inline)
+                .labelsHidden()
                 .onChange(of: store.settings.altScrollMode) { _, newValue in
                     DebugLog.shared.log(.lifecycle, "user-action: mode-switch \(newValue.rawValue)")
                 }
@@ -39,11 +45,9 @@ struct ExperimentalSettingsView: View {
                 """)
             }
 
-            Section {
-                NavigationLink { DiagnosticsSettingsView() } label: {
-                    Label("Diagnostics", systemImage: "ladybug")
-                }
-            }
+            // Diagnostics inline on THIS screen (no nested navigation): DiagnosticsContent
+            // renders its own sections directly into this List.
+            DiagnosticsContent()
         }
         .navigationTitle("Experimental")
     }

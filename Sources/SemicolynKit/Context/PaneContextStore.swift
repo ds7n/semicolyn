@@ -29,5 +29,13 @@ public struct PaneContextStore: Sendable {
     }
 
     /// The pane's engaged context, read immediately (no re-debounce on focus change).
+    /// Debounced + gated to `knownProcesses` (the keybar's promotion apps): the keybar
+    /// consumer. NOT for alt-scroll (see `rawContext`).
     public func context(for pane: PaneID) -> String? { machines[pane]?.engagedContext }
+
+    /// The pane's RAW latest `pane_current_command`: un-debounced (available on the first
+    /// snapshot) and un-gated (reports any command, not only `knownProcesses`). This is what
+    /// the alt-scroll decider reads: it must see `claude`/`gemini`/etc. immediately, which
+    /// `context(for:)`'s keybar-gated `engagedContext` never surfaces (Bug 1, 2026-07-16).
+    public func rawContext(for pane: PaneID) -> String? { machines[pane]?.currentProcess }
 }

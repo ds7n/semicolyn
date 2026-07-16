@@ -419,14 +419,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `TmuxPaneContainer` (container bounds ÷ measured cell), debounced there.
     func setTmuxClientSize(cols: Int, rows: Int) { tmux?.setClientSize(cols: cols, rows: rows) }
 
-    /// The foreground command for `pane` from the tmux context poll, read from the
-    /// runtime's COMPLETE map. Unlike `paneContexts` (which is filtered to
-    /// `renderablePanes` for the keybar's Fn auto-engage), this returns the command for
-    /// ANY polled pane. The alt-scroll decider needs it for the pane under the finger,
-    /// which may not be in `renderablePanes` at that instant (device trace 2026-07-16:
-    /// dragging a Claude pane %0 got nil from the filtered map while the poll reported
-    /// `%0:claude`, so the drag fell back to arrows instead of PgUp/PgDn).
-    func tmuxPaneCommand(_ pane: PaneID) -> String? { tmux?.paneContext(pane) }
+    /// The RAW foreground command for `pane` from the tmux context poll (the pane's
+    /// `pane_current_command`), read from the runtime's COMPLETE map. Used by the
+    /// alt-scroll decider for the pane under the finger. This reads the raw current
+    /// command, NOT the keybar's debounced/known-only `engagedContext`: the latter is
+    /// gated to the keybar's promotion apps (vim/less/python/…), which EXCLUDE
+    /// claude/gemini/codex/qwen, so it returned nil for a Claude pane and the drag fell
+    /// back to arrows instead of PgUp/PgDn (device trace 2026-07-16, Bug 1). The raw
+    /// command is also un-debounced, so a drag works the instant the first poll lands.
+    func tmuxPaneCommand(_ pane: PaneID) -> String? { tmux?.paneRawCommand(pane) }
+
+    /// Re-query tmux's `#{alternate_on}` for all panes. Called by the pane container when a
+    /// window-switch/reattach re-creates panes, so each fresh pane's tracked alt-screen state
+    /// is re-seeded authoritatively (via `onAltScreenReconcile`) instead of the unreliable
+    /// live emulator flag (Bug 2, 2026-07-16). No-op if not attached.
+    func requeryAltScreenState() { tmux?.requeryAlternateOn() }
 
     // MARK: - Teardown
 
