@@ -75,6 +75,10 @@ struct DiagnosticsContent: View {
                      + "remote stream. Turn on, then pick destinations below. Off by default.")
             }
 
+            // Everything below depends on the master switch: gray it all out (non-interactive
+            // + dimmed) when logging is off, so it reads as "these do nothing until you enable
+            // logging" instead of looking independently settable.
+            Group {
             Section {
                 Toggle("Show debug log panel", isOn: $showDebugPanel)
             } footer: {
@@ -153,6 +157,8 @@ struct DiagnosticsContent: View {
                 Text("Which diagnostic categories are recorded. Low-volume categories are on "
                      + "by default; render/input/predictor/keybar are verbose and off by default.")
             }
+            }
+            .disabled(!loggingEnabled)
         }
         .onAppear {
             DebugLog.shared.configureFromDefaults(reason: "diagnostics")

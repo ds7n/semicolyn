@@ -19,16 +19,17 @@ final class GestureClassifierTests: XCTestCase {
                        .scrollVertical)
     }
 
-    // EP: clear rightward horizontal drag, multi-window tmux → next window (+1).
-    func testHorizontalRightSwitchesNext() {
+    // EP: clear rightward horizontal drag, multi-window tmux → PREVIOUS window (-1).
+    // Content-follows-finger: swiping content rightward reveals the window to its left.
+    func testHorizontalRightSwitchesPrev() {
         XCTAssertEqual(GestureClassifier.classify(dx: dz + 40, dy: 2, isMultiWindowTmux: true),
-                       .switchWindow(delta: +1))
+                       .switchWindow(delta: -1))
     }
 
-    // EP: clear leftward horizontal drag, multi-window tmux → previous window (-1).
-    func testHorizontalLeftSwitchesPrev() {
+    // EP: clear leftward horizontal drag, multi-window tmux → NEXT window (+1).
+    func testHorizontalLeftSwitchesNext() {
         XCTAssertEqual(GestureClassifier.classify(dx: -(dz + 40), dy: 2, isMultiWindowTmux: true),
-                       .switchWindow(delta: -1))
+                       .switchWindow(delta: +1))
     }
 
     // EP: horizontal drag, NOT multi-window tmux → falls through to scroll.
@@ -54,7 +55,7 @@ final class GestureClassifierTests: XCTestCase {
     // dead-zone is Euclidean, so dy=0 needs dx just past dz.
     func testJustPastDeadZoneHorizontal() {
         XCTAssertEqual(GestureClassifier.classify(dx: dz + 0.1, dy: 0, isMultiWindowTmux: true),
-                       .switchWindow(delta: +1))
+                       .switchWindow(delta: -1))   // rightward -> previous
     }
 
     // Diagonal near-45°, vertical slightly dominant → scroll (axis by dominance).
@@ -74,9 +75,9 @@ final class GestureClassifierTests: XCTestCase {
 
     // A clearly-horizontal drag (dx > ratio × dy) still switches windows in tmux.
     func testClearlyHorizontalDragSwitches() {
-        // dx=90, dy=20 → ratio 4.5 ≥ 1.7 → switch (+1).
+        // dx=90, dy=20 → ratio 4.5 ≥ 1.7 → switch. Rightward -> previous (-1).
         XCTAssertEqual(GestureClassifier.classify(dx: 90, dy: 20, isMultiWindowTmux: true),
-                       .switchWindow(delta: +1))
+                       .switchWindow(delta: -1))
     }
 
     // BVA: just BELOW the switch-dominance ratio → scroll.
@@ -90,9 +91,9 @@ final class GestureClassifierTests: XCTestCase {
     // BVA: just ABOVE the switch-dominance ratio (tmux) → switch.
     func testJustAboveSwitchRatioSwitches() {
         let r = GestureClassifier.switchDominanceRatio
-        // dx just over r×dy → switch (+1).
+        // dx just over r×dy → switch. Rightward -> previous (-1).
         XCTAssertEqual(GestureClassifier.classify(dx: 30 * r + 3, dy: 30, isMultiWindowTmux: true),
-                       .switchWindow(delta: +1))
+                       .switchWindow(delta: -1))
     }
 
     // A clearly-horizontal drag in RAW (non-multi-window) still falls through to scroll.

@@ -20,8 +20,9 @@ public struct AltScreenScroll: Sendable {
     /// sludgy on device (2026-07-16) because content moved no faster than the finger.
     /// >1 makes content outpace the finger, closer to native touch-scroll / mouse-wheel
     /// feel. Feel-tuned; adjust here to taste. The `maxCellsPerEmit` cap still bounds a
-    /// fast flick, so gain cannot flood the remote.
-    public static let scrollGain: Double = 2.5
+    /// fast flick, so gain cannot flood the remote. 2.5 was too fast on device
+    /// (2026-07-16 retest, build 53), backed off to 1.8.
+    public static let scrollGain: Double = 1.8
 
     public static func arrows(totalDy: Double,
                               cellHeight: Double,
