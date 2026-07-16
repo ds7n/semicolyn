@@ -271,6 +271,26 @@ final class TmuxRuntime {
         return id
     }
 
+    /// Re-issue the `#{alternate_on}` query (the attach-prime one) on demand, tracking its
+    /// reply through the same `altScreenQueryIDs` → `onAltScreenReconcile` path. Called when
+    /// the pane container re-creates panes after a tmux window-switch: switching away
+    /// `forget()`s the off-screen pane's tracked alt-state, and window-return re-creates the
+    /// pane with no fresh alt-state, so it fell through to the (unreliable, often false) live
+    /// emulator flag and a Claude/vim pane misclassified as `.mouseReporting` -> the drag
+    /// became a stuck SwiftTerm selection (device trace 2026-07-16, Bug 2). Re-querying tmux
+    /// re-seeds the authoritative flag, and is correct even if the pane genuinely left the
+    /// alternate screen while off-screen. No-op / nil if not attached.
+    @discardableResult
+    func requeryAlternateOn() -> UInt64? {
+        guard let id = writeTracked(TmuxCommand.queryAlternateOn()) else {
+            DebugLog.shared.log(.tmux, "tmux requery alternate_on: writeTracked NIL (not attached)")
+            return nil
+        }
+        altScreenQueryIDs.insert(id)
+        DebugLog.shared.log(.tmux, "tmux requery: sent alternate_on query (req \(id))")
+        return id
+    }
+
     /// Begin polling `pane_current_command` once control mode is attached.
     func startContextPolling() {
         guard pollTask == nil else { return }
@@ -293,6 +313,11 @@ final class TmuxRuntime {
 
     /// The engaged context for `pane`, or nil.
     func paneContext(_ pane: PaneID) -> String? { contextStore.context(for: pane) }
+
+    /// The pane's RAW `pane_current_command` (un-debounced, un-gated): what the alt-scroll
+    /// decider reads. `paneContext` returns the keybar-gated `engagedContext`, which is nil
+    /// for non-keybar apps like claude (Bug 1, 2026-07-16); this reports any command.
+    func paneRawCommand(_ pane: PaneID) -> String? { contextStore.rawContext(for: pane) }
 
     /// The active pane of the active window (nil until the first layout/window event).
     private var activePane: PaneID? {
