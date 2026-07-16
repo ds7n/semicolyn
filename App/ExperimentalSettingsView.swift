@@ -24,6 +24,9 @@ struct ExperimentalSettingsView: View {
                     Text("Auto + window-title match (SSH/Mosh)").tag(AltScrollMode.autoPlusTitle)
                 }
                 .pickerStyle(.inline)
+                .onChange(of: store.settings.altScrollMode) { _, newValue in
+                    DebugLog.shared.log(.lifecycle, "user-action: mode-switch \(newValue.rawValue)")
+                }
             } header: {
                 Text("Alt-screen scroll")
             } footer: {

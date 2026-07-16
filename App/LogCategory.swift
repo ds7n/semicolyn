@@ -39,8 +39,8 @@ enum LogCategory: String, CaseIterable, Sendable {
     }
 
     /// Categories ON by default: low-volume, high-diagnostic-value. The high-volume /
-    /// niche ones (render/input/predictor/keybar) default OFF (opt-in when needed).
-    static let defaultEnabled: Set<LogCategory> = [.lifecycle, .connect, .tmux, .gesture, .seed]
+    /// niche ones (gesture/render/input/predictor/keybar) default OFF (opt-in when needed).
+    static let defaultEnabled: Set<LogCategory> = [.lifecycle, .connect, .tmux, .seed]
 
     var defaultOn: Bool { Self.defaultEnabled.contains(self) }
 }
