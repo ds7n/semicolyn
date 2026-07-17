@@ -17,6 +17,14 @@ final class WindowTransition {
     /// Duration of each slide phase.
     private let duration: TimeInterval = 0.22
 
+    /// `nonisolated` so the (nonisolated) `Coordinator` — an `NSObject`/`TerminalViewDelegate`,
+    /// which cannot be `@MainActor` — can construct this as a stored property. The init only
+    /// sets trivial defaults (no UIView / main-actor work); every method that touches UIView
+    /// stays `@MainActor`. Without this, `let windowTransition = WindowTransition()` in the
+    /// nonisolated Coordinator fails: "call to main actor-isolated initializer in a
+    /// synchronous nonisolated context" (macOS CI, 2026-07-17).
+    nonisolated init() {}
+
     /// Slide the current content OUT toward `edge`. `completion` runs when the animation ends.
     func slideOut(_ edge: SlideEdge, view: UIView, width: CGFloat, completion: (() -> Void)? = nil) {
         let dx: CGFloat = (edge == .left) ? -width : width
