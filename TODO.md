@@ -30,6 +30,16 @@ The canonical status + pending-work list. Architecture and the spec/plan map liv
 
 ## Next (unblocked dev work)
 
+### 🔜 Wheel-scroll retest (the tmux -CC unknown) — branch `fix/wheel-altscreen-scroll`, PR TBD
+
+Alt-screen scroll reworked to a universal SGR mouse-wheel emitter (Blink's 1-line model); spec `docs/superpowers/specs/2026-07-17-wheel-altscreen-scroll-design.md`, plan `docs/superpowers/plans/2026-07-17-wheel-altscreen-scroll.md`. Rollback anchor: tag `tf54-known-good` = `99e90ff` (live TF build 54).
+
+Enable Gesture logging (Settings → Diagnostics → Gesture). Drag to scroll a **Claude** pane:
+- **EXPECT:** `drag-move keys=wheel runs=… coord=(c,r)` in the trace, and Claude's transcript scrolls ~**one line per line-height** of drag (crisp, not half-screen jumps).
+- **IF Claude does NOT scroll:** our synthetic wheel bytes are not reaching the app under `tmux -CC` (the known risk). Switch Settings → Experimental → Alt-screen scroll to **"Fallback"** and confirm PgUp/arrows still scroll (isolates the -CC-drops-wheel case). If wheel fails, **plan B = the local-scrollback-buffer project** (memory: `tmux-cc-scrollback-architecture`).
+- Also verify **less/vim** scroll one line per line-height in wheel mode.
+- Settings migration: existing testers had `altScrollMode` = a legacy value; confirm it silently became "Line scroll" (no settings wipe, no crash).
+
 ### 🔜 Logging rework retest (decision-point logging, branch `fix/altscroll-b-context-and-logging`)
 
 Self-contained decision-point logging shipped (spec `docs/superpowers/specs/2026-07-16-decision-point-logging-design.md`, plan `docs/superpowers/plans/2026-07-16-decision-point-logging.md`). Each gesture/alt-scroll decision now emits ONE self-contained line (inputs + output + reason); session/user-action markers added; `gesture` category is now default-OFF.
