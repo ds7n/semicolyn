@@ -46,17 +46,17 @@ final class TerminalSettingsTests: XCTestCase {
         XCTAssertEqual(TerminalSettings.scrollbackPresets, [1000, 2000, 5000, 10000, Int.max])
     }
 
-    // altScrollMode defaults to .auto and round-trips through Codable.
-    func testAltScrollModeDefaultsToAuto() {
-        XCTAssertEqual(TerminalSettings().altScrollMode, .auto)
+    // altScrollMode defaults to .wheel and round-trips through Codable.
+    func testAltScrollModeDefaultsToWheel() {
+        XCTAssertEqual(TerminalSettings().altScrollMode, .wheel)
     }
 
     func testAltScrollModeCodableRoundTrip() throws {
         var s = TerminalSettings()
-        s.altScrollMode = .alwaysPageKeys
+        s.altScrollMode = .pageKeysArrows
         let data = try JSONEncoder().encode(s)
         let back = try JSONDecoder().decode(TerminalSettings.self, from: data)
-        XCTAssertEqual(back.altScrollMode, .alwaysPageKeys)
+        XCTAssertEqual(back.altScrollMode, .pageKeysArrows)
     }
 
     // Old persisted JSON (pre-altScrollMode) must still decode, defaulting the new
@@ -69,7 +69,7 @@ final class TerminalSettingsTests: XCTestCase {
         s.cursorStyle = .bar
         s.cursorBlink = true
         s.scrollbackLines = 2000
-        s.altScrollMode = .alwaysPageKeys
+        s.altScrollMode = .pageKeysArrows
 
         let data = try JSONEncoder().encode(s)
         let object = try JSONSerialization.jsonObject(with: data)
@@ -80,11 +80,33 @@ final class TerminalSettingsTests: XCTestCase {
         let legacyData = try JSONSerialization.data(withJSONObject: dict)
 
         let back = try JSONDecoder().decode(TerminalSettings.self, from: legacyData)
-        XCTAssertEqual(back.altScrollMode, .auto)
+        XCTAssertEqual(back.altScrollMode, .wheel)
         XCTAssertEqual(back.fontSize, 15)
         XCTAssertEqual(back.cursorStyle, .bar)
         XCTAssertTrue(back.cursorBlink)
         XCTAssertEqual(back.scrollbackLines, 2000)
         XCTAssertEqual(back.fontFace, s.fontFace)
+    }
+
+    // Migration: a settings blob persisted with a LEGACY altScrollMode ("auto") must decode to
+    // .wheel (the new default) AND preserve every other field at its non-default value. The
+    // 4-case modes no longer exist; decodeIfPresent on the new 2-case enum would throw on the
+    // unknown string, so the migration must swallow it and fall back to .wheel.
+    func testLegacyAltScrollModeMigratesToWheel() throws {
+        let json = """
+        {"fontSize":18,"cursorBlink":true,"scrollbackLines":9000,"altScrollMode":"auto"}
+        """.data(using: .utf8)!
+        let s = try JSONDecoder().decode(TerminalSettings.self, from: json)
+        XCTAssertEqual(s.altScrollMode, .wheel)            // legacy "auto" -> wheel
+        XCTAssertEqual(s.fontSize, 18)                     // other fields preserved
+        XCTAssertEqual(s.cursorBlink, true)
+        XCTAssertEqual(s.scrollbackLines, 9000)
+    }
+
+    // A blob with a VALID new mode round-trips unchanged.
+    func testValidAltScrollModePreserved() throws {
+        let json = #"{"altScrollMode":"pageKeysArrows"}"#.data(using: .utf8)!
+        let s = try JSONDecoder().decode(TerminalSettings.self, from: json)
+        XCTAssertEqual(s.altScrollMode, .pageKeysArrows)
     }
 }

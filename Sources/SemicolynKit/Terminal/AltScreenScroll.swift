@@ -24,18 +24,41 @@ public struct AltScreenScroll: Sendable {
     /// (2026-07-16 retest, build 53), backed off to 1.8.
     public static let scrollGain: Double = 1.8
 
+    /// Signed cell delta since last emit, clamped to `maxCellsPerEmit`. Shared by `arrows`
+    /// (gain = scrollGain) and `wheelEvents` (gain = 1.0). Returns nil when there is nothing to
+    /// emit (non-positive cellHeight, or no new whole-cell movement since `emittedCells`).
+    private static func signedCellDelta(totalDy: Double, cellHeight: Double,
+                                        emittedCells: Int, gain: Double) -> (delta: Int, newEmitted: Int)? {
+        guard cellHeight > 0 else { return nil }
+        let target = Int(totalDy * gain / cellHeight)
+        var delta = target - emittedCells
+        if delta == 0 { return nil }
+        if delta > maxCellsPerEmit { delta = maxCellsPerEmit }
+        if delta < -maxCellsPerEmit { delta = -maxCellsPerEmit }
+        return (delta, emittedCells + delta)
+    }
+
     public static func arrows(totalDy: Double,
                               cellHeight: Double,
                               emittedCells: Int) -> (runs: [ArrowRun], newEmittedCells: Int) {
-        guard cellHeight > 0 else { return ([], emittedCells) }
-        let target = Int(totalDy * scrollGain / cellHeight)
-        var delta = target - emittedCells
-        if delta == 0 { return ([], emittedCells) }
-        // Clamp magnitude to the per-emit cap (preserve sign).
-        if delta > maxCellsPerEmit { delta = maxCellsPerEmit }
-        if delta < -maxCellsPerEmit { delta = -maxCellsPerEmit }
+        guard let (delta, newEmitted) = signedCellDelta(totalDy: totalDy, cellHeight: cellHeight,
+                                                        emittedCells: emittedCells, gain: scrollGain)
+        else { return ([], emittedCells) }
         // +Δy (down) = UP arrows: negate the row delta for arrowEvents.
-        let runs = arrowEvents(cols: 0, rows: -delta)
-        return (runs, emittedCells + delta)
+        return (arrowEvents(cols: 0, rows: -delta), newEmitted)
+    }
+
+    /// Turn an in-progress alt-screen vertical drag into vertical wheel-event runs (the Blink
+    /// model): gain FIXED at 1.0 (one line-height of travel = one wheel event, about one line in the
+    /// app), same incremental + flood-clamp accounting as `arrows`. Runs are `.up`/`.down` only;
+    /// the App stamps each with the drag-point coordinate at encode time. Finger DOWN (+Δy) =
+    /// wheel UP (scroll back), matching the arrows convention.
+    public static func wheelEvents(totalDy: Double,
+                                   cellHeight: Double,
+                                   emittedCells: Int) -> (runs: [ArrowRun], newEmittedCells: Int) {
+        guard let (delta, newEmitted) = signedCellDelta(totalDy: totalDy, cellHeight: cellHeight,
+                                                        emittedCells: emittedCells, gain: 1.0)
+        else { return ([], emittedCells) }
+        return (arrowEvents(cols: 0, rows: -delta), newEmitted)
     }
 }

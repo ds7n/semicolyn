@@ -23,10 +23,8 @@ struct ExperimentalSettingsView: View {
                 // header and read like a tappable/selectable option row (it isn't). Hiding it
                 // leaves just the four real, selectable mode rows under a plain header.
                 Picker("Alt-screen scroll", selection: $store.settings.altScrollMode) {
-                    Text("Off (standard arrow keys)").tag(AltScrollMode.off)
-                    Text("Auto (AI CLIs use Page keys)").tag(AltScrollMode.auto)
-                    Text("Always Page keys").tag(AltScrollMode.alwaysPageKeys)
-                    Text("Auto + window-title match (SSH/Mosh)").tag(AltScrollMode.autoPlusTitle)
+                    Text("Line scroll (mouse wheel)").tag(AltScrollMode.wheel)
+                    Text("Fallback (Page/arrow keys)").tag(AltScrollMode.pageKeysArrows)
                 }
                 .pickerStyle(.inline)
                 .labelsHidden()
@@ -37,11 +35,9 @@ struct ExperimentalSettingsView: View {
                 Text("Alt-screen scroll")
             } footer: {
                 Text("""
-                Auto: Claude, Gemini, Codex, Qwen in tmux scroll with PgUp/PgDn instead of \
-                arrows (which they read as prompt history). \
-                Always: every full-screen app gets PgUp/PgDn, breaks line-scroll in less/vim. \
-                Title match: also guesses the app from the window title on non-tmux sessions, \
-                unreliable, titles are dynamic and may misfire.
+                Line scroll: sends mouse-wheel events so full-screen apps (Claude, vim, less) \
+                scroll one line at a time, like Blink. If an app does not respond to it, switch \
+                to Fallback. Fallback: arrow keys for less/vim, PgUp/PgDn for AI CLIs (older method).
                 """)
             }
 
