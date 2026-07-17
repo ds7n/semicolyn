@@ -788,9 +788,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Window-switch slide-in: after rebuilding the new window's panes, if the active
             // window changed and a transition is pending, slide the content in from the pending
             // edge (design 2026-07-17). Runs after panes are positioned so it animates the
-            // final layout.
+            // final layout. `WindowTransition` is `@MainActor`; wrap in `assumeIsolated` to match
+            // the file's convention for @MainActor calls from this UIView method (apply always
+            // runs on the main thread via SwiftUI `updateUIView`).
             if state.activeWindow != previousActiveWindow {
-                coordinator?.windowTransition.consumePendingSlideIn(view: paneContentView, width: bounds.width)
+                MainActor.assumeIsolated {
+                    coordinator?.windowTransition.consumePendingSlideIn(view: paneContentView, width: bounds.width)
+                }
             }
             previousActiveWindow = state.activeWindow
         }
