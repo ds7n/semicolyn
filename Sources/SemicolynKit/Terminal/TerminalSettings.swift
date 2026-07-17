@@ -91,7 +91,7 @@ public struct TerminalSettings: Equatable, Sendable, Codable {
                 cursorBlink: Bool = false,
                 scrollbackLines: Int = 5000,
                 fontFace: TerminalFont = FontCatalog.default.face,
-                altScrollMode: AltScrollMode = .auto) {
+                altScrollMode: AltScrollMode = .wheel) {
         self.fontSize = TerminalSettings.clampFont(fontSize)
         self.cursorStyle = cursorStyle
         self.cursorBlink = cursorBlink
@@ -116,7 +116,7 @@ public struct TerminalSettings: Equatable, Sendable, Codable {
         self.cursorBlink = try c.decodeIfPresent(Bool.self, forKey: .cursorBlink) ?? false
         self.scrollbackLines = try c.decodeIfPresent(Int.self, forKey: .scrollbackLines) ?? 5000
         self.fontFace = try c.decodeIfPresent(TerminalFont.self, forKey: .fontFace) ?? FontCatalog.default.face
-        self.altScrollMode = try c.decodeIfPresent(AltScrollMode.self, forKey: .altScrollMode) ?? .auto
+        self.altScrollMode = try c.decodeIfPresent(AltScrollMode.self, forKey: .altScrollMode) ?? .wheel
     }
 
     /// Clamp a requested font size into the legible range.
