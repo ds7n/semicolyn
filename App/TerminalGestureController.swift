@@ -63,7 +63,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// Key family for the in-flight alt-screen drag, snapshotted at `.began` so a single
     /// drag can't switch arrow↔page mid-flight.
     private var dragDecision: AltScrollDecision =
-        AltScrollDecision(keys: .arrows, mode: .off, paneCommand: nil, reason: "off")
+        AltScrollDecision(keys: .wheel, mode: .wheel, paneCommand: nil, reason: "wheel")
     /// Running total of cells already turned into arrows this drag (fed back into
     /// `AltScreenScroll.arrows` so successive `.changed` samples send only the new delta).
     private var emittedCells: Int = 0
