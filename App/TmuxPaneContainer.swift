@@ -283,8 +283,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         altScrollDecision: { [weak self] in
                             MainActor.assumeIsolated {
                                 guard let self else {
-                                    return AltScrollDecision(keys: .arrows, mode: .off,
-                                                             paneCommand: nil, reason: "off")
+                                    return AltScrollDecision(keys: .wheel, mode: .wheel,
+                                                             paneCommand: nil, reason: "wheel")
                                 }
                                 let mode = AppStores.shared.terminalSettings.settings.altScrollMode
                                 // Read the runtime's COMPLETE context (not the

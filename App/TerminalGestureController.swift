@@ -63,7 +63,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// Key family for the in-flight alt-screen drag, snapshotted at `.began` so a single
     /// drag can't switch arrow↔page mid-flight.
     private var dragDecision: AltScrollDecision =
-        AltScrollDecision(keys: .arrows, mode: .off, paneCommand: nil, reason: "off")
+        AltScrollDecision(keys: .wheel, mode: .wheel, paneCommand: nil, reason: "wheel")
     /// Running total of cells already turned into arrows this drag (fed back into
     /// `AltScreenScroll.arrows` so successive `.changed` samples send only the new delta).
     private var emittedCells: Int = 0
@@ -365,27 +365,51 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             // mid-mount edge (enabled just as the mode left) can't emit stray arrows.
             guard dragMode == .appOwnsInput else { return }
             let term = view.getTerminal()
-            let cellH = view.bounds.height / CGFloat(max(term.rows, 1))
-            let (runs, newEmitted) = AltScreenScroll.arrows(
-                totalDy: Double(g.translation(in: view).y),
-                cellHeight: Double(cellH),
-                emittedCells: emittedCells)
-            emittedCells = newEmitted
+            let cols = max(term.cols, 1), rows = max(term.rows, 1)
+            let cellH = view.bounds.height / CGFloat(rows)
+            let cellW = view.bounds.width / CGFloat(max(cols, 1))
+            let loc = g.location(in: view)
+            // 1-based cell coordinate of the drag point, clamped to the pane (SGR coords are 1-based).
+            let col = min(max(1, Int(loc.x / max(cellW, 1)) + 1), cols)
+            let row = min(max(1, Int(loc.y / max(cellH, 1)) + 1), rows)
+            let dy = Double(g.translation(in: view).y)
             var sent = 0
-            for run in runs {
-                let bytes = dragDecision.keys == .pageKeys
-                    ? encodePageKeyRun(run)
-                    : encodeArrowRun(run, applicationCursorKeys: dragAppCursor)
-                if !bytes.isEmpty { callbacks.sendBytes(bytes); sent += run.count }
-            }
-            if !runs.isEmpty {
-                DebugLog.shared.log(.gesture,
-                    "drag-move keys=\(dragDecision.keys) runs=\(runs.count) sent=\(sent) total=\(emittedCells)")
+            switch dragDecision.keys {
+            case .wheel:
+                let (runs, newEmitted) = AltScreenScroll.wheelEvents(
+                    totalDy: dy, cellHeight: Double(cellH), emittedCells: emittedCells)
+                emittedCells = newEmitted
+                for run in runs {
+                    let bytes = encodeWheelRun(run, col: col, row: row)
+                    if !bytes.isEmpty { callbacks.sendBytes(bytes); sent += run.count }
+                }
+                if !runs.isEmpty {
+                    DebugLog.shared.log(.gesture,
+                        "drag-move keys=wheel runs=\(runs.count) sent=\(sent) total=\(emittedCells) coord=(\(col),\(row))")
+                }
+            case .arrows, .pageKeys:
+                let (runs, newEmitted) = AltScreenScroll.arrows(
+                    totalDy: dy, cellHeight: Double(cellH), emittedCells: emittedCells)
+                emittedCells = newEmitted
+                for run in runs {
+                    let bytes = dragDecision.keys == .pageKeys
+                        ? encodePageKeyRun(run)
+                        : encodeArrowRun(run, applicationCursorKeys: dragAppCursor)
+                    if !bytes.isEmpty { callbacks.sendBytes(bytes); sent += run.count }
+                }
+                if !runs.isEmpty {
+                    DebugLog.shared.log(.gesture,
+                        "drag-move keys=\(dragDecision.keys) runs=\(runs.count) sent=\(sent) total=\(emittedCells)")
+                }
             }
         case .ended, .cancelled:
             let outcome: String
-            if emittedCells > 0 {
-                outcome = dragDecision.keys == .pageKeys ? "pageKeys" : "arrows"
+            if emittedCells != 0 {
+                switch dragDecision.keys {
+                case .wheel:    outcome = "wheel"
+                case .pageKeys: outcome = "pageKeys"
+                case .arrows:   outcome = "arrows"
+                }
             } else {
                 outcome = "none"
             }
