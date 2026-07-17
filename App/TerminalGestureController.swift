@@ -457,6 +457,15 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     @objc private func handleDoubleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
         DebugLog.shared.log(.gesture, "gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
+        // Word-select only makes sense on the NORMAL screen (`.localScroll`). On an
+        // app-owned screen (`.appOwnsInput` = Claude/vim/htop, or `.mouseReporting`) the app
+        // draws the alternate screen, so a LOCAL SwiftTerm selection keyed on `term.rows`
+        // does not correspond to what is rendered (device build 55: a double-tap selected a
+        // garbage bottom row regardless of tap position). Yield, exactly like single-tap.
+        guard callbacks.currentMode() == .localScroll else {
+            DebugLog.shared.log(.gesture, "gr:doubleTap yield mode=\(callbacks.currentMode())")
+            return
+        }
         let p = g.location(in: view)
         let (col, row) = cell(at: p, in: view)
         // Word-select: expand from the tapped cell across non-space runs on that row.
@@ -470,6 +479,12 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     @objc private func handleTripleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
         DebugLog.shared.log(.gesture, "gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
+        // Line-select only makes sense on the NORMAL screen (see `handleDoubleTap`): yield on
+        // an app-owned screen where a local selection does not match the app's render.
+        guard callbacks.currentMode() == .localScroll else {
+            DebugLog.shared.log(.gesture, "gr:tripleTap yield mode=\(callbacks.currentMode())")
+            return
+        }
         let p = g.location(in: view)
         let (_, row) = cell(at: p, in: view)
         let cols = max(view.getTerminal().cols, 1)
