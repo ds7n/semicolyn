@@ -87,4 +87,26 @@ final class TerminalSettingsTests: XCTestCase {
         XCTAssertEqual(back.scrollbackLines, 2000)
         XCTAssertEqual(back.fontFace, s.fontFace)
     }
+
+    // Migration: a settings blob persisted with a LEGACY altScrollMode ("auto") must decode to
+    // .wheel (the new default) AND preserve every other field at its non-default value. The
+    // 4-case modes no longer exist; decodeIfPresent on the new 2-case enum would throw on the
+    // unknown string, so the migration must swallow it and fall back to .wheel.
+    func testLegacyAltScrollModeMigratesToWheel() throws {
+        let json = """
+        {"fontSize":18,"cursorBlink":true,"scrollbackLines":9000,"altScrollMode":"auto"}
+        """.data(using: .utf8)!
+        let s = try JSONDecoder().decode(TerminalSettings.self, from: json)
+        XCTAssertEqual(s.altScrollMode, .wheel)            // legacy "auto" -> wheel
+        XCTAssertEqual(s.fontSize, 18)                     // other fields preserved
+        XCTAssertEqual(s.cursorBlink, true)
+        XCTAssertEqual(s.scrollbackLines, 9000)
+    }
+
+    // A blob with a VALID new mode round-trips unchanged.
+    func testValidAltScrollModePreserved() throws {
+        let json = #"{"altScrollMode":"pageKeysArrows"}"#.data(using: .utf8)!
+        let s = try JSONDecoder().decode(TerminalSettings.self, from: json)
+        XCTAssertEqual(s.altScrollMode, .pageKeysArrows)
+    }
 }
