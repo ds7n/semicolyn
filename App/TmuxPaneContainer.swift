@@ -71,6 +71,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
     func makeUIView(context: Context) -> ContainerView {
         let v = ContainerView()
         v.coordinator = context.coordinator
+        context.coordinator.containerView = v
         // Wire the coordinator's cache-invalidation hook so a pinch font change
         // forces pane-rect metrics to recompute on the next layout pass.
         context.coordinator.onInvalidateCachedCell = { [weak v] in v?.invalidateCachedCell() }
@@ -148,6 +149,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private var pinchRecognizers: [ObjectIdentifier: UIPinchGestureRecognizer] = [:]
         /// Per-pane gesture layer (replaces SwiftTerm's built-ins).
         private var gestureControllers: [ObjectIdentifier: TerminalGestureController] = [:]
+        /// Owns the two-phase window-switch slide (slide-out on swipe release, slide-in
+        /// on the next `apply` where the active window changed). See `WindowTransition`.
+        let windowTransition = WindowTransition()
+        /// The `ContainerView` this coordinator drives; set in `makeUIView`. Weak since
+        /// `ContainerView` already holds a weak back-reference to this coordinator (avoid
+        /// a retain cycle across the UIViewRepresentable boundary).
+        weak var containerView: ContainerView?
         /// Callbacks supplied by the container/VM (set at construction, refreshed in
         /// `updateUIView` — mirrors `onTmuxResize`).
         var onIsMultiWindowTmux: () -> Bool = { false }
@@ -271,6 +279,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         isMultiWindowTmux: { [weak self] in self?.onIsMultiWindowTmux() ?? false },
                         onSwitchWindow:    { [weak self] delta in
                             DebugLog.shared.log(.lifecycle, "user-action: window-switch delta=\(delta)")
+                            if let self, let dir = windowSlideDirection(delta: delta),
+                               let content = self.containerView?.paneContentView {
+                                let w = content.bounds.width
+                                self.windowTransition.slideOut(dir.out, view: content, width: w)
+                                self.windowTransition.beginPending(inEdge: dir.in, timeout: 1.5) { [weak content] in
+                                    content?.transform = .identity   // stuck switch: snap back
+                                }
+                                DebugLog.shared.log(.gesture, "window-switch anim: out=\(dir.out) in=\(dir.in) delta=\(delta)")
+                            }
                             self?.onSwitchWindow(delta)
                         },
                         onLongPressZoom:   { [weak self] in self?.onZoomActivePane() },
@@ -499,6 +516,26 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Pane-ID → live TerminalView; exposed for coordinator mouse-dot updates.
         var panes: [PaneID: TerminalView] = [:]
 
+        /// Wraps every pane subview so a later task can transform this ONE view to
+        /// slide a whole tmux window (window-switch animation). Fills `bounds`;
+        /// pane frames are computed in `apply(state:)` and are unchanged by this
+        /// wrapper since it exactly covers the container's coordinate space.
+        /// Added as a subview on first use (see `ensurePaneContentViewInstalled()`);
+        /// `layoutSubviews` keeps its frame pinned to `bounds` but never touches its
+        /// `.transform` (reserved for the future animation).
+        let paneContentView = UIView()
+        private var paneContentViewInstalled = false
+
+        /// Installs `paneContentView` as the first (and only) content-hosting subview,
+        /// lazily, the first time it's needed (mirrors `ContainerView` having no custom
+        /// `init` today). Idempotent.
+        private func ensurePaneContentViewInstalled() {
+            guard !paneContentViewInstalled else { return }
+            paneContentView.frame = bounds
+            addSubview(paneContentView)
+            paneContentViewInstalled = true
+        }
+
         /// Cached cell metrics so we don't re-measure the font on every layout pass.
         /// Nil'd by `invalidateCachedCell()` after a pinch font change.
         private var cachedCell: (w: Double, h: Double)?
@@ -507,6 +544,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// when the new state's signature matches — the SwiftUI `updateUIView` pass fires far
         /// more often than the rendered layout actually changes (the render storm).
         private var lastRenderSignature: RenderSignature?
+
+        /// The active window as of the last `apply` that reached the change-detect at the
+        /// end of the method. Compared against `state.activeWindow` there to decide whether
+        /// a pending window-switch slide-in should run (see `WindowTransition`).
+        private var previousActiveWindow: WindowID?
 
         /// Clears the cached cell metrics so `resolvedCell()` re-measures on the next
         /// layout pass. Called by the coordinator's `onInvalidateCachedCell` hook after
@@ -522,6 +564,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// the old coarse `sendApproxClientSize` estimate. Debounced in the coordinator.
         override func layoutSubviews() {
             super.layoutSubviews()
+            // Keep the pane-hosting wrapper pinned to our bounds on every layout pass
+            // (rotation, keyboard show-hide, font change) BEFORE pane frames are
+            // computed below. Frame only - `.transform` is left alone (a later task
+            // animates it for the window-switch slide).
+            ensurePaneContentViewInstalled()
+            paneContentView.frame = bounds
             let cell = resolvedCell()
             guard let grid = terminalGrid(width: Double(bounds.width), height: Double(bounds.height),
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
@@ -615,6 +663,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
                    unregister: (PaneID) -> Void,
                    activeBorderColor: UIColor,
                    inactiveBorderColor: UIColor) {
+            // SwiftUI can call `apply` before this view's first `layoutSubviews` pass
+            // (e.g. immediately after `makeUIView`), and panes are parented into
+            // `paneContentView` below - ensure it exists before that happens.
+            ensurePaneContentViewInstalled()
             let sig = RenderSignature(state)
             guard sig != lastRenderSignature else { return }   // unchanged → skip re-layout
             let reason = renderChangeReason(old: lastRenderSignature, new: sig, state: state)
@@ -679,7 +731,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         }
                         coordinator?.modeTracker.recompute(for: pane, terminal: term, altSource: src)
                     }
-                    addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
+                    paneContentView.addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
                     coordinator?.installHalo(on: t, pane: pane)
                     // Prime once at mount so a pane reattaching into a running
                     // alt-screen app (vim/Claude) is correct from frame one.
@@ -732,6 +784,19 @@ struct TmuxPaneContainer: UIViewRepresentable {
             if createdAnyPane {
                 coordinator?.vm.requeryAltScreenState()
             }
+
+            // Window-switch slide-in: after rebuilding the new window's panes, if the active
+            // window changed and a transition is pending, slide the content in from the pending
+            // edge (design 2026-07-17). Runs after panes are positioned so it animates the
+            // final layout. `WindowTransition` is `@MainActor`; wrap in `assumeIsolated` to match
+            // the file's convention for @MainActor calls from this UIView method (apply always
+            // runs on the main thread via SwiftUI `updateUIView`).
+            if state.activeWindow != previousActiveWindow {
+                MainActor.assumeIsolated {
+                    coordinator?.windowTransition.consumePendingSlideIn(view: paneContentView, width: bounds.width)
+                }
+            }
+            previousActiveWindow = state.activeWindow
         }
 
         /// Why a render fired — for the `.render` diagnostic. Compares the previous signature-
