@@ -30,6 +30,15 @@ The canonical status + pending-work list. Architecture and the spec/plan map liv
 
 ## Next (unblocked dev work)
 
+### 🔜 Tap-yield + window-switch-animation retest — branch `fix/altscreen-tap-yield`, PR TBD
+
+Two items on this branch (ship together, next TF after the wheel merge). Wheel scroll is CONFIRMED working line-by-line in Claude under tmux -CC (build 55 trace: `drag-move keys=wheel`).
+
+**1. Double/triple-tap yield (bug fix, `c8c8559`):** on a Claude/vim alt-screen (`.appOwnsInput`) or `.mouseReporting` pane, double/triple-tap should now do NOTHING (yield to the app) instead of drawing a garbage bottom-row selection. Verify: double/triple-tap on Claude = no selection; on a NORMAL shell prompt (`.localScroll`) word/line-select still works.
+
+**2. Window-switch animation (spec/plan `2026-07-17-window-switch-transition`):** swipe horizontally between tmux windows (need >1). EXPECT: on release the current window slides OUT in the swipe direction immediately, then the new window slides IN from the opposite side when tmux delivers it (brief empty gap on a slow link is OK). Rightward swipe (previous): current exits right, new enters from left; leftward (next): mirror. Confirm the tab strip does NOT slide. Slow/failed switch: content must NOT stick off-screen (1.5s timeout snaps back). Log (Gesture): `window-switch anim: out=… in=… delta=…`.
+   - Also RE-CONFIRM rendering unchanged by the `paneContentView` re-parent (Task 3): panes positioned correctly, halos/borders on the right panes, no first-mount flash, correct grid/cols. (Two ⚠️ items the review could only device-confirm.)
+
 ### 🔜 Wheel-scroll retest (the tmux -CC unknown) — branch `fix/wheel-altscreen-scroll`, PR TBD
 
 Alt-screen scroll reworked to a universal SGR mouse-wheel emitter (Blink's 1-line model); spec `docs/superpowers/specs/2026-07-17-wheel-altscreen-scroll-design.md`, plan `docs/superpowers/plans/2026-07-17-wheel-altscreen-scroll.md`. Rollback anchor: tag `tf54-known-good` = `99e90ff` (live TF build 54).
