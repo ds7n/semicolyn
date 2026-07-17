@@ -91,7 +91,7 @@ public struct TerminalSettings: Equatable, Sendable, Codable {
                 cursorBlink: Bool = false,
                 scrollbackLines: Int = 5000,
                 fontFace: TerminalFont = FontCatalog.default.face,
-                altScrollMode: AltScrollMode = .auto) {
+                altScrollMode: AltScrollMode = .wheel) {
         self.fontSize = TerminalSettings.clampFont(fontSize)
         self.cursorStyle = cursorStyle
         self.cursorBlink = cursorBlink
@@ -116,7 +116,16 @@ public struct TerminalSettings: Equatable, Sendable, Codable {
         self.cursorBlink = try c.decodeIfPresent(Bool.self, forKey: .cursorBlink) ?? false
         self.scrollbackLines = try c.decodeIfPresent(Int.self, forKey: .scrollbackLines) ?? 5000
         self.fontFace = try c.decodeIfPresent(TerminalFont.self, forKey: .fontFace) ?? FontCatalog.default.face
-        self.altScrollMode = try c.decodeIfPresent(AltScrollMode.self, forKey: .altScrollMode) ?? .auto
+        // altScrollMode migrated to a 2-case enum (wheel/pageKeysArrows). A blob persisted with a
+        // legacy 4-case value (off/auto/alwaysPageKeys/autoPlusTitle) would throw on the new enum,
+        // so decode the raw string and map anything not in the new set to .wheel (the new default).
+        // Pre-release migration: no back-compat burden, a clean remap to the default is correct.
+        if let raw = try c.decodeIfPresent(String.self, forKey: .altScrollMode),
+           let mode = AltScrollMode(rawValue: raw) {
+            self.altScrollMode = mode
+        } else {
+            self.altScrollMode = .wheel
+        }
     }
 
     /// Clamp a requested font size into the legible range.
