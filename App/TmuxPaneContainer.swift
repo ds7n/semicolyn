@@ -742,6 +742,44 @@ struct TmuxPaneContainer: UIViewRepresentable {
             paneContentViewInstalled = true
         }
 
+        /// Dim overlay revealed in the gap as `paneContentView` slides off during a window
+        /// switch. Installed BEHIND `paneContentView` (so the sliding window uncovers it) and
+        /// pinned to `bounds`. Always in the hierarchy - unlike the prior seam-dim (attached
+        /// to a neighbor host that often did not exist), so its gradient always renders.
+        /// Transparent at rest; the Coordinator ramps its `.alpha` with drag progress
+        /// (`GapDim.opacity`) and sets the gradient direction (`GapDim.endpoints`).
+        let gapDimView = UIView()
+        private let gapDimGradient = CAGradientLayer()
+        private var gapDimInstalled = false
+
+        /// Install `gapDimView` (with its gradient) as the FIRST subview so it sits behind
+        /// `paneContentView`. Idempotent. The gradient is a black->clear horizontal fade whose
+        /// direction the Coordinator sets per drag; the view starts fully transparent.
+        private func ensureGapDimInstalled() {
+            guard !gapDimInstalled else { return }
+            gapDimView.frame = bounds
+            gapDimView.isUserInteractionEnabled = false
+            gapDimView.alpha = 0
+            gapDimGradient.frame = gapDimView.bounds
+            gapDimGradient.colors = [UIColor.black.cgColor, UIColor.clear.cgColor]
+            gapDimView.layer.addSublayer(gapDimGradient)
+            insertSubview(gapDimView, at: 0)   // behind paneContentView
+            gapDimInstalled = true
+        }
+
+        /// The gap-dim gradient layer, for the Coordinator to set start/end points + keep the
+        /// view in the hierarchy. Ensures installation on first access.
+        func gapDimLayer() -> CAGradientLayer {
+            ensureGapDimInstalled()
+            return gapDimGradient
+        }
+
+        /// The gap-dim overlay view, for the Coordinator to ramp `.alpha`.
+        func gapDimOverlay() -> UIView {
+            ensureGapDimInstalled()
+            return gapDimView
+        }
+
         /// Cached cell metrics so we don't re-measure the font on every layout pass.
         /// Nil'd by `invalidateCachedCell()` after a pinch font change.
         private var cachedCell: (w: Double, h: Double)?
@@ -776,6 +814,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // animates it for the window-switch slide).
             ensurePaneContentViewInstalled()
             paneContentView.frame = bounds
+            ensureGapDimInstalled()
+            gapDimView.frame = bounds
+            gapDimGradient.frame = gapDimView.bounds
             let cell = resolvedCell()
             guard let grid = terminalGrid(width: Double(bounds.width), height: Double(bounds.height),
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
