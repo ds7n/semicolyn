@@ -628,6 +628,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     host?.transform = .identity
                 })
                 onSwitchWindow(delta)   // tmux select-window
+                // Cancel any prior in-flight timeout before arming a new one: a rapid second
+                // commit (within the 1.5s window, before the first switch's live window
+                // arrives) would otherwise leave the stale timer live, and it would fire
+                // `failPendingSwitch` against THIS commit's pending state, snapping the view
+                // mid-handoff. (Task 7 review 2026-07-18.)
+                pendingSwitchTimeout?.cancel()
                 let timeout = DispatchWorkItem { [weak self] in self?.failPendingSwitch() }
                 pendingSwitchTimeout = timeout
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: timeout)
