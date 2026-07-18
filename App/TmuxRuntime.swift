@@ -51,10 +51,17 @@ final class TmuxRuntime {
     private var primeWindowIDs: Set<UInt64> = []
     /// In-flight `queryAlternateOn` submission ids awaiting their reply.
     private var altScreenQueryIDs: Set<UInt64> = []
-    /// Correlation ids for in-flight `capture-pane` history seeds, keyed to the pane.
-    private var historyCaptureIDs: [UInt64: PaneID] = [:]
+    /// Purpose of an in-flight `capture-pane`: a scrollback SEED (feeds `PaneHistorySeeder`
+    /// via `onHistoryCaptured`) or a window-transition SNAPSHOT (feeds `WindowSnapshotStore`
+    /// via `onSnapshotCaptured`). Tagged so one reply routes to exactly one consumer.
+    private enum CapturePurpose { case seed, snapshot }
+    /// Correlation ids for in-flight `capture-pane` requests, keyed to (pane, purpose).
+    private var captureIDs: [UInt64: (pane: PaneID, purpose: CapturePurpose)] = [:]
     /// Fired when a capture response resolves: (pane, reconstructed history bytes).
     var onHistoryCaptured: ((PaneID, [UInt8]) -> Void)?
+    /// Fired when a SNAPSHOT capture resolves: (pane, reconstructed bytes). Consumed by
+    /// `WindowSnapshotStore` to render an off-screen preview of a non-active window.
+    var onSnapshotCaptured: ((PaneID, [UInt8]) -> Void)?
     /// Fired when a pane's history may be stale (%pause/%continue, reconnect, resize
     /// desync) — the seeder should mark affected panes unseeded and re-capture.
     var onResyncAll: (() -> Void)?
@@ -151,16 +158,18 @@ final class TmuxRuntime {
                 } else {
                     DebugLog.shared.log(.tmux, "tmux alternate_on REPLY: NOT .ok")
                 }
-            } else if let pane = historyCaptureIDs.removeValue(forKey: resolved.id) {
+            } else if let entry = captureIDs.removeValue(forKey: resolved.id) {
+                let bytes: [UInt8]
                 if case .ok(let lines) = resolved.outcome {
-                    // Reconstruct feedable bytes: join body rows + trim capture-pane's
-                    // trailing blank padding (see Task 3 — confirmed vs real tmux 3.4).
-                    let bytes = reconstructHistory(fromLines: lines)
-                    DebugLog.shared.log(.tmux, "tmux capture REPLY: pane=%\(pane.raw) lines=\(lines.count) bytes=\(bytes.count)")
-                    onHistoryCaptured?(pane, bytes)
+                    bytes = reconstructHistory(fromLines: lines)
+                    DebugLog.shared.log(.tmux, "tmux capture REPLY: pane=%\(entry.pane.raw) purpose=\(entry.purpose) lines=\(lines.count) bytes=\(bytes.count)")
                 } else {
-                    DebugLog.shared.log(.tmux, "tmux capture REPLY: pane=%\(pane.raw) NOT .ok (capture errored)")
-                    onHistoryCaptured?(pane, [])   // fail toward live-only
+                    bytes = []
+                    DebugLog.shared.log(.tmux, "tmux capture REPLY: pane=%\(entry.pane.raw) purpose=\(entry.purpose) NOT .ok (capture errored)")
+                }
+                switch entry.purpose {
+                case .seed:     onHistoryCaptured?(entry.pane, bytes)   // seed fails toward live-only ([])
+                case .snapshot: onSnapshotCaptured?(entry.pane, bytes)
                 }
             }
         }
@@ -266,8 +275,20 @@ final class TmuxRuntime {
     func captureHistory(pane: PaneID, lines: Int) -> UInt64? {
         guard let cmd = capturePaneCommand(paneID: pane, lines: lines),
               let id = writeTracked(cmd) else { return nil }
-        historyCaptureIDs[id] = pane
-        DebugLog.shared.log(.tmux, "tmux capture: pane=%\(pane.raw) lines=\(lines) id=\(id)")
+        captureIDs[id] = (pane, .seed)
+        DebugLog.shared.log(.tmux, "tmux capture: pane=%\(pane.raw) purpose=seed lines=\(lines) id=\(id)")
+        return id
+    }
+
+    /// Send a `capture-pane` for the window-transition SNAPSHOT of `pane` (which may be in
+    /// a NON-active window). Reply routes to `onSnapshotCaptured`. No-op / nil if seeding
+    /// is disabled (lines <= 0) or not attached.
+    @discardableResult
+    func captureSnapshot(pane: PaneID, lines: Int) -> UInt64? {
+        guard let cmd = capturePaneCommand(paneID: pane, lines: lines),
+              let id = writeTracked(cmd) else { return nil }
+        captureIDs[id] = (pane, .snapshot)
+        DebugLog.shared.log(.tmux, "tmux capture: pane=%\(pane.raw) purpose=snapshot lines=\(lines) id=\(id)")
         return id
     }
 
