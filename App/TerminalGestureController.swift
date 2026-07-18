@@ -9,8 +9,9 @@ import SemicolynKit
 /// drag scrolls via the terminal's NATIVE `UIScrollView` pan (kept enabled — we do
 /// not fight it); in `.appOwnsInput` (alt-screen) the mount parks that pan
 /// (`isScrollEnabled = false`) and this controller streams the drag to the app as
-/// arrow-key runs. A horizontal drag on the native pan switches tmux windows (one per
-/// drag, on release, via `GestureClassifier` + the mount's clamp); single tap places
+/// arrow-key runs. A horizontal drag on the native pan live-drags the window switch
+/// (axis-locked via `DragAxisLock`, transformed via `WindowDragModel`, resolved on
+/// release via `SwitchCommitDecision`); single tap places
 /// the cursor (in `.localScroll`; other modes yield the tap to the app);
 /// double/triple-tap word/line-select; long-press zooms the tmux pane; two-finger
 /// tap shows the edit menu. Routing is mode-driven: the mount tracks each pane's
@@ -51,6 +52,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let sendBytes: ([UInt8]) -> Void
         let hasSelection: () -> Bool
         let clearSelection: () -> Void
+        /// The horizontal drag has locked to the window-switch axis: prepare the reveal
+        /// (refresh non-active snapshots, position the neighbor host). Fires once per drag.
+        let onDragBeginSwitch: () -> Void
+        /// Live update on each `.changed` while switch-locked: content `offset` (points)
+        /// and which neighbor the gap exposes.
+        let onDragUpdate: (_ offset: Double, _ exposed: ExposedNeighbor) -> Void
+        /// Release PAST threshold: commit the switch by `delta` (container runs the settle
+        /// animation + tmux select-window + handoff).
+        let onDragCommit: (_ delta: Int) -> Void
+        /// Release SHORT: spring the current window back (no tmux command).
+        let onDragCancel: () -> Void
     }
 
     private weak var terminalView: TerminalView?
@@ -67,6 +79,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// Running total of cells already turned into arrows this drag (fed back into
     /// `AltScreenScroll.arrows` so successive `.changed` samples send only the new delta).
     private var emittedCells: Int = 0
+    /// Axis this drag locked to (decided once past the dead-zone). `.pending` until then.
+    private var dragAxis: DragAxis = .pending
+    /// True once we have fired `onDragBeginSwitch` for this drag (switch axis only).
+    private var switchRevealStarted = false
 
     // Our recognizers (kept so we can identify + remove them, and so the delegate can
     // tell ours apart from SwiftTerm's). Note: vertical scroll is NOT one of ours — it
@@ -292,6 +308,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         dragAppCursor = callbacks.applicationCursorKeys()
         dragDecision = callbacks.altScrollDecision()
         emittedCells = 0
+        dragAxis = .pending
+        switchRevealStarted = false
         // Defense-in-depth (on top of the Kit simultaneity policy): the moment a real
         // drag starts, force-cancel any long-press by bouncing its `isEnabled`. A
         // long-press that recognized just before the pan was turning the held-then-drag
@@ -314,17 +332,44 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         return dragMode
     }
 
-    /// Resolve a one-shot tmux window-switch from the drag's cumulative translation
-    /// (`GestureClassifier` axis-locks horizontal-dominant → switch). Called on
-    /// `.ended`/`.cancelled` from whichever pan owned the drag.
-    private func resolveWindowSwitch(_ g: UIPanGestureRecognizer, in view: TerminalView) {
+    /// Feed the drag's cumulative translation through the axis lock. Returns true if this
+    /// drag is (now) switch-locked and the caller should NOT run its scroll/arrow path.
+    /// On the first switch-lock it fires `onDragBeginSwitch`; every `.changed` after fires
+    /// `onDragUpdate` with the clamped offset + exposed neighbor.
+    private func driveLiveSwitch(_ g: UIPanGestureRecognizer, in view: TerminalView) -> Bool {
         let t = g.translation(in: view)
-        let decision = GestureClassifier.classify(
-            dx: Double(t.x), dy: Double(t.y),
-            isMultiWindowTmux: callbacks.isMultiWindowTmux())
-        if case .switchWindow(let delta) = decision {
-            callbacks.onSwitchWindow(delta)
+        if case .pending = dragAxis {
+            dragAxis = DragAxisLock.resolve(dx: Double(t.x), dy: Double(t.y),
+                                            isMultiWindowTmux: callbacks.isMultiWindowTmux())
         }
+        guard case .switchWindow = dragAxis else { return false }
+        if !switchRevealStarted {
+            switchRevealStarted = true
+            callbacks.onDragBeginSwitch()
+            DebugLog.shared.log(.gesture, "drag-switch begin dx=\(Int(t.x))")
+        }
+        let width = Double(view.bounds.width)
+        let offset = WindowDragModel.offset(dx: Double(t.x), width: width)
+        callbacks.onDragUpdate(offset, WindowDragModel.exposedNeighbor(dx: Double(t.x)))
+        return true
+    }
+
+    /// Resolve commit-vs-spring on release for a switch-locked drag. Returns true if this
+    /// was a switch drag (so the caller skips its own window-switch resolution).
+    private func resolveLiveSwitch(_ g: UIPanGestureRecognizer, in view: TerminalView) -> Bool {
+        guard case .switchWindow = dragAxis else { return false }
+        let t = g.translation(in: view)
+        let v = g.velocity(in: view)
+        let width = Double(view.bounds.width)
+        switch SwitchCommitDecision.resolve(dx: Double(t.x), width: width, velocity: Double(v.x)) {
+        case .commit(let delta):
+            DebugLog.shared.log(.gesture, "drag-switch commit delta=\(delta) dx=\(Int(t.x)) vx=\(Int(v.x))")
+            callbacks.onDragCommit(delta)
+        case .springBack:
+            DebugLog.shared.log(.gesture, "drag-switch cancel dx=\(Int(t.x)) vx=\(Int(v.x))")
+            callbacks.onDragCancel()
+        }
+        return true
     }
 
     /// Rides the terminal's NATIVE UIScrollView pan (we added ourselves as an extra
@@ -339,12 +384,14 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         switch g.state {
         case .began:
             beginDrag("scrollPan", on: view)
+        case .changed:
+            // Give the horizontal drag first refusal at the switch axis; if it locks to
+            // switch, the native scroll is suppressed for this drag (we drive the transform).
+            _ = driveLiveSwitch(g, in: view)
         case .ended, .cancelled:
+            if resolveLiveSwitch(g, in: view) { return }   // switch drag handled
             DebugLog.shared.log(.gesture,
                 "drag-end owner=scrollPan imode=\(dragMode) outcome=\(dragMode == .localScroll ? "scroll" : "none")")
-            // Native pan is only live in `.localScroll`; guard defensively anyway.
-            guard dragMode != .mouseReporting else { return }
-            resolveWindowSwitch(g, in: view)
         default: break
         }
     }
@@ -361,6 +408,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         case .began:
             beginDrag("altPan", on: view)
         case .changed:
+            if driveLiveSwitch(g, in: view) { return }   // horizontal switch owns this drag
             // The pan is only enabled in `.appOwnsInput`, but re-check the snapshot so a
             // mid-mount edge (enabled just as the mode left) can't emit stray arrows.
             guard dragMode == .appOwnsInput else { return }
@@ -403,6 +451,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                 }
             }
         case .ended, .cancelled:
+            if resolveLiveSwitch(g, in: view) { return }  // switch drag handled
             let outcome: String
             if emittedCells != 0 {
                 switch dragDecision.keys {
@@ -415,7 +464,6 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             }
             DebugLog.shared.log(.gesture,
                 "drag-end owner=altPan imode=\(dragMode) emitted=\(emittedCells) outcome=\(outcome)")
-            resolveWindowSwitch(g, in: view)
         default: break
         }
     }
