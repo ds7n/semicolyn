@@ -332,16 +332,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         selectWindow(state.windows[next].id)
     }
 
-    /// Horizontal-drag window switch: step one window with CLAMP (no wrap). No-op at
-    /// the ends of the window list, with <2 windows, or in raw-PTY mode.
-    func selectAdjacentWindowClamped(_ delta: Int) {
-        guard let state = tmuxState,
-              let active = state.activeWindow,
-              let idx = state.windows.firstIndex(where: { $0.id == active }),
-              let next = clampedStepIndex(current: idx, delta: delta, count: state.windows.count)
-        else { return }
-        selectWindow(state.windows[next].id)
-    }
+    /// Finger-drag window-switch commit: step one window WITH WRAP (matches the drag
+    /// reveal's `neighborWindow(of:delta:)`, which wraps). No-op with <2 windows or in
+    /// raw-PTY mode. Replaces the old clamped one-shot swipe commit (which disagreed
+    /// with the wrapping reveal, causing an edge-commit no-op + bounce-back).
+    func selectAdjacentWindowWrapping(_ delta: Int) { stepWindow(delta) }
 
     /// True when the active tmux session has more than one window (drives horizontal
     /// drag = window switch vs. scroll fall-through).

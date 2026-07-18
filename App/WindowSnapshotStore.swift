@@ -98,7 +98,10 @@ final class WindowSnapshotStore {
         // cleared buffer yields the previewed screen.
         view.feed(byteArray: [0x1b, 0x5b, 0x33, 0x4a][...])   // ESC [ 3 J (erase scrollback)
         if !bytes.isEmpty { view.feed(byteArray: bytes[...]) }
-        DebugLog.shared.log(.seed, "snapshot applied pane=%\(pane.raw) win=@\(window.raw) bytes=\(bytes.count)")
+        // `.gesture` (not `.seed`): this snapshot capture exists solely to feed the
+        // finger-drag window-transition preview, and every other log line in that flow
+        // (`beginSwitchReveal`/`commitSwitchDrag`/etc. in TmuxPaneContainer) is `.gesture`.
+        DebugLog.shared.log(.gesture, "snapshot applied pane=%\(pane.raw) win=@\(window.raw) bytes=\(bytes.count)")
     }
 
     /// Lay out `window`'s pane snapshot views inside its host at `bounds`, using the pane

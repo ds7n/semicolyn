@@ -530,6 +530,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// for main-actor calls fired from gesture-driven, always-main-thread paths).
         func beginSwitchReveal() {
             MainActor.assumeIsolated {
+                clearPendingSwitch()
                 guard let vm, let state = vm.tmuxState else { return }
                 vm.snapshotStore?.refreshNonActive(state: state)
                 DebugLog.shared.log(.gesture, "switch-reveal begin")
@@ -645,6 +646,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Wrapped in `assumeIsolated` for the same reason as `beginSwitchReveal`.
         func cancelSwitchDrag() {
             MainActor.assumeIsolated {
+                clearPendingSwitch()
                 guard let content = containerView?.paneContentView else { return }
                 let host = revealedSnapshot?.view
                 let w = containerView?.bounds.width ?? 0
@@ -659,6 +661,17 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 clearSeamDim()
                 DebugLog.shared.log(.gesture, "switch cancel -> spring back")
             }
+        }
+
+        /// Cancel any in-flight committed-switch handoff (its 1.5s timeout + pending window),
+        /// so a spring-back or a new drag can't leave a stale timer that later yanks the pane.
+        /// Mirrors the cancel-before-arm guard in `commitSwitchDrag`. Callers must invoke this
+        /// from within their own `assumeIsolated` block (touches main-actor stored props but
+        /// has no UIKit calls of its own, so it needs no wrapping here).
+        private func clearPendingSwitch() {
+            pendingSwitchTimeout?.cancel()
+            pendingSwitchTimeout = nil
+            pendingSwitchWindow = nil
         }
 
         /// Timeout: the committed switch never delivered. Restore the current content and
