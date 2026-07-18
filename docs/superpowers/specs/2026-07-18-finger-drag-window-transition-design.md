@@ -42,9 +42,14 @@ exists and is Kit-tested; this design points it at the transition.
    current window if tmux never delivers.
 6. **Axis lock:** decided once when the finger leaves the ~12pt dead-zone (still ~1.7:1 biased
    toward vertical/scroll); the axis is fixed for the whole drag (no mid-drag scroll<->switch flip).
-7. **Mode coverage:** the live switch works in **all** interaction modes. Axis-lock runs first;
-   a horizontal-dominant drag switches windows even on a `.appOwnsInput` (Claude/vim) or
-   `.mouseReporting` pane, while a vertical drag still goes to the app (wheel/arrows) or scrolls.
+7. **Mode coverage:** the live switch works in every mode where WE own the drag: `.localScroll`
+   (native pan) and `.appOwnsInput` (our alt-screen pan). Axis-lock runs first; a
+   horizontal-dominant drag switches windows even on a `.appOwnsInput` (Claude/vim) pane, while a
+   vertical drag still goes to the app (wheel/arrows) or scrolls. NOTE: in `.mouseReporting`
+   SwiftTerm consumes the drag as a mouse event and neither of our pan handlers fires, so the live
+   switch is not available there (the drag is a mouse report, by design). "All modes" in the
+   original brainstorm meant "all modes we drive"; mouse-reporting is the one we intentionally
+   yield to the app.
 8. **Edge behavior:** keep the current wrap at the ends of the window list (`stepIndex`).
 
 ## Architecture
