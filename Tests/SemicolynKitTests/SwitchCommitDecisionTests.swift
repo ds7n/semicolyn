@@ -55,4 +55,13 @@ final class SwitchCommitDecisionTests: XCTestCase {
         XCTAssertEqual(SwitchCommitDecision.resolve(dx: -20, width: width, velocity: -v),
                        .springBack)
     }
+
+    // Sign-agreement guard: a short LEFTWARD drag (dx<0) with a fast RIGHTWARD flick
+    // (velocity>0, opposite sign) must NOT commit via the velocity path -> spring back.
+    // This is the case a mutant dropping the sign-agreement check would wrongly commit.
+    func testOppositeDirectionFastFlickSpringsBack() {
+        let v = SwitchCommitDecision.velocityThreshold + 100   // clearly past the speed bar
+        XCTAssertEqual(SwitchCommitDecision.resolve(dx: -20, width: width, velocity: +v),
+                       .springBack)
+    }
 }
