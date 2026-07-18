@@ -163,6 +163,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private var tmux: TmuxRuntime?
     /// Seeds each tmux pane's scrollback history (capture-pane) before live output.
     private var historySeeder: PaneHistorySeeder?
+    /// Off-screen capture-pane snapshots of non-active windows for the finger-drag
+    /// window transition.
+    private(set) var snapshotStore: WindowSnapshotStore?
     /// Shared output sink; the terminal view wires `onBytes` to render into itself.
     let output = TerminalShellOutput()
 
@@ -852,6 +855,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             scrollbackLines: { AppStores.shared.terminalSettings.settings.scrollbackLines },
             viewForPane: { [weak self] pane in self?.paneViews[pane] })
         self.historySeeder = seeder
+        self.snapshotStore = WindowSnapshotStore(
+            runtime: runtime,
+            scrollbackLines: { AppStores.shared.terminalSettings.settings.scrollbackLines },
+            makeSnapshotView: { _ in
+                let v = TerminalView(frame: .zero)
+                v.isUserInteractionEnabled = false   // a static preview, never interactive
+                return v
+            })
         guard let startCmd = runtime.makeStartCommand() else {
             // Controller couldn't build a start command (e.g. an invalid resolved
             // session name — which a Defaults-level value can be, since the Defaults
@@ -891,6 +902,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             let oldActive = self.tmuxState?.activeWindow.flatMap { self.tmuxState?.window($0)?.activePane }
             self.tmuxState = state
             DebugLog.shared.log(.tmux, "tmux:activeWindow=\(state.activeWindow.map { "@\($0.raw)" } ?? "nil") wins=\(state.windows.count)")
+            self.snapshotStore?.rebuild(state: state)
+            self.snapshotStore?.refreshNonActive(state: state)
             let newActive = state.activeWindow.flatMap { state.window($0)?.activePane }
             if oldActive != newActive {
                 // Active pane changed (e.g. ⌘]) — re-publish the new active pane's
