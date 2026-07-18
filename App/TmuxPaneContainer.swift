@@ -149,9 +149,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private var pinchRecognizers: [ObjectIdentifier: UIPinchGestureRecognizer] = [:]
         /// Per-pane gesture layer (replaces SwiftTerm's built-ins).
         private var gestureControllers: [ObjectIdentifier: TerminalGestureController] = [:]
-        /// Owns the two-phase window-switch slide (slide-out on swipe release, slide-in
-        /// on the next `apply` where the active window changed). See `WindowTransition`.
-        let windowTransition = WindowTransition()
+        /// The neighbor snapshot host currently revealed in the drag gap (added as a
+        /// sibling of `paneContentView`), and the window it previews. Cleared on
+        /// commit-handoff or spring-back.
+        private var revealedSnapshot: (view: UIView, window: WindowID)?
+        /// Fires if a committed switch's live window never arrives (stuck switch): clears
+        /// the settled snapshot and restores the current window.
+        private var pendingSwitchTimeout: DispatchWorkItem?
+        /// The window we are switching TO once tmux delivers it (armed at commit).
+        private var pendingSwitchWindow: WindowID?
+        /// Seam-dim gradient on the incoming card's leading edge (depth cue, no text-render
+        /// change). Installed lazily in `updateSeamDim`, removed in `clearSeamDim`.
+        private var seamDim: CAGradientLayer?
         /// The `ContainerView` this coordinator drives; set in `makeUIView`. Weak since
         /// `ContainerView` already holds a weak back-reference to this coordinator (avoid
         /// a retain cycle across the UIViewRepresentable boundary).
@@ -277,18 +286,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     terminalView: view,
                     callbacks: .init(
                         isMultiWindowTmux: { [weak self] in self?.onIsMultiWindowTmux() ?? false },
-                        onSwitchWindow:    { [weak self] delta in
-                            DebugLog.shared.log(.lifecycle, "user-action: window-switch delta=\(delta)")
-                            if let self, let dir = windowSlideDirection(delta: delta),
-                               let content = self.containerView?.paneContentView {
-                                let w = content.bounds.width
-                                self.windowTransition.slideOut(dir.out, view: content, width: w)
-                                self.windowTransition.beginPending(inEdge: dir.in, timeout: 1.5) { [weak content] in
-                                    content?.transform = .identity   // stuck switch: snap back
-                                }
-                                DebugLog.shared.log(.gesture, "window-switch anim: out=\(dir.out) in=\(dir.in) delta=\(delta)")
-                            }
-                            self?.onSwitchWindow(delta)
+                        onSwitchWindow: { [weak self] delta in
+                            self?.onSwitchWindow(delta)   // tmux select-window (also used by esc-pill)
                         },
                         onLongPressZoom:   { [weak self] in self?.onZoomActivePane() },
                         onPlaceCursor:     { [weak self, weak view] col, row in
@@ -322,7 +321,19 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         },
                         sendBytes: { [weak self] bytes in self?.send(bytes) },
                         hasSelection: { [weak view] in view?.selectionActive ?? false },
-                        clearSelection: { [weak view] in view?.selectNone() }
+                        clearSelection: { [weak view] in view?.selectNone() },
+                        onDragBeginSwitch: { [weak self] in
+                            self?.beginSwitchReveal()
+                        },
+                        onDragUpdate: { [weak self] offset, exposed in
+                            self?.updateSwitchDrag(offset: offset, exposed: exposed)
+                        },
+                        onDragCommit: { [weak self] delta in
+                            self?.commitSwitchDrag(delta: delta)
+                        },
+                        onDragCancel: { [weak self] in
+                            self?.cancelSwitchDrag()
+                        }
                     )
                 )
                 gestureControllers[key] = controller
@@ -508,6 +519,177 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 UIImpactFeedbackGenerator(style: .soft).impactOccurred()
             }
         }
+
+        // MARK: - Finger-drag window switch: reveal / update / commit / cancel
+
+        /// Drag locked to the switch axis: refresh non-active snapshots so the neighbor
+        /// preview is as fresh as possible for THIS drag. The actual neighbor host is
+        /// added lazily in `updateSwitchDrag` once we know the direction. Touches
+        /// `@MainActor` state (`vm`, `snapshotStore`) from this nonisolated Coordinator;
+        /// wrapped in `assumeIsolated` (matches `setAltScreenPan` / `removeHalo`'s pattern
+        /// for main-actor calls fired from gesture-driven, always-main-thread paths).
+        func beginSwitchReveal() {
+            MainActor.assumeIsolated {
+                guard let vm, let state = vm.tmuxState else { return }
+                vm.snapshotStore?.refreshNonActive(state: state)
+                DebugLog.shared.log(.gesture, "switch-reveal begin")
+            }
+        }
+
+        /// Live `.changed`: translate `paneContentView`, and slide the exposed neighbor's
+        /// snapshot host in from the opposite edge so it tracks the gap. Wrapped in
+        /// `assumeIsolated` for the same reason as `beginSwitchReveal`.
+        func updateSwitchDrag(offset: Double, exposed: ExposedNeighbor) {
+            MainActor.assumeIsolated {
+                guard let content = containerView?.paneContentView,
+                      let vm, let state = vm.tmuxState,
+                      let active = state.activeWindow else { return }
+                content.transform = CGAffineTransform(translationX: CGFloat(offset), y: 0)
+                // Resolve the neighbor window id for the drag direction (wrap at ends).
+                let delta = (exposed == .previous) ? -1 : (exposed == .next ? +1 : 0)
+                guard delta != 0, let neighbor = vm.neighborWindow(of: active, delta: delta),
+                      let host = vm.snapshotStore?.snapshotView(for: neighbor),
+                      let container = containerView else {
+                    revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
+                    return
+                }
+                if revealedSnapshot?.window != neighbor {
+                    revealedSnapshot?.view.removeFromSuperview()
+                    container.addSubview(host)
+                    revealedSnapshot = (host, neighbor)
+                    let cell = container.resolvedCellPublic()
+                    vm.snapshotStore?.layout(window: neighbor, in: state, bounds: container.bounds,
+                                             cellWidth: cell.w, cellHeight: cell.h)
+                }
+                // Paired-card model: outgoing pane content + incoming neighbor translate as a
+                // rigid pair, both tracking the finger. The neighbor sits one width off the
+                // revealing edge, offset with the content.
+                let w = container.bounds.width
+                let base: CGFloat = (exposed == .previous) ? -w : w   // prev enters from left, next from right
+                host.transform = CGAffineTransform(translationX: base + CGFloat(offset), y: 0)
+                // Edge/seam dimming: fade the seam between the two cards for a depth cue with
+                // NO text-render change (decided in brainstorm 2026-07-18: seam dimming, no
+                // real 3D curl). See `installSeamDim` / `updateSeamDim` below.
+                updateSeamDim(on: host, exposed: exposed, progress: abs(offset) / max(w, 1))
+            }
+        }
+
+        /// A thin gradient overlay on the incoming card's LEADING edge (the seam between
+        /// the two cards), darkening toward the seam so the pair reads as layered depth.
+        /// A `CAGradientLayer`, NOT a render transform on the text — the terminal glyphs are
+        /// never distorted (brainstorm 2026-07-18: no real curl). This is also the single
+        /// extension point if a parallax multiplier is added later.
+        private func installSeamDim(on host: UIView, exposed: ExposedNeighbor) -> CAGradientLayer {
+            let g = CAGradientLayer()
+            g.frame = host.bounds
+            // Horizontal gradient; opaque black at the seam edge fading to clear across ~16% of width.
+            g.startPoint = CGPoint(x: exposed == .previous ? 1.0 : 0.0, y: 0.5)  // seam is the edge nearest the outgoing card
+            g.endPoint   = CGPoint(x: exposed == .previous ? 0.0 : 1.0, y: 0.5)
+            g.colors = [UIColor.black.withAlphaComponent(0.35).cgColor, UIColor.clear.cgColor]
+            g.locations = [0.0, 0.16]
+            g.isUserInteractionEnabled = false
+            host.layer.addSublayer(g)
+            return g
+        }
+
+        /// Update the seam-dim strength with drag progress (0 at rest -> full at a
+        /// full-width reveal) and keep its frame pinned to the host. Lazily installs the
+        /// gradient on first call for this reveal; tracked in `seamDim`.
+        private func updateSeamDim(on host: UIView, exposed: ExposedNeighbor, progress: Double) {
+            let g = seamDim ?? installSeamDim(on: host, exposed: exposed)
+            seamDim = g
+            g.frame = host.bounds
+            // Opacity ramps with how far the reveal has progressed (clamped 0...1), so the
+            // seam is subtle at the start of a drag and strongest when the card is fully in.
+            g.opacity = Float(min(max(progress, 0), 1))
+        }
+
+        /// Remove the seam-dim gradient (on commit-handoff, spring-back, or timeout).
+        private func clearSeamDim() {
+            seamDim?.removeFromSuperlayer()
+            seamDim = nil
+        }
+
+        /// Release past threshold: settle the snapshot fully over the pane, issue the tmux
+        /// switch, and arm the delivery timeout. The live window swaps in UNDER the snapshot
+        /// in `apply(state:)` (Step 4). Wrapped in `assumeIsolated` for the same reason as
+        /// `beginSwitchReveal`.
+        func commitSwitchDrag(delta: Int) {
+            MainActor.assumeIsolated {
+                guard let content = containerView?.paneContentView,
+                      let container = containerView,
+                      let dir = windowSlideDirection(delta: delta) else { cancelSwitchDrag(); return }
+                let w = container.bounds.width
+                let outX: CGFloat = (dir.out == .left) ? -w : w
+                let host = revealedSnapshot?.view
+                pendingSwitchWindow = revealedSnapshot?.window
+                UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut], animations: {
+                    content.transform = CGAffineTransform(translationX: outX, y: 0)
+                    host?.transform = .identity
+                })
+                onSwitchWindow(delta)   // tmux select-window
+                let timeout = DispatchWorkItem { [weak self] in self?.failPendingSwitch() }
+                pendingSwitchTimeout = timeout
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: timeout)
+                DebugLog.shared.log(.gesture, "switch commit delta=\(delta) -> pending @\(pendingSwitchWindow.map { "\($0.raw)" } ?? "nil")")
+            }
+        }
+
+        /// Release short: animate the current window back to identity, drop the snapshot.
+        /// Wrapped in `assumeIsolated` for the same reason as `beginSwitchReveal`.
+        func cancelSwitchDrag() {
+            MainActor.assumeIsolated {
+                guard let content = containerView?.paneContentView else { return }
+                let host = revealedSnapshot?.view
+                let w = containerView?.bounds.width ?? 0
+                let exposedPrev = (host?.transform.tx ?? 0) < 0
+                UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut], animations: {
+                    content.transform = .identity
+                    host?.transform = CGAffineTransform(translationX: exposedPrev ? -w : w, y: 0)
+                }, completion: { [weak self] _ in
+                    self?.revealedSnapshot?.view.removeFromSuperview()
+                    self?.revealedSnapshot = nil
+                })
+                clearSeamDim()
+                DebugLog.shared.log(.gesture, "switch cancel -> spring back")
+            }
+        }
+
+        /// Timeout: the committed switch never delivered. Restore the current content and
+        /// drop the stuck snapshot. Runs off a `DispatchWorkItem` fired on the main queue
+        /// (`DispatchQueue.main.asyncAfter` in `commitSwitchDrag`), so it is already on the
+        /// main thread; wrapped in `assumeIsolated` to match every other main-actor touch
+        /// in this section.
+        private func failPendingSwitch() {
+            MainActor.assumeIsolated {
+                pendingSwitchTimeout = nil
+                pendingSwitchWindow = nil
+                containerView?.paneContentView.transform = .identity
+                revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
+                clearSeamDim()
+                DebugLog.shared.log(.gesture, "switch TIMEOUT -> restore current")
+            }
+        }
+
+        /// Called from `apply(state:)` when the active window actually changed: complete
+        /// the handoff by resetting the content transform (live panes now fill it) and
+        /// removing the covering snapshot. No-op if no switch was pending. `apply(state:)`
+        /// runs on the main thread (SwiftUI `updateUIView`), so this is called from within
+        /// an existing `assumeIsolated` block there — no additional wrapping needed here to
+        /// avoid re-entrant `assumeIsolated`, but this method's own body does touch
+        /// `@MainActor` state, so it stays a plain method callable from that block.
+        func completePendingSwitchIfNeeded(newActive: WindowID) {
+            guard pendingSwitchWindow != nil else {
+                // A switch that arrived without our drag (e.g. esc-pill): nothing to hand off.
+                return
+            }
+            pendingSwitchTimeout?.cancel(); pendingSwitchTimeout = nil
+            pendingSwitchWindow = nil
+            containerView?.paneContentView.transform = .identity
+            revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
+            clearSeamDim()
+            DebugLog.shared.log(.gesture, "switch handoff complete active=@\(newActive.raw)")
+        }
     }
 
     /// UIKit container that lays out one `TerminalView` per pane and tracks the set.
@@ -547,7 +729,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         /// The active window as of the last `apply` that reached the change-detect at the
         /// end of the method. Compared against `state.activeWindow` there to decide whether
-        /// a pending window-switch slide-in should run (see `WindowTransition`).
+        /// a pending finger-drag switch handoff should complete (see `completePendingSwitchIfNeeded`).
         private var previousActiveWindow: WindowID?
 
         /// Clears the cached cell metrics so `resolvedCell()` re-measures on the next
@@ -657,6 +839,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
             guard w > 0, h > 0 else { return (8, 16) }
             return (w: w, h: h)
         }
+
+        /// Public accessor for `resolvedCell()` (private) so the Coordinator's drag-reveal
+        /// path (`updateSwitchDrag`) can lay out a neighbor snapshot using the same cell
+        /// metrics the live pane grid uses, without widening `resolvedCell`'s visibility.
+        func resolvedCellPublic() -> (w: Double, h: Double) { resolvedCell() }
 
         func apply(state: TmuxSessionState,
                    register: (PaneID, TerminalView) -> Void,
@@ -785,15 +972,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 coordinator?.vm.requeryAltScreenState()
             }
 
-            // Window-switch slide-in: after rebuilding the new window's panes, if the active
-            // window changed and a transition is pending, slide the content in from the pending
-            // edge (design 2026-07-17). Runs after panes are positioned so it animates the
-            // final layout. `WindowTransition` is `@MainActor`; wrap in `assumeIsolated` to match
-            // the file's convention for @MainActor calls from this UIView method (apply always
-            // runs on the main thread via SwiftUI `updateUIView`).
-            if state.activeWindow != previousActiveWindow {
+            // Finger-drag commit handoff: after rebuilding the new window's panes, if the
+            // active window actually changed, complete any pending switch (reset the content
+            // transform now that live panes fill it, drop the covering snapshot). Runs after
+            // panes are positioned so the handoff lands on the final layout. The coordinator
+            // is nonisolated; wrap in `assumeIsolated` to match the file's convention for
+            // @MainActor calls from this UIView method (apply always runs on the main thread
+            // via SwiftUI `updateUIView`).
+            if state.activeWindow != previousActiveWindow, let newActive = state.activeWindow {
                 MainActor.assumeIsolated {
-                    coordinator?.windowTransition.consumePendingSlideIn(view: paneContentView, width: bounds.width)
+                    coordinator?.completePendingSwitchIfNeeded(newActive: newActive)
                 }
             }
             previousActiveWindow = state.activeWindow

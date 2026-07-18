@@ -347,6 +347,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// drag = window switch vs. scroll fall-through).
     var isMultiWindowTmux: Bool { (tmuxState?.windows.count ?? 0) > 1 }
 
+    /// The window `delta` steps from `id` in window-list order, wrapping at the ends.
+    /// nil with fewer than 2 windows. Matches the wrap the esc-pill switch uses.
+    func neighborWindow(of id: WindowID, delta: Int) -> WindowID? {
+        guard let windows = tmuxState?.windows, windows.count > 1,
+              let idx = windows.firstIndex(where: { $0.id == id }) else { return nil }
+        let n = windows.count
+        let next = ((idx + delta) % n + n) % n
+        return windows[next].id
+    }
+
     /// Whether the in-progress input line looks like a password/secret entry, per
     /// `passwordDetector`'s verdict (used ONLY to gate diagnostic key-content logging —
     /// see `TerminalScreen.Coordinator.send`; has no effect on predictor learning, which
