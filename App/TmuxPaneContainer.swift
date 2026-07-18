@@ -527,6 +527,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// for main-actor calls fired from gesture-driven, always-main-thread paths).
         func beginSwitchReveal() {
             MainActor.assumeIsolated {
+                // A new drag interrupting a committed-but-undelivered switch must first tear
+                // down that switch's covering snapshot (C1) - do it BEFORE clearPendingSwitch
+                // nils `revealedSnapshot`'s companion state.
+                discardCommittedSnapshot()
                 clearPendingSwitch()
                 guard let vm, let state = vm.tmuxState else { return }
                 vm.snapshotStore?.refreshNonActive(state: state)
@@ -579,28 +583,36 @@ struct TmuxPaneContainer: UIViewRepresentable {
                       let vm, let state = vm.tmuxState,
                       let active = state.activeWindow,
                       let dir = windowSlideDirection(delta: delta) else { cancelSwitchDrag(); return }
+                // I1 (whole-branch review 2026-07-18): a switch whose target resolves to the
+                // CURRENT window (degenerate neighbor, or a tmux select-window that would no-op)
+                // never changes `state.activeWindow`, so the delivery handoff would never fire
+                // and the covering snapshot would sit for the full 1.5s timeout. Treat it as a
+                // spring-back instead - no cover, no tmux command.
+                let target = vm.neighborWindow(of: active, delta: delta)
+                guard let neighbor = target, neighbor != active else { cancelSwitchDrag(); return }
                 let w = container.bounds.width
                 let outX: CGFloat = (dir.out == .left) ? -w : w
-                // Finish the current window's slide-off; the gap-dim holds at full.
+                // Finish the current window's slide-off; force the gap-dim to full so the gap
+                // reads as a solid grey behind the departing window (I2: a fast velocity-flick
+                // commit may have left the drag-ramped alpha near-zero; the "hold grey"
+                // else-branch below needs it actually grey).
+                containerView?.gapDimOverlay().alpha = CGFloat(GapDim.maxOpacity)
                 UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut], animations: {
                     content.transform = CGAffineTransform(translationX: outX, y: 0)
                 })
                 // Draw the pre-warmed snapshot of the target window at its FINAL frame (only
                 // place a snapshot is shown; full-size, so no zoom mismatch). If the capture
                 // has not landed yet, hold the gap grey until tmux delivers the live window.
-                if let neighbor = vm.neighborWindow(of: active, delta: delta),
-                   let host = vm.snapshotStore?.snapshotView(for: neighbor) {
+                if let host = vm.snapshotStore?.snapshotView(for: neighbor) {
                     container.addSubview(host)                       // above gapDim + slid-off content
                     host.transform = .identity
                     let cell = container.resolvedCellPublic()
                     vm.snapshotStore?.layout(window: neighbor, in: state, bounds: container.bounds,
                                              cellWidth: cell.w, cellHeight: cell.h)
                     revealedSnapshot = (host, neighbor)
-                    pendingSwitchWindow = neighbor
-                } else {
-                    // No snapshot yet: hold grey (gapDim stays); the live window draws on delivery.
-                    pendingSwitchWindow = vm.neighborWindow(of: active, delta: delta)
                 }
+                // Either way, arm the handoff for the target window (both branches).
+                pendingSwitchWindow = neighbor
                 onSwitchWindow(delta)   // tmux select-window
                 // Cancel any prior in-flight timeout before arming a new one (rapid re-commit
                 // race, Task 7 review 2026-07-18).
@@ -637,10 +649,32 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Mirrors the cancel-before-arm guard in `commitSwitchDrag`. Callers must invoke this
         /// from within their own `assumeIsolated` block (touches main-actor stored props but
         /// has no UIKit calls of its own, so it needs no wrapping here).
+        ///
+        /// NOTE: this does NOT remove an on-screen committed snapshot - that teardown is the
+        /// caller's job, because the two callers want different visuals: `cancelSwitchDrag`
+        /// ANIMATES the pane back (so it removes the snapshot in its animation completion),
+        /// while `beginSwitchReveal` (a new drag interrupting a pending commit) tears the cover
+        /// down instantly via `discardCommittedSnapshot()` before the new drag starts.
         private func clearPendingSwitch() {
             pendingSwitchTimeout?.cancel()
             pendingSwitchTimeout = nil
             pendingSwitchWindow = nil
+        }
+
+        /// Instantly remove a committed-but-undelivered snapshot cover and restore the pane
+        /// (no animation), so a NEW drag can start from a clean state. Under the pivot the
+        /// committed snapshot FULLY occludes the pane, so if a second drag begins before the
+        /// first switch delivers, that cover would otherwise be orphaned on screen forever
+        /// (whole-branch review C1, 2026-07-18): once `clearPendingSwitch` nils
+        /// `pendingSwitchWindow`, `completePendingSwitchIfNeeded` early-outs on delivery and
+        /// nothing else removes the view. Main-actor caller only (invoked from within
+        /// `beginSwitchReveal`'s `assumeIsolated` block).
+        private func discardCommittedSnapshot() {
+            guard revealedSnapshot != nil else { return }
+            revealedSnapshot?.view.removeFromSuperview()
+            revealedSnapshot = nil
+            containerView?.paneContentView.transform = .identity
+            clearGapDim()
         }
 
         /// Timeout: the committed switch never delivered. Restore the current content and
