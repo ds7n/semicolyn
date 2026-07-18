@@ -59,4 +59,13 @@ final class GapDimTests: XCTestCase {
         let none = GapDim.endpoints(exposed: .none)
         XCTAssertEqual(none.startX, none.endX, accuracy: 0.0001)
     }
+
+    // Absolute direction (locks the sign the mirror test can't): .previous (rightward drag,
+    // departing window on the RIGHT) has its DARK end (startX) on the right (1.0) fading to
+    // clear on the left (0.0). A swapped mapping would fail this.
+    func testPreviousDarkEndIsOnTheRight() {
+        let ep = GapDim.endpoints(exposed: .previous)
+        XCTAssertEqual(ep.startX, 1.0, accuracy: 0.0001)   // dark end = right edge
+        XCTAssertEqual(ep.endX, 0.0, accuracy: 0.0001)     // clear end = left edge
+    }
 }
