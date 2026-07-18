@@ -158,6 +158,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private var pendingSwitchTimeout: DispatchWorkItem?
         /// The window we are switching TO once tmux delivers it (armed at commit).
         private var pendingSwitchWindow: WindowID?
+        /// Both-ready gate for the commit handoff (2026-07-18 timing fix): the live window
+        /// swaps in only when the commit slide animation has finished (`switchAnimDone`) AND
+        /// tmux has delivered the target window (`switchDelivered`). Whichever async event
+        /// finishes LAST triggers `finishSwitchHandoffIfReady`. Fixes the race where tmux
+        /// delivery (~120ms) reset the transform mid-slide (180ms) so no animation was seen.
+        private var switchAnimDone = false
+        private var switchDelivered = false
         /// The `ContainerView` this coordinator drives; set in `makeUIView`. Weak since
         /// `ContainerView` already holds a weak back-reference to this coordinator (avoid
         /// a retain cycle across the UIViewRepresentable boundary).
@@ -673,6 +680,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
             guard revealedSnapshot != nil else { return }
             revealedSnapshot?.view.removeFromSuperview()
             revealedSnapshot = nil
+            switchAnimDone = false
+            switchDelivered = false
             containerView?.paneContentView.transform = .identity
             clearGapDim()
         }
@@ -686,6 +695,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
             MainActor.assumeIsolated {
                 pendingSwitchTimeout = nil
                 pendingSwitchWindow = nil
+                switchAnimDone = false
+                switchDelivered = false
                 containerView?.paneContentView.transform = .identity
                 revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
                 clearGapDim()
@@ -693,27 +704,45 @@ struct TmuxPaneContainer: UIViewRepresentable {
             }
         }
 
-        /// Called from `apply(state:)` when the active window actually changed: complete
-        /// the handoff by resetting the content transform (live panes now fill it) and
-        /// removing the covering snapshot. No-op if no switch was pending. Wrapped in
-        /// `MainActor.assumeIsolated` like every other Coordinator method here: Swift 6
-        /// checks isolation per-method statically (it can't see that `apply(state:)`'s
-        /// caller is already on the main actor), so the body's `@MainActor` touches
-        /// (`DebugLog.shared.log`, UIView) need the wrap. Nested `assumeIsolated` (when
-        /// called from `apply`'s own block) is a runtime executor assertion, not a lock —
-        /// nesting is safe.
+        /// The both-ready gate: complete the commit handoff only when the slide animation has
+        /// finished AND tmux has delivered the target window. Called from BOTH the commit
+        /// animation completion and the delivery path; the second caller (whichever is last)
+        /// runs the teardown. No-op until both flags are set. Main-actor caller only (both
+        /// call sites are inside `assumeIsolated` blocks).
+        private func finishSwitchHandoffIfReady() {
+            guard switchAnimDone, switchDelivered else {
+                DebugLog.shared.log(.gesture,
+                    "switch finish WAIT anim=\(switchAnimDone) delivered=\(switchDelivered)")
+                return
+            }
+            pendingSwitchTimeout?.cancel(); pendingSwitchTimeout = nil
+            pendingSwitchWindow = nil
+            switchAnimDone = false
+            switchDelivered = false
+            // Live panes are already mounted UNDER the snapshot by `apply(state:)`; reveal them
+            // by resetting the content transform and removing the covering snapshot + gap-dim.
+            containerView?.paneContentView.transform = .identity
+            revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
+            clearGapDim()
+            DebugLog.shared.log(.gesture, "switch finish (both-ready) -> live shown")
+        }
+
+        /// Called from `apply(state:)` when the active window actually changed: RECORD that
+        /// tmux delivered the target window, then let the both-ready gate decide whether to
+        /// finish now (if the slide animation has also finished) or wait for it. No-op if no
+        /// drag-switch is pending (e.g. an esc-pill switch, which sets no `pendingSwitchWindow`).
+        /// Wrapped in `MainActor.assumeIsolated` (Swift 6 checks isolation per-method; nested
+        /// wrap when called from `apply`'s own block is a runtime assertion, safe to nest).
         func completePendingSwitchIfNeeded(newActive: WindowID) {
             MainActor.assumeIsolated {
                 guard pendingSwitchWindow != nil else {
                     // A switch that arrived without our drag (e.g. esc-pill): nothing to hand off.
                     return
                 }
-                pendingSwitchTimeout?.cancel(); pendingSwitchTimeout = nil
-                pendingSwitchWindow = nil
-                containerView?.paneContentView.transform = .identity
-                revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
-                clearGapDim()
-                DebugLog.shared.log(.gesture, "switch handoff complete active=@\(newActive.raw)")
+                switchDelivered = true
+                DebugLog.shared.log(.gesture,
+                    "switch delivered active=@\(newActive.raw) animDone=\(switchAnimDone)")
+                finishSwitchHandoffIfReady()
             }
         }
     }
