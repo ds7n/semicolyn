@@ -101,9 +101,11 @@ commit
 ```
 
 - **Storage:** `[WindowID: SnapshotView]`.
-- **Staleness:** each snapshot carries a generation tag; a late `capture-pane` reply for a window
-  that is no longer relevant (window closed, generation superseded) is **dropped**, never applied
-  to the wrong view.
+- **Staleness:** a `capture-pane` reply for a pane whose window was closed is **dropped** (its
+  `paneWindow` entry is cleared on the window-list change, so the apply-path guards it out).
+  Replies for a still-live pane arrive in issue order because tmux resolves command results
+  FIFO, so the latest capture's bytes are the ones that land (no generation tag needed; an
+  earlier design used one, removed as dead state once the FIFO guarantee was confirmed).
 - **Non-blocking:** a missing / not-yet-arrived snapshot at reveal time shows the last-known
   content (or empty on the very first drag before any reply lands). The drag never blocks on a
   reply.
@@ -125,12 +127,22 @@ commit
             just off the revealing edge
 .changed -> offset = WindowDragModel.offset(dx, width)
             paneContentView.transform = translate(offset)
-            neighbor snapshot x tracks the exposed edge
+            neighbor snapshot x tracks the exposed edge (paired-card: the two translate
+            as a rigid pair, both following the finger)
 .ended   -> SwitchCommitDecision.commit(dx, width, velocity)
 ```
 
 If the finger reverses across center (drag right then left), the exposed snapshot swaps to the
 other neighbor (offset sign from `WindowDragModel`).
+
+**Paired-card model + seam dimming (brainstorm refinement 2026-07-18):** the outgoing pane
+content and the incoming neighbor snapshot move together as a rigid pair, both tracking the
+finger (iOS-photos feel). A **seam-dim** gradient (`CAGradientLayer` on the incoming card's
+leading edge, opacity ramping with drag progress) gives a layered depth cue with **no text-render
+change** - we explicitly rejected a real 3D page-curl (rasterizing the live text view + shader
+deformation) as too costly / likely to shimmer on a monospace grid; the gradient is also the lone
+extension point if a parallax multiplier is added later. Both are decided; a real curl is out of
+scope (revisit only if the flat + seam-dim feel is judged insufficient on device).
 
 **Commit (`.commit(delta)`):**
 1. Animate `paneContentView` + the incoming snapshot the rest of the way so the snapshot fully

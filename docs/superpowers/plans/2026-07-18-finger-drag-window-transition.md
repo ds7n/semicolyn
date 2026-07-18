@@ -1060,6 +1060,9 @@ with:
         private var pendingSwitchTimeout: DispatchWorkItem?
         /// The window we are switching TO once tmux delivers it (armed at commit).
         private var pendingSwitchWindow: WindowID?
+        /// Seam-dim gradient on the incoming card's leading edge (depth cue, no text-render
+        /// change). Installed lazily in `updateSeamDim`, removed in `clearSeamDim`.
+        private var seamDim: CAGradientLayer?
 ```
 
 - [ ] **Step 2: Wire the four new callbacks**
@@ -1124,10 +1127,52 @@ Add these methods to the `Coordinator` (all `@MainActor` - the coordinator alrea
                 vm.snapshotStore?.layout(window: neighbor, in: state, bounds: container.bounds,
                                          cellWidth: cell.w, cellHeight: cell.h)
             }
-            // The neighbor sits just off the revealing edge, offset with the content.
+            // Paired-card model: outgoing pane content + incoming neighbor translate as a
+            // rigid pair, both tracking the finger. The neighbor sits one width off the
+            // revealing edge, offset with the content.
             let w = container.bounds.width
             let base: CGFloat = (exposed == .previous) ? -w : w   // prev enters from left, next from right
             host.transform = CGAffineTransform(translationX: base + CGFloat(offset), y: 0)
+            // Edge/seam dimming: fade the seam between the two cards for a depth cue with
+            // NO text-render change (decided in brainstorm 2026-07-18: seam dimming, no
+            // real 3D curl). See `installSeamDim` / `updateSeamDim` below.
+            updateSeamDim(on: host, exposed: exposed, progress: abs(offset) / max(w, 1))
+        }
+
+        /// A thin gradient overlay on the incoming card's LEADING edge (the seam between
+        /// the two cards), darkening toward the seam so the pair reads as layered depth.
+        /// A `CAGradientLayer`, NOT a render transform on the text — the terminal glyphs are
+        /// never distorted (brainstorm 2026-07-18: no real curl). This is also the single
+        /// extension point if a parallax multiplier is added later.
+        private func installSeamDim(on host: UIView, exposed: ExposedNeighbor) -> CAGradientLayer {
+            let g = CAGradientLayer()
+            g.frame = host.bounds
+            // Horizontal gradient; opaque black at the seam edge fading to clear across ~16% of width.
+            g.startPoint = CGPoint(x: exposed == .previous ? 1.0 : 0.0, y: 0.5)  // seam is the edge nearest the outgoing card
+            g.endPoint   = CGPoint(x: exposed == .previous ? 0.0 : 1.0, y: 0.5)
+            g.colors = [UIColor.black.withAlphaComponent(0.35).cgColor, UIColor.clear.cgColor]
+            g.locations = [0.0, 0.16]
+            g.isUserInteractionEnabled = false
+            host.layer.addSublayer(g)
+            return g
+        }
+
+        /// Update the seam-dim strength with drag progress (0 at rest -> full at a
+        /// full-width reveal) and keep its frame pinned to the host. Lazily installs the
+        /// gradient on first call for this reveal; tracked in `seamDim`.
+        private func updateSeamDim(on host: UIView, exposed: ExposedNeighbor, progress: Double) {
+            let g = seamDim ?? installSeamDim(on: host, exposed: exposed)
+            seamDim = g
+            g.frame = host.bounds
+            // Opacity ramps with how far the reveal has progressed (clamped 0...1), so the
+            // seam is subtle at the start of a drag and strongest when the card is fully in.
+            g.opacity = Float(min(max(progress, 0), 1))
+        }
+
+        /// Remove the seam-dim gradient (on commit-handoff, spring-back, or timeout).
+        private func clearSeamDim() {
+            seamDim?.removeFromSuperlayer()
+            seamDim = nil
         }
 
         /// Release past threshold: settle the snapshot fully over the pane, issue the tmux
@@ -1165,6 +1210,7 @@ Add these methods to the `Coordinator` (all `@MainActor` - the coordinator alrea
                 self?.revealedSnapshot?.view.removeFromSuperview()
                 self?.revealedSnapshot = nil
             })
+            clearSeamDim()
             DebugLog.shared.log(.gesture, "switch cancel -> spring back")
         }
 
@@ -1175,6 +1221,7 @@ Add these methods to the `Coordinator` (all `@MainActor` - the coordinator alrea
             pendingSwitchWindow = nil
             containerView?.paneContentView.transform = .identity
             revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
+            clearSeamDim()
             DebugLog.shared.log(.gesture, "switch TIMEOUT -> restore current")
         }
 
@@ -1190,6 +1237,7 @@ Add these methods to the `Coordinator` (all `@MainActor` - the coordinator alrea
             pendingSwitchWindow = nil
             containerView?.paneContentView.transform = .identity
             revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
+            clearSeamDim()
             DebugLog.shared.log(.gesture, "switch handoff complete active=@\(newActive.raw)")
         }
 ```
