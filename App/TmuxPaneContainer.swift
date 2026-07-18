@@ -588,7 +588,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
             g.endPoint   = CGPoint(x: exposed == .previous ? 0.0 : 1.0, y: 0.5)
             g.colors = [UIColor.black.withAlphaComponent(0.35).cgColor, UIColor.clear.cgColor]
             g.locations = [0.0, 0.16]
-            g.isUserInteractionEnabled = false
+            // (A CALayer is inherently non-interactive; no `isUserInteractionEnabled` to set,
+            // and the host snapshot view is non-interactive already.)
             host.layer.addSublayer(g)
             return g
         }
@@ -692,22 +693,26 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         /// Called from `apply(state:)` when the active window actually changed: complete
         /// the handoff by resetting the content transform (live panes now fill it) and
-        /// removing the covering snapshot. No-op if no switch was pending. `apply(state:)`
-        /// runs on the main thread (SwiftUI `updateUIView`), so this is called from within
-        /// an existing `assumeIsolated` block there — no additional wrapping needed here to
-        /// avoid re-entrant `assumeIsolated`, but this method's own body does touch
-        /// `@MainActor` state, so it stays a plain method callable from that block.
+        /// removing the covering snapshot. No-op if no switch was pending. Wrapped in
+        /// `MainActor.assumeIsolated` like every other Coordinator method here: Swift 6
+        /// checks isolation per-method statically (it can't see that `apply(state:)`'s
+        /// caller is already on the main actor), so the body's `@MainActor` touches
+        /// (`DebugLog.shared.log`, UIView) need the wrap. Nested `assumeIsolated` (when
+        /// called from `apply`'s own block) is a runtime executor assertion, not a lock —
+        /// nesting is safe.
         func completePendingSwitchIfNeeded(newActive: WindowID) {
-            guard pendingSwitchWindow != nil else {
-                // A switch that arrived without our drag (e.g. esc-pill): nothing to hand off.
-                return
+            MainActor.assumeIsolated {
+                guard pendingSwitchWindow != nil else {
+                    // A switch that arrived without our drag (e.g. esc-pill): nothing to hand off.
+                    return
+                }
+                pendingSwitchTimeout?.cancel(); pendingSwitchTimeout = nil
+                pendingSwitchWindow = nil
+                containerView?.paneContentView.transform = .identity
+                revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
+                clearSeamDim()
+                DebugLog.shared.log(.gesture, "switch handoff complete active=@\(newActive.raw)")
             }
-            pendingSwitchTimeout?.cancel(); pendingSwitchTimeout = nil
-            pendingSwitchWindow = nil
-            containerView?.paneContentView.transform = .identity
-            revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
-            clearSeamDim()
-            DebugLog.shared.log(.gesture, "switch handoff complete active=@\(newActive.raw)")
         }
     }
 
