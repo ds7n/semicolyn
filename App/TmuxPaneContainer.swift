@@ -567,50 +567,63 @@ struct TmuxPaneContainer: UIViewRepresentable {
             containerView?.gapDimOverlay().alpha = 0
         }
 
-        /// Release past threshold: settle the snapshot fully over the pane, issue the tmux
-        /// switch, and arm the delivery timeout. The live window swaps in UNDER the snapshot
-        /// in `apply(state:)` (Step 4). Wrapped in `assumeIsolated` for the same reason as
-        /// `beginSwitchReveal`.
+        /// Release past threshold: finish sliding the current window off, issue the tmux
+        /// switch, and draw the PRE-WARMED snapshot of the new window at its FINAL full-size
+        /// frame (identity transform) so it covers the pane with no blank flash and no zoom
+        /// mismatch (the snapshot is never shown under a partial drag transform). The live
+        /// panes swap in UNDER it in `apply(state:)`; a 1.5s timeout is the safety net.
         func commitSwitchDrag(delta: Int) {
             MainActor.assumeIsolated {
                 guard let content = containerView?.paneContentView,
                       let container = containerView,
+                      let vm, let state = vm.tmuxState,
+                      let active = state.activeWindow,
                       let dir = windowSlideDirection(delta: delta) else { cancelSwitchDrag(); return }
                 let w = container.bounds.width
                 let outX: CGFloat = (dir.out == .left) ? -w : w
-                let host = revealedSnapshot?.view
-                pendingSwitchWindow = revealedSnapshot?.window
+                // Finish the current window's slide-off; the gap-dim holds at full.
                 UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut], animations: {
                     content.transform = CGAffineTransform(translationX: outX, y: 0)
-                    host?.transform = .identity
                 })
+                // Draw the pre-warmed snapshot of the target window at its FINAL frame (only
+                // place a snapshot is shown; full-size, so no zoom mismatch). If the capture
+                // has not landed yet, hold the gap grey until tmux delivers the live window.
+                if let neighbor = vm.neighborWindow(of: active, delta: delta),
+                   let host = vm.snapshotStore?.snapshotView(for: neighbor) {
+                    container.addSubview(host)                       // above gapDim + slid-off content
+                    host.transform = .identity
+                    let cell = container.resolvedCellPublic()
+                    vm.snapshotStore?.layout(window: neighbor, in: state, bounds: container.bounds,
+                                             cellWidth: cell.w, cellHeight: cell.h)
+                    revealedSnapshot = (host, neighbor)
+                    pendingSwitchWindow = neighbor
+                } else {
+                    // No snapshot yet: hold grey (gapDim stays); the live window draws on delivery.
+                    pendingSwitchWindow = vm.neighborWindow(of: active, delta: delta)
+                }
                 onSwitchWindow(delta)   // tmux select-window
-                // Cancel any prior in-flight timeout before arming a new one: a rapid second
-                // commit (within the 1.5s window, before the first switch's live window
-                // arrives) would otherwise leave the stale timer live, and it would fire
-                // `failPendingSwitch` against THIS commit's pending state, snapping the view
-                // mid-handoff. (Task 7 review 2026-07-18.)
+                // Cancel any prior in-flight timeout before arming a new one (rapid re-commit
+                // race, Task 7 review 2026-07-18).
                 pendingSwitchTimeout?.cancel()
                 let timeout = DispatchWorkItem { [weak self] in self?.failPendingSwitch() }
                 pendingSwitchTimeout = timeout
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: timeout)
-                DebugLog.shared.log(.gesture, "switch commit delta=\(delta) -> pending @\(pendingSwitchWindow.map { "\($0.raw)" } ?? "nil")")
+                DebugLog.shared.log(.gesture,
+                    "switch commit delta=\(delta) snapshot=\(revealedSnapshot != nil) -> pending @\(pendingSwitchWindow.map { "\($0.raw)" } ?? "nil")")
             }
         }
 
-        /// Release short: animate the current window back to identity, drop the snapshot.
-        /// Wrapped in `assumeIsolated` for the same reason as `beginSwitchReveal`.
+        /// Release short: spring the current window back to identity and clear the gap-dim.
+        /// No during-drag snapshot exists to move (pivot: the snapshot is drawn only on
+        /// commit). Wrapped in `assumeIsolated` for the same reason as `beginSwitchReveal`.
         func cancelSwitchDrag() {
             MainActor.assumeIsolated {
                 clearPendingSwitch()
                 guard let content = containerView?.paneContentView else { return }
-                let host = revealedSnapshot?.view
-                let w = containerView?.bounds.width ?? 0
-                let exposedPrev = (host?.transform.tx ?? 0) < 0
                 UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut], animations: {
                     content.transform = .identity
-                    host?.transform = CGAffineTransform(translationX: exposedPrev ? -w : w, y: 0)
                 }, completion: { [weak self] _ in
+                    // Drop any snapshot that a just-committed switch left (defensive; normally nil).
                     self?.revealedSnapshot?.view.removeFromSuperview()
                     self?.revealedSnapshot = nil
                 })
