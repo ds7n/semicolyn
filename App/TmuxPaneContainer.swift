@@ -158,9 +158,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private var pendingSwitchTimeout: DispatchWorkItem?
         /// The window we are switching TO once tmux delivers it (armed at commit).
         private var pendingSwitchWindow: WindowID?
-        /// Seam-dim gradient on the incoming card's leading edge (depth cue, no text-render
-        /// change). Installed lazily in `updateSeamDim`, removed in `clearSeamDim`.
-        private var seamDim: CAGradientLayer?
         /// The `ContainerView` this coordinator drives; set in `makeUIView`. Weak since
         /// `ContainerView` already holds a weak back-reference to this coordinator (avoid
         /// a retain cycle across the UIViewRepresentable boundary).
@@ -537,79 +534,37 @@ struct TmuxPaneContainer: UIViewRepresentable {
             }
         }
 
-        /// Live `.changed`: translate `paneContentView`, and slide the exposed neighbor's
-        /// snapshot host in from the opposite edge so it tracks the gap. Wrapped in
+        /// Live `.changed`: slide `paneContentView` with the finger and darken the exposed
+        /// gap behind it. NO neighbor window is shown during the drag (pivot 2026-07-18:
+        /// prep-don't-reveal); the pre-warmed snapshot is drawn only on commit. Wrapped in
         /// `assumeIsolated` for the same reason as `beginSwitchReveal`.
         func updateSwitchDrag(offset: Double, exposed: ExposedNeighbor) {
             MainActor.assumeIsolated {
-                guard let content = containerView?.paneContentView,
-                      let vm, let state = vm.tmuxState,
-                      let active = state.activeWindow else { return }
+                guard let content = containerView?.paneContentView else { return }
                 content.transform = CGAffineTransform(translationX: CGFloat(offset), y: 0)
-                // Resolve the neighbor window id for the drag direction (wrap at ends).
-                let delta = (exposed == .previous) ? -1 : (exposed == .next ? +1 : 0)
-                guard delta != 0, let neighbor = vm.neighborWindow(of: active, delta: delta),
-                      let host = vm.snapshotStore?.snapshotView(for: neighbor),
-                      let container = containerView else {
-                    revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
-                    return
-                }
-                if revealedSnapshot?.window != neighbor {
-                    revealedSnapshot?.view.removeFromSuperview()
-                    container.addSubview(host)
-                    revealedSnapshot = (host, neighbor)
-                    let cell = container.resolvedCellPublic()
-                    vm.snapshotStore?.layout(window: neighbor, in: state, bounds: container.bounds,
-                                             cellWidth: cell.w, cellHeight: cell.h)
-                }
-                // Paired-card model: outgoing pane content + incoming neighbor translate as a
-                // rigid pair, both tracking the finger. The neighbor sits one width off the
-                // revealing edge, offset with the content.
-                let w = container.bounds.width
-                let base: CGFloat = (exposed == .previous) ? -w : w   // prev enters from left, next from right
-                host.transform = CGAffineTransform(translationX: base + CGFloat(offset), y: 0)
-                // Edge/seam dimming: fade the seam between the two cards for a depth cue with
-                // NO text-render change (decided in brainstorm 2026-07-18: seam dimming, no
-                // real 3D curl). See `installSeamDim` / `updateSeamDim` below.
-                updateSeamDim(on: host, exposed: exposed, progress: abs(offset) / max(w, 1))
+                updateGapDim(exposed: exposed, offset: offset)
             }
         }
 
-        /// A thin gradient overlay on the incoming card's LEADING edge (the seam between
-        /// the two cards), darkening toward the seam so the pair reads as layered depth.
-        /// A `CAGradientLayer`, NOT a render transform on the text — the terminal glyphs are
-        /// never distorted (brainstorm 2026-07-18: no real curl). This is also the single
-        /// extension point if a parallax multiplier is added later.
-        private func installSeamDim(on host: UIView, exposed: ExposedNeighbor) -> CAGradientLayer {
-            let g = CAGradientLayer()
-            g.frame = host.bounds
-            // Horizontal gradient; opaque black at the seam edge fading to clear across ~16% of width.
-            g.startPoint = CGPoint(x: exposed == .previous ? 1.0 : 0.0, y: 0.5)  // seam is the edge nearest the outgoing card
-            g.endPoint   = CGPoint(x: exposed == .previous ? 0.0 : 1.0, y: 0.5)
-            g.colors = [UIColor.black.withAlphaComponent(0.35).cgColor, UIColor.clear.cgColor]
-            g.locations = [0.0, 0.16]
-            // (A CALayer is inherently non-interactive; no `isUserInteractionEnabled` to set,
-            // and the host snapshot view is non-interactive already.)
-            host.layer.addSublayer(g)
-            return g
+        /// Ramp the gap-dim overlay with drag progress (`GapDim.opacity`) and set its gradient
+        /// direction (`GapDim.endpoints`) so the dark end is nearest the departing window.
+        /// Assumes the caller is already on the main actor (called from within
+        /// `updateSwitchDrag`'s `assumeIsolated` block).
+        private func updateGapDim(exposed: ExposedNeighbor, offset: Double) {
+            guard let container = containerView else { return }
+            let w = Double(container.bounds.width)
+            let overlay = container.gapDimOverlay()
+            let gradient = container.gapDimLayer()
+            let ep = GapDim.endpoints(exposed: exposed)
+            gradient.startPoint = CGPoint(x: ep.startX, y: 0.5)
+            gradient.endPoint = CGPoint(x: ep.endX, y: 0.5)
+            overlay.alpha = CGFloat(GapDim.opacity(offset: offset, width: w))
         }
 
-        /// Update the seam-dim strength with drag progress (0 at rest -> full at a
-        /// full-width reveal) and keep its frame pinned to the host. Lazily installs the
-        /// gradient on first call for this reveal; tracked in `seamDim`.
-        private func updateSeamDim(on host: UIView, exposed: ExposedNeighbor, progress: Double) {
-            let g = seamDim ?? installSeamDim(on: host, exposed: exposed)
-            seamDim = g
-            g.frame = host.bounds
-            // Opacity ramps with how far the reveal has progressed (clamped 0...1), so the
-            // seam is subtle at the start of a drag and strongest when the card is fully in.
-            g.opacity = Float(min(max(progress, 0), 1))
-        }
-
-        /// Remove the seam-dim gradient (on commit-handoff, spring-back, or timeout).
-        private func clearSeamDim() {
-            seamDim?.removeFromSuperlayer()
-            seamDim = nil
+        /// Fade the gap-dim overlay back to transparent (spring-back, commit-handoff, timeout).
+        /// Main-actor caller (invoked from within existing `assumeIsolated` blocks).
+        private func clearGapDim() {
+            containerView?.gapDimOverlay().alpha = 0
         }
 
         /// Release past threshold: settle the snapshot fully over the pane, issue the tmux
@@ -659,7 +614,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     self?.revealedSnapshot?.view.removeFromSuperview()
                     self?.revealedSnapshot = nil
                 })
-                clearSeamDim()
+                clearGapDim()
                 DebugLog.shared.log(.gesture, "switch cancel -> spring back")
             }
         }
@@ -686,7 +641,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 pendingSwitchWindow = nil
                 containerView?.paneContentView.transform = .identity
                 revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
-                clearSeamDim()
+                clearGapDim()
                 DebugLog.shared.log(.gesture, "switch TIMEOUT -> restore current")
             }
         }
@@ -710,7 +665,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 pendingSwitchWindow = nil
                 containerView?.paneContentView.transform = .identity
                 revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
-                clearSeamDim()
+                clearGapDim()
                 DebugLog.shared.log(.gesture, "switch handoff complete active=@\(newActive.raw)")
             }
         }
