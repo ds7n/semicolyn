@@ -10,8 +10,10 @@ import SemicolynKit
 /// each holds a SwiftTerm `TerminalView` per pane, positioned from the window's
 /// `visibleLayout`. Fed by `TmuxRuntime.captureSnapshot` -> `onSnapshotCaptured`.
 ///
-/// A per-pane `generation` counter drops a late reply for a pane whose window was closed
-/// or re-captured, so stale bytes never land in the wrong view.
+/// A reply for a pane whose window was closed is dropped (its `paneWindow` entry is
+/// cleared in `rebuild`, so `applyCapture` guards it out). Replies for a live pane arrive
+/// in issue order (tmux resolves command results FIFO), so the latest capture's bytes are
+/// the ones that land.
 @MainActor
 final class WindowSnapshotStore {
     private let runtime: TmuxRuntime
@@ -23,8 +25,6 @@ final class WindowSnapshotStore {
     /// The snapshot TerminalView per pane, and which window it belongs to.
     private var paneViews: [PaneID: TerminalView] = [:]
     private var paneWindow: [PaneID: WindowID] = [:]
-    /// Monotonic capture generation per pane; a reply is applied only if it matches.
-    private var generation: [PaneID: Int] = [:]
 
     init(runtime: TmuxRuntime,
          scrollbackLines: @escaping () -> Int,
@@ -45,14 +45,15 @@ final class WindowSnapshotStore {
         for window in state.windows where window.id != state.activeWindow {
             // `visibleLayout?.panes` yields (pane: PaneID, geometry: Geometry) leaves.
             for leaf in window.visibleLayout?.panes ?? [] {
-                bumpGeneration(leaf.pane, window: window.id)
+                noteCapture(leaf.pane, window: window.id)
                 runtime.captureSnapshot(pane: leaf.pane, lines: lines)
             }
         }
     }
 
-    /// Drop hosting views for windows that no longer exist; invalidate their generations
-    /// so any in-flight reply is ignored. Called on a window-list change.
+    /// Drop hosting views for windows that no longer exist; clear their panes' `paneWindow`
+    /// entries so any in-flight reply is dropped by `applyCapture`. Called on a window-list
+    /// change.
     func rebuild(state: TmuxSessionState) {
         let live = Set(state.windows.map(\.id))
         for (win, view) in windowViews where !live.contains(win) {
@@ -65,15 +66,13 @@ final class WindowSnapshotStore {
         for pane in paneViews.keys where !livePanes.contains(pane) {
             paneViews[pane] = nil
             paneWindow[pane] = nil
-            generation[pane] = (generation[pane] ?? 0) + 1   // invalidate in-flight
         }
     }
 
     /// The hosting view for `window`'s snapshot, or nil if nothing captured yet.
     func snapshotView(for window: WindowID) -> UIView? { windowViews[window] }
 
-    private func bumpGeneration(_ pane: PaneID, window: WindowID) {
-        generation[pane] = (generation[pane] ?? 0) + 1
+    private func noteCapture(_ pane: PaneID, window: WindowID) {
         paneWindow[pane] = window
     }
 
