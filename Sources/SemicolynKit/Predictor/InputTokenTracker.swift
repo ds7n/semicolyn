@@ -46,6 +46,16 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// leading space exactly at line start).
     private var sawLineStart = false
 
+    /// Monotonic tally of tokens DROPPED by the L3 paste gate. PRIVACY-SAFE: a count
+    /// only, never the dropped text. The App reads the delta after `observe` and logs
+    /// `predictor:drop-gate paste=N secret=M` so a device trace proves the
+    /// secret-exclusion gates are actually firing (previously invisible: audit
+    /// 2026-07-19). Never reset except by `reset()` so deltas across chunks are stable.
+    public private(set) var droppedInPaste = 0
+    /// Monotonic tally of tokens DROPPED by the L4b secret-value gate. Privacy-safe
+    /// count only (see `droppedInPaste`).
+    public private(set) var droppedAsSecret = 0
+
     private static let pasteEnter: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]  // ESC[200~
     private static let pasteExit: [UInt8]  = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]  // ESC[201~
 
@@ -70,7 +80,15 @@ public struct InputTokenTracker: Equatable, Sendable {
             if Self.pasteEnter.starts(with: escapeBuffer) || Self.pasteExit.starts(with: escapeBuffer) {
                 if escapeBuffer == Self.pasteEnter { withinPaste = true; escapeBuffer = [] }
                 else if escapeBuffer == Self.pasteExit {
-                    if withinPaste { current = "" }   // drop whatever accumulated inside the paste
+                    if withinPaste {
+                        // Drop whatever accumulated inside the paste. This is the SECOND L3
+                        // drop site (the first is `commitCurrent`'s paste branch, for a
+                        // delimiter seen mid-paste); count it too so `droppedInPaste`
+                        // reflects every paste-suppressed token. Only tally non-empty
+                        // content so an empty/marker-only paste does not inflate the count.
+                        if !current.isEmpty { droppedInPaste += 1 }
+                        current = ""
+                    }
                     withinPaste = false
                     escapeBuffer = []
                 }
@@ -131,6 +149,7 @@ public struct InputTokenTracker: Equatable, Sendable {
         // L3: inside a paste — drop; do NOT touch `previous` or `secretCheckPrev`.
         if withinPaste {
             current = ""
+            droppedInPaste += 1   // privacy-safe tally (count, not text) for the App drop-gate log
             return
         }
         // L4b: a denylisted secret value — drop, no `previous` advance (the next
@@ -140,6 +159,7 @@ public struct InputTokenTracker: Equatable, Sendable {
         if isSecretValueToken(current, precededBy: secretCheckPrev) {
             secretCheckPrev = nil
             current = ""
+            droppedAsSecret += 1   // privacy-safe tally (count, not text) for the App drop-gate log
             return
         }
         committed.append(CommittedToken(token: current, previous: previous))
@@ -165,6 +185,8 @@ public struct InputTokenTracker: Equatable, Sendable {
         lineOptedOut = false
         lastCommittedLineOptedOut = false
         sawLineStart = false
+        droppedInPaste = 0
+        droppedAsSecret = 0
     }
 }
 

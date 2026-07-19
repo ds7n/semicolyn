@@ -62,6 +62,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Nil when the predictor is disabled for this session (incognito).
     private var predictor: PredictorActor?
     private var tracker = InputTokenTracker()
+    /// Last-observed values of the tracker's monotonic secret-exclusion drop tallies,
+    /// so `observePredictorInput` can log the PER-CHUNK delta (privacy-safe: counts of
+    /// tokens the L3-paste / L4b-secret gates dropped, never the token text). Reset to 0
+    /// whenever the tracker is reset (context/host switch), mirroring the tracker's own
+    /// counter reset. Enables the `.predictor` `drop-gate` line the audit found missing.
+    private var lastDropInPaste = 0
+    private var lastDropAsSecret = 0
     /// Trailing-debounce so a typing burst recomputes suggestions once, not per
     /// keystroke (Plan B).
     // 0.035 < the 40ms settle-hop delay so the folded `isDue` check clears the window
@@ -237,8 +244,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         PerfSignposts.input.endInterval("send", signpost)
         // ── after the write: diagnostics (gated no-op) + forked observation ───────
         // `log` is an @autoclosure that is a no-op unless diagnostics is enabled, so
-        // this string is not even built in normal use.
-        DebugLog.shared.log(.input, "input[\(bytes.count)B] → \(moshSession != nil ? "MOSH" : (tmux != nil ? "TMUX" : "RAW"))")
+        // this string is not even built in normal use. Structure only (byte count),
+        // never content: this line sees every keystroke including secrets.
+        let transport = moshSession != nil ? "MOSH" : (tmux != nil ? "TMUX" : "RAW")
+        DebugLog.shared.log(.input, decisionLine(
+            "input:dispatch",
+            inputs: [("bytes", "\(bytes.count)")],
+            outputs: [("transport", transport)],
+            reason: nil))
         observePredictorInput(bytes)
     }
 
@@ -490,6 +503,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             AppStores.shared.activePredictorSession = nil
         }
         tracker.reset()
+        lastDropInPaste = 0               // mirror the tracker's monotonic drop-tally reset
+        lastDropAsSecret = 0
         passwordDetector.reset()          // clear echo/prompt state across sessions
         pendingLineTokens.removeAll()     // drop any un-flushed line tokens
         predictorVM.setSuggestions([])
@@ -672,10 +687,29 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// with a banner. Returns true if a Mosh session was attached; false if it fell
     /// back (the caller then runs the existing tmux/raw branch).
     private func attachMoshIfPossible(conn: Connection, host: Host, defaults: Defaults) async -> Bool {
+        // resolveMoshEnabled reads the leaf-independent `mosh.enabled` (host
+        // container's leaf, else Defaults container's leaf, else false: see
+        // `resolveLeaf`). Log both containers' explicit-vs-inherit state so a
+        // device trace shows which one actually drove the decision.
+        let hostMoshExplicit: Bool
+        if case .explicit = host.mosh { hostMoshExplicit = true } else { hostMoshExplicit = false }
+        let defaultsMoshExplicit: Bool
+        if case .explicit = defaults.mosh { defaultsMoshExplicit = true } else { defaultsMoshExplicit = false }
         guard resolveMoshEnabled(host: host, defaults: defaults) else {
-            DebugLog.shared.log(.connect, "mosh: disabled for this host → SSH/tmux path")
+            DebugLog.shared.log(.connect, decisionLine(
+                "connect:mosh-decision",
+                inputs: [("hostMoshExplicit", "\(hostMoshExplicit)"),
+                         ("defaultsMoshExplicit", "\(defaultsMoshExplicit)")],
+                outputs: [("enabled", "false")],
+                reason: hostMoshExplicit ? "host-explicit-off" : "defaults-off-or-unset"))
             return false
         }
+        DebugLog.shared.log(.connect, decisionLine(
+            "connect:mosh-decision",
+            inputs: [("hostMoshExplicit", "\(hostMoshExplicit)"),
+                     ("defaultsMoshExplicit", "\(defaultsMoshExplicit)")],
+            outputs: [("enabled", "true")],
+            reason: hostMoshExplicit ? "host-explicit-on" : "defaults-on"))
         // Effective config for the argv (port range, server path, prediction mode).
         // resolveOptional honors Inherited three-state (NOT host.mosh.value).
         let cfg = resolveOptional(host.mosh, defaults.mosh) ?? MoshConfig(enabled: true)
@@ -923,6 +957,22 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             for pane in self.renderablePanes {
                 if let ctx = runtime.paneContext(pane) { map[pane] = ctx }
             }
+            // Context-map update trace (audit 2026-07-19: Bug-1 dragged-pane-absent was
+            // undiagnosable). Log the INPUTS (renderable pane set) and what CHANGED vs the
+            // prior map, so a missing pane's absence is visible in the trace.
+            let old = self.paneContexts
+            let added = map.keys.filter { old[$0] == nil }.map { "%\($0.raw)" }.sorted()
+            let removed = old.keys.filter { map[$0] == nil }.map { "%\($0.raw)" }.sorted()
+            let changed = map.keys.filter { old[$0] != nil && old[$0] != map[$0] }
+                .map { "%\($0.raw)" }.sorted()
+            DebugLog.shared.log(.tmux, decisionLine(
+                "tmux:contexts",
+                inputs: [("renderable", "\(self.renderablePanes.count)")],
+                outputs: [("panes", "\(map.count)"),
+                          ("added", added.isEmpty ? "none" : added.joined(separator: ",")),
+                          ("removed", removed.isEmpty ? "none" : removed.joined(separator: ",")),
+                          ("changed", changed.isEmpty ? "none" : changed.joined(separator: ","))],
+                reason: "list-panes-reply"))
             self.paneContexts = map
             self.refreshFnAutoEngage()
         }
@@ -1116,6 +1166,20 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
         }
+        // Secret-exclusion drop-gate trace (audit 2026-07-19: these gates were previously
+        // invisible). Log ONLY when this chunk actually dropped something, and the DELTA
+        // (tallies are monotonic until reset). PRIVACY: counts only, never token text.
+        let dPaste = tracker.droppedInPaste - lastDropInPaste
+        let dSecret = tracker.droppedAsSecret - lastDropAsSecret
+        if dPaste > 0 || dSecret > 0 {
+            lastDropInPaste = tracker.droppedInPaste
+            lastDropAsSecret = tracker.droppedAsSecret
+            DebugLog.shared.log(.predictor, decisionLine(
+                "predictor:drop-gate",
+                inputs: [("bytes", "\(bytes.count)")],
+                outputs: [("paste", "\(dPaste)"), ("secret", "\(dSecret)")],
+                reason: dSecret > 0 ? "L4b-secret" : "L3-paste"))
+        }
         // If this chunk left the line empty with no usable preceding token (an ESC /
         // Ctrl-* / control line reset, or a backspace-to-empty), clear stale chips now.
         // Enter is already handled synchronously below; the normal typing case has a
@@ -1269,6 +1333,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // Probe + branch on tmux availability.
                 let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
                 osc52Allowed = resolveOsc52Allow(host: savedHost, defaults: defaults2)
+                // resolveOsc52Allow reads the leaf-independent `semicolyn.osc52.allow`
+                // (host container's leaf, else Defaults container's leaf, else true).
+                // Log both containers' explicit-vs-inherit state alongside the result.
+                let hostSemicolynExplicit: Bool
+                if case .explicit = savedHost.semicolyn { hostSemicolynExplicit = true } else { hostSemicolynExplicit = false }
+                let defaultsSemicolynExplicit: Bool
+                if case .explicit = defaults2.semicolyn { defaultsSemicolynExplicit = true } else { defaultsSemicolynExplicit = false }
+                DebugLog.shared.log(.connect, decisionLine(
+                    "connect:osc52",
+                    inputs: [("hostSemicolynExplicit", "\(hostSemicolynExplicit)"),
+                             ("defaultsSemicolynExplicit", "\(defaultsSemicolynExplicit)")],
+                    outputs: [("osc52Allowed", "\(osc52Allowed)")],
+                    reason: nil))
                 startPredictor(host: savedHost, defaults: defaults2)
                 // Mosh takes precedence over tmux when enabled + bootstrappable.
                 if await attachMoshIfPossible(conn: conn, host: savedHost, defaults: defaults2) {
@@ -1331,6 +1408,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // Probe + branch on tmux availability.
                 let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
                 osc52Allowed = resolveOsc52Allow(host: hostRecord, defaults: defaults2)
+                // resolveOsc52Allow reads the leaf-independent `semicolyn.osc52.allow`
+                // (host container's leaf, else Defaults container's leaf, else true).
+                // Log both containers' explicit-vs-inherit state alongside the result.
+                let hostSemicolynExplicit: Bool
+                if case .explicit = hostRecord.semicolyn { hostSemicolynExplicit = true } else { hostSemicolynExplicit = false }
+                let defaultsSemicolynExplicit: Bool
+                if case .explicit = defaults2.semicolyn { defaultsSemicolynExplicit = true } else { defaultsSemicolynExplicit = false }
+                DebugLog.shared.log(.connect, decisionLine(
+                    "connect:osc52",
+                    inputs: [("hostSemicolynExplicit", "\(hostSemicolynExplicit)"),
+                             ("defaultsSemicolynExplicit", "\(defaultsSemicolynExplicit)")],
+                    outputs: [("osc52Allowed", "\(osc52Allowed)")],
+                    reason: nil))
                 startPredictor(host: hostRecord, defaults: defaults2)
                 // Mosh takes precedence over tmux when enabled + bootstrappable.
                 if await attachMoshIfPossible(conn: conn, host: hostRecord, defaults: defaults2) {

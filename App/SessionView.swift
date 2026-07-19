@@ -279,8 +279,14 @@ struct SessionView: View {
         // Flush learned predictor state when the app backgrounds, so a session
         // that gets backgrounded and killed doesn't lose what it learned (only a
         // clean teardown flushed before). No-op when the predictor is off.
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { vm.flushPredictor() }
+        // Logged unconditionally (all phases, not just background) so a session
+        // trace can tell a predictor flush apart from other background causes and
+        // match it to a user report of foregrounding/backgrounding.
+        .onChange(of: scenePhase) { oldPhase, phase in
+            let didFlush = phase == .background
+            if didFlush { vm.flushPredictor() }
+            DebugLog.shared.log(.lifecycle,
+                "app scenePhase: \(phaseLabel(oldPhase)) → \(phaseLabel(phase)) flushedPredictor=\(didFlush)")
         }
     }
 
@@ -304,6 +310,18 @@ struct SessionView: View {
                     if let host { quickConnectHost = IdentifiableHost(host) }
                 },
                 onCancel: { vm.presentedSheet = nil })
+        }
+    }
+
+    // MARK: - Lifecycle logging
+
+    /// Readable label for a `ScenePhase`, for the `.lifecycle` fg/bg transition log.
+    private func phaseLabel(_ phase: ScenePhase) -> String {
+        switch phase {
+        case .active: "active"
+        case .inactive: "inactive"
+        case .background: "background"
+        @unknown default: "unknown(\(String(describing: phase)))"
         }
     }
 

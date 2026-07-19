@@ -175,6 +175,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// matches. Also bumped by `discardCommittedSnapshot` / `failPendingSwitch` so a pending
         /// completion is invalidated when a switch is interrupted or times out.
         private var switchGeneration = 0
+        /// Last `offset` (points) fed to `updateSwitchDrag`, so the per-frame live-drag
+        /// render log fires only when the finger moves the content by ≥1pt (the `.render`
+        /// "logged only on change" discipline (a 60fps drag must not drown the trace).
+        /// Reset to `nil` at each drag's `.began` (`beginSwitchReveal`). This is the ONE
+        /// permanent instrument that proves the live-drag transform is actually applied on
+        /// device (the mechanism was previously never traced: see the render-wiring note
+        /// on `updateSwitchDrag`).
+        private var lastLoggedDragOffset: Double?
         /// The `ContainerView` this coordinator drives; set in `makeUIView`. Weak since
         /// `ContainerView` already holds a weak back-reference to this coordinator (avoid
         /// a retain cycle across the UIViewRepresentable boundary).
@@ -549,6 +557,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // nils `revealedSnapshot`'s companion state.
                 discardCommittedSnapshot()
                 clearPendingSwitch()
+                lastLoggedDragOffset = nil   // fresh on-change baseline for this drag's render trace
                 guard let vm, let state = vm.tmuxState else { return }
                 vm.snapshotStore?.refreshNonActive(state: state)
                 DebugLog.shared.log(.gesture, "switch-reveal begin")
@@ -564,6 +573,22 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 guard let content = containerView?.paneContentView else { return }
                 content.transform = CGAffineTransform(translationX: CGFloat(offset), y: 0)
                 updateGapDim(exposed: exposed, offset: offset)
+                // Permanent `.render` instrument (logged-on-change, ≥1pt): prove the live-drag
+                // transform is actually applied to `paneContentView` on device. `req` is the
+                // offset the finger asked for; `tx` is read BACK off the view's transform right
+                // after setting it: if `tx` ever diverges from `req`, something (a competing
+                // frame/transform write, e.g. `layoutSubviews`) is stomping it between frames.
+                let applied = Double(content.transform.tx)
+                if lastLoggedDragOffset == nil || abs(offset - (lastLoggedDragOffset ?? 0)) >= 1 {
+                    lastLoggedDragOffset = offset
+                    DebugLog.shared.log(.render, decisionLine(
+                        "render:drag-xform",
+                        inputs: [("req", String(format: "%.1f", offset)),
+                                 ("exposed", "\(exposed)")],
+                        outputs: [("tx", String(format: "%.1f", applied)),
+                                  ("frame.x", String(format: "%.1f", Double(content.frame.origin.x)))],
+                        reason: abs(applied - offset) < 0.5 ? "applied" : "STOMPED"))
+                }
             }
         }
 
@@ -908,7 +933,22 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // computed below. Frame only - `.transform` is left alone (a later task
             // animates it for the window-switch slide).
             ensurePaneContentViewInstalled()
+            // Permanent `.render` instrument: a `layoutSubviews` pass DURING a live drag is the
+            // prime suspect for the "window doesn't move" bug: setting `.frame` while a
+            // `.transform` is active can visually cancel the slide. Capture the transform's
+            // translation before AND after the frame-write; if `after` != `before`, this pass
+            // stomped the live drag. Gated to non-identity tx so it's silent at rest (no drag).
+            let txBefore = Double(paneContentView.transform.tx)
             paneContentView.frame = bounds
+            let txAfter = Double(paneContentView.transform.tx)
+            if txBefore != 0 || txAfter != 0 {
+                DebugLog.shared.log(.render, decisionLine(
+                    "render:layout-vs-xform",
+                    inputs: [("txBefore", String(format: "%.1f", txBefore)),
+                             ("bounds.w", String(format: "%.0f", Double(bounds.width)))],
+                    outputs: [("txAfter", String(format: "%.1f", txAfter))],
+                    reason: abs(txAfter - txBefore) < 0.5 ? "transform-preserved" : "FRAME-STOMPED-XFORM"))
+            }
             ensureGapDimInstalled()
             gapDimView.frame = bounds
             gapDimGradient.frame = gapDimView.bounds

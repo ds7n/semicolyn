@@ -339,8 +339,33 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private func driveLiveSwitch(_ g: UIPanGestureRecognizer, in view: TerminalView) -> Bool {
         let t = g.translation(in: view)
         if case .pending = dragAxis {
+            let multiWin = callbacks.isMultiWindowTmux()
             dragAxis = DragAxisLock.resolve(dx: Double(t.x), dy: Double(t.y),
-                                            isMultiWindowTmux: callbacks.isMultiWindowTmux())
+                                            isMultiWindowTmux: multiWin)
+            // Log ONCE at the moment the axis resolves out of `.pending` (a dead-zone
+            // resolve can return `.pending` again, which must NOT log every frame: the
+            // `if case .pending` below only fires when the axis is still undecided).
+            if case .pending = dragAxis {
+                // Still inside the dead-zone; no decision yet, no log.
+            } else {
+                let (axisDesc, reason): (String, String)
+                switch dragAxis {
+                case .switchWindow(let delta):
+                    axisDesc = "switchWindow(delta=\(delta))"
+                    reason = "dominance"
+                case .scroll:
+                    axisDesc = "scroll"
+                    reason = "vertical-or-single"
+                case .pending:
+                    axisDesc = "pending"   // unreachable here (excluded by the outer if/else)
+                    reason = "dead-zone"
+                }
+                DebugLog.shared.log(.gesture, decisionLine(
+                    "drag-axis-lock",
+                    inputs: [("dx", "\(Int(t.x))"), ("dy", "\(Int(t.y))"), ("multiWin", "\(multiWin)")],
+                    outputs: [("axis", axisDesc)],
+                    reason: reason))
+            }
         }
         guard case .switchWindow = dragAxis else { return false }
         if !switchRevealStarted {
