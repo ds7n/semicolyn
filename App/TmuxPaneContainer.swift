@@ -758,24 +758,31 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// The both-ready gate: complete the commit handoff only when the slide animation has
         /// finished AND tmux has delivered the target window. Called from BOTH the commit
         /// animation completion and the delivery path; the second caller (whichever is last)
-        /// runs the teardown. No-op until both flags are set. Main-actor caller only (both
-        /// call sites are inside `assumeIsolated` blocks).
+        /// runs the teardown. No-op until both flags are set. Wrapped in `MainActor.assumeIsolated`
+        /// like every other Coordinator method here: Swift 6 checks isolation PER-METHOD
+        /// statically (it can't see that its callers are already on the main actor), and the
+        /// `DebugLog.shared.log` calls are `@MainActor` - so the body needs the wrap even though
+        /// the callers are wrapped. Nested `assumeIsolated` is a runtime executor assertion, safe
+        /// to nest. (macOS CI 2026-07-19: unwrapped `log` here failed exactly as the
+        /// `completePendingSwitchIfNeeded` fix predicted.)
         private func finishSwitchHandoffIfReady() {
-            guard switchAnimDone, switchDelivered else {
-                DebugLog.shared.log(.gesture,
-                    "switch finish WAIT anim=\(switchAnimDone) delivered=\(switchDelivered)")
-                return
+            MainActor.assumeIsolated {
+                guard switchAnimDone, switchDelivered else {
+                    DebugLog.shared.log(.gesture,
+                        "switch finish WAIT anim=\(switchAnimDone) delivered=\(switchDelivered)")
+                    return
+                }
+                pendingSwitchTimeout?.cancel(); pendingSwitchTimeout = nil
+                pendingSwitchWindow = nil
+                switchAnimDone = false
+                switchDelivered = false
+                // Live panes are already mounted UNDER the snapshot by `apply(state:)`; reveal them
+                // by resetting the content transform and removing the covering snapshot + gap-dim.
+                containerView?.paneContentView.transform = .identity
+                revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
+                clearGapDim()
+                DebugLog.shared.log(.gesture, "switch finish (both-ready) -> live shown")
             }
-            pendingSwitchTimeout?.cancel(); pendingSwitchTimeout = nil
-            pendingSwitchWindow = nil
-            switchAnimDone = false
-            switchDelivered = false
-            // Live panes are already mounted UNDER the snapshot by `apply(state:)`; reveal them
-            // by resetting the content transform and removing the covering snapshot + gap-dim.
-            containerView?.paneContentView.transform = .identity
-            revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
-            clearGapDim()
-            DebugLog.shared.log(.gesture, "switch finish (both-ready) -> live shown")
         }
 
         /// Called from `apply(state:)` when the active window actually changed: RECORD that
