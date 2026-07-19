@@ -7,8 +7,9 @@ import Foundation
 /// replaced a side-gradient that dimmed the wrong edge; the dim now rides the card itself).
 /// This unit owns just the opacity ramp; the App layer applies it to a `UIView.alpha`.
 public struct GapDim: Sendable {
-    /// Peak dim (fraction) reached at a full-width drag. 0.5 = a clear but not opaque grey.
-    public static let maxOpacity: Double = 0.5
+    /// Peak dim (fraction) reached at a full-width drag. 0.75 = the departing card goes clearly
+    /// dark but stays slightly translucent (device 2026-07-19: 0.5 was almost unnoticeable).
+    public static let maxOpacity: Double = 0.75
 
     /// Overlay opacity for a drag of `offset` over a pane of `width`: linear ramp from 0
     /// (at rest) to `maxOpacity` (at a full-width drag), clamped past width. Sign-agnostic

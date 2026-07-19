@@ -84,6 +84,23 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// True once we have fired `onDragBeginSwitch` for this drag (switch axis only).
     private var switchRevealStarted = false
 
+    // MARK: Alt-screen scroll momentum (fling)
+    /// Drives the post-release decaying wheel-event fling for alt-screen scroll (the native
+    /// `UIScrollView` gives normal-shell scroll momentum for free; the synthetic emitter does
+    /// not). Nil when no fling is in flight.
+    private var flingDisplayLink: CADisplayLink?
+    /// The active fling's decay model + start time + per-fling accounting, mirroring the
+    /// drag's `emittedCells` so the tick loop emits only the NEW whole-cell delta each frame.
+    private var flingMomentum: ScrollMomentum?
+    private var flingStartTime: CFTimeInterval = 0
+    private var flingEmittedCells: Int = 0
+    /// The alt-screen key family + drag-point coordinate captured at release, so the fling
+    /// emits the same key kind at a stable coordinate (the finger is gone).
+    private var flingDecision: AltScrollDecision =
+        AltScrollDecision(keys: .wheel, mode: .wheel, paneCommand: nil, reason: "wheel")
+    private var flingAppCursor: Bool = false
+    private var flingCoord: (col: Int, row: Int) = (1, 1)
+
     // Our recognizers (kept so we can identify + remove them, and so the delegate can
     // tell ours apart from SwiftTerm's). Note: vertical scroll is NOT one of ours — it
     // stays on the terminal's native UIScrollView pan; we only add ourselves as an extra
@@ -232,6 +249,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     }
 
     func detach() {
+        stopAltScreenFling()   // kill any live display link so it can't retain self after detach
         guard let view = terminalView else { return }
         view.panGestureRecognizer.removeTarget(self, action: #selector(handleScrollViewPan(_:)))
         for gr in ours { view.removeGestureRecognizer(gr) }
@@ -304,6 +322,9 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// straddle two interpretations mid-flight. Returns the snapshotted mode.
     @discardableResult
     private func beginDrag(_ owner: String, on view: TerminalView) -> InteractionMode {
+        // A new touch always kills an in-flight momentum fling (catch-the-scroll), so the
+        // finger takes over immediately rather than fighting the decaying stream.
+        stopAltScreenFling()
         dragMode = callbacks.currentMode()
         dragAppCursor = callbacks.applicationCursorKeys()
         dragDecision = callbacks.altScrollDecision()
@@ -489,8 +510,89 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             }
             DebugLog.shared.log(.gesture,
                 "drag-end owner=altPan imode=\(dragMode) emitted=\(emittedCells) outcome=\(outcome)")
+            // Fling: on a real scroll release (not a switch, not cancelled), carry the drag's
+            // velocity into a decaying post-release wheel-event stream so alt-screen scroll has
+            // the same momentum the native shell scroll gets for free.
+            if g.state == .ended, dragMode == .appOwnsInput, emittedCells != 0 {
+                startAltScreenFling(releaseVelocityY: Double(g.velocity(in: view).y), in: view)
+            }
         default: break
         }
+    }
+
+    // MARK: Alt-screen scroll momentum (fling)
+
+    /// Start a decaying post-release wheel-event fling from `releaseVelocityY` (points/sec, as
+    /// UIKit reports pan velocity: +down / −up). Below `minFlingVelocity` this is a no-op (a
+    /// slow lift just stops). Captures the alt-screen key family + a stable drag-point
+    /// coordinate at release (the finger is gone during the fling), then drives a `CADisplayLink`
+    /// that emits the same wheel events the live drag would, decelerating to a stop.
+    private func startAltScreenFling(releaseVelocityY: Double, in view: TerminalView) {
+        stopAltScreenFling()   // never stack two flings
+        let momentum = ScrollMomentum(velocity: releaseVelocityY)
+        guard !momentum.isFinished(at: 0) else { return }   // too slow to fling
+        // Stable coordinate for the fling's SGR wheel encoding: the last drag point.
+        let term = view.getTerminal()
+        let cols = max(term.cols, 1), rows = max(term.rows, 1)
+        let cellH = view.bounds.height / CGFloat(rows), cellW = view.bounds.width / CGFloat(cols)
+        let loc = view.panGestureRecognizer.location(in: view)
+        flingCoord = (min(max(1, Int(loc.x / max(cellW, 1)) + 1), cols),
+                      min(max(1, Int(loc.y / max(cellH, 1)) + 1), rows))
+        flingMomentum = momentum
+        flingDecision = dragDecision
+        flingAppCursor = dragAppCursor
+        flingEmittedCells = 0
+        let link = CADisplayLink(target: self, selector: #selector(tickAltScreenFling(_:)))
+        link.add(to: .main, forMode: .common)
+        flingDisplayLink = link
+        flingStartTime = CACurrentMediaTime()
+        DebugLog.shared.log(.gesture,
+            "fling start v=\(Int(releaseVelocityY)) keys=\(dragDecision.keys) coord=\(flingCoord)")
+    }
+
+    /// Cancel any in-flight fling (new touch, detach). Idempotent.
+    private func stopAltScreenFling() {
+        guard flingDisplayLink != nil else { return }
+        flingDisplayLink?.invalidate()
+        flingDisplayLink = nil
+        flingMomentum = nil
+        DebugLog.shared.log(.gesture, "fling stop total=\(flingEmittedCells)")
+    }
+
+    /// One fling frame: advance the decay model, convert the NEW cumulative offset into wheel
+    /// events (same `AltScreenScroll` accounting as the live drag, using the fling's own
+    /// `flingEmittedCells`), emit them, and stop once the model has decayed below threshold.
+    @objc private func tickAltScreenFling(_ link: CADisplayLink) {
+        guard let view = terminalView, let momentum = flingMomentum else { stopAltScreenFling(); return }
+        let t = CACurrentMediaTime() - flingStartTime
+        let rows = max(view.getTerminal().rows, 1)
+        let cellH = view.bounds.height / CGFloat(rows)
+        let totalDy = momentum.offset(at: t)
+        var sent = 0
+        switch flingDecision.keys {
+        case .wheel:
+            let (runs, newEmitted) = AltScreenScroll.wheelEvents(
+                totalDy: totalDy, cellHeight: Double(cellH), emittedCells: flingEmittedCells)
+            flingEmittedCells = newEmitted
+            for run in runs {
+                let bytes = encodeWheelRun(run, col: flingCoord.col, row: flingCoord.row)
+                if !bytes.isEmpty { callbacks.sendBytes(bytes); sent += run.count }
+            }
+        case .arrows, .pageKeys:
+            let (runs, newEmitted) = AltScreenScroll.arrows(
+                totalDy: totalDy, cellHeight: Double(cellH), emittedCells: flingEmittedCells)
+            flingEmittedCells = newEmitted
+            for run in runs {
+                let bytes = flingDecision.keys == .pageKeys
+                    ? encodePageKeyRun(run)
+                    : encodeArrowRun(run, applicationCursorKeys: flingAppCursor)
+                if !bytes.isEmpty { callbacks.sendBytes(bytes); sent += run.count }
+            }
+        }
+        if sent > 0 {
+            DebugLog.shared.log(.gesture, "fling tick t=\(String(format: "%.2f", t)) sent=\(sent) total=\(flingEmittedCells)")
+        }
+        if momentum.isFinished(at: t) { stopAltScreenFling() }
     }
 
     @objc private func handleSingleTap(_ g: UITapGestureRecognizer) {
