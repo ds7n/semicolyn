@@ -154,6 +154,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private var pendingSwitchTimeout: DispatchWorkItem?
         /// The window we are switching TO once tmux delivers it (armed at commit).
         private var pendingSwitchWindow: WindowID?
+        /// How long to hold the new window HIDDEN after tmux delivers, so its freshly created
+        /// panes lay out + take their first output under cover before being revealed (removes the
+        /// blank->relayout->fill flicker; device 2026-07-19). ~2 frames at 60Hz; feel-tuned.
+        private static let switchSettleDelay: TimeInterval = 0.08
+
+        /// True while a finger-drag switch is committed and awaiting handoff: `apply(state:)`
+        /// reads this to create the new window's panes HIDDEN, so their mid-build flicker is
+        /// masked until `revealSwitchedPanes()` unhides them at handoff.
+        var hasPendingSwitch: Bool { pendingSwitchWindow != nil }
         /// Both-ready gate for the commit handoff (2026-07-18 timing fix): the live window
         /// swaps in only when the commit slide animation has finished (`switchAnimDone`) AND
         /// tmux has delivered the target window (`switchDelivered`). Whichever async event
@@ -698,6 +707,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             MainActor.assumeIsolated {
                 clearPendingSwitch()
                 guard let container = containerView else { return }
+                container.revealSwitchedPanes()   // never strand a hidden pane on spring-back
                 let content = container.paneContentView
                 let dim = container.cardDimOverlay()
                 UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut], animations: {
@@ -730,6 +740,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             switchAnimDone = false
             switchDelivered = false
             switchGeneration &+= 1   // C1: invalidate the interrupted switch's pending completion
+            containerView?.revealSwitchedPanes()   // never strand a hidden pane on interrupt
             containerView?.paneContentView.transform = .identity
             clearCardDim()
         }
@@ -745,6 +756,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 switchAnimDone = false
                 switchDelivered = false
                 switchGeneration &+= 1   // C1: invalidate this switch's pending animation completion
+                containerView?.revealSwitchedPanes()   // never strand a hidden pane on timeout
                 containerView?.paneContentView.transform = .identity
                 clearCardDim()
                 DebugLog.shared.log(.gesture, "switch TIMEOUT -> restore current")
@@ -773,8 +785,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 switchAnimDone = false
                 switchDelivered = false
                 // The live next window is already mounted (by `apply(state:)`) at identity
-                // UNDER the slid-off card. Reveal it by snapping the card transform back to
-                // identity and clearing the dim - the card is now the live window.
+                // UNDER the slid-off card, but its panes were created HIDDEN to mask the
+                // mid-build flicker. Unhide them now (settle window has passed), snap the card
+                // transform back to identity, and clear the dim - the settled window is revealed
+                // in one clean step instead of showing the blank->relayout->fill build.
+                containerView?.revealSwitchedPanes()
                 containerView?.paneContentView.transform = .identity
                 clearCardDim()
                 DebugLog.shared.log(.gesture, "switch finish (both-ready) -> live shown")
@@ -793,7 +808,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     // A switch that arrived without our drag (e.g. esc-pill): nothing to hand off.
                     return
                 }
-                switchDelivered = true
                 // M1 (whole-branch review): tmux has delivered, so the switch WILL complete
                 // (the animation completion is guaranteed to fire); cancel the 1.5s
                 // never-delivered timeout now so it can't stomp a delivered-but-still-animating
@@ -801,8 +815,21 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // only once BOTH flags are set - this covers the delivered-first gap.)
                 pendingSwitchTimeout?.cancel(); pendingSwitchTimeout = nil
                 DebugLog.shared.log(.gesture,
-                    "switch delivered active=@\(newActive.raw) animDone=\(switchAnimDone)")
-                finishSwitchHandoffIfReady()
+                    "switch delivered active=@\(newActive.raw) animDone=\(switchAnimDone) - settling")
+                // Settle window (device 2026-07-19: the switch flickered because the freshly
+                // created panes were REVEALED mid-build - blank, then re-laid-out, then filled -
+                // as tmux delivered the window's state incrementally). The new panes are created
+                // HIDDEN (see `apply(state:)`), and we hold the reveal for a short settle so they
+                // lay out + take their first output under cover, THEN mark delivered + finish. A
+                // super-fast render still just looks instant; a slow one no longer shows the build.
+                let gen = switchGeneration
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.switchSettleDelay) { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self, gen == self.switchGeneration else { return }   // superseded
+                        self.switchDelivered = true
+                        self.finishSwitchHandoffIfReady()
+                    }
+                }
             }
         }
     }
@@ -831,6 +858,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
             paneContentView.frame = bounds
             addSubview(paneContentView)
             paneContentViewInstalled = true
+        }
+
+        /// Unhide every pane view. Panes created DURING a pending switch are made hidden (to
+        /// mask their mid-build flicker); the Coordinator calls this at handoff / cancel /
+        /// timeout to reveal them. Idempotent (a visible pane stays visible). Called on every
+        /// terminal path of a switch so a hidden pane can never be stranded invisible.
+        func revealSwitchedPanes() {
+            for view in panes.values where view.isHidden { view.isHidden = false }
         }
 
         /// Uniform dim overlay that darkens the DEPARTING card itself as it drags off during a
@@ -1091,6 +1126,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         }
                         coordinator?.modeTracker.recompute(for: pane, terminal: term, altSource: src)
                     }
+                    // Hide a pane created DURING a pending switch until the settle window
+                    // reveals it (device 2026-07-19: avoid showing the blank->relayout->fill
+                    // build). `revealSwitchedPanes()` unhides all at handoff. A pane created
+                    // outside a switch (normal attach) stays visible.
+                    if coordinator?.hasPendingSwitch == true { t.isHidden = true }
                     paneContentView.addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
                     coordinator?.installHalo(on: t, pane: pane)
                     // Prime once at mount so a pane reattaching into a running

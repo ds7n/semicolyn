@@ -14,9 +14,11 @@ import Foundation
 /// deceleration rate (0.998 per ms) so the curve matches the momentum the user already gets
 /// in the normal shell: `k = −1000 · ln(0.998) ≈ 2.0` per second.
 public struct ScrollMomentum: Sendable {
-    /// Continuous decay constant (per second), derived from `UIScrollView.DecelerationRate.normal`
-    /// (0.998 per millisecond): `k = −1000 · ln(0.998)`. Higher = stops sooner.
-    public static let decayRate: Double = -1000.0 * Foundation.log(0.998)
+    /// Continuous decay constant (per second). Started from `UIScrollView.DecelerationRate.normal`
+    /// (0.998/ms -> k ~= 2.0) but the fling glided a touch too far on device (2026-07-19), so it
+    /// was dialed back ~40% to a faster deceleration (0.9972/ms -> k ~= 2.8): a shorter, tighter
+    /// glide. Higher = stops sooner.
+    public static let decayRate: Double = -1000.0 * Foundation.log(0.9972)
 
     /// Minimum release speed (points/sec) that flings. Below this a lift is treated as a plain
     /// stop (no momentum) - matches the feel of releasing a slow drag. Feel-tuned.
