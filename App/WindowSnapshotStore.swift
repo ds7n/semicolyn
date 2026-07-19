@@ -25,6 +25,12 @@ final class WindowSnapshotStore {
     /// The snapshot TerminalView per pane, and which window it belongs to.
     private var paneViews: [PaneID: TerminalView] = [:]
     private var paneWindow: [PaneID: WindowID] = [:]
+    /// Windows currently being revealed/animated into view. While frozen, a late-arriving
+    /// `capture-pane` reply must NOT re-feed the snapshot: re-feeding re-flows SwiftTerm's
+    /// grid MID-SLIDE, which the user sees as the incoming window flickering to a different
+    /// size/resolution (device 2026-07-19). The commit path freezes the target at
+    /// anim-start and unfreezes at handoff, so the slide shows one stable image.
+    private var frozenWindows: Set<WindowID> = []
 
     init(runtime: TmuxRuntime,
          scrollbackLines: @escaping () -> Int,
@@ -72,6 +78,20 @@ final class WindowSnapshotStore {
     /// The hosting view for `window`'s snapshot, or nil if nothing captured yet.
     func snapshotView(for window: WindowID) -> UIView? { windowViews[window] }
 
+    /// Freeze `window` so late `capture-pane` replies do not re-feed (and re-flow) its
+    /// snapshot while it is sliding in. Called by the commit path at anim-start.
+    func freeze(window: WindowID) {
+        frozenWindows.insert(window)
+        DebugLog.shared.log(.gesture, "snapshot freeze win=@\(window.raw)")
+    }
+
+    /// Unfreeze `window` (handoff complete / cancelled / timed out), letting subsequent
+    /// captures refresh its snapshot again for the next drag.
+    func unfreeze(window: WindowID) {
+        frozenWindows.remove(window)
+        DebugLog.shared.log(.gesture, "snapshot unfreeze win=@\(window.raw)")
+    }
+
     private func noteCapture(_ pane: PaneID, window: WindowID) {
         paneWindow[pane] = window
     }
@@ -81,6 +101,14 @@ final class WindowSnapshotStore {
     /// gone (dropped in `rebuild`).
     private func applyCapture(_ pane: PaneID, _ bytes: [UInt8]) {
         guard let window = paneWindow[pane] else { return }   // pane retired
+        // A capture that lands while its window is sliding in must NOT re-feed the snapshot:
+        // re-flowing the grid mid-slide is the visible size/resolution flicker. Drop it; the
+        // pre-drag capture already on screen is a fine preview, and the LIVE window replaces
+        // it on handoff anyway.
+        if frozenWindows.contains(window) {
+            DebugLog.shared.log(.gesture, "snapshot skip (frozen) pane=%\(pane.raw) win=@\(window.raw)")
+            return
+        }
         let host = windowViews[window] ?? {
             let v = UIView(); windowViews[window] = v; return v
         }()

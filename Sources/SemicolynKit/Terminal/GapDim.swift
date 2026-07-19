@@ -28,14 +28,17 @@ public struct GapDim: Sendable {
         public init(startX: Double, endX: Double) { self.startX = startX; self.endX = endX }
     }
 
-    /// Endpoints for the drag direction. `.previous` (rightward drag): the window slides
-    /// RIGHT, the gap opens on the LEFT, and the departing window is to the gap's RIGHT ->
-    /// dark on the right (startX = 1), fading left (endX = 0). `.next` mirrors it. `.none`
-    /// -> a zero-span default (no direction implied).
+    /// Endpoints for the drag direction. The dim must be DARKEST where the gap actually
+    /// opens (the exposed edge), fading toward the still-visible sliding window (device
+    /// 2026-07-19: the prior mapping put the dark end on the wrong side, so the exposed gap
+    /// showed the CLEAR end and no dimming was visible). `.previous` (rightward drag, `dx>0`):
+    /// the window slides RIGHT and the gap opens on the LEFT -> dark on the left (startX = 0),
+    /// fading right (endX = 1). `.next` (leftward drag) mirrors it: gap on the RIGHT -> dark on
+    /// the right (startX = 1). `.none` -> a zero-span default (no direction implied).
     public static func endpoints(exposed: ExposedNeighbor) -> Endpoints {
         switch exposed {
-        case .previous: return Endpoints(startX: 1.0, endX: 0.0)
-        case .next:     return Endpoints(startX: 0.0, endX: 1.0)
+        case .previous: return Endpoints(startX: 0.0, endX: 1.0)
+        case .next:     return Endpoints(startX: 1.0, endX: 0.0)
         case .none:     return Endpoints(startX: 0.5, endX: 0.5)
         }
     }

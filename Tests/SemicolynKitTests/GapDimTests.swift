@@ -42,8 +42,8 @@ final class GapDimTests: XCTestCase {
         XCTAssertEqual(GapDim.opacity(offset: 100, width: 0), 0, accuracy: 0.0001)
     }
 
-    // Direction: previous (rightward drag, gap on the LEFT, departing window on the
-    // right) and next produce MIRRORED endpoints.
+    // Direction: previous (rightward drag, gap opens on the LEFT) and next (leftward drag,
+    // gap opens on the RIGHT) produce MIRRORED endpoints.
     func testEndpointsMirrorByDirection() {
         let prev = GapDim.endpoints(exposed: .previous)
         let next = GapDim.endpoints(exposed: .next)
@@ -60,12 +60,20 @@ final class GapDimTests: XCTestCase {
         XCTAssertEqual(none.startX, none.endX, accuracy: 0.0001)
     }
 
-    // Absolute direction (locks the sign the mirror test can't): .previous (rightward drag,
-    // departing window on the RIGHT) has its DARK end (startX) on the right (1.0) fading to
-    // clear on the left (0.0). A swapped mapping would fail this.
-    func testPreviousDarkEndIsOnTheRight() {
+    // Absolute direction (locks the sign the mirror test can't): .previous is a RIGHTWARD
+    // drag, so the window slides right and the gap opens on the LEFT -> the DARK end (startX)
+    // must be on the LEFT (0.0), fading to clear on the right (1.0). This is where the gap
+    // actually is; the pre-2026-07-19 mapping had it backwards and no dim was visible.
+    func testPreviousDarkEndIsOnTheLeft() {
         let ep = GapDim.endpoints(exposed: .previous)
-        XCTAssertEqual(ep.startX, 1.0, accuracy: 0.0001)   // dark end = right edge
+        XCTAssertEqual(ep.startX, 0.0, accuracy: 0.0001)   // dark end = left edge (where the gap opens)
+        XCTAssertEqual(ep.endX, 1.0, accuracy: 0.0001)     // clear end = right edge
+    }
+
+    // Mirror: .next is a LEFTWARD drag, gap opens on the RIGHT -> dark end on the RIGHT (1.0).
+    func testNextDarkEndIsOnTheRight() {
+        let ep = GapDim.endpoints(exposed: .next)
+        XCTAssertEqual(ep.startX, 1.0, accuracy: 0.0001)   // dark end = right edge (where the gap opens)
         XCTAssertEqual(ep.endX, 0.0, accuracy: 0.0001)     // clear end = left edge
     }
 }

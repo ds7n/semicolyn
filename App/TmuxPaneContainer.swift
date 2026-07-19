@@ -604,7 +604,20 @@ struct TmuxPaneContainer: UIViewRepresentable {
             let ep = GapDim.endpoints(exposed: exposed)
             gradient.startPoint = CGPoint(x: ep.startX, y: 0.5)
             gradient.endPoint = CGPoint(x: ep.endX, y: 0.5)
-            overlay.alpha = CGFloat(GapDim.opacity(offset: offset, width: w))
+            // (The gradient layer's frame is kept sized to the overlay by `layoutSubviews`,
+            // which runs on every drag frame under the -CC render storm.)
+            let alpha = CGFloat(GapDim.opacity(offset: offset, width: w))
+            overlay.alpha = alpha
+            // Permanent `.render` instrument (audit 2026-07-19: gap-dim had ZERO logging, so a
+            // "no dimming" device report could not be diagnosed). On-change would need extra
+            // state; this runs only during an active switch drag (bounded), so log each update.
+            DebugLog.shared.log(.render, decisionLine(
+                "render:gap-dim",
+                inputs: [("offset", String(format: "%.0f", offset)), ("exposed", "\(exposed)")],
+                outputs: [("alpha", String(format: "%.2f", Double(alpha))),
+                          ("grad", "\(ep.startX)->\(ep.endX)"),
+                          ("frame", "\(Int(overlay.bounds.width))x\(Int(overlay.bounds.height))")],
+                reason: alpha > 0.01 ? "dim" : "clear"))
         }
 
         /// Fade the gap-dim overlay back to transparent (spring-back, commit-handoff, timeout).
@@ -657,10 +670,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // off over the dark gap, and the live window draws on delivery.
                 let host = vm.snapshotStore?.snapshotView(for: neighbor)
                 if let host {
+                    // Freeze the target BEFORE we place it: any capture reply still in flight
+                    // must not re-feed (re-flow) the snapshot while it slides in (2026-07-19
+                    // size-flicker fix). Unfrozen at handoff/cancel/timeout.
+                    vm.snapshotStore?.freeze(window: neighbor)
                     container.addSubview(host)                          // above gapDim + content
                     let cell = container.resolvedCellPublic()
                     vm.snapshotStore?.layout(window: neighbor, in: state, bounds: container.bounds,
                                              cellWidth: cell.w, cellHeight: cell.h)
+                    // Force SwiftTerm to re-flow its grid to the just-set frames SYNCHRONOUSLY,
+                    // BEFORE the slide begins, so the incoming window is drawn at the current
+                    // container's cols x rows from frame 0 (no draw-small-then-resize flicker).
+                    host.layoutIfNeeded()
                     host.transform = CGAffineTransform(translationX: inStartX, y: 0) // start off-edge
                     revealedSnapshot = (host, neighbor)
                 }
@@ -717,6 +738,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     content.transform = .identity
                 }, completion: { [weak self] _ in
                     // Drop any snapshot that a just-committed switch left (defensive; normally nil).
+                    self?.unfreezeRevealedSnapshot()
                     self?.revealedSnapshot?.view.removeFromSuperview()
                     self?.revealedSnapshot = nil
                 })
@@ -742,6 +764,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
             pendingSwitchWindow = nil
         }
 
+        /// Unfreeze whichever window the current `revealedSnapshot` previews (if any), so its
+        /// snapshot can refresh again on the next drag. Called at every terminal teardown of a
+        /// committed switch (handoff / cancel / timeout / discard). Safe to call when nothing is
+        /// revealed (no-op). Main-actor caller (invoked from within existing assumeIsolated blocks).
+        private func unfreezeRevealedSnapshot() {
+            guard let win = revealedSnapshot?.window else { return }
+            vm?.snapshotStore?.unfreeze(window: win)
+        }
+
         /// Instantly remove a committed-but-undelivered snapshot cover and restore the pane
         /// (no animation), so a NEW drag can start from a clean state. Under the pivot the
         /// committed snapshot FULLY occludes the pane, so if a second drag begins before the
@@ -752,6 +783,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// `beginSwitchReveal`'s `assumeIsolated` block).
         private func discardCommittedSnapshot() {
             guard revealedSnapshot != nil else { return }
+            unfreezeRevealedSnapshot()
             revealedSnapshot?.view.removeFromSuperview()
             revealedSnapshot = nil
             switchAnimDone = false
@@ -774,6 +806,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 switchDelivered = false
                 switchGeneration &+= 1   // C1: invalidate this switch's pending animation completion
                 containerView?.paneContentView.transform = .identity
+                unfreezeRevealedSnapshot()
                 revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
                 clearGapDim()
                 DebugLog.shared.log(.gesture, "switch TIMEOUT -> restore current")
@@ -804,6 +837,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // Live panes are already mounted UNDER the snapshot by `apply(state:)`; reveal them
                 // by resetting the content transform and removing the covering snapshot + gap-dim.
                 containerView?.paneContentView.transform = .identity
+                unfreezeRevealedSnapshot()
                 revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
                 clearGapDim()
                 DebugLog.shared.log(.gesture, "switch finish (both-ready) -> live shown")
