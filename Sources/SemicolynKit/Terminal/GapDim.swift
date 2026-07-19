@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
-/// Pure geometry for the window-switch gap dimming. As the CURRENT window slides off,
-/// the exposed gap behind it darkens with drag progress; the gradient is darkest at the
-/// edge nearest the departing window and fades across the gap. This unit owns the opacity
-/// ramp and the gradient x-endpoints (direction); the App layer applies them to a
-/// `CAGradientLayer` / overlay `UIView`.
+/// Pure opacity ramp for the window-switch card dimming. As the current window (card)
+/// drags off, the whole card darkens UNIFORMLY with drag progress (device 2026-07-19:
+/// replaced a side-gradient that dimmed the wrong edge; the dim now rides the card itself).
+/// This unit owns just the opacity ramp; the App layer applies it to a `UIView.alpha`.
 public struct GapDim: Sendable {
     /// Peak dim (fraction) reached at a full-width drag. 0.5 = a clear but not opaque grey.
     public static let maxOpacity: Double = 0.5
@@ -17,29 +16,5 @@ public struct GapDim: Sendable {
     public static func opacity(offset: Double, width: Double) -> Double {
         guard width > 0 else { return 0 }
         return min(abs(offset) / width, 1) * maxOpacity
-    }
-
-    /// Gradient x-endpoints in unit coordinates (0 = left edge, 1 = right edge; y is fixed
-    /// at 0.5 by the App layer). `startX` is the DARK end (nearest the departing window),
-    /// `endX` the clear end.
-    public struct Endpoints: Equatable, Sendable {
-        public let startX: Double
-        public let endX: Double
-        public init(startX: Double, endX: Double) { self.startX = startX; self.endX = endX }
-    }
-
-    /// Endpoints for the drag direction. The dim must be DARKEST where the gap actually
-    /// opens (the exposed edge), fading toward the still-visible sliding window (device
-    /// 2026-07-19: the prior mapping put the dark end on the wrong side, so the exposed gap
-    /// showed the CLEAR end and no dimming was visible). `.previous` (rightward drag, `dx>0`):
-    /// the window slides RIGHT and the gap opens on the LEFT -> dark on the left (startX = 0),
-    /// fading right (endX = 1). `.next` (leftward drag) mirrors it: gap on the RIGHT -> dark on
-    /// the right (startX = 1). `.none` -> a zero-span default (no direction implied).
-    public static func endpoints(exposed: ExposedNeighbor) -> Endpoints {
-        switch exposed {
-        case .previous: return Endpoints(startX: 0.0, endX: 1.0)
-        case .next:     return Endpoints(startX: 1.0, endX: 0.0)
-        case .none:     return Endpoints(startX: 0.5, endX: 0.5)
-        }
     }
 }

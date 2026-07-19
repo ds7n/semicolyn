@@ -149,12 +149,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private var pinchRecognizers: [ObjectIdentifier: UIPinchGestureRecognizer] = [:]
         /// Per-pane gesture layer (replaces SwiftTerm's built-ins).
         private var gestureControllers: [ObjectIdentifier: TerminalGestureController] = [:]
-        /// The neighbor snapshot host currently revealed in the drag gap (added as a
-        /// sibling of `paneContentView`), and the window it previews. Cleared on
-        /// commit-handoff or spring-back.
-        private var revealedSnapshot: (view: UIView, window: WindowID)?
-        /// Fires if a committed switch's live window never arrives (stuck switch): clears
-        /// the settled snapshot and restores the current window.
+        /// Fires if a committed switch's live window never arrives (stuck switch): restores
+        /// the current window (snaps the slid-off card back).
         private var pendingSwitchTimeout: DispatchWorkItem?
         /// The window we are switching TO once tmux delivers it (armed at commit).
         private var pendingSwitchWindow: WindowID?
@@ -544,22 +540,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         // MARK: - Finger-drag window switch: reveal / update / commit / cancel
 
-        /// Drag locked to the switch axis: refresh non-active snapshots so the neighbor
-        /// preview is as fresh as possible for THIS drag. The actual neighbor host is
-        /// added lazily in `updateSwitchDrag` once we know the direction. Touches
-        /// `@MainActor` state (`vm`, `snapshotStore`) from this nonisolated Coordinator;
-        /// wrapped in `assumeIsolated` (matches `setAltScreenPan` / `removeHalo`'s pattern
-        /// for main-actor calls fired from gesture-driven, always-main-thread paths).
+        /// Drag locked to the switch axis (drop-snapshot design: nothing to pre-warm; the card
+        /// itself is what animates). If a committed-but-undelivered switch is still in flight
+        /// (rapid re-drag), snap it back and invalidate it before this drag starts. Touches
+        /// `@MainActor` state from this nonisolated Coordinator; wrapped in `assumeIsolated`
+        /// (matches `setAltScreenPan` / `removeHalo`'s pattern for gesture-driven main-thread calls).
         func beginSwitchReveal() {
             MainActor.assumeIsolated {
-                // A new drag interrupting a committed-but-undelivered switch must first tear
-                // down that switch's covering snapshot (C1) - do it BEFORE clearPendingSwitch
-                // nils `revealedSnapshot`'s companion state.
+                // A new drag interrupting a committed-but-undelivered switch must first snap that
+                // switch's card back + invalidate it (C1), BEFORE clearPendingSwitch nils its state.
                 discardCommittedSnapshot()
                 clearPendingSwitch()
                 lastLoggedDragOffset = nil   // fresh on-change baseline for this drag's render trace
-                guard let vm, let state = vm.tmuxState else { return }
-                vm.snapshotStore?.refreshNonActive(state: state)
                 DebugLog.shared.log(.gesture, "switch-reveal begin")
             }
         }
@@ -572,7 +564,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             MainActor.assumeIsolated {
                 guard let content = containerView?.paneContentView else { return }
                 content.transform = CGAffineTransform(translationX: CGFloat(offset), y: 0)
-                updateGapDim(exposed: exposed, offset: offset)
+                updateCardDim(offset: offset)
                 // Permanent `.render` instrument (logged-on-change, ≥1pt): prove the live-drag
                 // transform is actually applied to `paneContentView` on device. `req` is the
                 // offset the finger asked for; `tx` is read BACK off the view's transform right
@@ -592,43 +584,34 @@ struct TmuxPaneContainer: UIViewRepresentable {
             }
         }
 
-        /// Ramp the gap-dim overlay with drag progress (`GapDim.opacity`) and set its gradient
-        /// direction (`GapDim.endpoints`) so the dark end is nearest the departing window.
-        /// Assumes the caller is already on the main actor (called from within
-        /// `updateSwitchDrag`'s `assumeIsolated` block).
-        private func updateGapDim(exposed: ExposedNeighbor, offset: Double) {
+        /// Ramp the UNIFORM card-dim overlay with drag progress (`GapDim.opacity`). The overlay
+        /// is a child of `paneContentView`, so it rides the same transform and the dim travels
+        /// with the finger (device 2026-07-19: the whole departing card darkens as it leaves,
+        /// replacing the old side-gradient that dimmed the wrong edge). Assumes the caller is
+        /// already on the main actor (called from within `updateSwitchDrag`'s `assumeIsolated`).
+        private func updateCardDim(offset: Double) {
             guard let container = containerView else { return }
             let w = Double(container.bounds.width)
-            let overlay = container.gapDimOverlay()
-            let gradient = container.gapDimLayer()
-            let ep = GapDim.endpoints(exposed: exposed)
-            gradient.startPoint = CGPoint(x: ep.startX, y: 0.5)
-            gradient.endPoint = CGPoint(x: ep.endX, y: 0.5)
-            // (The gradient layer's frame is kept sized to the overlay by `layoutSubviews`,
-            // which runs on every drag frame under the -CC render storm.)
+            let overlay = container.cardDimOverlay()
             let alpha = CGFloat(GapDim.opacity(offset: offset, width: w))
             overlay.alpha = alpha
-            // Permanent `.render` instrument (audit 2026-07-19: gap-dim had ZERO logging, so a
-            // "no dimming" device report could not be diagnosed). On-change would need extra
-            // state; this runs only during an active switch drag (bounded), so log each update.
-            // Wrapped in `assumeIsolated`: `DebugLog.shared.log` is `@MainActor` and Swift 6
-            // checks isolation per-method (it can't see this method's callers are already on the
-            // main actor). Matches every other main-actor touch in this Coordinator section.
+            // Permanent `.render` instrument (audit 2026-07-19: the dim had ZERO logging, so a
+            // "no dimming" report could not be diagnosed). Bounded to an active switch drag.
+            // `assumeIsolated`: `DebugLog.shared.log` is `@MainActor` and Swift 6 checks isolation
+            // per-method (matches every other main-actor touch in this Coordinator section).
             MainActor.assumeIsolated {
                 DebugLog.shared.log(.render, decisionLine(
-                    "render:gap-dim",
-                    inputs: [("offset", String(format: "%.0f", offset)), ("exposed", "\(exposed)")],
-                    outputs: [("alpha", String(format: "%.2f", Double(alpha))),
-                              ("grad", "\(ep.startX)->\(ep.endX)"),
-                              ("frame", "\(Int(overlay.bounds.width))x\(Int(overlay.bounds.height))")],
+                    "render:card-dim",
+                    inputs: [("offset", String(format: "%.0f", offset))],
+                    outputs: [("alpha", String(format: "%.2f", Double(alpha)))],
                     reason: alpha > 0.01 ? "dim" : "clear"))
             }
         }
 
-        /// Fade the gap-dim overlay back to transparent (spring-back, commit-handoff, timeout).
+        /// Fade the card-dim overlay back to transparent (spring-back, commit-handoff, timeout).
         /// Main-actor caller (invoked from within existing `assumeIsolated` blocks).
-        private func clearGapDim() {
-            containerView?.gapDimOverlay().alpha = 0
+        private func clearCardDim() {
+            containerView?.cardDimOverlay().alpha = 0
         }
 
         /// Release past threshold: a paired page-turn. The current window slides OFF one
@@ -656,7 +639,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
                 let w = container.bounds.width
                 let outX: CGFloat = (dir.out == .left) ? -w : w      // current window exits this edge
-                let inStartX: CGFloat = (dir.in == .left) ? -w : w   // new window enters from this edge
 
                 // Fresh gate for this commit. Bump the generation so any still-pending
                 // completion from a superseded switch (rapid double-switch) is ignored (C1).
@@ -665,47 +647,25 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 switchGeneration &+= 1
                 let generation = switchGeneration
 
-                // I2: force the gap-dim to full so the exposed gap reads as solid grey (a fast
-                // flick may have left the drag-ramped alpha near zero).
-                container.gapDimOverlay().alpha = CGFloat(GapDim.maxOpacity)
+                // Force the card-dim to full so the departing card reads fully dark by the time
+                // it leaves (a fast flick may have left the drag-ramped alpha near zero).
+                container.cardDimOverlay().alpha = CGFloat(GapDim.maxOpacity)
 
-                // Place the pre-warmed snapshot at its FINAL full-size frame (no zoom mismatch),
-                // but START it one width off the INCOMING edge so it can slide in. If the capture
-                // has not landed yet, there is no incoming view - the current window still slides
-                // off over the dark gap, and the live window draws on delivery.
-                let host = vm.snapshotStore?.snapshotView(for: neighbor)
-                if let host {
-                    // Freeze the target BEFORE we place it: any capture reply still in flight
-                    // must not re-feed (re-flow) the snapshot while it slides in (2026-07-19
-                    // size-flicker fix). Unfrozen at handoff/cancel/timeout.
-                    vm.snapshotStore?.freeze(window: neighbor)
-                    container.addSubview(host)                          // above gapDim + content
-                    let cell = container.resolvedCellPublic()
-                    vm.snapshotStore?.layout(window: neighbor, in: state, bounds: container.bounds,
-                                             cellWidth: cell.w, cellHeight: cell.h)
-                    // Force SwiftTerm to re-flow its grid to the just-set frames SYNCHRONOUSLY,
-                    // BEFORE the slide begins, so the incoming window is drawn at the current
-                    // container's cols x rows from frame 0 (no draw-small-then-resize flicker).
-                    host.layoutIfNeeded()
-                    host.transform = CGAffineTransform(translationX: inStartX, y: 0) // start off-edge
-                    revealedSnapshot = (host, neighbor)
-                }
                 pendingSwitchWindow = neighbor
 
-                // Paired page-turn: current window slides OFF `outX`, new snapshot slides IN from
-                // `inStartX` to identity, in one animation. The animation OWNS the timing - its
-                // completion sets `switchAnimDone` and asks the both-ready gate to finish (which
-                // waits if tmux has not delivered yet, and no longer resets mid-slide).
+                // Drop-snapshot design (2026-07-19): NO incoming preview. The current window (a
+                // dimmed card) simply slides OFF `outX` over the container's own background; the
+                // LIVE next window draws when tmux delivers (both-ready gate). A `-CC` neighbor
+                // can have a different pane layout, so a captured preview never reliably matched
+                // its size and flickered - dropping it removes that whole problem class.
                 DebugLog.shared.log(.gesture,
-                    "switch anim-start gen=\(generation) delta=\(delta) snapshot=\(host != nil) out=\(dir.out) in=\(dir.in)")
+                    "switch anim-start gen=\(generation) delta=\(delta) out=\(dir.out)")
                 UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut], animations: {
                     content.transform = CGAffineTransform(translationX: outX, y: 0)
-                    host?.transform = .identity
                 }, completion: { [weak self] _ in
                     // Runs inside the outer `assumeIsolated` context (the enclosing
                     // `commitSwitchDrag` block), so main-actor state is reachable directly -
-                    // NO inner `assumeIsolated` (matches the shipped `cancelSwitchDrag`
-                    // completion, which touches `revealedSnapshot` unwrapped and compiles on CI).
+                    // NO inner `assumeIsolated` (matches the shipped `cancelSwitchDrag` pattern).
                     guard let self else { return }
                     // C1: ignore a STALE completion from a switch that was superseded (rapid
                     // double-switch) or interrupted/timed-out - it must not set the successor's
@@ -732,22 +692,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
             }
         }
 
-        /// Release short: spring the current window back to identity and clear the gap-dim.
-        /// No during-drag snapshot exists to move (pivot: the snapshot is drawn only on
-        /// commit). Wrapped in `assumeIsolated` for the same reason as `beginSwitchReveal`.
+        /// Release short: spring the current window back to identity and clear the card-dim.
+        /// Wrapped in `assumeIsolated` for the same reason as `beginSwitchReveal`.
         func cancelSwitchDrag() {
             MainActor.assumeIsolated {
                 clearPendingSwitch()
-                guard let content = containerView?.paneContentView else { return }
+                guard let container = containerView else { return }
+                let content = container.paneContentView
+                let dim = container.cardDimOverlay()
                 UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut], animations: {
                     content.transform = .identity
-                }, completion: { [weak self] _ in
-                    // Drop any snapshot that a just-committed switch left (defensive; normally nil).
-                    self?.unfreezeRevealedSnapshot()
-                    self?.revealedSnapshot?.view.removeFromSuperview()
-                    self?.revealedSnapshot = nil
+                    dim.alpha = 0   // fade the card-dim back out together with the spring
                 })
-                clearGapDim()
                 DebugLog.shared.log(.gesture, "switch cancel -> spring back")
             }
         }
@@ -757,54 +713,31 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Mirrors the cancel-before-arm guard in `commitSwitchDrag`. Callers must invoke this
         /// from within their own `assumeIsolated` block (touches main-actor stored props but
         /// has no UIKit calls of its own, so it needs no wrapping here).
-        ///
-        /// NOTE: this does NOT remove an on-screen committed snapshot - that teardown is the
-        /// caller's job, because the two callers want different visuals: `cancelSwitchDrag`
-        /// ANIMATES the pane back (so it removes the snapshot in its animation completion),
-        /// while `beginSwitchReveal` (a new drag interrupting a pending commit) tears the cover
-        /// down instantly via `discardCommittedSnapshot()` before the new drag starts.
         private func clearPendingSwitch() {
             pendingSwitchTimeout?.cancel()
             pendingSwitchTimeout = nil
             pendingSwitchWindow = nil
         }
 
-        /// Unfreeze whichever window the current `revealedSnapshot` previews (if any), so its
-        /// snapshot can refresh again on the next drag. Called at every terminal teardown of a
-        /// committed switch (handoff / cancel / timeout / discard). Safe to call when nothing is
-        /// revealed (no-op). Main-actor caller (invoked from within existing assumeIsolated blocks).
-        private func unfreezeRevealedSnapshot() {
-            MainActor.assumeIsolated {
-                guard let win = revealedSnapshot?.window else { return }
-                vm?.snapshotStore?.unfreeze(window: win)
-            }
-        }
-
-        /// Instantly remove a committed-but-undelivered snapshot cover and restore the pane
-        /// (no animation), so a NEW drag can start from a clean state. Under the pivot the
-        /// committed snapshot FULLY occludes the pane, so if a second drag begins before the
-        /// first switch delivers, that cover would otherwise be orphaned on screen forever
-        /// (whole-branch review C1, 2026-07-18): once `clearPendingSwitch` nils
-        /// `pendingSwitchWindow`, `completePendingSwitchIfNeeded` early-outs on delivery and
-        /// nothing else removes the view. Main-actor caller only (invoked from within
-        /// `beginSwitchReveal`'s `assumeIsolated` block).
+        /// Instantly restore the card (reset transform + clear dim) and invalidate a
+        /// committed-but-undelivered switch, so a NEW drag can start from a clean state. With
+        /// the drop-snapshot design there is no cover view to remove; the departing card may be
+        /// mid-slide (transform off-screen) when a second drag begins, so we snap it back and
+        /// bump the generation so the in-flight animation completion is ignored (C1). Main-actor
+        /// caller (invoked from within `beginSwitchReveal`'s `assumeIsolated` block).
         private func discardCommittedSnapshot() {
-            guard revealedSnapshot != nil else { return }
-            unfreezeRevealedSnapshot()
-            revealedSnapshot?.view.removeFromSuperview()
-            revealedSnapshot = nil
+            guard pendingSwitchWindow != nil else { return }
             switchAnimDone = false
             switchDelivered = false
             switchGeneration &+= 1   // C1: invalidate the interrupted switch's pending completion
             containerView?.paneContentView.transform = .identity
-            clearGapDim()
+            clearCardDim()
         }
 
-        /// Timeout: the committed switch never delivered. Restore the current content and
-        /// drop the stuck snapshot. Runs off a `DispatchWorkItem` fired on the main queue
-        /// (`DispatchQueue.main.asyncAfter` in `commitSwitchDrag`), so it is already on the
-        /// main thread; wrapped in `assumeIsolated` to match every other main-actor touch
-        /// in this section.
+        /// Timeout: the committed switch never delivered. Restore the current content. Runs off a
+        /// `DispatchWorkItem` fired on the main queue (`DispatchQueue.main.asyncAfter` in
+        /// `commitSwitchDrag`), so it is already on the main thread; wrapped in `assumeIsolated`
+        /// to match every other main-actor touch in this section.
         private func failPendingSwitch() {
             MainActor.assumeIsolated {
                 pendingSwitchTimeout = nil
@@ -813,9 +746,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 switchDelivered = false
                 switchGeneration &+= 1   // C1: invalidate this switch's pending animation completion
                 containerView?.paneContentView.transform = .identity
-                unfreezeRevealedSnapshot()
-                revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
-                clearGapDim()
+                clearCardDim()
                 DebugLog.shared.log(.gesture, "switch TIMEOUT -> restore current")
             }
         }
@@ -841,12 +772,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 pendingSwitchWindow = nil
                 switchAnimDone = false
                 switchDelivered = false
-                // Live panes are already mounted UNDER the snapshot by `apply(state:)`; reveal them
-                // by resetting the content transform and removing the covering snapshot + gap-dim.
+                // The live next window is already mounted (by `apply(state:)`) at identity
+                // UNDER the slid-off card. Reveal it by snapping the card transform back to
+                // identity and clearing the dim - the card is now the live window.
                 containerView?.paneContentView.transform = .identity
-                unfreezeRevealedSnapshot()
-                revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
-                clearGapDim()
+                clearCardDim()
                 DebugLog.shared.log(.gesture, "switch finish (both-ready) -> live shown")
             }
         }
@@ -903,42 +833,33 @@ struct TmuxPaneContainer: UIViewRepresentable {
             paneContentViewInstalled = true
         }
 
-        /// Dim overlay revealed in the gap as `paneContentView` slides off during a window
-        /// switch. Installed BEHIND `paneContentView` (so the sliding window uncovers it) and
-        /// pinned to `bounds`. Always in the hierarchy - unlike the prior seam-dim (attached
-        /// to a neighbor host that often did not exist), so its gradient always renders.
-        /// Transparent at rest; the Coordinator ramps its `.alpha` with drag progress
-        /// (`GapDim.opacity`) and sets the gradient direction (`GapDim.endpoints`).
-        let gapDimView = UIView()
-        private let gapDimGradient = CAGradientLayer()
-        private var gapDimInstalled = false
+        /// Uniform dim overlay that darkens the DEPARTING card itself as it drags off during a
+        /// window switch (device 2026-07-19: replaces the old side-gradient gap-dim, which
+        /// darkened the exposed edge the user drags AWAY from and read backwards). Added as a
+        /// subview OF `paneContentView`, so it rides the same transform and the dim travels with
+        /// the finger. Solid black; the Coordinator ramps its `.alpha` 0 -> `GapDim.maxOpacity`
+        /// with drag distance. Transparent at rest.
+        let cardDimView = UIView()
+        private var cardDimInstalled = false
 
-        /// Install `gapDimView` (with its gradient) as the FIRST subview so it sits behind
-        /// `paneContentView`. Idempotent. The gradient is a black->clear horizontal fade whose
-        /// direction the Coordinator sets per drag; the view starts fully transparent.
-        private func ensureGapDimInstalled() {
-            guard !gapDimInstalled else { return }
-            gapDimView.frame = bounds
-            gapDimView.isUserInteractionEnabled = false
-            gapDimView.alpha = 0
-            gapDimGradient.frame = gapDimView.bounds
-            gapDimGradient.colors = [UIColor.black.cgColor, UIColor.clear.cgColor]
-            gapDimView.layer.addSublayer(gapDimGradient)
-            insertSubview(gapDimView, at: 0)   // behind paneContentView
-            gapDimInstalled = true
+        /// Install `cardDimView` as the TOP subview of `paneContentView` (so it dims the panes
+        /// beneath it) pinned to `paneContentView.bounds`. Idempotent. Requires
+        /// `paneContentView` to be installed first (its parent).
+        private func ensureCardDimInstalled() {
+            guard !cardDimInstalled else { return }
+            ensurePaneContentViewInstalled()
+            cardDimView.frame = paneContentView.bounds
+            cardDimView.isUserInteractionEnabled = false
+            cardDimView.alpha = 0
+            cardDimView.backgroundColor = .black
+            paneContentView.addSubview(cardDimView)   // on top of the panes, inside the card
+            cardDimInstalled = true
         }
 
-        /// The gap-dim gradient layer, for the Coordinator to set start/end points + keep the
-        /// view in the hierarchy. Ensures installation on first access.
-        func gapDimLayer() -> CAGradientLayer {
-            ensureGapDimInstalled()
-            return gapDimGradient
-        }
-
-        /// The gap-dim overlay view, for the Coordinator to ramp `.alpha`.
-        func gapDimOverlay() -> UIView {
-            ensureGapDimInstalled()
-            return gapDimView
+        /// The card-dim overlay view, for the Coordinator to ramp `.alpha`.
+        func cardDimOverlay() -> UIView {
+            ensureCardDimInstalled()
+            return cardDimView
         }
 
         /// Cached cell metrics so we don't re-measure the font on every layout pass.
@@ -1002,9 +923,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     outputs: [("frame.x", String(format: "%.1f", Double(paneContentView.frame.origin.x)))],
                     reason: "transform-preserved(bounds+center)"))
             }
-            ensureGapDimInstalled()
-            gapDimView.frame = bounds
-            gapDimGradient.frame = gapDimView.bounds
+            // Keep the card-dim overlay pinned to the card (paneContentView) on every pass,
+            // and ALWAYS on top of it: a window switch creates new pane subviews via
+            // `paneContentView.addSubview` AFTER install, which would otherwise stack them above
+            // the dim and leave it darkening nothing during the slide (review 2026-07-19).
+            ensureCardDimInstalled()
+            cardDimView.frame = paneContentView.bounds
+            paneContentView.bringSubviewToFront(cardDimView)
             let cell = resolvedCell()
             guard let grid = terminalGrid(width: Double(bounds.width), height: Double(bounds.height),
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
@@ -1092,11 +1017,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
             guard w > 0, h > 0 else { return (8, 16) }
             return (w: w, h: h)
         }
-
-        /// Public accessor for `resolvedCell()` (private) so the Coordinator's drag-reveal
-        /// path (`updateSwitchDrag`) can lay out a neighbor snapshot using the same cell
-        /// metrics the live pane grid uses, without widening `resolvedCell`'s visibility.
-        func resolvedCellPublic() -> (w: Double, h: Double) { resolvedCell() }
 
         func apply(state: TmuxSessionState,
                    register: (PaneID, TerminalView) -> Void,

@@ -51,17 +51,15 @@ final class TmuxRuntime {
     private var primeWindowIDs: Set<UInt64> = []
     /// In-flight `queryAlternateOn` submission ids awaiting their reply.
     private var altScreenQueryIDs: Set<UInt64> = []
-    /// Purpose of an in-flight `capture-pane`: a scrollback SEED (feeds `PaneHistorySeeder`
-    /// via `onHistoryCaptured`) or a window-transition SNAPSHOT (feeds `WindowSnapshotStore`
-    /// via `onSnapshotCaptured`). Tagged so one reply routes to exactly one consumer.
-    private enum CapturePurpose { case seed, snapshot }
+    /// Purpose of an in-flight `capture-pane`. Currently only a scrollback SEED (feeds
+    /// `PaneHistorySeeder` via `onHistoryCaptured`); the window-transition SNAPSHOT purpose
+    /// was removed with the drop-snapshot window-switch design (2026-07-19). Kept as an enum
+    /// so the capture-reply routing stays explicit if another purpose is added.
+    private enum CapturePurpose { case seed }
     /// Correlation ids for in-flight `capture-pane` requests, keyed to (pane, purpose).
     private var captureIDs: [UInt64: (pane: PaneID, purpose: CapturePurpose)] = [:]
     /// Fired when a capture response resolves: (pane, reconstructed history bytes).
     var onHistoryCaptured: ((PaneID, [UInt8]) -> Void)?
-    /// Fired when a SNAPSHOT capture resolves: (pane, reconstructed bytes). Consumed by
-    /// `WindowSnapshotStore` to render an off-screen preview of a non-active window.
-    var onSnapshotCaptured: ((PaneID, [UInt8]) -> Void)?
     /// Fired when a pane's history may be stale (%pause/%continue, reconnect, resize
     /// desync) — the seeder should mark affected panes unseeded and re-capture.
     var onResyncAll: (() -> Void)?
@@ -168,8 +166,7 @@ final class TmuxRuntime {
                     DebugLog.shared.log(.tmux, "tmux capture REPLY: pane=%\(entry.pane.raw) purpose=\(entry.purpose) NOT .ok (capture errored)")
                 }
                 switch entry.purpose {
-                case .seed:     onHistoryCaptured?(entry.pane, bytes)   // seed fails toward live-only ([])
-                case .snapshot: onSnapshotCaptured?(entry.pane, bytes)
+                case .seed: onHistoryCaptured?(entry.pane, bytes)   // seed fails toward live-only ([])
                 }
             }
         }
@@ -277,18 +274,6 @@ final class TmuxRuntime {
               let id = writeTracked(cmd) else { return nil }
         captureIDs[id] = (pane, .seed)
         DebugLog.shared.log(.tmux, "tmux capture: pane=%\(pane.raw) purpose=seed lines=\(lines) id=\(id)")
-        return id
-    }
-
-    /// Send a `capture-pane` for the window-transition SNAPSHOT of `pane` (which may be in
-    /// a NON-active window). Reply routes to `onSnapshotCaptured`. No-op / nil if seeding
-    /// is disabled (lines <= 0) or not attached.
-    @discardableResult
-    func captureSnapshot(pane: PaneID, lines: Int) -> UInt64? {
-        guard let cmd = capturePaneCommand(paneID: pane, lines: lines),
-              let id = writeTracked(cmd) else { return nil }
-        captureIDs[id] = (pane, .snapshot)
-        DebugLog.shared.log(.tmux, "tmux capture: pane=%\(pane.raw) purpose=snapshot lines=\(lines) id=\(id)")
         return id
     }
 
