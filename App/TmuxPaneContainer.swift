@@ -165,6 +165,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// delivery (~120ms) reset the transform mid-slide (180ms) so no animation was seen.
         private var switchAnimDone = false
         private var switchDelivered = false
+        /// Monotonic id for the current committed switch, so a STALE animation completion from
+        /// a superseded switch can't touch the gate of its successor (whole-branch review C1,
+        /// 2026-07-18). A rapid double-switch replaces switch A's `paneContentView` animation
+        /// with switch B's; UIKit still fires A's completion (with `finished == false`), which
+        /// would otherwise set `switchAnimDone = true` for B and let the gate finish B's handoff
+        /// mid-slide - the very race this fix removes. Each `commitSwitchDrag` bumps this and
+        /// captures it in the completion; the completion acts only if its captured id still
+        /// matches. Also bumped by `discardCommittedSnapshot` / `failPendingSwitch` so a pending
+        /// completion is invalidated when a switch is interrupted or times out.
+        private var switchGeneration = 0
         /// The `ContainerView` this coordinator drives; set in `makeUIView`. Weak since
         /// `ContainerView` already holds a weak back-reference to this coordinator (avoid
         /// a retain cycle across the UIViewRepresentable boundary).
@@ -605,9 +615,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 let outX: CGFloat = (dir.out == .left) ? -w : w      // current window exits this edge
                 let inStartX: CGFloat = (dir.in == .left) ? -w : w   // new window enters from this edge
 
-                // Fresh gate for this commit.
+                // Fresh gate for this commit. Bump the generation so any still-pending
+                // completion from a superseded switch (rapid double-switch) is ignored (C1).
                 switchAnimDone = false
                 switchDelivered = false
+                switchGeneration &+= 1
+                let generation = switchGeneration
 
                 // I2: force the gap-dim to full so the exposed gap reads as solid grey (a fast
                 // flick may have left the drag-ramped alpha near zero).
@@ -633,7 +646,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // completion sets `switchAnimDone` and asks the both-ready gate to finish (which
                 // waits if tmux has not delivered yet, and no longer resets mid-slide).
                 DebugLog.shared.log(.gesture,
-                    "switch anim-start delta=\(delta) snapshot=\(host != nil) out=\(dir.out) in=\(dir.in)")
+                    "switch anim-start gen=\(generation) delta=\(delta) snapshot=\(host != nil) out=\(dir.out) in=\(dir.in)")
                 UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut], animations: {
                     content.transform = CGAffineTransform(translationX: outX, y: 0)
                     host?.transform = .identity
@@ -642,9 +655,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     // `commitSwitchDrag` block), so main-actor state is reachable directly -
                     // NO inner `assumeIsolated` (matches the shipped `cancelSwitchDrag`
                     // completion, which touches `revealedSnapshot` unwrapped and compiles on CI).
-                    self?.switchAnimDone = true
-                    DebugLog.shared.log(.gesture, "switch anim-done")
-                    self?.finishSwitchHandoffIfReady()
+                    guard let self else { return }
+                    // C1: ignore a STALE completion from a switch that was superseded (rapid
+                    // double-switch) or interrupted/timed-out - it must not set the successor's
+                    // `switchAnimDone` and let the gate finish B's handoff mid-slide.
+                    guard generation == self.switchGeneration else {
+                        DebugLog.shared.log(.gesture,
+                            "switch anim-done gen=\(generation) STALE (cur=\(self.switchGeneration)) - ignored")
+                        return
+                    }
+                    self.switchAnimDone = true
+                    DebugLog.shared.log(.gesture, "switch anim-done gen=\(generation)")
+                    self.finishSwitchHandoffIfReady()
                 })
 
                 onSwitchWindow(delta)   // tmux select-window (delivery flips `switchDelivered`)
@@ -709,6 +731,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             revealedSnapshot = nil
             switchAnimDone = false
             switchDelivered = false
+            switchGeneration &+= 1   // C1: invalidate the interrupted switch's pending completion
             containerView?.paneContentView.transform = .identity
             clearGapDim()
         }
@@ -724,6 +747,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 pendingSwitchWindow = nil
                 switchAnimDone = false
                 switchDelivered = false
+                switchGeneration &+= 1   // C1: invalidate this switch's pending animation completion
                 containerView?.paneContentView.transform = .identity
                 revealedSnapshot?.view.removeFromSuperview(); revealedSnapshot = nil
                 clearGapDim()
@@ -767,6 +791,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     return
                 }
                 switchDelivered = true
+                // M1 (whole-branch review): tmux has delivered, so the switch WILL complete
+                // (the animation completion is guaranteed to fire); cancel the 1.5s
+                // never-delivered timeout now so it can't stomp a delivered-but-still-animating
+                // switch during the both-ready WAIT window. (The finisher also cancels it, but
+                // only once BOTH flags are set - this covers the delivered-first gap.)
+                pendingSwitchTimeout?.cancel(); pendingSwitchTimeout = nil
                 DebugLog.shared.log(.gesture,
                     "switch delivered active=@\(newActive.raw) animDone=\(switchAnimDone)")
                 finishSwitchHandoffIfReady()
