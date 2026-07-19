@@ -611,13 +611,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Permanent `.render` instrument (audit 2026-07-19: gap-dim had ZERO logging, so a
             // "no dimming" device report could not be diagnosed). On-change would need extra
             // state; this runs only during an active switch drag (bounded), so log each update.
-            DebugLog.shared.log(.render, decisionLine(
-                "render:gap-dim",
-                inputs: [("offset", String(format: "%.0f", offset)), ("exposed", "\(exposed)")],
-                outputs: [("alpha", String(format: "%.2f", Double(alpha))),
-                          ("grad", "\(ep.startX)->\(ep.endX)"),
-                          ("frame", "\(Int(overlay.bounds.width))x\(Int(overlay.bounds.height))")],
-                reason: alpha > 0.01 ? "dim" : "clear"))
+            // Wrapped in `assumeIsolated`: `DebugLog.shared.log` is `@MainActor` and Swift 6
+            // checks isolation per-method (it can't see this method's callers are already on the
+            // main actor). Matches every other main-actor touch in this Coordinator section.
+            MainActor.assumeIsolated {
+                DebugLog.shared.log(.render, decisionLine(
+                    "render:gap-dim",
+                    inputs: [("offset", String(format: "%.0f", offset)), ("exposed", "\(exposed)")],
+                    outputs: [("alpha", String(format: "%.2f", Double(alpha))),
+                              ("grad", "\(ep.startX)->\(ep.endX)"),
+                              ("frame", "\(Int(overlay.bounds.width))x\(Int(overlay.bounds.height))")],
+                    reason: alpha > 0.01 ? "dim" : "clear"))
+            }
         }
 
         /// Fade the gap-dim overlay back to transparent (spring-back, commit-handoff, timeout).
@@ -769,8 +774,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// committed switch (handoff / cancel / timeout / discard). Safe to call when nothing is
         /// revealed (no-op). Main-actor caller (invoked from within existing assumeIsolated blocks).
         private func unfreezeRevealedSnapshot() {
-            guard let win = revealedSnapshot?.window else { return }
-            vm?.snapshotStore?.unfreeze(window: win)
+            MainActor.assumeIsolated {
+                guard let win = revealedSnapshot?.window else { return }
+                vm?.snapshotStore?.unfreeze(window: win)
+            }
         }
 
         /// Instantly remove a committed-but-undelivered snapshot cover and restore the pane
