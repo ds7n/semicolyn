@@ -933,21 +933,33 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // computed below. Frame only - `.transform` is left alone (a later task
             // animates it for the window-switch slide).
             ensurePaneContentViewInstalled()
-            // Permanent `.render` instrument: a `layoutSubviews` pass DURING a live drag is the
-            // prime suspect for the "window doesn't move" bug: setting `.frame` while a
-            // `.transform` is active can visually cancel the slide. Capture the transform's
-            // translation before AND after the frame-write; if `after` != `before`, this pass
-            // stomped the live drag. Gated to non-identity tx so it's silent at rest (no drag).
-            let txBefore = Double(paneContentView.transform.tx)
-            paneContentView.frame = bounds
-            let txAfter = Double(paneContentView.transform.tx)
-            if txBefore != 0 || txAfter != 0 {
+            // Pin the pane-hosting wrapper to our bounds on every layout pass (rotation,
+            // keyboard show-hide, font change). CRUCIAL (device root-cause 2026-07-19): when a
+            // live window-switch drag has set a non-identity `.transform` on this view, we must
+            // NOT write `.frame` - UIKit derives `frame` THROUGH the transform, so `frame =
+            // bounds` back-computes bounds/center in a way that cancels the drag translation
+            // (trace: tx=-288 while frame.x=-0.3, so the window never visibly moved). Under the
+            // -CC render storm `layoutSubviews` fires ~60x/sec, so this fought the transform on
+            // every frame. Per the UIKit contract, position a transformed view via `bounds` +
+            // `center` (both applied INDEPENDENTLY of the transform) and leave `frame` alone; use
+            // the plain `frame = bounds` only when at rest (identity transform).
+            let dragActive = !paneContentView.transform.isIdentity
+            if dragActive {
+                paneContentView.bounds = CGRect(origin: .zero, size: bounds.size)
+                paneContentView.center = CGPoint(x: bounds.midX, y: bounds.midY)
+            } else {
+                paneContentView.frame = bounds
+            }
+            // Permanent `.render` instrument: confirm the transform SURVIVES this layout pass now.
+            // Before the fix this logged `FRAME-STOMPED-XFORM`; it should now always be
+            // `transform-preserved` while a drag is active. Silent at rest (identity transform).
+            if dragActive {
                 DebugLog.shared.log(.render, decisionLine(
                     "render:layout-vs-xform",
-                    inputs: [("txBefore", String(format: "%.1f", txBefore)),
+                    inputs: [("tx", String(format: "%.1f", Double(paneContentView.transform.tx))),
                              ("bounds.w", String(format: "%.0f", Double(bounds.width)))],
-                    outputs: [("txAfter", String(format: "%.1f", txAfter))],
-                    reason: abs(txAfter - txBefore) < 0.5 ? "transform-preserved" : "FRAME-STOMPED-XFORM"))
+                    outputs: [("frame.x", String(format: "%.1f", Double(paneContentView.frame.origin.x)))],
+                    reason: "transform-preserved(bounds+center)"))
             }
             ensureGapDimInstalled()
             gapDimView.frame = bounds
