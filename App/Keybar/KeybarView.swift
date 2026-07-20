@@ -53,7 +53,7 @@ struct KeybarView: View {
     /// Shared bar chrome: themed panel background + insets.
     @ViewBuilder private func barChrome<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         content()
-            .padding(.horizontal, 8).padding(.vertical, 5)
+            .padding(.horizontal, 8).padding(.vertical, 3)
             .frame(maxWidth: .infinity)
             .background(Color(theme.surface.panel))
     }
