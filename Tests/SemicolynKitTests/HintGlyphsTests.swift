@@ -21,6 +21,10 @@ final class HintGlyphsTests: XCTestCase {
     func testEscapeGlyph() {
         XCTAssertEqual(hintGlyph(for: .key(.escape, KeyModifiers())), "⎋")
     }
+    func testEnterAndBackspaceGlyphs() {
+        XCTAssertEqual(hintGlyph(for: .key(.enter, KeyModifiers())), "⏎")
+        XCTAssertEqual(hintGlyph(for: .key(.backspace, KeyModifiers())), "⌫")
+    }
     func testArrowGlyphs() {
         XCTAssertEqual(hintGlyph(for: .key(.arrow(.up), KeyModifiers())), "↑")
         XCTAssertEqual(hintGlyph(for: .key(.arrow(.down), KeyModifiers())), "↓")
