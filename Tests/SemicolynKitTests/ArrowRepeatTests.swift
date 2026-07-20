@@ -5,7 +5,7 @@ import XCTest
 
 final class ArrowRepeatTests: XCTestCase {
 
-    // MARK: interval(heldFor:) — iOS-style hold-to-repeat timing (BVA on the curve)
+    // MARK: interval(heldFor:) iOS-style hold-to-repeat timing (BVA on the curve)
 
     func testNoRepeatAtStart() {
         XCTAssertNil(ArrowRepeat.interval(heldFor: 0))              // still in initial-delay window
@@ -35,7 +35,7 @@ final class ArrowRepeatTests: XCTestCase {
         XCTAssertEqual(out!, 0.06, accuracy: 1e-9)                  // clamped floor
     }
 
-    // MARK: dominantArrow(dx:dy:) — equivalence partitions, one representative each
+    // MARK: dominantArrow(dx:dy:) equivalence partitions, one representative each
 
     func testDominantRight() { XCTAssertEqual(dominantArrow(dx: 10, dy: 0), .right) }
     func testDominantLeft()  { XCTAssertEqual(dominantArrow(dx: -10, dy: 0), .left) }
