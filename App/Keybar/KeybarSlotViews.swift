@@ -8,7 +8,7 @@ import SemicolynKit
 /// label: swipe-up glyph on top, swipe-down below. A single-direction key fills only its
 /// slot; the other is an invisible spacer so the main label stays vertically centered
 /// (device issue #2: replaces the old edge-pinned overlay glyphs).
-private struct SlotChrome<Label: View>: View {
+struct SlotChrome<Label: View>: View {
     let bg: Color
     var up: String? = nil
     var down: String? = nil
