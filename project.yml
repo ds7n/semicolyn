@@ -28,10 +28,15 @@ targets:
     sources:
       - path: App
         # .ttf files under App/Resources/Fonts are auto-classified as bundle
-        # resources by XcodeGen. Exclude the REUSE .license sidecars — they document
-        # the fonts' licensing in-repo but must not ship inside the .app.
+        # resources by XcodeGen. Exclude the REUSE .license sidecars: they document
+        # the fonts' licensing in-repo but must not ship inside the .app. Same for the
+        # predictor seed's REUSE sidecar and provenance record under Resources/predictor:
+        # seed_v1.sketch and SEED_ATTRIBUTION.md still bundle so the CC-BY/MIT credit
+        # is user-visible at runtime.
         excludes:
           - "Resources/Fonts/*.license"
+          - "Resources/predictor/*.license"
+          - "Resources/predictor/*.provenance.txt"
     dependencies:
       - package: SemicolynPackage
         product: SemicolynSSHCoreFFI
