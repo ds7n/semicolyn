@@ -26,10 +26,13 @@ public struct ResizeDebounce: Equatable, Sendable {
     }
 
     /// If a pending size has been quiet for `quiet` AND differs from the last emitted size,
-    /// return and clear it; else nil (an unchanged size is suppressed, not re-emitted).
-    public mutating func tick(at now: Date) -> (cols: Int, rows: Int)? {
+    /// return and clear it; else nil (an unchanged size is suppressed, not re-emitted). The
+    /// `quiet` threshold defaults to `Self.quiet` (0.1s); callers pass a LONGER window during a
+    /// window-switch settle so the keyboard/keybar grow animation's intermediate sizes coalesce
+    /// to a single final emit (device #2 Build 2) instead of resizing tmux mid-animation.
+    public mutating func tick(at now: Date, quiet: TimeInterval = ResizeDebounce.quiet) -> (cols: Int, rows: Int)? {
         guard let lc = lastChange, let c = pendingCols, let r = pendingRows else { return nil }
-        guard now.timeIntervalSince(lc) >= Self.quiet else { return nil }
+        guard now.timeIntervalSince(lc) >= quiet else { return nil }
         pendingCols = nil; pendingRows = nil; lastChange = nil
         // Suppress a no-op resize: nothing changed since the last emit, so don't nudge tmux.
         if lastEmittedCols == c, lastEmittedRows == r { return nil }

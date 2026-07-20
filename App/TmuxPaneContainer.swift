@@ -154,6 +154,17 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private var pendingSwitchTimeout: DispatchWorkItem?
         /// The window we are switching TO once tmux delivers it (armed at commit).
         private var pendingSwitchWindow: WindowID?
+        /// Device #2 (Build 2): while a window switch is settling, the keybar/keyboard show
+        /// animation grows the container bounds through a burst of intermediate sizes
+        /// (e.g. 80x35 -> 80x44 -> 80x33). Sending each to tmux resized the window multiple
+        /// times, and a TRANSIENT wrong size landed on the active window -> content filled the
+        /// wrong row count -> "bottom halfway up, rest blank". This deadline extends the
+        /// resize debounce during the settle so only the FINAL settled size reaches tmux.
+        private var resizeSettleUntil: Date?
+        /// The extended debounce quiet window used while `resizeSettleUntil` is in the future -
+        /// long enough to span the keyboard/keybar grow animation (feel-tuned; the animation is
+        /// ~150-400ms). Outside the settle window the normal `ResizeDebounce.quiet` applies.
+        private static let switchResizeQuiet: TimeInterval = 0.45
         /// How long to hold the new window HIDDEN after tmux delivers, so its freshly created
         /// panes lay out + take their first output under cover before being revealed (removes the
         /// blank->relayout->fill flicker; device 2026-07-19). ~2 frames at 60Hz; feel-tuned.
@@ -503,11 +514,25 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// with the full-container grid (bounds ÷ measured cell) — the single accurate
         /// source, replacing the old coarse `sendApproxClientSize` estimate. Debounces
         /// rapid bursts (rotation / keyboard show-hide).
+        /// Arm the resize-settle window (device #2 Build 2): for the next `switchResizeQuiet`
+        /// seconds, `noteClientSize` uses the longer debounce so a switch's keyboard/keybar grow
+        /// animation coalesces to one final tmux resize instead of a burst of intermediate sizes.
+        func armResizeSettle() {
+            resizeSettleUntil = Date().addingTimeInterval(Self.switchResizeQuiet)
+        }
+
         func noteClientSize(cols: Int, rows: Int) {
-            resizeDebounce.note(cols: cols, rows: rows, at: Date())
-            DispatchQueue.main.asyncAfter(deadline: .now() + ResizeDebounce.quiet) { [weak self] in
+            let now = Date()
+            resizeDebounce.note(cols: cols, rows: rows, at: now)
+            // Device #2 (Build 2): during a switch-settle window use a LONGER quiet so the
+            // keyboard/keybar grow animation's intermediate sizes (35 -> 44 -> 33) coalesce to
+            // one emit of the final settled size, instead of resizing tmux mid-animation and
+            // stranding the active window at a transient row count (the half-blank pane).
+            let settling = (resizeSettleUntil.map { now < $0 }) ?? false
+            let quiet = settling ? Self.switchResizeQuiet : ResizeDebounce.quiet
+            DispatchQueue.main.asyncAfter(deadline: .now() + quiet) { [weak self] in
                 guard let self else { return }
-                if let size = self.resizeDebounce.tick(at: Date()) {
+                if let size = self.resizeDebounce.tick(at: Date(), quiet: quiet) {
                     self.onTmuxResize?(size.cols, size.rows)
                 }
             }
@@ -1237,6 +1262,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // via SwiftUI `updateUIView`).
             if state.activeWindow != previousActiveWindow, let newActive = state.activeWindow {
                 MainActor.assumeIsolated {
+                    // Device #2 (Build 2): a switch (drag, esc-pill, OR tab) triggers the keyboard/
+                    // keybar grow animation that bursts intermediate client sizes. Arm the resize-
+                    // settle window here (the universal active-window-change point) so those
+                    // intermediates coalesce to one final emit and tmux isn't resized mid-animation.
+                    coordinator?.armResizeSettle()
                     coordinator?.completePendingSwitchIfNeeded(newActive: newActive)
                 }
             }

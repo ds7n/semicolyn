@@ -51,10 +51,15 @@ struct KeybarView: View {
     }
 
     /// Shared bar chrome: themed panel background + insets.
+    ///
+    /// Device #2 (Build 2): the full-width frame must align its content `.leading`, or SwiftUI
+    /// centers/distributes the bar's HStack across the full width and the locked keys spread
+    /// edge-to-edge with large gaps. `.leading` packs them at the leading edge (the Build-1
+    /// probe on the inner ScrollView was the wrong element; this is the real fix).
     @ViewBuilder private func barChrome<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         content()
             .padding(.horizontal, 8).padding(.vertical, 3)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(theme.surface.panel))
     }
 
