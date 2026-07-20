@@ -906,6 +906,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// more often than the rendered layout actually changes (the render storm).
         private var lastRenderSignature: RenderSignature?
 
+        /// The pane layout applied by the last `apply` (device #2, 2026-07-20). `apply` sets
+        /// pane frames, but it is gated by `RenderSignature` (no geometry dependency), so when
+        /// the container bounds change WITHOUT a tmux-state change (the keybar/keyboard show
+        /// animation growing bounds after a window switch) the panes are never re-framed and a
+        /// newly-revealed pane stays sized to a stale, tiny bounds snapshot until a scroll
+        /// provokes a tmux event. `relayoutExistingPaneFrames()` replays this layout on a pure
+        /// geometry change so a revealed pane tracks the grow animation.
+        private var lastAppliedLayout: PaneLayout?
+        /// The bounds size at the last `layoutSubviews` relayout, to fire the geometry-only
+        /// pane re-frame ONLY when bounds actually changed (avoids churn under the render storm).
+        private var lastLaidOutBounds: CGSize = .zero
+
         /// The active window as of the last `apply` that reached the change-detect at the
         /// end of the method. Compared against `state.activeWindow` there to decide whether
         /// a pending finger-drag switch handoff should complete (see `completePendingSwitchIfNeeded`).
@@ -989,6 +1001,30 @@ struct TmuxPaneContainer: UIViewRepresentable {
             DebugLog.shared.log(.tmux,
                 "sizing:tmux bounds=\(Int(bounds.width))x\(Int(bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) cell=\(String(format: "%.1f", cell.w))x\(String(format: "%.1f", cell.h)) kbH=\(String(format: "%.1f", kbH)) usableH=\(Int(usableH)) grid=\(grid.cols)x\(grid.rows)")
             coordinator?.noteClientSize(cols: grid.cols, rows: grid.rows)
+
+            // Device #2 (2026-07-20): re-frame existing panes when the container geometry
+            // changed WITHOUT a tmux-state change (the keybar/keyboard show animation growing
+            // bounds after a window switch). `apply` is gated by `RenderSignature` (no geometry
+            // dependency), so a pane revealed mid-grow stays at its stale tiny frame until a
+            // scroll provokes a tmux event. Fire only on an actual bounds-size change to avoid
+            // churn under the -CC render storm.
+            if bounds.size != lastLaidOutBounds {
+                lastLaidOutBounds = bounds.size
+                relayoutExistingPaneFrames(cell: cell)
+            }
+        }
+
+        /// Re-apply `paneRects` to the panes ALREADY in `panes` (no create/destroy, no
+        /// first-responder/border changes) so a revealed pane tracks a geometry-only bounds
+        /// change. Skips entirely while a switch drag holds a non-identity transform (don't
+        /// fight the slide) and when no layout has been applied yet. Device #2.
+        private func relayoutExistingPaneFrames(cell: (w: Double, h: Double)) {
+            guard paneContentView.transform.isIdentity else { return }
+            guard let layout = lastAppliedLayout else { return }
+            for rect in paneRects(in: layout, cellWidth: cell.w, cellHeight: cell.h) {
+                guard let view = panes[rect.pane] else { continue }
+                view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
+            }
         }
 
         /// Sizing-diagnostic helper: the keybar (`inputAccessoryView`) height of whichever
@@ -1075,6 +1111,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             DebugLog.shared.log(.render, "render:panes reason=\(reason) active=\(state.activeWindow.map { "@\($0.raw)" } ?? "nil") windows=\(state.windows.count) panes=\(state.activeWindow.flatMap { state.window($0) }?.visibleLayout?.panes.count ?? -1)")
             guard let win = state.activeWindow, let window = state.window(win),
                   let layout = window.visibleLayout else { return }
+            lastAppliedLayout = layout   // device #2: so layoutSubviews can re-frame on a geometry-only change
 
             let cell = resolvedCell()
             let rects = paneRects(in: layout, cellWidth: cell.w, cellHeight: cell.h)
