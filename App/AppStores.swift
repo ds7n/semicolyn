@@ -82,6 +82,12 @@ final class AppStores {
         // Identity service: mint/import + resolve SSH identities for publickey auth.
         // Constructed last so both `self.hosts` and `self.secrets` are already set.
         self.identities = IdentityService(store: self.hosts, secrets: secrets, minter: CoreIdentityMinter())
+
+        // Install the bundled predictor seed on first launch / version upgrade so
+        // prediction works out of the box. Fail-soft: a missing/corrupt resource must
+        // never break launch (degrades to learned-only, matching loadSeed's contract).
+        // This is the app-edge glue Phase 4l deferred; its absence was device issue #3.
+        installBundledSeedIfNeeded()
     }
 
     // MARK: - Predictor stores
@@ -112,6 +118,28 @@ final class AppStores {
     /// The bundled/installed predictor seed, or nil if none is installed yet.
     func predictorSeed() -> PredictorSeed? {
         SeedStore(directory: baseDirectory.appendingPathComponent("predictor", isDirectory: true)).loadSeed()
+    }
+
+    /// Read the bundled combined seed resource and install it via SeedStore
+    /// (idempotent + self-healing). No-op if the resource is absent (dev builds
+    /// without a committed seed) or unparseable. Never throws into launch.
+    private func installBundledSeedIfNeeded() {
+        guard let url = Bundle.main.url(forResource: "seed_v1", withExtension: "sketch"),
+              let data = try? Data(contentsOf: url) else {
+            DebugLog.shared.log(.seed, "seed:install skipped=no-resource")
+            return
+        }
+        guard let bundled = BundledSeed(combinedBlob: [UInt8](data)) else {
+            DebugLog.shared.log(.seed, "seed:install skipped=unparseable bytes=\(data.count)")
+            return
+        }
+        let store = SeedStore(directory: baseDirectory.appendingPathComponent("predictor", isDirectory: true))
+        do {
+            let didInstall = try store.installIfNeeded(bundled)
+            DebugLog.shared.log(.seed, "seed:install installed=\(didInstall) version=\(bundled.version)")
+        } catch {
+            DebugLog.shared.log(.seed, "seed:install failed error=\(error)")
+        }
     }
 
     // MARK: - Device seed
