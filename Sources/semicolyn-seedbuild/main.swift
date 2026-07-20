@@ -8,9 +8,10 @@ import SeedKit
 /// walking, and file I/O. See `2026-06-21-predictor-seed-ingestion-design` and
 /// `2026-06-21-predictor-fig-ingestion-design`.
 ///
-/// Usage: `semicolyn-seedbuild --out <dir> [--tldr <dir>] [--fig <dir>]`
+/// Usage: `semicolyn-seedbuild --out <dir> [--tldr <dir>] [--fig <dir>] [--combined <file>]`
 /// At least one source is required. Writes `seed_unigram_v1.sketch` and
-/// `seed_bigram_v1.sketch` into the out directory.
+/// `seed_bigram_v1.sketch` into the out directory. `--combined <file>` additionally
+/// writes the single seed_pinned-format blob the app installs directly.
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -21,8 +22,8 @@ func warn(_ message: String) {
     FileHandle.standardError.write(Data((message + "\n").utf8))
 }
 
-let usage = "usage: semicolyn-seedbuild --out <dir> [--tldr <dir>] [--fig <dir>]"
-let knownFlags: Set<String> = ["--out", "--tldr", "--fig"]
+let usage = "usage: semicolyn-seedbuild --out <dir> [--tldr <dir>] [--fig <dir>] [--combined <file>]"
+let knownFlags: Set<String> = ["--out", "--tldr", "--fig", "--combined"]
 
 /// Parse `--flag value` options into a dictionary. An unknown flag, a valueless
 /// flag, or a non-flag argument is a usage error — never a silent skip.
@@ -118,3 +119,14 @@ do {
 print("seed built from \(totalFiles) files → \(outDir.path)")
 print("  unigram blob: \(blobs.unigram.count) bytes")
 print("  bigram blob:  \(blobs.bigram.count) bytes")
+
+if let combinedPath = options["--combined"] {
+    let combined = combinedSeedBlob(version: 1, unigram: blobs.unigram, bigram: blobs.bigram)
+    let url = URL(fileURLWithPath: combinedPath)
+    do {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(combined).write(to: url)
+    } catch { fail("combined write failed: \(error)") }
+    print("  combined seed: \(combined.count) bytes → \(url.path)")
+}
