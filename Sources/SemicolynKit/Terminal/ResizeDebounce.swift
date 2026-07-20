@@ -10,6 +10,13 @@ public struct ResizeDebounce: Equatable, Sendable {
     private var pendingCols: Int?
     private var pendingRows: Int?
     private var lastChange: Date?
+    /// The last size actually EMITTED by `tick`, so an unchanged size is never re-emitted.
+    /// Device 2026-07-20: a spring-back's layout churn re-noted the same grid, and without this
+    /// guard `tick` re-emitted it, sending tmux a `refresh-client` that forced a full-screen
+    /// repaint (visible flicker on a no-op short drag). nil (both) until the first emit. Two
+    /// `Int?`s rather than a tuple so `Equatable` still synthesizes.
+    private var lastEmittedCols: Int?
+    private var lastEmittedRows: Int?
 
     public init() {}
 
@@ -18,11 +25,15 @@ public struct ResizeDebounce: Equatable, Sendable {
         pendingCols = cols; pendingRows = rows; lastChange = now
     }
 
-    /// If a pending size has been quiet for `quiet`, return and clear it; else nil.
+    /// If a pending size has been quiet for `quiet` AND differs from the last emitted size,
+    /// return and clear it; else nil (an unchanged size is suppressed, not re-emitted).
     public mutating func tick(at now: Date) -> (cols: Int, rows: Int)? {
         guard let lc = lastChange, let c = pendingCols, let r = pendingRows else { return nil }
         guard now.timeIntervalSince(lc) >= Self.quiet else { return nil }
         pendingCols = nil; pendingRows = nil; lastChange = nil
+        // Suppress a no-op resize: nothing changed since the last emit, so don't nudge tmux.
+        if lastEmittedCols == c, lastEmittedRows == r { return nil }
+        lastEmittedCols = c; lastEmittedRows = r
         return (c, r)
     }
 }

@@ -221,8 +221,10 @@ struct MissingSlotView: View {
     }
 }
 
-/// Pad: drag = arrow key (dominant axis), tap = zoom active pane.
-/// (Long-press pane-mode + splits = a later slice.)
+/// Pad: SWIPE = arrow key in the swiped (dominant-axis) direction. No tap action - the pad
+/// is purely a directional control (device 2026-07-20: tap used to zoom the active pane, so a
+/// press meant to send an arrow zoomed a pane instead; every direction is now a swipe that
+/// originates on the pad itself). Zoom lives on the long-press-pane gesture elsewhere.
 struct PadView: View {
     let vm: ConnectionViewModel
     @Environment(\.theme) private var theme
@@ -230,11 +232,13 @@ struct PadView: View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
             Image(systemName: "dpad").foregroundStyle(Color(theme.text.primary))
         }
-        .onInputClickTap { vm.zoomActivePane() }
         .gesture(DragGesture(minimumDistance: 16).onEnded { g in
             let dx = g.translation.width, dy = g.translation.height
-            if abs(dx) > abs(dy) { vm.keybar.arrow(dx > 0 ? .right : .left) }
-            else { vm.keybar.arrow(dy > 0 ? .down : .up) }
+            let arrow: ArrowDirection = abs(dx) > abs(dy)
+                ? (dx > 0 ? .right : .left)
+                : (dy > 0 ? .down : .up)
+            vm.keybar.arrow(arrow)
+            DebugLog.shared.log(.keybar, "keybar:dpad swipe dx=\(Int(dx)) dy=\(Int(dy)) -> arrow=\(arrow)")
         })
     }
 }
