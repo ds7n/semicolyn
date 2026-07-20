@@ -221,24 +221,72 @@ struct MissingSlotView: View {
     }
 }
 
-/// Pad: SWIPE = arrow key in the swiped (dominant-axis) direction. No tap action - the pad
-/// is purely a directional control (device 2026-07-20: tap used to zoom the active pane, so a
-/// press meant to send an arrow zoomed a pane instead; every direction is now a swipe that
-/// originates on the pad itself). Zoom lives on the long-press-pane gesture elsewhere.
+/// Pad: SWIPE = arrow key in the swiped (dominant-axis) direction, and HOLDING the swipe
+/// auto-repeats it iOS-style (distance picks direction, held-time drives the rate; see
+/// SemicolynKit `ArrowRepeat`). No tap action: the pad is purely a directional control
+/// (device 2026-07-20: tap used to zoom the active pane, so a press meant to send an arrow
+/// zoomed a pane instead). Zoom lives on the long-press-pane gesture elsewhere.
 struct PadView: View {
     let vm: ConnectionViewModel
     @Environment(\.theme) private var theme
+
+    @State private var heldSince: Date?                 // set on the first crossing; nil = not held
+    @State private var lastTranslation: CGSize = .zero  // latest dx/dy, updated every onChanged
+    @State private var repeatTimer: Timer?
+
     var body: some View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
             Image(systemName: "dpad").foregroundStyle(Color(theme.text.primary))
         }
-        .gesture(DragGesture(minimumDistance: 16).onEnded { g in
-            let dx = g.translation.width, dy = g.translation.height
-            let arrow: ArrowDirection = abs(dx) > abs(dy)
-                ? (dx > 0 ? .right : .left)
-                : (dy > 0 ? .down : .up)
-            vm.keybar.arrow(arrow)
-            DebugLog.shared.log(.keybar, "keybar:dpad swipe dx=\(Int(dx)) dy=\(Int(dy)) -> arrow=\(arrow)")
-        })
+        .gesture(
+            DragGesture(minimumDistance: 16)
+                .onChanged { g in
+                    lastTranslation = g.translation           // always track the latest thumb pos
+                    guard heldSince == nil else { return }     // already holding; timer drives it
+                    fireArrow()                                // first fire on crossing 16pt
+                    heldSince = Date()
+                    DebugLog.shared.log(.keybar,
+                        "keybar:dpad swipe dx=\(Int(g.translation.width)) dy=\(Int(g.translation.height)) -> arrow=\(dominantArrow(dx: g.translation.width, dy: g.translation.height))")
+                    DebugLog.shared.log(.keybar, "keybar:dpad repeat start")
+                    scheduleNextRepeat()
+                }
+                .onEnded { _ in stopRepeat() }
+        )
+    }
+
+    /// Fire the arrow for the current thumb direction.
+    private func fireArrow() {
+        vm.keybar.arrow(dominantArrow(dx: lastTranslation.width, dy: lastTranslation.height))
+    }
+
+    /// Re-arm the repeat timer: ask the Kit decider for the interval at the current held-time.
+    /// While still in the initial-delay window it returns nil; poll again at the remaining delay.
+    private func scheduleNextRepeat() {
+        guard let since = heldSince else { return }
+        let held = Date().timeIntervalSince(since)
+        let delay: TimeInterval
+        let shouldFire: Bool
+        if let interval = ArrowRepeat.interval(heldFor: held) {
+            delay = interval
+            shouldFire = true
+        } else {
+            delay = max(0.01, ArrowRepeat.initialDelay - held)   // wait out the remaining delay
+            shouldFire = false
+        }
+        repeatTimer?.invalidate()
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                guard self.heldSince != nil else { return }      // released between arm and fire
+                if shouldFire { self.fireArrow() }
+                self.scheduleNextRepeat()
+            }
+        }
+    }
+
+    /// Stop repeating and reset held state (on release).
+    private func stopRepeat() {
+        repeatTimer?.invalidate()
+        repeatTimer = nil
+        heldSince = nil
     }
 }
