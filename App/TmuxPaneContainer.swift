@@ -940,12 +940,22 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // every frame. Per the UIKit contract, position a transformed view via `bounds` +
             // `center` (both applied INDEPENDENTLY of the transform) and leave `frame` alone; use
             // the plain `frame = bounds` only when at rest (identity transform).
+            // Device #1 (2026-07-20): the keybar (inputAccessoryView) is NOT propagated into
+            // our safeArea (si=(t0,b0) on device), so `bounds` includes the keybar+keyboard
+            // band and the terminal rendered behind the bar. Subtract the keybar height so the
+            // pane-hosting wrapper (and every pane + card-dim inside it) occupies only the
+            // visible area above the bar. kbH<=0 = keyboard down (no accessory) -> full height.
+            let kbH = firstResponderKeybarHeight()
+            let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height), keybarHeight: Double(kbH))
+            let usableSize = CGSize(width: bounds.width, height: CGFloat(usableH))
             let dragActive = !paneContentView.transform.isIdentity
             if dragActive {
-                paneContentView.bounds = CGRect(origin: .zero, size: bounds.size)
-                paneContentView.center = CGPoint(x: bounds.midX, y: bounds.midY)
+                paneContentView.bounds = CGRect(origin: .zero, size: usableSize)
+                // The horizontal slide (transform.tx) is unaffected by the height inset; center
+                // stays at the visible-area midpoint so the card sits above the keybar.
+                paneContentView.center = CGPoint(x: bounds.midX, y: usableSize.height / 2)
             } else {
-                paneContentView.frame = bounds
+                paneContentView.frame = CGRect(origin: .zero, size: usableSize)
             }
             // Permanent `.render` instrument: confirm the transform SURVIVES this layout pass now.
             // Before the fix this logged `FRAME-STOMPED-XFORM`; it should now always be
@@ -966,22 +976,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
             cardDimView.frame = paneContentView.bounds
             paneContentView.bringSubviewToFront(cardDimView)
             let cell = resolvedCell()
-            guard let grid = terminalGrid(width: Double(bounds.width), height: Double(bounds.height),
+            // Grid from the KEYBAR-ADJUSTED height (device #1), not raw bounds.height.
+            guard let grid = terminalGrid(width: Double(bounds.width), height: usableH,
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
             // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15). Log the
-            // full geometry at the grid-computation boundary so a device trace can prove
-            // whether the container bounds already exclude the keybar (inputAccessoryView)
-            // area, or whether the grid is computed from pre-keyboard-avoidance bounds.
-            // `si` = safeAreaInsets; a nonzero `.bottom` = the system reserved space (home
-            // indicator / keyboard). `kb` = the active pane's keybar accessory height.
+            // full geometry at the grid-computation boundary. `si` = safeAreaInsets; a nonzero
+            // `.bottom` = system reserved space. `kbH` = the active pane's keybar accessory
+            // height; `usableH` = bounds.height with the keybar subtracted (what the grid uses).
+            // Logged under `.tmux` (default-ON) so the grid/client-size mismatch captures on a
+            // device build without a manual toggle.
             let si = safeAreaInsets
-            let kbH = firstResponderKeybarHeight()
-            // Logged under `.tmux` (default-ON) rather than `.keybar` (off): the
-            // grid/client-size mismatch (#D: we send tmux 80 cols while the window is
-            // laid out at 89) is a tmux-sizing concern, and it must capture on a device
-            // build without a manual toggle.
             DebugLog.shared.log(.tmux,
-                "sizing:tmux bounds=\(Int(bounds.width))x\(Int(bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) cell=\(String(format: "%.1f", cell.w))x\(String(format: "%.1f", cell.h)) kbH=\(String(format: "%.1f", kbH)) grid=\(grid.cols)x\(grid.rows)")
+                "sizing:tmux bounds=\(Int(bounds.width))x\(Int(bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) cell=\(String(format: "%.1f", cell.w))x\(String(format: "%.1f", cell.h)) kbH=\(String(format: "%.1f", kbH)) usableH=\(Int(usableH)) grid=\(grid.cols)x\(grid.rows)")
             coordinator?.noteClientSize(cols: grid.cols, rows: grid.rows)
         }
 
