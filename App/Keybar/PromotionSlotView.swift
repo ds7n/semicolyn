@@ -15,7 +15,7 @@ struct PromotionSlotView: View {
             Text(slot.tap).font(.system(.body, design: .monospaced)).foregroundStyle(Color(theme.text.primary))
             if let down = slot.down { Text(down).font(.system(size: 9)).foregroundStyle(Color(theme.text.secondary)) }
         }
-        .frame(minWidth: 34, minHeight: 34).padding(.horizontal, 6)
+        .frame(minWidth: 40, minHeight: 34).padding(.horizontal, 6)
         .background(Color(theme.keybar.slotBgPromoted))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .onInputClickTap { if let c = slot.tap.first { vm.keybar.tapSymbol(c) } }
@@ -63,7 +63,7 @@ struct FnSlotView: View {
     }
     var body: some View {
         Text("Fn").font(.caption).foregroundStyle(Color(theme.text.primary))
-            .frame(minWidth: 34, minHeight: 34).padding(.horizontal, 6)
+            .frame(minWidth: 40, minHeight: 34).padding(.horizontal, 6)
             .background(bg).clipShape(RoundedRectangle(cornerRadius: 6))
             .onInputClickTap { vm.fnTap() }
     }
