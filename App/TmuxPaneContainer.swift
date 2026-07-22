@@ -531,63 +531,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Pane-ID → live TerminalView; exposed for coordinator mouse-dot updates.
         var panes: [PaneID: TerminalView] = [:]
 
-        /// Wraps every pane subview so a later task can transform this ONE view to
-        /// slide a whole tmux window (window-switch animation). Fills `bounds`;
-        /// pane frames are computed in `apply(state:)` and are unchanged by this
-        /// wrapper since it exactly covers the container's coordinate space.
-        /// Added as a subview on first use (see `ensurePaneContentViewInstalled()`);
-        /// `layoutSubviews` keeps its frame pinned to `bounds` but never touches its
-        /// `.transform` (reserved for the future animation).
-        let paneContentView = UIView()
-        private var paneContentViewInstalled = false
-
-        /// Installs `paneContentView` as the first (and only) content-hosting subview,
-        /// lazily, the first time it's needed (mirrors `ContainerView` having no custom
-        /// `init` today). Idempotent.
-        private func ensurePaneContentViewInstalled() {
-            guard !paneContentViewInstalled else { return }
-            paneContentView.frame = bounds
-            addSubview(paneContentView)
-            paneContentViewInstalled = true
-        }
-
-        /// Unhide every pane view. Panes created DURING a pending switch are made hidden (to
-        /// mask their mid-build flicker); the Coordinator calls this at handoff / cancel /
-        /// timeout to reveal them. Idempotent (a visible pane stays visible). Called on every
-        /// terminal path of a switch so a hidden pane can never be stranded invisible.
-        func revealSwitchedPanes() {
-            for view in panes.values where view.isHidden { view.isHidden = false }
-        }
-
-        /// Uniform dim overlay that darkens the DEPARTING card itself as it drags off during a
-        /// window switch (device 2026-07-19: replaces the old side-gradient gap-dim, which
-        /// darkened the exposed edge the user drags AWAY from and read backwards). Added as a
-        /// subview OF `paneContentView`, so it rides the same transform and the dim travels with
-        /// the finger. Solid black; the Coordinator ramps its `.alpha` 0 -> `GapDim.maxOpacity`
-        /// with drag distance. Transparent at rest.
-        let cardDimView = UIView()
-        private var cardDimInstalled = false
-
-        /// Install `cardDimView` as the TOP subview of `paneContentView` (so it dims the panes
-        /// beneath it) pinned to `paneContentView.bounds`. Idempotent. Requires
-        /// `paneContentView` to be installed first (its parent).
-        private func ensureCardDimInstalled() {
-            guard !cardDimInstalled else { return }
-            ensurePaneContentViewInstalled()
-            cardDimView.frame = paneContentView.bounds
-            cardDimView.isUserInteractionEnabled = false
-            cardDimView.alpha = 0
-            cardDimView.backgroundColor = .black
-            paneContentView.addSubview(cardDimView)   // on top of the panes, inside the card
-            cardDimInstalled = true
-        }
-
-        /// The card-dim overlay view, for the Coordinator to ramp `.alpha`.
-        func cardDimOverlay() -> UIView {
-            ensureCardDimInstalled()
-            return cardDimView
-        }
-
         /// Cached cell metrics so we don't re-measure the font on every layout pass.
         /// Nil'd by `invalidateCachedCell()` after a pinch font change.
         private var cachedCell: (w: Double, h: Double)?
@@ -628,56 +571,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// the old coarse `sendApproxClientSize` estimate. Debounced in the coordinator.
         override func layoutSubviews() {
             super.layoutSubviews()
-            // Keep the pane-hosting wrapper pinned to our bounds on every layout pass
-            // (rotation, keyboard show-hide, font change) BEFORE pane frames are
-            // computed below. Frame only - `.transform` is left alone (a later task
-            // animates it for the window-switch slide).
-            ensurePaneContentViewInstalled()
-            // Pin the pane-hosting wrapper to our bounds on every layout pass (rotation,
-            // keyboard show-hide, font change). CRUCIAL (device root-cause 2026-07-19): when a
-            // live window-switch drag has set a non-identity `.transform` on this view, we must
-            // NOT write `.frame` - UIKit derives `frame` THROUGH the transform, so `frame =
-            // bounds` back-computes bounds/center in a way that cancels the drag translation
-            // (trace: tx=-288 while frame.x=-0.3, so the window never visibly moved). Under the
-            // -CC render storm `layoutSubviews` fires ~60x/sec, so this fought the transform on
-            // every frame. Per the UIKit contract, position a transformed view via `bounds` +
-            // `center` (both applied INDEPENDENTLY of the transform) and leave `frame` alone; use
-            // the plain `frame = bounds` only when at rest (identity transform).
             // Device #1 (2026-07-20): the keybar (inputAccessoryView) is NOT propagated into
             // our safeArea (si=(t0,b0) on device), so `bounds` includes the keybar+keyboard
-            // band and the terminal rendered behind the bar. Subtract the keybar height so the
-            // pane-hosting wrapper (and every pane + card-dim inside it) occupies only the
-            // visible area above the bar. kbH<=0 = keyboard down (no accessory) -> full height.
+            // band and the terminal rendered behind the bar. Subtract the keybar height so
+            // every pane occupies only the visible area above the bar. kbH<=0 = keyboard down
+            // (no accessory) -> full height.
             let kbH = firstResponderKeybarHeight()
             let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height), keybarHeight: Double(kbH))
-            let usableSize = CGSize(width: bounds.width, height: CGFloat(usableH))
-            let dragActive = !paneContentView.transform.isIdentity
-            if dragActive {
-                paneContentView.bounds = CGRect(origin: .zero, size: usableSize)
-                // The horizontal slide (transform.tx) is unaffected by the height inset; center
-                // stays at the visible-area midpoint so the card sits above the keybar.
-                paneContentView.center = CGPoint(x: bounds.midX, y: usableSize.height / 2)
-            } else {
-                paneContentView.frame = CGRect(origin: .zero, size: usableSize)
-            }
-            // Permanent `.render` instrument: confirm the transform SURVIVES this layout pass now.
-            // Before the fix this logged `FRAME-STOMPED-XFORM`; it should now always be
-            // `transform-preserved` while a drag is active. Silent at rest (identity transform).
-            if dragActive {
-                DebugLog.shared.log(.render, decisionLine(
-                    "render:layout-vs-xform",
-                    inputs: [("tx", String(format: "%.1f", Double(paneContentView.transform.tx))),
-                             ("bounds.w", String(format: "%.0f", Double(bounds.width)))],
-                    outputs: [("frame.x", String(format: "%.1f", Double(paneContentView.frame.origin.x)))],
-                    reason: "transform-preserved(bounds+center)"))
-            }
-            // Keep the card-dim overlay pinned to the card (paneContentView) on every pass,
-            // and ALWAYS on top of it: a window switch creates new pane subviews via
-            // `paneContentView.addSubview` AFTER install, which would otherwise stack them above
-            // the dim and leave it darkening nothing during the slide (review 2026-07-19).
-            ensureCardDimInstalled()
-            cardDimView.frame = paneContentView.bounds
-            paneContentView.bringSubviewToFront(cardDimView)
             let cell = resolvedCell()
             // Grid from the KEYBAR-ADJUSTED height (device #1), not raw bounds.height.
             guard let grid = terminalGrid(width: Double(bounds.width), height: usableH,
@@ -707,10 +607,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         /// Re-apply `paneRects` to the panes ALREADY in `panes` (no create/destroy, no
         /// first-responder/border changes) so a revealed pane tracks a geometry-only bounds
-        /// change. Skips entirely while a switch drag holds a non-identity transform (don't
-        /// fight the slide) and when no layout has been applied yet. Device #2.
+        /// change. No-ops when no layout has been applied yet. Device #2.
         private func relayoutExistingPaneFrames(cell: (w: Double, h: Double)) {
-            guard paneContentView.transform.isIdentity else { return }
             guard let layout = lastAppliedLayout else { return }
             for rect in paneRects(in: layout, cellWidth: cell.w, cellHeight: cell.h) {
                 guard let view = panes[rect.pane] else { continue }
@@ -791,10 +689,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
                    unregister: (PaneID) -> Void,
                    activeBorderColor: UIColor,
                    inactiveBorderColor: UIColor) {
-            // SwiftUI can call `apply` before this view's first `layoutSubviews` pass
-            // (e.g. immediately after `makeUIView`), and panes are parented into
-            // `paneContentView` below - ensure it exists before that happens.
-            ensurePaneContentViewInstalled()
             let sig = RenderSignature(state)
             guard sig != lastRenderSignature else { return }   // unchanged → skip re-layout
             let reason = renderChangeReason(old: lastRenderSignature, new: sig, state: state)
@@ -860,7 +754,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         }
                         coordinator?.modeTracker.recompute(for: pane, terminal: term, altSource: src)
                     }
-                    paneContentView.addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
+                    addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
                     coordinator?.installHalo(on: t, pane: pane)
                     // Prime once at mount so a pane reattaching into a running
                     // alt-screen app (vim/Claude) is correct from frame one.
