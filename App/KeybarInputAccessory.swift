@@ -94,8 +94,16 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     /// view's seed height rather than the content height. `sizeThatFits` is immune to
     /// that: it measures the SwiftUI graph, not the container frame.
     private func contentHeight() -> CGFloat {
-        let width = bounds.width > 0 ? bounds.width : UIScreen.main.bounds.width
-        let fitted = host.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+        // Not yet laid out (width 0) => `sizeThatFits` returns a degenerate height (the seed).
+        // This happens for a freshly-attached accessory on a window switch, and made
+        // `firstResponderKeybarHeight` report a transient wrong kbH (40 not 74), thrashing the
+        // grid and painting the history seed at the wrong size (device 2026-07-22, the
+        // cursor-in-corner switch-back). Fall back to the last VALID measurement, which
+        // predictor-strip / hidden-keybar / hardware-keyboard changes keep current.
+        guard bounds.width > 0 else {
+            return lastMeasuredHeight > 0 ? lastMeasuredHeight : Self.seedHeight
+        }
+        let fitted = host.sizeThatFits(in: CGSize(width: bounds.width, height: .greatestFiniteMagnitude))
         let h = fitted.height > 0 ? fitted.height : Self.seedHeight
         DebugLog.shared.log(.keybar, "keybar:contentHeight h=\(h)")
         return h
