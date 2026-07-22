@@ -11,8 +11,8 @@ import Foundation
 public enum DragAxis: Equatable, Sendable {
     case pending
     case scroll
-    /// Content-follows-finger: rightward swipe (dx>0) -> previous window (-1),
-    /// leftward -> next (+1). Matches `windowSlideDirection`.
+    /// Content-follows-finger is gone (KISS): rightward swipe (dx>0) -> previous window (-1),
+    /// leftward -> next (+1).
     case switchWindow(delta: Int)
 }
 
