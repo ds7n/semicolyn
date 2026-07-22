@@ -192,6 +192,28 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         }
     }
 
+    /// Durably subordinate SwiftTerm's LAZILY-created selection/mouse pan to the native
+    /// scroll pan, at the moment it first exists. Unlike `disableStraySwiftTermPans` (a
+    /// per-drag scan that misses the case where the selection pan WINS arbitration before
+    /// our `.began` handler runs), this wires the pan into the failure tree ONCE: it sets
+    /// our delegate (so the existing `shouldRequireFailureOf` selectionPan-vs-scrollPan
+    /// rule fires) and calls `require(toFail:)` directly as redundant insurance. Idempotent
+    /// (re-setting the same delegate / re-adding the same failure requirement is a no-op).
+    private func subordinateSelectionPan(on view: TerminalView) {
+        let scrollPan = view.panGestureRecognizer
+        for gr in view.gestureRecognizers ?? [] where
+            gr is UIPanGestureRecognizer
+            && gr !== scrollPan            // not the scroll pan (our authoritative owner)
+            && !ours.contains(gr) {        // not one of ours
+            if gr.delegate !== self {
+                gr.delegate = self
+                gr.require(toFail: scrollPan)
+                DebugLog.shared.log(.gesture,
+                    "selectionPan subordinated (delegate+require-fail vs scrollPan)")
+            }
+        }
+    }
+
     private func installOurRecognizers(on view: TerminalView) {
         singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
         singleTap.delegate = self
@@ -348,6 +370,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             longPress.isEnabled = false
             longPress.isEnabled = true
         }
+        // Primary fix: durably subordinate the selection pan the instant it exists.
+        subordinateSelectionPan(on: view)
         // Kill any lazily-created SwiftTerm selection/mouse pan before it can turn this
         // drag into a text selection (the one-time init sweep can't catch it).
         disableStraySwiftTermPans(on: view)
@@ -661,6 +685,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let (start, end) = wordBounds(col: col, row: row, in: view)
         DebugLog.shared.log(.gesture, "sel:before hasActive=\(view.hasActiveSelection)")
         view.setSelectionRange(start: Position(col: start, row: row), end: Position(col: end, row: row))
+        subordinateSelectionPan(on: view)   // the selection pan is created now; subordinate it at birth
         DebugLog.shared.log(.gesture, "sel:after set (\(start),\(row))-(\(end),\(row)) hasActive=\(view.hasActiveSelection)")
         presentEditMenu(at: p, in: view)
     }
@@ -680,6 +705,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         DebugLog.shared.log(.gesture, "sel:before hasActive=\(view.hasActiveSelection)")
         view.setSelectionRange(start: Position(col: 0, row: row),
                                end: Position(col: cols - 1, row: row))
+        subordinateSelectionPan(on: view)   // the selection pan is created now; subordinate it at birth
         DebugLog.shared.log(.gesture, "sel:after set (0,\(row))-(\(cols - 1),\(row)) hasActive=\(view.hasActiveSelection)")
         presentEditMenu(at: p, in: view)
     }
