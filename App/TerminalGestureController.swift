@@ -307,16 +307,18 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: Handlers
 
-    /// Diagnostic (Bug B, device trace 2026-07-14): in `.appOwnsInput` our
-    /// `handleScrollViewPan` never fires because a `delegate=nil` UIKit pan
-    /// (`_UIDragAutoScrollGestureRecognizer` / SwiftTerm's lazy pan) appears to win
-    /// the drag. Kept attached as a stray-recognizer observer target (see
-    /// `observeStrayRecognizers`); the identifying log line moved into `beginDrag`'s
-    /// `drag-begin winner=...` (self-contained per-drag line), so this handler is now
-    /// a deliberate no-op: a stray recognizer firing still routes here without
-    /// producing a second, redundant log.
     @objc private func observeRecognizerState(_ g: UIGestureRecognizer) {
         guard g.state == .began || g.state == .changed else { return }
+        // A: catch a swipe that loses the recognizer race before `drag-begin` logs. Identify
+        // which non-ours recognizer began/changed on the terminal view (SwiftTerm's scroll or
+        // lazy selection pan). If this fires without a following `drag-begin`, that recognizer
+        // pre-empted our switch drag (the invisible intermittent-swipe miss, device 2026-07-22).
+        let kind: String
+        if g === terminalView?.panGestureRecognizer { kind = "scrollPan" }
+        else if g is UIPanGestureRecognizer { kind = "strayPan" }
+        else { kind = String(describing: type(of: g)) }
+        DebugLog.shared.log(.gesture,
+            "gr-observe \(kind) state=\(g.state.rawValue) mode=\(callbacks.currentMode())")
     }
 
     /// Attach `observeRecognizerState` as an extra target on every recognizer on the
@@ -360,7 +362,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // Kill any lazily-created SwiftTerm selection/mouse pan before it can turn this
         // drag into a text selection (the one-time init sweep can't catch it).
         disableStraySwiftTermPans(on: view)
-        if dragMode == .appOwnsInput { observeStrayRecognizers(on: view) }
+        observeStrayRecognizers(on: view)   // A: observe stray recognizers in ALL modes (catch localScroll swipe-race misses)
         // `imode=` is the InteractionMode; `dragDecision.logLine` carries its own
         // `mode=` (the AltScrollMode). Distinct keys so the one line stays unambiguous
         // (the B retest reads `imode=` to tell mouseReporting from appOwnsInput).
