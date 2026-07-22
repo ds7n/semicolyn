@@ -51,7 +51,8 @@ horizontal swipe passes the commit threshold (on release)
   taps (cursor/word/line select), pinch font-zoom, alt-screen arrow-scroll pan,
   the selection-pan subordination (helps scroll-vs-selection reliability, not
   swipe-specific), the `WindowTabStrip` tap fallback.
-- Normal pane rendering: `apply(state:)` builds the new window's panes and tmux
+- Normal pane rendering: `apply(state:)` builds the new window's panes (parented
+  directly into `ContainerView` now, see paneContentView removal below) and tmux
   repaints them. With NO hiding, NO gate, NO animation.
 
 ## DELETE (the ceremony) — all in App/TmuxPaneContainer.swift + App/TerminalGestureController.swift
@@ -74,21 +75,24 @@ Coordinator (switch animation + async-handoff machinery):
 - ContainerView: `cardDimView` / `cardDimOverlay` / `ensureCardDimInstalled`,
   `revealSwitchedPanes`, panes-created-`isHidden` logic.
 
-### paneContentView: KEEP or inline?
-`paneContentView` currently exists to be the single view the slide transform was
-applied to. With no slide, it is just a passthrough wrapper. KEEP it as-is for this
-change (panes are parented into it and `layoutSubviews` pins it to bounds); removing
-the wrapper is a larger refactor and out of scope. We simply stop ever setting its
-`.transform`. (A later cleanup may inline it.)
+### paneContentView: REMOVE (no inert wrapper)
+`paneContentView` existed ONLY to be the single view the slide transform was applied
+to. With no slide it is a pointless passthrough. REMOVE it: parent panes directly
+into `ContainerView`, and pin them in `layoutSubviews` against `ContainerView.bounds`
+(same visible-height inset math, minus the wrapper). No leftover wrapper view. If the
+animated version is ever wanted again, `git revert` restores it; we do not keep inert
+code "just in case."
 
-### armResizeSettle / resize-settle window
-`armResizeSettle` + the `switchResizeQuiet` debounce coalesced a resize burst caused
-by the switch animation's keyboard/keybar grow. With no animation, re-evaluate: the
-resize burst on switch may still occur from the keybar, so KEEP `armResizeSettle`
-(it is triggered from the universal active-window-change point in `apply`, not the
-deleted animation) unless the plan finds it is animation-coupled. Decision deferred
-to the plan's investigation step; default KEEP (it is a resize-debounce concern,
-orthogonal to the switch animation).
+### armResizeSettle / resize-settle window: INVESTIGATE, then cut-or-keep
+`armResizeSettle` + the `switchResizeQuiet` debounce coalesced a resize burst. The
+plan's FIRST step must trace what actually triggers that burst:
+- If it is the deleted switch ANIMATION's keyboard/keybar grow -> DELETE it (dead with
+  the animation).
+- If it is the keybar grow that happens on ANY active-window change independent of the
+  animation (i.e. still fires with the animation gone) -> KEEP it (it is a live
+  resize-debounce concern, not animation ceremony).
+This is a correctness determination (cutting a still-needed debounce would break
+resize), NOT hoarding. Resolve it by tracing the trigger, then cut or keep decisively.
 
 ## Data flow (after)
 
