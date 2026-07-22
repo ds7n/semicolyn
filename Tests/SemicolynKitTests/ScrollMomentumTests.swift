@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
+import Foundation
 import XCTest
 @testable import SemicolynKit
 
@@ -66,5 +67,29 @@ final class ScrollMomentumTests: XCTestCase {
     func testAtThresholdReleaseFlings() {
         let m = ScrollMomentum(velocity: ScrollMomentum.minFlingVelocity + 1)
         XCTAssertFalse(m.isFinished(at: 0))
+    }
+
+    // D (2026-07-22): the fling must END while it is still moving at a few lines/sec, not
+    // dribble out slow single wheel-clicks (the alt-screen grit). With the raised floor, a
+    // fling that has decayed to ~60 pt/sec is considered finished (a ~6-line cell at ~10pt
+    // is <1 line per few frames). Below the floor -> finished; comfortably above -> not.
+    func testRaisedStopFloorEndsFlingWhileStillSlowMoving() {
+        // A fling released fast enough to qualify, sampled at a time where its instantaneous
+        // velocity has decayed to ~50 pt/sec, must now be finished (grit-cut).
+        let m = ScrollMomentum(velocity: 1200)
+        // find a t where velocity(at:) is ~50 pt/sec: v0 * e^(-k t) = 50.
+        let k = ScrollMomentum.decayRate
+        let tAtFifty = Foundation.log(1200.0 / 50.0) / k
+        XCTAssertTrue(m.isFinished(at: tAtFifty),
+                      "fling at ~50 pt/sec should be finished with the raised floor")
+        // And it must NOT be finished while still moving briskly (~150 pt/sec).
+        let tAtOneFifty = Foundation.log(1200.0 / 150.0) / k
+        XCTAssertFalse(m.isFinished(at: tAtOneFifty),
+                       "fling at ~150 pt/sec should still be running")
+    }
+
+    // The stop floor is the raised value (no silent retune back).
+    func testStopVelocityFloorValue() {
+        XCTAssertEqual(ScrollMomentum.stopVelocity, 70.0)
     }
 }

@@ -25,8 +25,11 @@ public struct ScrollMomentum: Sendable {
     public static let minFlingVelocity: Double = 80.0
 
     /// Instantaneous velocity (points/sec) below which the fling is considered stopped, so the
-    /// App's tick loop knows to end. Feel-tuned (sub-pixel-per-frame at 60Hz).
-    public static let stopVelocity: Double = 20.0
+    /// App's tick loop ends. Raised from 20 to 70 (2026-07-22): at ~1 wheel-line (~10pt) per
+    /// event, a fling below ~70 pt/sec dribbles out slow single clicks with visible gaps (the
+    /// alt-screen "grit"), so we end the fling crisply here instead of tailing off. A fast
+    /// flick still carries; only the gritty slow tail is cut.
+    public static let stopVelocity: Double = 70.0
 
     /// Release velocity (points/sec, signed: +down / −up as UIKit reports pan velocity).
     public let velocity: Double
