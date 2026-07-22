@@ -323,8 +323,9 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     /// Attach `observeRecognizerState` as an extra target on every recognizer on the
     /// view that is not one of ours, so any of them firing is logged. Idempotent per
-    /// recognizer (UIKit ignores a duplicate identical target/action). Called when a
-    /// pane enters `.appOwnsInput` (the only mode where the drag goes missing).
+    /// recognizer (UIKit ignores a duplicate identical target/action). Called on every
+    /// drag start in ALL interaction modes, to catch a stray recognizer (SwiftTerm's
+    /// scroll/selection pan) pre-empting our drag (the intermittent swipe-race miss).
     private func observeStrayRecognizers(on view: TerminalView) {
         for gr in view.gestureRecognizers ?? [] where !ours.contains(gr) && gr !== view.panGestureRecognizer {
             gr.addTarget(self, action: #selector(observeRecognizerState(_:)))
