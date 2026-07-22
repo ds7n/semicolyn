@@ -85,4 +85,10 @@ final class GestureSimultaneityTests: XCTestCase {
         XCTAssertFalse(gesturesMayRecognizeSimultaneously(.selectionPan, .scrollPan))
         XCTAssertFalse(gesturesMayRecognizeSimultaneously(.altScreenPan, .longPress))
     }
+
+    // Guard the OTHER direction: pinch must still coexist with the scroll pan, or a stray
+    // second finger would kill scrolling.
+    func testPinchStillCoexistsWithScrollPan() {
+        XCTAssertTrue(gesturesMayRecognizeSimultaneously(.pinch, .scrollPan))
+    }
 }
