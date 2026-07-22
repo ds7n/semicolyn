@@ -9,9 +9,9 @@ import SemicolynKit
 /// drag scrolls via the terminal's NATIVE `UIScrollView` pan (kept enabled — we do
 /// not fight it); in `.appOwnsInput` (alt-screen) the mount parks that pan
 /// (`isScrollEnabled = false`) and this controller streams the drag to the app as
-/// arrow-key runs. A horizontal drag on the native pan live-drags the window switch
-/// (axis-locked via `DragAxisLock`, transformed via `WindowDragModel`, resolved on
-/// release via `SwitchCommitDecision`); single tap places
+/// arrow-key runs. A horizontal drag on the native pan is axis-locked via
+/// `DragAxisLock`; no live rendering happens during the drag, and on release past
+/// threshold `SwitchCommitDecision` fires the window switch. single tap places
 /// the cursor (in `.localScroll`; other modes yield the tap to the app);
 /// double/triple-tap word/line-select; long-press zooms the tmux pane; two-finger
 /// tap shows the edit menu. Routing is mode-driven: the mount tracks each pane's
@@ -52,17 +52,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let sendBytes: ([UInt8]) -> Void
         let hasSelection: () -> Bool
         let clearSelection: () -> Void
-        /// The horizontal drag has locked to the window-switch axis: prepare the reveal
-        /// (refresh non-active snapshots, position the neighbor host). Fires once per drag.
-        let onDragBeginSwitch: () -> Void
-        /// Live update on each `.changed` while switch-locked: content `offset` (points)
-        /// and which neighbor the gap exposes.
-        let onDragUpdate: (_ offset: Double, _ exposed: ExposedNeighbor) -> Void
-        /// Release PAST threshold: commit the switch by `delta` (container runs the settle
-        /// animation + tmux select-window + handoff).
+        /// Release PAST threshold on a switch-locked horizontal drag: commit the switch
+        /// by `delta` (tmux select-window). The sole switch callback: the drag has no
+        /// live-render phase, so a short release simply does nothing (no callback).
         let onDragCommit: (_ delta: Int) -> Void
-        /// Release SHORT: spring the current window back (no tmux command).
-        let onDragCancel: () -> Void
     }
 
     private weak var terminalView: TerminalView?
@@ -81,12 +74,6 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private var emittedCells: Int = 0
     /// Axis this drag locked to (decided once past the dead-zone). `.pending` until then.
     private var dragAxis: DragAxis = .pending
-    /// True once we have fired `onDragBeginSwitch` for this drag (switch axis only).
-    private var switchRevealStarted = false
-    /// Scroll `contentOffset` captured at this drag's `.began`, so a switch-lock can
-    /// restore it and erase the tiny vertical scroll the native pan made during the
-    /// pre-lock dead-zone (`ScrollResidueDecision`). Reset each drag.
-    private var savedContentOffset: CGPoint = .zero
 
     // MARK: Alt-screen scroll momentum (fling)
     /// Drives the post-release decaying wheel-event fling for alt-screen scroll (the native
@@ -351,15 +338,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // A new touch always kills an in-flight momentum fling (catch-the-scroll), so the
         // finger takes over immediately rather than fighting the decaying stream.
         stopAltScreenFling()
-        // Capture the scroll offset so a switch-lock can undo any accidental scroll the
-        // native pan made during the pre-lock dead-zone (ScrollResidueDecision, Kit).
-        savedContentOffset = view.contentOffset
         dragMode = callbacks.currentMode()
         dragAppCursor = callbacks.applicationCursorKeys()
         dragDecision = callbacks.altScrollDecision()
         emittedCells = 0
         dragAxis = .pending
-        switchRevealStarted = false
         // Defense-in-depth (on top of the Kit simultaneity policy): the moment a real
         // drag starts, force-cancel any long-press by bouncing its `isEnabled`. A
         // long-press that recognized just before the pan was turning the held-then-drag
@@ -385,32 +368,22 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     }
 
     /// Feed the drag's cumulative translation through the axis lock. Returns true if this
-    /// drag is (now) switch-locked and the caller should NOT run its scroll/arrow path.
-    /// On the first switch-lock it fires `onDragBeginSwitch`; every `.changed` after fires
-    /// `onDragUpdate` with the clamped offset + exposed neighbor.
+    /// drag is (now) switch-locked (horizontal) so the caller suppresses its scroll/arrow
+    /// path. No live rendering: the switch fires only on release (see `resolveLiveSwitch`).
     private func driveLiveSwitch(_ g: UIPanGestureRecognizer, in view: TerminalView) -> Bool {
         let t = g.translation(in: view)
         if case .pending = dragAxis {
             let multiWin = callbacks.isMultiWindowTmux()
             dragAxis = DragAxisLock.resolve(dx: Double(t.x), dy: Double(t.y),
                                             isMultiWindowTmux: multiWin)
-            // Log ONCE at the moment the axis resolves out of `.pending` (a dead-zone
-            // resolve can return `.pending` again, which must NOT log every frame: the
-            // `if case .pending` below only fires when the axis is still undecided).
             if case .pending = dragAxis {
-                // Still inside the dead-zone; no decision yet, no log.
+                // still inside the dead-zone; no decision yet
             } else {
                 let (axisDesc, reason): (String, String)
                 switch dragAxis {
-                case .switchWindow(let delta):
-                    axisDesc = "switchWindow(delta=\(delta))"
-                    reason = "dominance"
-                case .scroll:
-                    axisDesc = "scroll"
-                    reason = "vertical-or-single"
-                case .pending:
-                    axisDesc = "pending"   // unreachable here (excluded by the outer if/else)
-                    reason = "dead-zone"
+                case .switchWindow(let delta): axisDesc = "switchWindow(delta=\(delta))"; reason = "dominance"
+                case .scroll: axisDesc = "scroll"; reason = "vertical-or-single"
+                case .pending: axisDesc = "pending"; reason = "dead-zone"
                 }
                 DebugLog.shared.log(.gesture, decisionLine(
                     "drag-axis-lock",
@@ -419,27 +392,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                     reason: reason))
             }
         }
-        guard case .switchWindow = dragAxis else { return false }
-        if !switchRevealStarted {
-            switchRevealStarted = true
-            // Undo the dead-zone scroll residue now that we know this is a switch (Kit decider).
-            if case let .restore(toX, toY) = ScrollResidueDecision.resolve(
-                axis: dragAxis, savedX: Double(savedContentOffset.x), savedY: Double(savedContentOffset.y)) {
-                view.contentOffset = CGPoint(x: toX, y: toY)
-                DebugLog.shared.log(.gesture,
-                    "drag-switch restore-offset x=\(Int(toX)) y=\(Int(toY))")
-            }
-            callbacks.onDragBeginSwitch()
-            DebugLog.shared.log(.gesture, "drag-switch begin dx=\(Int(t.x))")
-        }
-        let width = Double(view.bounds.width)
-        let offset = WindowDragModel.offset(dx: Double(t.x), width: width)
-        callbacks.onDragUpdate(offset, WindowDragModel.exposedNeighbor(dx: Double(t.x)))
-        return true
+        if case .switchWindow = dragAxis { return true }
+        return false
     }
 
-    /// Resolve commit-vs-spring on release for a switch-locked drag. Returns true if this
-    /// was a switch drag (so the caller skips its own window-switch resolution).
+    /// On release, resolve commit-vs-nothing for a switch-locked drag. Returns true if this
+    /// was a switch drag (caller skips its own resolution). Commit fires `onDragCommit`
+    /// (-> tmux select-window); a short drag does nothing (no animation to cancel).
     private func resolveLiveSwitch(_ g: UIPanGestureRecognizer, in view: TerminalView) -> Bool {
         guard case .switchWindow = dragAxis else { return false }
         let t = g.translation(in: view)
@@ -450,8 +409,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             DebugLog.shared.log(.gesture, "drag-switch commit delta=\(delta) dx=\(Int(t.x)) vx=\(Int(v.x))")
             callbacks.onDragCommit(delta)
         case .springBack:
-            DebugLog.shared.log(.gesture, "drag-switch cancel dx=\(Int(t.x)) vx=\(Int(v.x))")
-            callbacks.onDragCancel()
+            DebugLog.shared.log(.gesture, "drag-switch short dx=\(Int(t.x)) vx=\(Int(v.x)) - no switch")
         }
         return true
     }
