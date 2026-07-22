@@ -161,13 +161,10 @@ struct TerminalScreen: UIViewRepresentable {
                 sendBytes: { [weak coordinator = context.coordinator] bytes in coordinator?.send(bytes) },
                 hasSelection: { [weak terminal] in terminal?.selectionActive ?? false },
                 clearSelection: { [weak terminal] in terminal?.selectNone() },
-                // Raw-PTY / single-pane terminal: no tmux windows to switch, so the live
-                // finger-drag window-switch callbacks are no-ops here (they only fire when
+                // Raw-PTY / single-pane terminal: no tmux windows to switch, so the
+                // finger-drag commit callback is a no-op here (it only fires when
                 // `isMultiWindowTmux` is true, which is always false in this screen).
-                onDragBeginSwitch: { },
-                onDragUpdate: { _, _ in },
-                onDragCommit: { _ in },
-                onDragCancel: { }
+                onDragCommit: { _ in }
             )
         )
         context.coordinator.gestureController = gestureController

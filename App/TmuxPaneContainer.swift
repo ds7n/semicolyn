@@ -149,11 +149,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private var pinchRecognizers: [ObjectIdentifier: UIPinchGestureRecognizer] = [:]
         /// Per-pane gesture layer (replaces SwiftTerm's built-ins).
         private var gestureControllers: [ObjectIdentifier: TerminalGestureController] = [:]
-        /// Fires if a committed switch's live window never arrives (stuck switch): restores
-        /// the current window (snaps the slid-off card back).
-        private var pendingSwitchTimeout: DispatchWorkItem?
-        /// The window we are switching TO once tmux delivers it (armed at commit).
-        private var pendingSwitchWindow: WindowID?
         /// Device #2 (Build 2): while a window switch is settling, the keybar/keyboard show
         /// animation grows the container bounds through a burst of intermediate sizes
         /// (e.g. 80x35 -> 80x44 -> 80x33). Sending each to tmux resized the window multiple
@@ -165,40 +160,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// long enough to span the keyboard/keybar grow animation (feel-tuned; the animation is
         /// ~150-400ms). Outside the settle window the normal `ResizeDebounce.quiet` applies.
         private static let switchResizeQuiet: TimeInterval = 0.45
-        /// How long to hold the new window HIDDEN after tmux delivers, so its freshly created
-        /// panes lay out + take their first output under cover before being revealed (removes the
-        /// blank->relayout->fill flicker; device 2026-07-19). ~2 frames at 60Hz; feel-tuned.
-        private static let switchSettleDelay: TimeInterval = 0.08
-
-        /// True while a finger-drag switch is committed and awaiting handoff: `apply(state:)`
-        /// reads this to create the new window's panes HIDDEN, so their mid-build flicker is
-        /// masked until `revealSwitchedPanes()` unhides them at handoff.
-        var hasPendingSwitch: Bool { pendingSwitchWindow != nil }
-        /// Both-ready gate for the commit handoff (2026-07-18 timing fix): the live window
-        /// swaps in only when the commit slide animation has finished (`switchAnimDone`) AND
-        /// tmux has delivered the target window (`switchDelivered`). Whichever async event
-        /// finishes LAST triggers `finishSwitchHandoffIfReady`. Fixes the race where tmux
-        /// delivery (~120ms) reset the transform mid-slide (180ms) so no animation was seen.
-        private var switchAnimDone = false
-        private var switchDelivered = false
-        /// Monotonic id for the current committed switch, so a STALE animation completion from
-        /// a superseded switch can't touch the gate of its successor (whole-branch review C1,
-        /// 2026-07-18). A rapid double-switch replaces switch A's `paneContentView` animation
-        /// with switch B's; UIKit still fires A's completion (with `finished == false`), which
-        /// would otherwise set `switchAnimDone = true` for B and let the gate finish B's handoff
-        /// mid-slide - the very race this fix removes. Each `commitSwitchDrag` bumps this and
-        /// captures it in the completion; the completion acts only if its captured id still
-        /// matches. Also bumped by `discardCommittedSnapshot` / `failPendingSwitch` so a pending
-        /// completion is invalidated when a switch is interrupted or times out.
-        private var switchGeneration = 0
-        /// Last `offset` (points) fed to `updateSwitchDrag`, so the per-frame live-drag
-        /// render log fires only when the finger moves the content by ≥1pt (the `.render`
-        /// "logged only on change" discipline (a 60fps drag must not drown the trace).
-        /// Reset to `nil` at each drag's `.began` (`beginSwitchReveal`). This is the ONE
-        /// permanent instrument that proves the live-drag transform is actually applied on
-        /// device (the mechanism was previously never traced: see the render-wiring note
-        /// on `updateSwitchDrag`).
-        private var lastLoggedDragOffset: Double?
         /// The `ContainerView` this coordinator drives; set in `makeUIView`. Weak since
         /// `ContainerView` already holds a weak back-reference to this coordinator (avoid
         /// a retain cycle across the UIViewRepresentable boundary).
@@ -360,17 +321,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         sendBytes: { [weak self] bytes in self?.send(bytes) },
                         hasSelection: { [weak view] in view?.selectionActive ?? false },
                         clearSelection: { [weak view] in view?.selectNone() },
-                        onDragBeginSwitch: { [weak self] in
-                            self?.beginSwitchReveal()
-                        },
-                        onDragUpdate: { [weak self] offset, exposed in
-                            self?.updateSwitchDrag(offset: offset, exposed: exposed)
-                        },
                         onDragCommit: { [weak self] delta in
-                            self?.commitSwitchDrag(delta: delta)
-                        },
-                        onDragCancel: { [weak self] in
-                            self?.cancelSwitchDrag()
+                            self?.onSwitchWindow(delta)   // tmux select-window; tmux redraws (KISS)
                         }
                     )
                 )
@@ -571,292 +523,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 UIImpactFeedbackGenerator(style: .soft).impactOccurred()
             }
         }
-
-        // MARK: - Finger-drag window switch: reveal / update / commit / cancel
-
-        /// Drag locked to the switch axis (drop-snapshot design: nothing to pre-warm; the card
-        /// itself is what animates). If a committed-but-undelivered switch is still in flight
-        /// (rapid re-drag), snap it back and invalidate it before this drag starts. Touches
-        /// `@MainActor` state from this nonisolated Coordinator; wrapped in `assumeIsolated`
-        /// (matches `setAltScreenPan` / `removeHalo`'s pattern for gesture-driven main-thread calls).
-        func beginSwitchReveal() {
-            MainActor.assumeIsolated {
-                // A new drag interrupting a committed-but-undelivered switch must first snap that
-                // switch's card back + invalidate it (C1), BEFORE clearPendingSwitch nils its state.
-                discardCommittedSnapshot()
-                clearPendingSwitch()
-                lastLoggedDragOffset = nil   // fresh on-change baseline for this drag's render trace
-                DebugLog.shared.log(.gesture, "switch-reveal begin")
-            }
-        }
-
-        /// Live `.changed`: slide `paneContentView` with the finger and darken the exposed
-        /// gap behind it. NO neighbor window is shown during the drag (pivot 2026-07-18:
-        /// prep-don't-reveal); the pre-warmed snapshot is drawn only on commit. Wrapped in
-        /// `assumeIsolated` for the same reason as `beginSwitchReveal`.
-        func updateSwitchDrag(offset: Double, exposed: ExposedNeighbor) {
-            MainActor.assumeIsolated {
-                guard let content = containerView?.paneContentView else { return }
-                content.transform = CGAffineTransform(translationX: CGFloat(offset), y: 0)
-                updateCardDim(offset: offset)
-                // Permanent `.render` instrument (logged-on-change, ≥1pt): prove the live-drag
-                // transform is actually applied to `paneContentView` on device. `req` is the
-                // offset the finger asked for; `tx` is read BACK off the view's transform right
-                // after setting it: if `tx` ever diverges from `req`, something (a competing
-                // frame/transform write, e.g. `layoutSubviews`) is stomping it between frames.
-                let applied = Double(content.transform.tx)
-                if lastLoggedDragOffset == nil || abs(offset - (lastLoggedDragOffset ?? 0)) >= 1 {
-                    lastLoggedDragOffset = offset
-                    DebugLog.shared.log(.render, decisionLine(
-                        "render:drag-xform",
-                        inputs: [("req", String(format: "%.1f", offset)),
-                                 ("exposed", "\(exposed)")],
-                        outputs: [("tx", String(format: "%.1f", applied)),
-                                  ("frame.x", String(format: "%.1f", Double(content.frame.origin.x)))],
-                        reason: abs(applied - offset) < 0.5 ? "applied" : "STOMPED"))
-                }
-            }
-        }
-
-        /// Ramp the UNIFORM card-dim overlay with drag progress (`GapDim.opacity`). The overlay
-        /// is a child of `paneContentView`, so it rides the same transform and the dim travels
-        /// with the finger (device 2026-07-19: the whole departing card darkens as it leaves,
-        /// replacing the old side-gradient that dimmed the wrong edge). Assumes the caller is
-        /// already on the main actor (called from within `updateSwitchDrag`'s `assumeIsolated`).
-        private func updateCardDim(offset: Double) {
-            guard let container = containerView else { return }
-            let w = Double(container.bounds.width)
-            let overlay = container.cardDimOverlay()
-            let alpha = CGFloat(GapDim.opacity(offset: offset, width: w))
-            overlay.alpha = alpha
-            // Permanent `.render` instrument (audit 2026-07-19: the dim had ZERO logging, so a
-            // "no dimming" report could not be diagnosed). Bounded to an active switch drag.
-            // `assumeIsolated`: `DebugLog.shared.log` is `@MainActor` and Swift 6 checks isolation
-            // per-method (matches every other main-actor touch in this Coordinator section).
-            MainActor.assumeIsolated {
-                DebugLog.shared.log(.render, decisionLine(
-                    "render:card-dim",
-                    inputs: [("offset", String(format: "%.0f", offset))],
-                    outputs: [("alpha", String(format: "%.2f", Double(alpha)))],
-                    reason: alpha > 0.01 ? "dim" : "clear"))
-            }
-        }
-
-        /// Fade the card-dim overlay back to transparent (spring-back, commit-handoff, timeout).
-        /// Main-actor caller (invoked from within existing `assumeIsolated` blocks).
-        private func clearCardDim() {
-            containerView?.cardDimOverlay().alpha = 0
-        }
-
-        /// Release past threshold: a paired page-turn. The current window slides OFF one
-        /// edge while the PRE-WARMED snapshot of the new window slides IN from the opposite
-        /// edge, in a single animation - both driven by the same `UIView.animate` so they
-        /// stay in lockstep. The animation's completion sets `switchAnimDone` and asks the
-        /// both-ready gate (`finishSwitchHandoffIfReady`) to finish the handoff, which also
-        /// waits on tmux's delivery (`switchDelivered`, set by `completePendingSwitchIfNeeded`)
-        /// so the live panes never swap in mid-slide (2026-07-18 timing fix: tmux delivery,
-        /// ~120ms, used to arrive before the 180ms slide finished and reset the transform).
-        func commitSwitchDrag(delta: Int) {
-            MainActor.assumeIsolated {
-                guard let content = containerView?.paneContentView,
-                      let container = containerView,
-                      let vm, let state = vm.tmuxState,
-                      let active = state.activeWindow,
-                      let dir = windowSlideDirection(delta: delta) else { cancelSwitchDrag(); return }
-                // I1 (whole-branch review 2026-07-18): a switch whose target resolves to the
-                // CURRENT window (degenerate neighbor, or a tmux select-window that would no-op)
-                // never changes `state.activeWindow`, so the delivery handoff would never fire
-                // and the covering snapshot would sit for the full 1.5s timeout. Treat it as a
-                // spring-back instead - no cover, no tmux command.
-                let target = vm.neighborWindow(of: active, delta: delta)
-                guard let neighbor = target, neighbor != active else { cancelSwitchDrag(); return }
-
-                let w = container.bounds.width
-                let outX: CGFloat = (dir.out == .left) ? -w : w      // current window exits this edge
-
-                // Fresh gate for this commit. Bump the generation so any still-pending
-                // completion from a superseded switch (rapid double-switch) is ignored (C1).
-                switchAnimDone = false
-                switchDelivered = false
-                switchGeneration &+= 1
-                let generation = switchGeneration
-
-                // Force the card-dim to full so the departing card reads fully dark by the time
-                // it leaves (a fast flick may have left the drag-ramped alpha near zero).
-                container.cardDimOverlay().alpha = CGFloat(GapDim.maxOpacity)
-
-                pendingSwitchWindow = neighbor
-
-                // Drop-snapshot design (2026-07-19): NO incoming preview. The current window (a
-                // dimmed card) simply slides OFF `outX` over the container's own background; the
-                // LIVE next window draws when tmux delivers (both-ready gate). A `-CC` neighbor
-                // can have a different pane layout, so a captured preview never reliably matched
-                // its size and flickered - dropping it removes that whole problem class.
-                DebugLog.shared.log(.gesture,
-                    "switch anim-start gen=\(generation) delta=\(delta) out=\(dir.out)")
-                UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut], animations: {
-                    content.transform = CGAffineTransform(translationX: outX, y: 0)
-                }, completion: { [weak self] _ in
-                    // Runs inside the outer `assumeIsolated` context (the enclosing
-                    // `commitSwitchDrag` block), so main-actor state is reachable directly -
-                    // NO inner `assumeIsolated` (matches the shipped `cancelSwitchDrag` pattern).
-                    guard let self else { return }
-                    // C1: ignore a STALE completion from a switch that was superseded (rapid
-                    // double-switch) or interrupted/timed-out - it must not set the successor's
-                    // `switchAnimDone` and let the gate finish B's handoff mid-slide.
-                    guard generation == self.switchGeneration else {
-                        DebugLog.shared.log(.gesture,
-                            "switch anim-done gen=\(generation) STALE (cur=\(self.switchGeneration)) - ignored")
-                        return
-                    }
-                    self.switchAnimDone = true
-                    DebugLog.shared.log(.gesture, "switch anim-done gen=\(generation)")
-                    self.finishSwitchHandoffIfReady()
-                })
-
-                onSwitchWindow(delta)   // tmux select-window (delivery flips `switchDelivered`)
-
-                // 1.5s timeout backstop: a never-delivered switch restores the current. Cancel
-                // any prior in-flight timeout before arming a new one (rapid re-commit race,
-                // Task 7 review 2026-07-18).
-                pendingSwitchTimeout?.cancel()
-                let timeout = DispatchWorkItem { [weak self] in self?.failPendingSwitch() }
-                pendingSwitchTimeout = timeout
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: timeout)
-            }
-        }
-
-        /// Release short: spring the current window back to identity and clear the card-dim.
-        /// Wrapped in `assumeIsolated` for the same reason as `beginSwitchReveal`.
-        func cancelSwitchDrag() {
-            MainActor.assumeIsolated {
-                clearPendingSwitch()
-                guard let container = containerView else { return }
-                container.revealSwitchedPanes()   // never strand a hidden pane on spring-back
-                let content = container.paneContentView
-                let dim = container.cardDimOverlay()
-                UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut], animations: {
-                    content.transform = .identity
-                    dim.alpha = 0   // fade the card-dim back out together with the spring
-                })
-                DebugLog.shared.log(.gesture, "switch cancel -> spring back")
-            }
-        }
-
-        /// Cancel any in-flight committed-switch handoff (its 1.5s timeout + pending window),
-        /// so a spring-back or a new drag can't leave a stale timer that later yanks the pane.
-        /// Mirrors the cancel-before-arm guard in `commitSwitchDrag`. Callers must invoke this
-        /// from within their own `assumeIsolated` block (touches main-actor stored props but
-        /// has no UIKit calls of its own, so it needs no wrapping here).
-        private func clearPendingSwitch() {
-            pendingSwitchTimeout?.cancel()
-            pendingSwitchTimeout = nil
-            pendingSwitchWindow = nil
-        }
-
-        /// Instantly restore the card (reset transform + clear dim) and invalidate a
-        /// committed-but-undelivered switch, so a NEW drag can start from a clean state. With
-        /// the drop-snapshot design there is no cover view to remove; the departing card may be
-        /// mid-slide (transform off-screen) when a second drag begins, so we snap it back and
-        /// bump the generation so the in-flight animation completion is ignored (C1). Main-actor
-        /// caller (invoked from within `beginSwitchReveal`'s `assumeIsolated` block).
-        private func discardCommittedSnapshot() {
-            guard pendingSwitchWindow != nil else { return }
-            switchAnimDone = false
-            switchDelivered = false
-            switchGeneration &+= 1   // C1: invalidate the interrupted switch's pending completion
-            containerView?.revealSwitchedPanes()   // never strand a hidden pane on interrupt
-            containerView?.paneContentView.transform = .identity
-            clearCardDim()
-        }
-
-        /// Timeout: the committed switch never delivered. Restore the current content. Runs off a
-        /// `DispatchWorkItem` fired on the main queue (`DispatchQueue.main.asyncAfter` in
-        /// `commitSwitchDrag`), so it is already on the main thread; wrapped in `assumeIsolated`
-        /// to match every other main-actor touch in this section.
-        private func failPendingSwitch() {
-            MainActor.assumeIsolated {
-                pendingSwitchTimeout = nil
-                pendingSwitchWindow = nil
-                switchAnimDone = false
-                switchDelivered = false
-                switchGeneration &+= 1   // C1: invalidate this switch's pending animation completion
-                containerView?.revealSwitchedPanes()   // never strand a hidden pane on timeout
-                containerView?.paneContentView.transform = .identity
-                clearCardDim()
-                DebugLog.shared.log(.gesture, "switch TIMEOUT -> restore current")
-            }
-        }
-
-        /// The both-ready gate: complete the commit handoff only when the slide animation has
-        /// finished AND tmux has delivered the target window. Called from BOTH the commit
-        /// animation completion and the delivery path; the second caller (whichever is last)
-        /// runs the teardown. No-op until both flags are set. Wrapped in `MainActor.assumeIsolated`
-        /// like every other Coordinator method here: Swift 6 checks isolation PER-METHOD
-        /// statically (it can't see that its callers are already on the main actor), and the
-        /// `DebugLog.shared.log` calls are `@MainActor` - so the body needs the wrap even though
-        /// the callers are wrapped. Nested `assumeIsolated` is a runtime executor assertion, safe
-        /// to nest. (macOS CI 2026-07-19: unwrapped `log` here failed exactly as the
-        /// `completePendingSwitchIfNeeded` fix predicted.)
-        private func finishSwitchHandoffIfReady() {
-            MainActor.assumeIsolated {
-                guard switchAnimDone, switchDelivered else {
-                    DebugLog.shared.log(.gesture,
-                        "switch finish WAIT anim=\(switchAnimDone) delivered=\(switchDelivered)")
-                    return
-                }
-                pendingSwitchTimeout?.cancel(); pendingSwitchTimeout = nil
-                pendingSwitchWindow = nil
-                switchAnimDone = false
-                switchDelivered = false
-                // The live next window is already mounted (by `apply(state:)`) at identity
-                // UNDER the slid-off card, but its panes were created HIDDEN to mask the
-                // mid-build flicker. Unhide them now (settle window has passed), snap the card
-                // transform back to identity, and clear the dim - the settled window is revealed
-                // in one clean step instead of showing the blank->relayout->fill build.
-                containerView?.revealSwitchedPanes()
-                containerView?.paneContentView.transform = .identity
-                clearCardDim()
-                DebugLog.shared.log(.gesture, "switch finish (both-ready) -> live shown")
-            }
-        }
-
-        /// Called from `apply(state:)` when the active window actually changed: RECORD that
-        /// tmux delivered the target window, then let the both-ready gate decide whether to
-        /// finish now (if the slide animation has also finished) or wait for it. No-op if no
-        /// drag-switch is pending (e.g. an esc-pill switch, which sets no `pendingSwitchWindow`).
-        /// Wrapped in `MainActor.assumeIsolated` (Swift 6 checks isolation per-method; nested
-        /// wrap when called from `apply`'s own block is a runtime assertion, safe to nest).
-        func completePendingSwitchIfNeeded(newActive: WindowID) {
-            MainActor.assumeIsolated {
-                guard pendingSwitchWindow != nil else {
-                    // A switch that arrived without our drag (e.g. esc-pill): nothing to hand off.
-                    return
-                }
-                // M1 (whole-branch review): tmux has delivered, so the switch WILL complete
-                // (the animation completion is guaranteed to fire); cancel the 1.5s
-                // never-delivered timeout now so it can't stomp a delivered-but-still-animating
-                // switch during the both-ready WAIT window. (The finisher also cancels it, but
-                // only once BOTH flags are set - this covers the delivered-first gap.)
-                pendingSwitchTimeout?.cancel(); pendingSwitchTimeout = nil
-                DebugLog.shared.log(.gesture,
-                    "switch delivered active=@\(newActive.raw) animDone=\(switchAnimDone) - settling")
-                // Settle window (device 2026-07-19: the switch flickered because the freshly
-                // created panes were REVEALED mid-build - blank, then re-laid-out, then filled -
-                // as tmux delivered the window's state incrementally). The new panes are created
-                // HIDDEN (see `apply(state:)`), and we hold the reveal for a short settle so they
-                // lay out + take their first output under cover, THEN mark delivered + finish. A
-                // super-fast render still just looks instant; a slow one no longer shows the build.
-                let gen = switchGeneration
-                DispatchQueue.main.asyncAfter(deadline: .now() + Self.switchSettleDelay) { [weak self] in
-                    MainActor.assumeIsolated {
-                        guard let self, gen == self.switchGeneration else { return }   // superseded
-                        self.switchDelivered = true
-                        self.finishSwitchHandoffIfReady()
-                    }
-                }
-            }
-        }
     }
 
     /// UIKit container that lays out one `TerminalView` per pane and tracks the set.
@@ -945,7 +611,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         /// The active window as of the last `apply` that reached the change-detect at the
         /// end of the method. Compared against `state.activeWindow` there to decide whether
-        /// a pending finger-drag switch handoff should complete (see `completePendingSwitchIfNeeded`).
+        /// to arm the keybar-grow resize-settle debounce (see `armResizeSettle`).
         private var previousActiveWindow: WindowID?
 
         /// Clears the cached cell metrics so `resolvedCell()` re-measures on the next
@@ -1194,11 +860,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         }
                         coordinator?.modeTracker.recompute(for: pane, terminal: term, altSource: src)
                     }
-                    // Hide a pane created DURING a pending switch until the settle window
-                    // reveals it (device 2026-07-19: avoid showing the blank->relayout->fill
-                    // build). `revealSwitchedPanes()` unhides all at handoff. A pane created
-                    // outside a switch (normal attach) stays visible.
-                    if coordinator?.hasPendingSwitch == true { t.isHidden = true }
                     paneContentView.addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
                     coordinator?.installHalo(on: t, pane: pane)
                     // Prime once at mount so a pane reattaching into a running
@@ -1253,21 +914,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 coordinator?.vm.requeryAltScreenState()
             }
 
-            // Finger-drag commit handoff: after rebuilding the new window's panes, if the
-            // active window actually changed, complete any pending switch (reset the content
-            // transform now that live panes fill it, drop the covering snapshot). Runs after
-            // panes are positioned so the handoff lands on the final layout. The coordinator
-            // is nonisolated; wrap in `assumeIsolated` to match the file's convention for
-            // @MainActor calls from this UIView method (apply always runs on the main thread
-            // via SwiftUI `updateUIView`).
-            if state.activeWindow != previousActiveWindow, let newActive = state.activeWindow {
+            if state.activeWindow != previousActiveWindow, state.activeWindow != nil {
                 MainActor.assumeIsolated {
-                    // Device #2 (Build 2): a switch (drag, esc-pill, OR tab) triggers the keyboard/
-                    // keybar grow animation that bursts intermediate client sizes. Arm the resize-
-                    // settle window here (the universal active-window-change point) so those
-                    // intermediates coalesce to one final emit and tmux isn't resized mid-animation.
-                    coordinator?.armResizeSettle()
-                    coordinator?.completePendingSwitchIfNeeded(newActive: newActive)
+                    coordinator?.armResizeSettle()   // keybar-grow resize debounce on window change (KEEP)
                 }
             }
             previousActiveWindow = state.activeWindow
