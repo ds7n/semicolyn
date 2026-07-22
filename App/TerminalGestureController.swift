@@ -83,6 +83,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private var dragAxis: DragAxis = .pending
     /// True once we have fired `onDragBeginSwitch` for this drag (switch axis only).
     private var switchRevealStarted = false
+    /// Scroll `contentOffset` captured at this drag's `.began`, so a switch-lock can
+    /// restore it and erase the tiny vertical scroll the native pan made during the
+    /// pre-lock dead-zone (`ScrollResidueDecision`). Reset each drag.
+    private var savedContentOffset: CGPoint = .zero
 
     // MARK: Alt-screen scroll momentum (fling)
     /// Drives the post-release decaying wheel-event fling for alt-screen scroll (the native
@@ -325,6 +329,9 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // A new touch always kills an in-flight momentum fling (catch-the-scroll), so the
         // finger takes over immediately rather than fighting the decaying stream.
         stopAltScreenFling()
+        // Capture the scroll offset so a switch-lock can undo any accidental scroll the
+        // native pan made during the pre-lock dead-zone (ScrollResidueDecision, Kit).
+        savedContentOffset = view.contentOffset
         dragMode = callbacks.currentMode()
         dragAppCursor = callbacks.applicationCursorKeys()
         dragDecision = callbacks.altScrollDecision()
@@ -391,6 +398,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         guard case .switchWindow = dragAxis else { return false }
         if !switchRevealStarted {
             switchRevealStarted = true
+            // Undo the dead-zone scroll residue now that we know this is a switch (Kit decider).
+            if case let .restore(toX, toY) = ScrollResidueDecision.resolve(
+                axis: dragAxis, savedX: Double(savedContentOffset.x), savedY: Double(savedContentOffset.y)) {
+                view.contentOffset = CGPoint(x: toX, y: toY)
+                DebugLog.shared.log(.gesture,
+                    "drag-switch restore-offset x=\(Int(toX)) y=\(Int(toY))")
+            }
             callbacks.onDragBeginSwitch()
             DebugLog.shared.log(.gesture, "drag-switch begin dx=\(Int(t.x))")
         }
