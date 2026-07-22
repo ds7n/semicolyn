@@ -291,15 +291,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let cellW = view.bounds.width / CGFloat(cols)
         let cellH = view.bounds.height / CGFloat(rows)
         guard cellW > 0, cellH > 0 else { return (0, 0) }
-        // `point` is `gesture.location(in: view)`. SwiftTerm's own tap-hit math
-        // (`calculateTapHit`) maps this DIRECTLY: row = point.y / cellHeight, with NO
-        // `contentOffset` arithmetic — the gesture point is already in the coordinate
-        // space SwiftTerm's selection/cursor APIs expect. The previous `+ contentOffset.y`
-        // / `- Int(contentOffset.y / cellH)` juggling double-counted the offset and left a
-        // rounding residue that grew with scroll distance (device bug: double/triple-tap
-        // selected a row far above the tap once the buffer had scrolled). Match SwiftTerm.
         let col = min(cols - 1, max(0, Int(point.x / cellW)))
-        let row = min(rows - 1, max(0, Int(point.y / cellH)))
+        // `point` is `gesture.location(in: view)`, and `view` is a UIScrollView, so `point`
+        // is in CONTENT space (includes the scroll offset). SwiftTerm's own `calculateTapHit`
+        // and its selection / `getCharData` APIs want a VIEWPORT screen row (0..<rows); its
+        // `getLine` adds `buffer.yDisp` itself. So convert content -> viewport by subtracting
+        // `contentOffset.y`, and do NOT add `yDisp` (adding it double-counts: the old
+        // "double/triple-tap selected a row far above the tap once scrolled" bug). Vertical
+        // scroll does not affect `col`, so `point.x` is used directly above.
+        let row = TapRowMapping.row(contentY: Double(point.y),
+                                    contentOffsetY: Double(view.contentOffset.y),
+                                    cellHeight: Double(cellH), rows: rows)
         return (col, row)
     }
 
