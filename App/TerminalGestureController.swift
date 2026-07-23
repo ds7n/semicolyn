@@ -94,8 +94,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     // Our recognizers (kept so we can identify + remove them, and so the delegate can
     // tell ours apart from SwiftTerm's). Note: vertical scroll is NOT one of ours — it
-    // stays on the terminal's native UIScrollView pan; we only add ourselves as an extra
-    // target on it (see `handleScrollViewPan`) for the horizontal window-switch.
+    // stays on the terminal's native UIScrollView pan; the horizontal window-switch is
+    // driven by our own `switchPan` (see `handleSwitchPan`), not by riding that pan.
     private var ours: [UIGestureRecognizer] = []
     private var singleTap: UITapGestureRecognizer!
     private var doubleTap: UITapGestureRecognizer!
@@ -107,13 +107,21 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// (toggled by the mount via `setAltScreenPanEnabled` in the same mode-transition
     /// handler that flips `isScrollEnabled`). It exists because in `.appOwnsInput` the
     /// mount sets `isScrollEnabled = false`, which DISABLES the inherited
-    /// `UIScrollView.panGestureRecognizer` — so our `handleScrollViewPan` target on that
-    /// recognizer never fires there (device-proven, build 47: `gr:scrollPan began
-    /// mode=appOwnsInput` = 0). This pan survives that flip because it is our own,
+    /// `UIScrollView.panGestureRecognizer` (device-proven, build 47: `gr:scrollPan began
+    /// mode=appOwnsInput` = 0), and would also disable a `switchPan` riding it (the reason
+    /// `switchPan` is instead our own independent recognizer, never attached to the
+    /// inherited pan). This pan survives that flip because it is our own,
     /// independent recognizer. Gating it on the mode guarantees exactly ONE live
     /// drag-recognizer per mode (native pan in `.localScroll`, this one in
     /// `.appOwnsInput`) — no straddle.
     private var altScreenPan: UIPanGestureRecognizer!
+    /// OUR always-on window-switch pan. Unlike `altScreenPan` (only `.appOwnsInput`), this is
+    /// enabled in `.localScroll`/`.mouseReporting` where the plain-shell swipe used to ride
+    /// SwiftTerm's native scroll pan, which does NOT track a horizontal drag on a freshly
+    /// created pane (contentSize 0). Owning the recognizer removes that dependency: the swipe
+    /// fires regardless of scroll-view state. Axis-gated (DragAxisLock) so it acts only on a
+    /// horizontal-dominant drag; the native scroll pan keeps handling vertical scroll.
+    private var switchPan: UIPanGestureRecognizer!
 
     init(terminalView: TerminalView, callbacks: Callbacks) {
         self.terminalView = terminalView
@@ -133,11 +141,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // which the mount installs AFTER this controller — order matters, see mount).
         //
         // CRUCIAL EXCEPTION: `TerminalView` is a `UIScrollView` and scrolls via its
-        // INHERITED `panGestureRecognizer`. We must NOT disable it — doing so kills
+        // INHERITED `panGestureRecognizer`. We must NOT disable it: doing so kills
         // native scrolling AND leaves `isTracking` false, so SwiftTerm's
         // `syncYDispFromContentOffset` (gated on `isTracking`) never updates scrollback.
-        // We keep native scroll and ride this same recognizer for the window-switch
-        // decision (see `handleScrollViewPan`).
+        // We keep native scroll enabled; the window-switch decision is driven by our own
+        // `switchPan` recognizer instead (see `handleSwitchPan`).
         for gr in view.gestureRecognizers ?? []
         where !ours.contains(gr) && gr !== view.panGestureRecognizer {
             gr.isEnabled = false
@@ -195,8 +203,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             if gr.delegate !== self {
                 gr.delegate = self
                 gr.require(toFail: scrollPan)
+                if let switchPan {
+                    gr.require(toFail: switchPan)
+                }
                 DebugLog.shared.log(.gesture,
-                    "selectionPan subordinated (delegate+require-fail vs scrollPan)")
+                    "selectionPan subordinated (delegate+require-fail vs scrollPan+switchPan)")
             }
         }
     }
@@ -239,18 +250,18 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         altScreenPan.delegate = self
         altScreenPan.isEnabled = false
 
-        ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap, altScreenPan]
+        switchPan = UIPanGestureRecognizer(target: self, action: #selector(handleSwitchPan(_:)))
+        switchPan.delegate = self
+        // Enabled at install (NOT via modeTracker.onChange, which fires only on a mode CHANGE
+        // and so never fires for a fresh pane that starts in .localScroll: the exact bug).
+        // The mount then toggles it on mode transitions via `setSwitchPanEnabled`.
+        switchPan.isEnabled = true
+
+        ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap, altScreenPan, switchPan]
         for gr in ours { view.addGestureRecognizer(gr) }
 
-        // Vertical scrolling stays NATIVE (the inherited UIScrollView pan, kept enabled
-        // by the sweep) in `.localScroll`. We ride that same recognizer to detect a
-        // horizontal drag = tmux window switch, so we never fight the scroll view with a
-        // competing pan there. (In `.appOwnsInput` that recognizer is disabled by
-        // `isScrollEnabled = false`; `altScreenPan` above takes over.)
-        view.panGestureRecognizer.addTarget(self, action: #selector(handleScrollViewPan(_:)))
-
         // Bug B diagnosis: observe every non-ours recognizer's state so a drag that
-        // never reaches `handleScrollViewPan` still logs which recognizer won.
+        // never reaches `handleSwitchPan` still logs which recognizer won.
         observeStrayRecognizers(on: view)
 
         // Tap snappiness: UIScrollView delays content-touch delivery (~150ms) to first
@@ -264,7 +275,6 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     func detach() {
         stopAltScreenFling()   // kill any live display link so it can't retain self after detach
         guard let view = terminalView else { return }
-        view.panGestureRecognizer.removeTarget(self, action: #selector(handleScrollViewPan(_:)))
         for gr in ours { view.removeGestureRecognizer(gr) }
         view.removeInteraction(editMenu)
         ours = []
@@ -278,6 +288,14 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     func setAltScreenPanEnabled(_ enabled: Bool) {
         altScreenPan?.isEnabled = enabled
         DebugLog.shared.log(.gesture, "altPan enabled=\(enabled)")
+    }
+
+    /// Enable OUR switch pan for `.localScroll`/`.mouseReporting` and disable it in
+    /// `.appOwnsInput` (there `altScreenPan` owns the switch, exactly one switch-owner per
+    /// mode). Called by the mount from `modeTracker.onChange`, alongside `setAltScreenPan`.
+    func setSwitchPanEnabled(_ enabled: Bool) {
+        switchPan?.isEnabled = enabled
+        DebugLog.shared.log(.gesture, "switchPan enabled=\(enabled)")
     }
 
     // MARK: Cell geometry
@@ -419,26 +437,21 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         return true
     }
 
-    /// Rides the terminal's NATIVE UIScrollView pan (we added ourselves as an extra
-    /// target). This recognizer is only LIVE in `.localScroll` (in `.appOwnsInput` the
-    /// mount sets `isScrollEnabled = false`, which disables it — `altScreenPan` owns the
-    /// drag there instead; in `.mouseReporting` SwiftTerm forwards the drag as a mouse
-    /// event). So here the scroll view itself owns the vertical drag (native scroll,
-    /// inertia, correct `isTracking`/scrollback) and we only resolve a horizontal-drag
-    /// tmux window-switch, once, on release.
-    @objc private func handleScrollViewPan(_ g: UIPanGestureRecognizer) {
+    /// OUR switch pan handler (`.localScroll`/`.mouseReporting`). Axis-gated: on a
+    /// horizontal-dominant drag it drives the window switch (via `driveLiveSwitch` /
+    /// `resolveLiveSwitch`); on a vertical/pending drag it does nothing (the native scroll
+    /// pan, co-recognizing, handles the scroll). Unlike the old ride-the-scroll-pan target,
+    /// this fires regardless of scroll-view content/state.
+    @objc private func handleSwitchPan(_ g: UIPanGestureRecognizer) {
         guard let view = terminalView else { return }
         switch g.state {
         case .began:
-            beginDrag("scrollPan", on: view)
+            beginDrag("switchPan", on: view)
         case .changed:
-            // Give the horizontal drag first refusal at the switch axis; if it locks to
-            // switch, the native scroll is suppressed for this drag (we drive the transform).
-            _ = driveLiveSwitch(g, in: view)
+            _ = driveLiveSwitch(g, in: view)   // horizontal -> switch; else no-op (scroll pan scrolls)
         case .ended, .cancelled:
-            if resolveLiveSwitch(g, in: view) { return }   // switch drag handled
-            DebugLog.shared.log(.gesture,
-                "drag-end owner=scrollPan imode=\(dragMode) outcome=\(dragMode == .localScroll ? "scroll" : "none")")
+            if resolveLiveSwitch(g, in: view) { return }   // switch committed/spring-back
+            DebugLog.shared.log(.gesture, "drag-end owner=switchPan imode=\(dragMode) outcome=none")
         default: break
         }
     }
@@ -718,6 +731,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private func role(of g: UIGestureRecognizer) -> GestureRole {
         if g === terminalView?.panGestureRecognizer { return .scrollPan }
         if g === altScreenPan { return .altScreenPan }
+        if g === switchPan { return .switchPan }
         if g === longPress { return .longPress }
         if g is UIPinchGestureRecognizer { return .pinch }
         if g is UITapGestureRecognizer { return .tap }
@@ -750,7 +764,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// one it must wait on.
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRequireFailureOf other: UIGestureRecognizer) -> Bool {
-        return role(of: g) == .selectionPan && role(of: other) == .scrollPan
+        guard role(of: g) == .selectionPan else { return false }
+        return role(of: other) == .scrollPan || role(of: other) == .switchPan
     }
 }
 
