@@ -777,13 +777,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     if let isAlt = coordinator?.vm.takeAltScreenOverride(for: pane) {
                         coordinator?.modeTracker.setAltScreenOverride(for: pane, isAlt: isAlt, terminal: t.getTerminal())
                     }
-                    // Sync our alt-screen pan to this pane's CURRENT mode. The prime /
-                    // override above fire `onChange` only on a mode CHANGE (deduped); a
-                    // pane that resolves straight to `.appOwnsInput` is covered, but this
-                    // guarantees the pan matches the mode regardless of dedup outcome.
+                    // Sync our alt-screen + switch pans to this pane's CURRENT mode. The
+                    // prime / override above fire `onChange` only on a mode CHANGE
+                    // (deduped); a pane that resolves straight to `.appOwnsInput` is
+                    // covered, but this guarantees the pans match the mode regardless of
+                    // dedup outcome.
                     if let coordinator {
                         coordinator.setAltScreenPan(
                             for: t, enabled: coordinator.modeTracker.mode(for: pane) == .appOwnsInput)
+                        coordinator.setSwitchPan(
+                            for: t, enabled: coordinator.modeTracker.mode(for: pane) != .appOwnsInput)
                     }
                     return t
                 }()

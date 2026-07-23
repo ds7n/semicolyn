@@ -177,6 +177,7 @@ struct TerminalScreen: UIViewRepresentable {
         // alternate screen (reattach into a running vim/Claude) needs its pan enabled
         // now — `onChange` only fires on a future transition, not the prime.
         gestureController.setAltScreenPanEnabled(context.coordinator.modeTracker.mode == .appOwnsInput)
+        gestureController.setSwitchPanEnabled(context.coordinator.modeTracker.mode != .appOwnsInput)
         MainActor.assumeIsolated {
             DebugLog.shared.log(.seed, "scroll:init isScrollEnabled=\(terminal.isScrollEnabled) nativePan=\(terminal.panGestureRecognizer.isEnabled) contentSize=\(terminal.contentSize) offset=\(terminal.contentOffset)")
         }
