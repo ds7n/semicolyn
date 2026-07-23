@@ -91,4 +91,28 @@ final class GestureSimultaneityTests: XCTestCase {
     func testPinchStillCoexistsWithScrollPan() {
         XCTAssertTrue(gesturesMayRecognizeSimultaneously(.pinch, .scrollPan))
     }
+
+    // The dedicated switch pan coexists with the native scroll pan (orthogonal axes: our
+    // pan acts on horizontal, scroll pan on vertical); neither must require the other to fail.
+    func testSwitchPanAndScrollPanCoexist() {
+        XCTAssertTrue(gesturesMayRecognizeSimultaneously(.switchPan, .scrollPan))
+        XCTAssertTrue(gesturesMayRecognizeSimultaneously(.scrollPan, .switchPan))
+    }
+
+    // Selection must NOT co-recognize with the switch pan (a switch drag must never become
+    // a text selection), same as it must not with the scroll pan.
+    func testSelectionPanAndSwitchPanAreMutuallyExclusive() {
+        XCTAssertFalse(gesturesMayRecognizeSimultaneously(.selectionPan, .switchPan))
+    }
+
+    // Long-press must NOT co-recognize with the switch pan (held-then-drag hazard), mirroring
+    // the altScreenPan/longPress and scrollPan/longPress exclusions.
+    func testSwitchPanAndLongPressAreMutuallyExclusive() {
+        XCTAssertFalse(gesturesMayRecognizeSimultaneously(.switchPan, .longPress))
+    }
+
+    // Pinch still coexists with the switch pan (2-finger vs 1-finger).
+    func testSwitchPanAndPinchCoexist() {
+        XCTAssertTrue(gesturesMayRecognizeSimultaneously(.switchPan, .pinch))
+    }
 }

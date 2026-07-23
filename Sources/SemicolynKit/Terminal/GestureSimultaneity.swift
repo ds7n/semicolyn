@@ -26,6 +26,11 @@ public enum GestureRole: Hashable, Sendable {
     /// (xterm Alternate-Scroll). Never live at the same time as `scrollPan` (mode-gated),
     /// but must be mutually exclusive with the long-press for the same held-drag hazard.
     case altScreenPan
+    /// OUR always-on horizontal window-switch pan (`.localScroll`/`.mouseReporting`). A
+    /// UIPanGestureRecognizer we own, so the swipe never depends on SwiftTerm's scroll-view
+    /// state (a fresh pane's native scroll pan does not track a horizontal drag). Coexists
+    /// with the scroll pan (orthogonal axes: horizontal here, vertical there).
+    case switchPan
     /// Any other recognizer we don't model explicitly.
     case other
 }
@@ -53,5 +58,11 @@ public func gesturesMayRecognizeSimultaneously(_ a: GestureRole, _ b: GestureRol
     // starts moving would anchor a text selection instead of letting the drag emit
     // arrows. Making the pairing exclusive lets the pan cancel the long-press on motion.
     if pair == Set([.altScreenPan, .longPress]) { return false }
+    // The switch pan must NOT co-recognize with the selection pan (a switch drag must never
+    // be hijacked into a text selection) nor the long-press (held-then-drag hazard), matching
+    // the scrollPan exclusions. It DOES coexist with the scroll pan (orthogonal axes) and
+    // pinch (2-finger), which fall through to the default `true`.
+    if pair == Set([.selectionPan, .switchPan]) { return false }
+    if pair == Set([.switchPan, .longPress]) { return false }
     return true
 }
