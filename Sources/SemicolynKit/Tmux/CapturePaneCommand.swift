@@ -4,15 +4,28 @@ import Foundation
 
 /// Build the tmux control-mode `capture-pane` command that seeds a pane's scrollback
 /// history (spec: tmux -CC native scrollback). Flags: `-p` print to stdout, `-e`
-/// preserve escape sequences (so colors/attributes survive), `-S -<N>` start N lines
-/// back into history. **No `-J`** — keep tmux's real line wrapping so seeded history
-/// matches the live buffer width. **No `-a`** — alt-screen history is out of scope.
-/// `N == Int.max` uses tmux's whole-history shorthand `-S -`. Returns `nil` when
-/// `lines <= 0` (seeding disabled). No trailing newline (the transport appends one).
+/// preserve escape sequences (so colors/attributes survive), `-J` **join** tmux's
+/// soft-wrapped rows back into their logical lines, `-S -<N>` start N lines back into
+/// history. **No `-a`** — alt-screen history is out of scope. `N == Int.max` uses
+/// tmux's whole-history shorthand `-S -`. Returns `nil` when `lines <= 0` (seeding
+/// disabled). No trailing newline (the transport appends one).
+///
+/// Why `-J` (was deliberately omitted before): `capture-pane` returns each PHYSICAL
+/// row as one line, wrapped at whatever width the pane had **when the output was
+/// produced** — which is NOT necessarily our current client width. When history was
+/// generated at a wider width (e.g. a prior desktop attach at ~256 cols), those
+/// pre-wrapped physical rows get re-wrapped AGAIN by our narrower (80-col) SwiftTerm
+/// buffer on replay → each logical line staircases across several rows (device bug,
+/// 2026-07-23: `ll` history captured at 240–267 cols cascading in an 80-col pane).
+/// `-J` un-wraps to logical lines and lets SwiftTerm re-wrap them at the CURRENT width
+/// exactly once, so seeded history matches the live buffer regardless of the width it
+/// was originally captured at. The old comment's premise ("keep tmux's real wrapping
+/// so it matches the live width") only held when capture-width == display-width, which
+/// pre-attach history violates.
 public func capturePaneCommand(paneID: PaneID, lines: Int) -> String? {
     guard lines > 0 else { return nil }
     let start = (lines == Int.max) ? "-" : "-\(lines)"
-    return "capture-pane -p -e -S \(start) -t %\(paneID.raw)"
+    return "capture-pane -p -e -J -S \(start) -t %\(paneID.raw)"
 }
 
 /// Reconstruct feedable history bytes from a `capture-pane` control-block body. tmux
