@@ -93,6 +93,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // Enable our alt-screen drag pan in lockstep with the isScrollEnabled
                 // flip (owns the drag in `.appOwnsInput`, where the native pan is parked).
                 v.coordinator?.setAltScreenPan(for: view, enabled: mode == .appOwnsInput)
+                v.coordinator?.setSwitchPan(for: view, enabled: mode != .appOwnsInput)
             }
         }
         return v
@@ -436,6 +437,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // `removeHalo` invokes the controller's `detach()`.
             MainActor.assumeIsolated {
                 gestureControllers[ObjectIdentifier(view)]?.setAltScreenPanEnabled(enabled)
+            }
+        }
+
+        /// Enable/disable a pane's switch pan (mirrors `setAltScreenPan`). Called from the
+        /// mode-transition handler so exactly one switch-owner is live per mode: `switchPan`
+        /// in `.localScroll`/`.mouseReporting`, `altScreenPan` in `.appOwnsInput`.
+        func setSwitchPan(for view: TerminalView, enabled: Bool) {
+            MainActor.assumeIsolated {
+                gestureControllers[ObjectIdentifier(view)]?.setSwitchPanEnabled(enabled)
             }
         }
 
