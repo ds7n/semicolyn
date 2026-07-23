@@ -812,6 +812,23 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     return t
                 }()
                 view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
+                // Staircase/wrap diagnostic (`.sizing`, default-OFF). Compare, for THIS
+                // pane, the three widths that must all agree or text re-wraps:
+                //   frameW   — the pane's on-screen point width we just set
+                //   stCols   — SwiftTerm's OWN buffer cols (frameW ÷ its cell); what it
+                //              actually lays glyphs out at
+                //   layoutW  — the pane width tmux put in %layout (the cols tmux formats
+                //              output for) — from `rect` via the cell
+                //   cell.w   — the cell we derived (5.0 on device)
+                // If stCols ≪ layoutW (e.g. 50 vs 80) the pane view is narrower than tmux
+                // thinks → tmux's 80-wide lines re-wrap in a ~50-wide SwiftTerm buffer =
+                // the staircase. If they match but it still staircases, the wrap is glyph
+                // advance vs cell (render), not buffer width.
+                DebugLog.shared.log(.sizing, {
+                    let term = view.getTerminal()
+                    let layoutCols = cell.w > 0 ? Int((Double(rect.width) / cell.w).rounded()) : -1
+                    return "sizing:pane @\(rect.pane.raw) frameW=\(Int(rect.width)) stCols=\(term.cols) stRows=\(term.rows) layoutCols≈\(layoutCols) cell.w=\(String(format: "%.2f", cell.w)) fontPt=\(String(format: "%.1f", Double(view.font.pointSize)))"
+                }())
                 let isActive = (rect.pane == window.activePane)
                 // The active-pane border only conveys meaning when there is more than
                 // one pane (it answers "which pane has focus"). In a single-pane window

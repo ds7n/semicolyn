@@ -45,6 +45,9 @@ final class TmuxRuntime {
     /// blank-panes root cause is confirmed on device.
     var onDiagnostic: ((String) -> Void)?
     private var diagBytesTotal = 0
+    /// Last cols we told tmux via `refresh-client` — echoed into the `.sizing` output
+    /// probe so a single log line pairs the reported width with the observed line width.
+    private var lastReportedCols = 0
     /// In-flight context-poll submission ids awaiting their result block.
     private var contextPollIDs: Set<UInt64> = []
     /// In-flight `list-windows` (attach-prime) submission ids awaiting their reply.
@@ -92,6 +95,46 @@ final class TmuxRuntime {
         DebugLog.shared.log(.tmux, {
             let preview = String(decoding: bytes.prefix(80).map { (0x20...0x7e).contains($0) ? $0 : 0x2e }, as: UTF8.self)
             return "tmux rx[\(bytes.count)B] paneOut=\(out.paneOutput.count) resolved=\(out.resolved.count): \(preview)"
+        }())
+        // Staircase/wrap diagnostic (`.sizing`, default-OFF). For each pane chunk,
+        // measure the widest run of printable bytes between line breaks (CR/LF) — the
+        // effective line width tmux is emitting. If this is ~50 while we report 80 cols
+        // to tmux, the wrap is upstream (the pane/program formatted narrow); if it's ~80
+        // and text still staircases on screen, the wrap is in SwiftTerm's render. We do
+        // NOT log the bytes' content (privacy) — only the max/last printable run length
+        // and whether the chunk carried a CSI (escape) so we can tell reflowed redraws
+        // from raw program output. Gated autoclosure → zero cost when the category is off.
+        DebugLog.shared.log(.sizing, {
+            // Count only VISIBLE columns: skip bytes inside an ESC/CSI sequence so
+            // `eza --color`'s SGR codes (`\e[38;5;..m`) don't inflate the width. A CSI
+            // runs from ESC until its final byte in 0x40...0x7e (`m`, `H`, …).
+            // esc: 0 = normal, 1 = just saw ESC (awaiting `[` or a 2-byte final),
+            //      2 = inside a CSI body (skip until a final byte 0x40...0x7e).
+            var maxRun = 0, run = 0, hasCSI = false, esc = 0
+            for chunk in out.paneOutput {
+                for b in chunk.data {
+                    if esc == 1 {                            // byte after ESC
+                        esc = (b == 0x5b) ? 2 : 0            // `[` → CSI body; else 2-byte ESC ends
+                        continue
+                    }
+                    if esc == 2 {                            // CSI body: params/intermediates
+                        if (0x40...0x7e).contains(b) { esc = 0 }   // final byte ends the CSI
+                        continue
+                    }
+                    if b == 0x1b { hasCSI = true; esc = 1; continue }  // ESC begins a sequence
+                    if b == 0x0a || b == 0x0d {              // LF / CR resets the visible run
+                        if run > maxRun { maxRun = run }
+                        run = 0
+                    } else if (0x20...0x7e).contains(b) || b >= 0x80 {
+                        // printable ASCII or a UTF-8 lead/continuation byte counts toward width
+                        // (approx: multibyte glyphs slightly over-count, fine for a width probe)
+                        run += 1
+                    }
+                }
+            }
+            if run > maxRun { maxRun = run }
+            let panes = out.paneOutput.map { "@\($0.pane.raw)" }.joined(separator: ",")
+            return "sizing:output panes=[\(panes)] maxPrintRun=\(maxRun) hasCSI=\(hasCSI) reportedCols=\(lastReportedCols)"
         }())
         for chunk in out.paneOutput { onPaneBytes?(chunk.pane, chunk.data) }
         if out.stateChanged { onStateChanged?(controller.state) }
@@ -249,6 +292,7 @@ final class TmuxRuntime {
     /// Tell tmux the client size in cells so it re-tiles; ignored if degenerate.
     func setClientSize(cols: Int, rows: Int) {
         guard let line = TmuxCommand.refreshClientSize(width: cols, height: rows) else { return }
+        lastReportedCols = cols
         DebugLog.shared.log(.tmux, "tmux:send refresh-client size=\(cols)x\(rows)")
         write(line)
     }
