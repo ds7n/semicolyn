@@ -15,6 +15,7 @@ enum LogCategory: String, CaseIterable, Sendable {
     case predictor   // suggestion lifecycle + secret-exclusion gates
     case keybar      // accessory sizing, macro resolution, live-edit apply
     case seed        // tmux history seeding
+    case sizing      // cell/grid metrics, tmux client-size, raw %output width probe (staircase bug)
 
     /// UserDefaults key backing the per-category toggle.
     var storageKey: String { "diagnostics.logcat.\(rawValue)" }
@@ -35,6 +36,7 @@ enum LogCategory: String, CaseIterable, Sendable {
         case .predictor: return "Suggestion lifecycle and secret-exclusion gates. Verbose."
         case .keybar:    return "Accessory sizing, macro resolution, live-edit apply. Verbose."
         case .seed:      return "tmux scrollback history seeding."
+        case .sizing:    return "Cell/grid metrics, tmux client size, and raw %output line widths (staircase/wrap bug). Verbose; shows terminal text structure but not typed input."
         }
     }
 

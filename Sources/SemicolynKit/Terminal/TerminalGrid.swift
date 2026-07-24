@@ -18,3 +18,16 @@ public func terminalGrid(width: Double, height: Double,
     let rows = max(1, Int((height / cellHeight).rounded(.down)))
     return (cols, rows)
 }
+
+/// The terminal-usable height: the container's raw height minus the height the
+/// keybar/keyboard accessory reserves at the bottom. Device #1 (2026-07-20): the
+/// grid was fed raw container bounds that included the keybar, so the terminal
+/// rendered behind the bar and the keyboard. `keybarHeight <= 0` means no pane is
+/// first responder (the sentinel `-1` from `firstResponderKeybarHeight()` when the
+/// keyboard is down, so no accessory is shown) -> subtract nothing. Floors at 0 so
+/// a keybar taller than the area never yields a negative height (`terminalGrid`
+/// then fail-closes on the non-positive input).
+public func visibleTerminalHeight(rawHeight: Double, keybarHeight: Double) -> Double {
+    guard keybarHeight > 0 else { return rawHeight }
+    return max(0, rawHeight - keybarHeight)
+}

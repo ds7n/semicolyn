@@ -9,8 +9,9 @@ import SemicolynKit
 /// drag scrolls via the terminal's NATIVE `UIScrollView` pan (kept enabled — we do
 /// not fight it); in `.appOwnsInput` (alt-screen) the mount parks that pan
 /// (`isScrollEnabled = false`) and this controller streams the drag to the app as
-/// arrow-key runs. A horizontal drag on the native pan switches tmux windows (one per
-/// drag, on release, via `GestureClassifier` + the mount's clamp); single tap places
+/// arrow-key runs. A horizontal drag on the native pan is axis-locked via
+/// `DragAxisLock`; no live rendering happens during the drag, and on release past
+/// threshold `SwitchCommitDecision` fires the window switch. single tap places
 /// the cursor (in `.localScroll`; other modes yield the tap to the app);
 /// double/triple-tap word/line-select; long-press zooms the tmux pane; two-finger
 /// tap shows the edit menu. Routing is mode-driven: the mount tracks each pane's
@@ -51,6 +52,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let sendBytes: ([UInt8]) -> Void
         let hasSelection: () -> Bool
         let clearSelection: () -> Void
+        /// Release PAST threshold on a switch-locked horizontal drag: commit the switch
+        /// by `delta` (tmux select-window). The sole switch callback: the drag has no
+        /// live-render phase, so a short release simply does nothing (no callback).
+        let onDragCommit: (_ delta: Int) -> Void
     }
 
     private weak var terminalView: TerminalView?
@@ -67,11 +72,30 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// Running total of cells already turned into arrows this drag (fed back into
     /// `AltScreenScroll.arrows` so successive `.changed` samples send only the new delta).
     private var emittedCells: Int = 0
+    /// Axis this drag locked to (decided once past the dead-zone). `.pending` until then.
+    private var dragAxis: DragAxis = .pending
+
+    // MARK: Alt-screen scroll momentum (fling)
+    /// Drives the post-release decaying wheel-event fling for alt-screen scroll (the native
+    /// `UIScrollView` gives normal-shell scroll momentum for free; the synthetic emitter does
+    /// not). Nil when no fling is in flight.
+    private var flingDisplayLink: CADisplayLink?
+    /// The active fling's decay model + start time + per-fling accounting, mirroring the
+    /// drag's `emittedCells` so the tick loop emits only the NEW whole-cell delta each frame.
+    private var flingMomentum: ScrollMomentum?
+    private var flingStartTime: CFTimeInterval = 0
+    private var flingEmittedCells: Int = 0
+    /// The alt-screen key family + drag-point coordinate captured at release, so the fling
+    /// emits the same key kind at a stable coordinate (the finger is gone).
+    private var flingDecision: AltScrollDecision =
+        AltScrollDecision(keys: .wheel, mode: .wheel, paneCommand: nil, reason: "wheel")
+    private var flingAppCursor: Bool = false
+    private var flingCoord: (col: Int, row: Int) = (1, 1)
 
     // Our recognizers (kept so we can identify + remove them, and so the delegate can
     // tell ours apart from SwiftTerm's). Note: vertical scroll is NOT one of ours — it
-    // stays on the terminal's native UIScrollView pan; we only add ourselves as an extra
-    // target on it (see `handleScrollViewPan`) for the horizontal window-switch.
+    // stays on the terminal's native UIScrollView pan; the horizontal window-switch is
+    // driven by our own `switchPan` (see `handleSwitchPan`), not by riding that pan.
     private var ours: [UIGestureRecognizer] = []
     private var singleTap: UITapGestureRecognizer!
     private var doubleTap: UITapGestureRecognizer!
@@ -83,13 +107,21 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// (toggled by the mount via `setAltScreenPanEnabled` in the same mode-transition
     /// handler that flips `isScrollEnabled`). It exists because in `.appOwnsInput` the
     /// mount sets `isScrollEnabled = false`, which DISABLES the inherited
-    /// `UIScrollView.panGestureRecognizer` — so our `handleScrollViewPan` target on that
-    /// recognizer never fires there (device-proven, build 47: `gr:scrollPan began
-    /// mode=appOwnsInput` = 0). This pan survives that flip because it is our own,
+    /// `UIScrollView.panGestureRecognizer` (device-proven, build 47: `gr:scrollPan began
+    /// mode=appOwnsInput` = 0), and would also disable a `switchPan` riding it (the reason
+    /// `switchPan` is instead our own independent recognizer, never attached to the
+    /// inherited pan). This pan survives that flip because it is our own,
     /// independent recognizer. Gating it on the mode guarantees exactly ONE live
     /// drag-recognizer per mode (native pan in `.localScroll`, this one in
     /// `.appOwnsInput`) — no straddle.
     private var altScreenPan: UIPanGestureRecognizer!
+    /// OUR always-on window-switch pan. Unlike `altScreenPan` (only `.appOwnsInput`), this is
+    /// enabled in `.localScroll`/`.mouseReporting` where the plain-shell swipe used to ride
+    /// SwiftTerm's native scroll pan, which does NOT track a horizontal drag on a freshly
+    /// created pane (contentSize 0). Owning the recognizer removes that dependency: the swipe
+    /// fires regardless of scroll-view state. Axis-gated (DragAxisLock) so it acts only on a
+    /// horizontal-dominant drag; the native scroll pan keeps handling vertical scroll.
+    private var switchPan: UIPanGestureRecognizer!
 
     init(terminalView: TerminalView, callbacks: Callbacks) {
         self.terminalView = terminalView
@@ -109,11 +141,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // which the mount installs AFTER this controller — order matters, see mount).
         //
         // CRUCIAL EXCEPTION: `TerminalView` is a `UIScrollView` and scrolls via its
-        // INHERITED `panGestureRecognizer`. We must NOT disable it — doing so kills
+        // INHERITED `panGestureRecognizer`. We must NOT disable it: doing so kills
         // native scrolling AND leaves `isTracking` false, so SwiftTerm's
         // `syncYDispFromContentOffset` (gated on `isTracking`) never updates scrollback.
-        // We keep native scroll and ride this same recognizer for the window-switch
-        // decision (see `handleScrollViewPan`).
+        // We keep native scroll enabled; the window-switch decision is driven by our own
+        // `switchPan` recognizer instead (see `handleSwitchPan`).
         for gr in view.gestureRecognizers ?? []
         where !ours.contains(gr) && gr !== view.panGestureRecognizer {
             gr.isEnabled = false
@@ -155,6 +187,31 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         }
     }
 
+    /// Durably subordinate SwiftTerm's LAZILY-created selection/mouse pan to the native
+    /// scroll pan, at the moment it first exists. Unlike `disableStraySwiftTermPans` (a
+    /// per-drag scan that misses the case where the selection pan WINS arbitration before
+    /// our `.began` handler runs), this wires the pan into the failure tree ONCE: it sets
+    /// our delegate (so the existing `shouldRequireFailureOf` selectionPan-vs-scrollPan
+    /// rule fires) and calls `require(toFail:)` directly as redundant insurance. Idempotent
+    /// (re-setting the same delegate / re-adding the same failure requirement is a no-op).
+    private func subordinateSelectionPan(on view: TerminalView) {
+        let scrollPan = view.panGestureRecognizer
+        for gr in view.gestureRecognizers ?? [] where
+            gr is UIPanGestureRecognizer
+            && gr !== scrollPan            // not the scroll pan (our authoritative owner)
+            && !ours.contains(gr) {        // not one of ours
+            if gr.delegate !== self {
+                gr.delegate = self
+                gr.require(toFail: scrollPan)
+                if let switchPan {
+                    gr.require(toFail: switchPan)
+                }
+                DebugLog.shared.log(.gesture,
+                    "selectionPan subordinated (delegate+require-fail vs scrollPan+switchPan)")
+            }
+        }
+    }
+
     private func installOurRecognizers(on view: TerminalView) {
         singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
         singleTap.delegate = self
@@ -193,18 +250,18 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         altScreenPan.delegate = self
         altScreenPan.isEnabled = false
 
-        ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap, altScreenPan]
+        switchPan = UIPanGestureRecognizer(target: self, action: #selector(handleSwitchPan(_:)))
+        switchPan.delegate = self
+        // Enabled at install (NOT via modeTracker.onChange, which fires only on a mode CHANGE
+        // and so never fires for a fresh pane that starts in .localScroll: the exact bug).
+        // The mount then toggles it on mode transitions via `setSwitchPanEnabled`.
+        switchPan.isEnabled = true
+
+        ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap, altScreenPan, switchPan]
         for gr in ours { view.addGestureRecognizer(gr) }
 
-        // Vertical scrolling stays NATIVE (the inherited UIScrollView pan, kept enabled
-        // by the sweep) in `.localScroll`. We ride that same recognizer to detect a
-        // horizontal drag = tmux window switch, so we never fight the scroll view with a
-        // competing pan there. (In `.appOwnsInput` that recognizer is disabled by
-        // `isScrollEnabled = false`; `altScreenPan` above takes over.)
-        view.panGestureRecognizer.addTarget(self, action: #selector(handleScrollViewPan(_:)))
-
         // Bug B diagnosis: observe every non-ours recognizer's state so a drag that
-        // never reaches `handleScrollViewPan` still logs which recognizer won.
+        // never reaches `handleSwitchPan` still logs which recognizer won.
         observeStrayRecognizers(on: view)
 
         // Tap snappiness: UIScrollView delays content-touch delivery (~150ms) to first
@@ -216,8 +273,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     }
 
     func detach() {
+        stopAltScreenFling()   // kill any live display link so it can't retain self after detach
         guard let view = terminalView else { return }
-        view.panGestureRecognizer.removeTarget(self, action: #selector(handleScrollViewPan(_:)))
         for gr in ours { view.removeGestureRecognizer(gr) }
         view.removeInteraction(editMenu)
         ours = []
@@ -233,6 +290,14 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         DebugLog.shared.log(.gesture, "altPan enabled=\(enabled)")
     }
 
+    /// Enable OUR switch pan for `.localScroll`/`.mouseReporting` and disable it in
+    /// `.appOwnsInput` (there `altScreenPan` owns the switch, exactly one switch-owner per
+    /// mode). Called by the mount from `modeTracker.onChange`, alongside `setAltScreenPan`.
+    func setSwitchPanEnabled(_ enabled: Bool) {
+        switchPan?.isEnabled = enabled
+        DebugLog.shared.log(.gesture, "switchPan enabled=\(enabled)")
+    }
+
     // MARK: Cell geometry
 
     /// Convert a point in the terminal view to a (col, row) cell using the terminal's
@@ -244,36 +309,41 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let cellW = view.bounds.width / CGFloat(cols)
         let cellH = view.bounds.height / CGFloat(rows)
         guard cellW > 0, cellH > 0 else { return (0, 0) }
-        // `point` is `gesture.location(in: view)`. SwiftTerm's own tap-hit math
-        // (`calculateTapHit`) maps this DIRECTLY: row = point.y / cellHeight, with NO
-        // `contentOffset` arithmetic — the gesture point is already in the coordinate
-        // space SwiftTerm's selection/cursor APIs expect. The previous `+ contentOffset.y`
-        // / `- Int(contentOffset.y / cellH)` juggling double-counted the offset and left a
-        // rounding residue that grew with scroll distance (device bug: double/triple-tap
-        // selected a row far above the tap once the buffer had scrolled). Match SwiftTerm.
         let col = min(cols - 1, max(0, Int(point.x / cellW)))
-        let row = min(rows - 1, max(0, Int(point.y / cellH)))
+        // `point` is `gesture.location(in: view)`, and `view` is a UIScrollView, so `point`
+        // is in CONTENT space (includes the scroll offset). SwiftTerm's own `calculateTapHit`
+        // and its selection / `getCharData` APIs want a VIEWPORT screen row (0..<rows); its
+        // `getLine` adds `buffer.yDisp` itself. So convert content -> viewport by subtracting
+        // `contentOffset.y`, and do NOT add `yDisp` (adding it double-counts: the old
+        // "double/triple-tap selected a row far above the tap once scrolled" bug). Vertical
+        // scroll does not affect `col`, so `point.x` is used directly above.
+        let row = TapRowMapping.row(contentY: Double(point.y),
+                                    contentOffsetY: Double(view.contentOffset.y),
+                                    cellHeight: Double(cellH), rows: rows)
         return (col, row)
     }
 
     // MARK: Handlers
 
-    /// Diagnostic (Bug B, device trace 2026-07-14): in `.appOwnsInput` our
-    /// `handleScrollViewPan` never fires because a `delegate=nil` UIKit pan
-    /// (`_UIDragAutoScrollGestureRecognizer` / SwiftTerm's lazy pan) appears to win
-    /// the drag. Kept attached as a stray-recognizer observer target (see
-    /// `observeStrayRecognizers`); the identifying log line moved into `beginDrag`'s
-    /// `drag-begin winner=...` (self-contained per-drag line), so this handler is now
-    /// a deliberate no-op: a stray recognizer firing still routes here without
-    /// producing a second, redundant log.
     @objc private func observeRecognizerState(_ g: UIGestureRecognizer) {
         guard g.state == .began || g.state == .changed else { return }
+        // A: catch a swipe that loses the recognizer race before `drag-begin` logs. Identify
+        // which non-ours recognizer began/changed on the terminal view (SwiftTerm's scroll or
+        // lazy selection pan). If this fires without a following `drag-begin`, that recognizer
+        // pre-empted our switch drag (the invisible intermittent-swipe miss, device 2026-07-22).
+        let kind: String
+        if g === terminalView?.panGestureRecognizer { kind = "scrollPan" }
+        else if g is UIPanGestureRecognizer { kind = "strayPan" }
+        else { kind = String(describing: type(of: g)) }
+        DebugLog.shared.log(.gesture,
+            "gr-observe \(kind) state=\(g.state.rawValue) mode=\(callbacks.currentMode())")
     }
 
     /// Attach `observeRecognizerState` as an extra target on every recognizer on the
     /// view that is not one of ours, so any of them firing is logged. Idempotent per
-    /// recognizer (UIKit ignores a duplicate identical target/action). Called when a
-    /// pane enters `.appOwnsInput` (the only mode where the drag goes missing).
+    /// recognizer (UIKit ignores a duplicate identical target/action). Called on every
+    /// drag start in ALL interaction modes, to catch a stray recognizer (SwiftTerm's
+    /// scroll/selection pan) pre-empting our drag (the intermittent swipe-race miss).
     private func observeStrayRecognizers(on view: TerminalView) {
         for gr in view.gestureRecognizers ?? [] where !ours.contains(gr) && gr !== view.panGestureRecognizer {
             gr.addTarget(self, action: #selector(observeRecognizerState(_:)))
@@ -288,10 +358,14 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// straddle two interpretations mid-flight. Returns the snapshotted mode.
     @discardableResult
     private func beginDrag(_ owner: String, on view: TerminalView) -> InteractionMode {
+        // A new touch always kills an in-flight momentum fling (catch-the-scroll), so the
+        // finger takes over immediately rather than fighting the decaying stream.
+        stopAltScreenFling()
         dragMode = callbacks.currentMode()
         dragAppCursor = callbacks.applicationCursorKeys()
         dragDecision = callbacks.altScrollDecision()
         emittedCells = 0
+        dragAxis = .pending
         // Defense-in-depth (on top of the Kit simultaneity policy): the moment a real
         // drag starts, force-cancel any long-press by bouncing its `isEnabled`. A
         // long-press that recognized just before the pan was turning the held-then-drag
@@ -302,10 +376,12 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             longPress.isEnabled = false
             longPress.isEnabled = true
         }
+        // Primary fix: durably subordinate the selection pan the instant it exists.
+        subordinateSelectionPan(on: view)
         // Kill any lazily-created SwiftTerm selection/mouse pan before it can turn this
         // drag into a text selection (the one-time init sweep can't catch it).
         disableStraySwiftTermPans(on: view)
-        if dragMode == .appOwnsInput { observeStrayRecognizers(on: view) }
+        observeStrayRecognizers(on: view)   // A: observe stray recognizers in ALL modes (catch localScroll swipe-race misses)
         // `imode=` is the InteractionMode; `dragDecision.logLine` carries its own
         // `mode=` (the AltScrollMode). Distinct keys so the one line stays unambiguous
         // (the B retest reads `imode=` to tell mouseReporting from appOwnsInput).
@@ -314,37 +390,68 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         return dragMode
     }
 
-    /// Resolve a one-shot tmux window-switch from the drag's cumulative translation
-    /// (`GestureClassifier` axis-locks horizontal-dominant → switch). Called on
-    /// `.ended`/`.cancelled` from whichever pan owned the drag.
-    private func resolveWindowSwitch(_ g: UIPanGestureRecognizer, in view: TerminalView) {
+    /// Feed the drag's cumulative translation through the axis lock. Returns true if this
+    /// drag is (now) switch-locked (horizontal) so the caller suppresses its scroll/arrow
+    /// path. No live rendering: the switch fires only on release (see `resolveLiveSwitch`).
+    private func driveLiveSwitch(_ g: UIPanGestureRecognizer, in view: TerminalView) -> Bool {
         let t = g.translation(in: view)
-        let decision = GestureClassifier.classify(
-            dx: Double(t.x), dy: Double(t.y),
-            isMultiWindowTmux: callbacks.isMultiWindowTmux())
-        if case .switchWindow(let delta) = decision {
-            callbacks.onSwitchWindow(delta)
+        if case .pending = dragAxis {
+            let multiWin = callbacks.isMultiWindowTmux()
+            dragAxis = DragAxisLock.resolve(dx: Double(t.x), dy: Double(t.y),
+                                            isMultiWindowTmux: multiWin)
+            if case .pending = dragAxis {
+                // still inside the dead-zone; no decision yet
+            } else {
+                let (axisDesc, reason): (String, String)
+                switch dragAxis {
+                case .switchWindow(let delta): axisDesc = "switchWindow(delta=\(delta))"; reason = "dominance"
+                case .scroll: axisDesc = "scroll"; reason = "vertical-or-single"
+                case .pending: axisDesc = "pending"; reason = "dead-zone"
+                }
+                DebugLog.shared.log(.gesture, decisionLine(
+                    "drag-axis-lock",
+                    inputs: [("dx", "\(Int(t.x))"), ("dy", "\(Int(t.y))"), ("multiWin", "\(multiWin)")],
+                    outputs: [("axis", axisDesc)],
+                    reason: reason))
+            }
         }
+        if case .switchWindow = dragAxis { return true }
+        return false
     }
 
-    /// Rides the terminal's NATIVE UIScrollView pan (we added ourselves as an extra
-    /// target). This recognizer is only LIVE in `.localScroll` (in `.appOwnsInput` the
-    /// mount sets `isScrollEnabled = false`, which disables it — `altScreenPan` owns the
-    /// drag there instead; in `.mouseReporting` SwiftTerm forwards the drag as a mouse
-    /// event). So here the scroll view itself owns the vertical drag (native scroll,
-    /// inertia, correct `isTracking`/scrollback) and we only resolve a horizontal-drag
-    /// tmux window-switch, once, on release.
-    @objc private func handleScrollViewPan(_ g: UIPanGestureRecognizer) {
+    /// On release, resolve commit-vs-nothing for a switch-locked drag. Returns true if this
+    /// was a switch drag (caller skips its own resolution). Commit fires `onDragCommit`
+    /// (-> tmux select-window); a short drag does nothing (no animation to cancel).
+    private func resolveLiveSwitch(_ g: UIPanGestureRecognizer, in view: TerminalView) -> Bool {
+        guard case .switchWindow = dragAxis else { return false }
+        let t = g.translation(in: view)
+        let v = g.velocity(in: view)
+        let width = Double(view.bounds.width)
+        switch SwitchCommitDecision.resolve(dx: Double(t.x), width: width, velocity: Double(v.x)) {
+        case .commit(let delta):
+            DebugLog.shared.log(.gesture, "drag-switch commit delta=\(delta) dx=\(Int(t.x)) vx=\(Int(v.x))")
+            callbacks.onDragCommit(delta)
+        case .springBack:
+            DebugLog.shared.log(.gesture, "drag-switch short dx=\(Int(t.x)) vx=\(Int(v.x)) - no switch")
+        }
+        return true
+    }
+
+    /// OUR switch pan handler (`.localScroll`/`.mouseReporting`). Axis-gated: on a
+    /// horizontal-dominant drag it drives the window switch (via `driveLiveSwitch` /
+    /// `resolveLiveSwitch`); on a vertical/pending drag it does nothing (the native scroll
+    /// pan, co-recognizing, handles the scroll). Unlike the old ride-the-scroll-pan target,
+    /// this fires regardless of scroll-view content/state.
+    @objc private func handleSwitchPan(_ g: UIPanGestureRecognizer) {
         guard let view = terminalView else { return }
         switch g.state {
         case .began:
-            beginDrag("scrollPan", on: view)
+            beginDrag("switchPan", on: view)
+        case .changed:
+            _ = driveLiveSwitch(g, in: view)   // horizontal -> switch; else no-op (scroll pan scrolls)
         case .ended, .cancelled:
-            DebugLog.shared.log(.gesture,
-                "drag-end owner=scrollPan imode=\(dragMode) outcome=\(dragMode == .localScroll ? "scroll" : "none")")
-            // Native pan is only live in `.localScroll`; guard defensively anyway.
-            guard dragMode != .mouseReporting else { return }
-            resolveWindowSwitch(g, in: view)
+            if resolveLiveSwitch(g, in: view) { return }   // switch committed/spring-back
+            DebugLog.shared.log(.gesture, "drag-end owner=switchPan imode=\(dragMode) outcome=none")
         default: break
         }
     }
@@ -361,6 +468,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         case .began:
             beginDrag("altPan", on: view)
         case .changed:
+            if driveLiveSwitch(g, in: view) { return }   // horizontal switch owns this drag
             // The pan is only enabled in `.appOwnsInput`, but re-check the snapshot so a
             // mid-mount edge (enabled just as the mode left) can't emit stray arrows.
             guard dragMode == .appOwnsInput else { return }
@@ -403,6 +511,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                 }
             }
         case .ended, .cancelled:
+            if resolveLiveSwitch(g, in: view) { return }  // switch drag handled
             let outcome: String
             if emittedCells != 0 {
                 switch dragDecision.keys {
@@ -415,9 +524,89 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             }
             DebugLog.shared.log(.gesture,
                 "drag-end owner=altPan imode=\(dragMode) emitted=\(emittedCells) outcome=\(outcome)")
-            resolveWindowSwitch(g, in: view)
+            // Fling: on a real scroll release (not a switch, not cancelled), carry the drag's
+            // velocity into a decaying post-release wheel-event stream so alt-screen scroll has
+            // the same momentum the native shell scroll gets for free.
+            if g.state == .ended, dragMode == .appOwnsInput, emittedCells != 0 {
+                startAltScreenFling(releaseVelocityY: Double(g.velocity(in: view).y), in: view)
+            }
         default: break
         }
+    }
+
+    // MARK: Alt-screen scroll momentum (fling)
+
+    /// Start a decaying post-release wheel-event fling from `releaseVelocityY` (points/sec, as
+    /// UIKit reports pan velocity: +down / −up). Below `minFlingVelocity` this is a no-op (a
+    /// slow lift just stops). Captures the alt-screen key family + a stable drag-point
+    /// coordinate at release (the finger is gone during the fling), then drives a `CADisplayLink`
+    /// that emits the same wheel events the live drag would, decelerating to a stop.
+    private func startAltScreenFling(releaseVelocityY: Double, in view: TerminalView) {
+        stopAltScreenFling()   // never stack two flings
+        let momentum = ScrollMomentum(velocity: releaseVelocityY)
+        guard !momentum.isFinished(at: 0) else { return }   // too slow to fling
+        // Stable coordinate for the fling's SGR wheel encoding: the last drag point.
+        let term = view.getTerminal()
+        let cols = max(term.cols, 1), rows = max(term.rows, 1)
+        let cellH = view.bounds.height / CGFloat(rows), cellW = view.bounds.width / CGFloat(cols)
+        let loc = view.panGestureRecognizer.location(in: view)
+        flingCoord = (min(max(1, Int(loc.x / max(cellW, 1)) + 1), cols),
+                      min(max(1, Int(loc.y / max(cellH, 1)) + 1), rows))
+        flingMomentum = momentum
+        flingDecision = dragDecision
+        flingAppCursor = dragAppCursor
+        flingEmittedCells = 0
+        let link = CADisplayLink(target: self, selector: #selector(tickAltScreenFling(_:)))
+        link.add(to: .main, forMode: .common)
+        flingDisplayLink = link
+        flingStartTime = CACurrentMediaTime()
+        DebugLog.shared.log(.gesture,
+            "fling start v=\(Int(releaseVelocityY)) keys=\(dragDecision.keys) coord=\(flingCoord)")
+    }
+
+    /// Cancel any in-flight fling (new touch, detach). Idempotent.
+    private func stopAltScreenFling() {
+        guard flingDisplayLink != nil else { return }
+        flingDisplayLink?.invalidate()
+        flingDisplayLink = nil
+        flingMomentum = nil
+        DebugLog.shared.log(.gesture, "fling stop total=\(flingEmittedCells)")
+    }
+
+    /// One fling frame: advance the decay model, convert the NEW cumulative offset into wheel
+    /// events (same `AltScreenScroll` accounting as the live drag, using the fling's own
+    /// `flingEmittedCells`), emit them, and stop once the model has decayed below threshold.
+    @objc private func tickAltScreenFling(_ link: CADisplayLink) {
+        guard let view = terminalView, let momentum = flingMomentum else { stopAltScreenFling(); return }
+        let t = CACurrentMediaTime() - flingStartTime
+        let rows = max(view.getTerminal().rows, 1)
+        let cellH = view.bounds.height / CGFloat(rows)
+        let totalDy = momentum.offset(at: t)
+        var sent = 0
+        switch flingDecision.keys {
+        case .wheel:
+            let (runs, newEmitted) = AltScreenScroll.wheelEvents(
+                totalDy: totalDy, cellHeight: Double(cellH), emittedCells: flingEmittedCells)
+            flingEmittedCells = newEmitted
+            for run in runs {
+                let bytes = encodeWheelRun(run, col: flingCoord.col, row: flingCoord.row)
+                if !bytes.isEmpty { callbacks.sendBytes(bytes); sent += run.count }
+            }
+        case .arrows, .pageKeys:
+            let (runs, newEmitted) = AltScreenScroll.arrows(
+                totalDy: totalDy, cellHeight: Double(cellH), emittedCells: flingEmittedCells)
+            flingEmittedCells = newEmitted
+            for run in runs {
+                let bytes = flingDecision.keys == .pageKeys
+                    ? encodePageKeyRun(run)
+                    : encodeArrowRun(run, applicationCursorKeys: flingAppCursor)
+                if !bytes.isEmpty { callbacks.sendBytes(bytes); sent += run.count }
+            }
+        }
+        if sent > 0 {
+            DebugLog.shared.log(.gesture, "fling tick t=\(String(format: "%.2f", t)) sent=\(sent) total=\(flingEmittedCells)")
+        }
+        if momentum.isFinished(at: t) { stopAltScreenFling() }
     }
 
     @objc private func handleSingleTap(_ g: UITapGestureRecognizer) {
@@ -472,6 +661,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let (start, end) = wordBounds(col: col, row: row, in: view)
         DebugLog.shared.log(.gesture, "sel:before hasActive=\(view.hasActiveSelection)")
         view.setSelectionRange(start: Position(col: start, row: row), end: Position(col: end, row: row))
+        subordinateSelectionPan(on: view)   // the selection pan is created now; subordinate it at birth
         DebugLog.shared.log(.gesture, "sel:after set (\(start),\(row))-(\(end),\(row)) hasActive=\(view.hasActiveSelection)")
         presentEditMenu(at: p, in: view)
     }
@@ -491,6 +681,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         DebugLog.shared.log(.gesture, "sel:before hasActive=\(view.hasActiveSelection)")
         view.setSelectionRange(start: Position(col: 0, row: row),
                                end: Position(col: cols - 1, row: row))
+        subordinateSelectionPan(on: view)   // the selection pan is created now; subordinate it at birth
         DebugLog.shared.log(.gesture, "sel:after set (0,\(row))-(\(cols - 1),\(row)) hasActive=\(view.hasActiveSelection)")
         presentEditMenu(at: p, in: view)
     }
@@ -540,6 +731,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private func role(of g: UIGestureRecognizer) -> GestureRole {
         if g === terminalView?.panGestureRecognizer { return .scrollPan }
         if g === altScreenPan { return .altScreenPan }
+        if g === switchPan { return .switchPan }
         if g === longPress { return .longPress }
         if g is UIPinchGestureRecognizer { return .pinch }
         if g is UITapGestureRecognizer { return .tap }
@@ -572,7 +764,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// one it must wait on.
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRequireFailureOf other: UIGestureRecognizer) -> Bool {
-        return role(of: g) == .selectionPan && role(of: other) == .scrollPan
+        guard role(of: g) == .selectionPan else { return false }
+        return role(of: other) == .scrollPan || role(of: other) == .switchPan
     }
 }
 

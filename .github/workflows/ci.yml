@@ -19,6 +19,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:   # manual trigger (sidesteps a stuck webhook: `gh workflow run CI --ref <branch>`)
 
 # Read-only token; no job needs write access.
 permissions:

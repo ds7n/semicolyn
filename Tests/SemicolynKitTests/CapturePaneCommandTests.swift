@@ -3,27 +3,28 @@
 import XCTest
 @testable import SemicolynKit
 
-/// Builder for the `capture-pane` history-seed command (escapes kept, no join).
+/// Builder for the `capture-pane` history-seed command (escapes kept, joins wrapped
+/// rows via `-J` so history captured at one width re-wraps correctly at ours).
 final class CapturePaneCommandTests: XCTestCase {
-    // EP: a normal line count → -S -<N>, escapes (-e), print (-p), pane target %<raw>.
+    // EP: a normal line count → -S -<N>, escapes (-e), join (-J), print (-p), pane %<raw>.
     func testBuildsNormalCapture() {
         XCTAssertEqual(
             capturePaneCommand(paneID: PaneID(raw: 3), lines: 5000),
-            "capture-pane -p -e -S -5000 -t %3")
+            "capture-pane -p -e -J -S -5000 -t %3")
     }
 
     // BVA: Int.max → whole-history shorthand `-S -` (no number).
     func testUnlimitedUsesWholeHistoryShorthand() {
         XCTAssertEqual(
             capturePaneCommand(paneID: PaneID(raw: 7), lines: Int.max),
-            "capture-pane -p -e -S - -t %7")
+            "capture-pane -p -e -J -S - -t %7")
     }
 
     // BVA: lines == 1 → -S -1.
     func testSingleLine() {
         XCTAssertEqual(
             capturePaneCommand(paneID: PaneID(raw: 0), lines: 1),
-            "capture-pane -p -e -S -1 -t %0")
+            "capture-pane -p -e -J -S -1 -t %0")
     }
 
     // Negative: lines == 0 → nil (seeding disabled), no command emitted.
@@ -36,22 +37,26 @@ final class CapturePaneCommandTests: XCTestCase {
         XCTAssertNil(capturePaneCommand(paneID: PaneID(raw: 3), lines: -10))
     }
 
-    // No -J (join): the command must NOT contain -J (preserve tmux wrapping).
-    func testNoJoinFlag() {
+    // Join (-J): the command MUST contain -J so tmux joins its soft-wrapped rows into
+    // logical lines; without it, history captured at a wider width re-wraps (staircases)
+    // when replayed into our narrower buffer (device bug 2026-07-23).
+    func testHasJoinFlag() {
         let cmd = capturePaneCommand(paneID: PaneID(raw: 1), lines: 100) ?? ""
-        XCTAssertFalse(cmd.contains("-J"), "capture must not join wrapped lines: \(cmd)")
+        XCTAssertTrue(cmd.contains(" -J "), "capture must join wrapped lines (-J): \(cmd)")
     }
 
-    // Reconstruct: joins content lines with \n + trailing \n; escapes preserved.
-    func testReconstructJoinsContentLines() {
+    // Reconstruct: joins content lines with CR-LF + trailing CR-LF; escapes preserved.
+    // CR-LF (not bare LF) is required so SwiftTerm returns the cursor to column 0 per
+    // line (lineFeedMode/LNM is OFF by default → bare LF would staircase the history).
+    func testReconstructJoinsContentLinesWithCRLF() {
         let out = reconstructHistory(fromLines: ["\u{1b}[31mred\u{1b}[39m", "plain"])
-        XCTAssertEqual(out, Array("\u{1b}[31mred\u{1b}[39m\nplain\n".utf8))
+        XCTAssertEqual(out, Array("\u{1b}[31mred\u{1b}[39m\r\nplain\r\n".utf8))
     }
 
-    // Trailing blank lines (capture-pane bottom padding) are trimmed.
+    // Trailing blank lines (capture-pane bottom padding) are trimmed; CR-LF between rows.
     func testReconstructTrimsTrailingBlanks() {
         let out = reconstructHistory(fromLines: ["a", "b", "", "   ", ""])
-        XCTAssertEqual(out, Array("a\nb\n".utf8))
+        XCTAssertEqual(out, Array("a\r\nb\r\n".utf8))
     }
 
     // All-blank input → empty (no spurious newline).
@@ -64,9 +69,9 @@ final class CapturePaneCommandTests: XCTestCase {
         XCTAssertEqual(reconstructHistory(fromLines: []), [])
     }
 
-    // Interior blank lines are KEPT (only trailing trimmed).
+    // Interior blank lines are KEPT (only trailing trimmed); each break is CR-LF.
     func testReconstructKeepsInteriorBlanks() {
         let out = reconstructHistory(fromLines: ["a", "", "b"])
-        XCTAssertEqual(out, Array("a\n\nb\n".utf8))
+        XCTAssertEqual(out, Array("a\r\n\r\nb\r\n".utf8))
     }
 }

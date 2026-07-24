@@ -3,16 +3,43 @@
 import SwiftUI
 import SemicolynKit
 
-/// Shared slot chrome: themed background + label, fixed min size.
-private struct SlotChrome<Label: View>: View {
+/// Shared slot chrome: themed background + label, uniform min size. When a slot has
+/// swipe secondaries, they render as a small accent-tinted column to the RIGHT of the
+/// label: swipe-up glyph on top, swipe-down below. A single-direction key fills only its
+/// slot; the other is an invisible spacer so the main label stays vertically centered
+/// (device issue #2: replaces the old edge-pinned overlay glyphs).
+struct SlotChrome<Label: View>: View {
     let bg: Color
+    var up: String? = nil
+    var down: String? = nil
+    @Environment(\.theme) private var theme
     @ViewBuilder var label: () -> Label
+
+    private var hasHints: Bool { up != nil || down != nil }
+
     var body: some View {
-        label()
-            .frame(minWidth: 34, minHeight: 34)
-            .padding(.horizontal, 6)
-            .background(bg)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+        HStack(spacing: 3) {
+            label()
+            if hasHints {
+                VStack(spacing: 0) {
+                    hintText(up)
+                    hintText(down)
+                }
+            }
+        }
+        .frame(minWidth: 36, minHeight: 27)   // tightened input area (2026-07-24): 34→27 row, still tappable
+        .padding(.horizontal, 6)
+        .background(bg)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// One hint glyph, or an invisible spacer of the same metrics when the direction is
+    /// unbound (keeps the main label centered and both single-swipe directions aligned).
+    @ViewBuilder private func hintText(_ s: String?) -> some View {
+        Text(s ?? " ")
+            .font(.system(size: 8, design: .monospaced))
+            .foregroundStyle(Color(theme.accent.primary))
+            .opacity(s == nil ? 0 : 0.85)
     }
 }
 
@@ -23,14 +50,14 @@ struct SymbolSlotView: View {
     let keybarSettings: KeybarSettingsStore
     @Environment(\.theme) private var theme
     var body: some View {
-        SlotChrome(bg: Color(theme.keybar.slotBg)) {
+        let secondaries = resolveSecondaries(for: .symbol(symbol),
+                                             overrides: keybarSettings.settings.fixedKeySecondaries)
+        let g = hintGlyphs(for: secondaries)
+        SlotChrome(bg: Color(theme.keybar.slotBg), up: g.up, down: g.down) {
             Text(symbol).font(.system(.body, design: .monospaced)).foregroundStyle(Color(theme.text.primary))
         }
         .onInputClickTap { if let c = symbol.first { vm.keybar.tapSymbol(c) } }
-        .fixedKeySwipes(
-            resolveSecondaries(for: .symbol(symbol),
-                               overrides: keybarSettings.settings.fixedKeySecondaries)
-        ) { v in vm.keybar.emitSecondary(v) }
+        .fixedKeySwipes(secondaries) { v in vm.keybar.emitSecondary(v) }
     }
 }
 
@@ -40,52 +67,29 @@ struct TabSlotView: View {
     let keybarSettings: KeybarSettingsStore
     @Environment(\.theme) private var theme
     var body: some View {
-        SlotChrome(bg: Color(theme.keybar.slotBg)) {
+        let secondaries = resolveSecondaries(for: .tab,
+                                             overrides: keybarSettings.settings.fixedKeySecondaries)
+        let g = hintGlyphs(for: secondaries)
+        SlotChrome(bg: Color(theme.keybar.slotBg), up: g.up, down: g.down) {
             Text("⇥").foregroundStyle(Color(theme.text.primary))
         }
         .onInputClickTap { vm.keybar.tapTab() }
-        .fixedKeySwipes(
-            resolveSecondaries(for: .tab,
-                               overrides: keybarSettings.settings.fixedKeySecondaries)
-        ) { v in vm.keybar.emitSecondary(v) }
+        .fixedKeySwipes(secondaries) { v in vm.keybar.emitSecondary(v) }
     }
 }
 
 // MARK: - Fixed-key swipe secondaries
 
 extension View {
-    @ViewBuilder
+    /// The swipe-up / swipe-down gesture that emits a fixed key's secondaries. The hint
+    /// GLYPHS are rendered by SlotChrome's column (fed hintGlyphs(for:)); this modifier is
+    /// now gesture-only (device #2 removed the edge-pinned overlay glyphs).
     func fixedKeySwipes(_ secondaries: SwipeSecondaries,
                         emit: @escaping (SecondaryValue) -> Void) -> some View {
-        self
-            .overlay(alignment: .top) {
-                if let up = secondaries.up { Text(fixedKeyGlyphLabel(up)).font(.system(size: 7)).foregroundStyle(.secondary) }
-            }
-            .overlay(alignment: .bottom) {
-                if let down = secondaries.down { Text(fixedKeyGlyphLabel(down)).font(.system(size: 7)).foregroundStyle(.secondary) }
-            }
-            .gesture(DragGesture(minimumDistance: 12).onEnded { g in
-                if g.translation.height < -12, let up = secondaries.up { emit(up) }
-                else if g.translation.height > 12, let down = secondaries.down { emit(down) }
-            })
-    }
-}
-
-func fixedKeyGlyphLabel(_ v: SecondaryValue) -> String {
-    switch v {
-    case .literal(let s): return s
-    case .key(let input, let mods):
-        switch input {
-        case .tab:         return mods.shift ? "⇤" : "⇥"
-        case .escape:      return "⎋"
-        case .enter:       return "⏎"
-        case .backspace:   return "⌫"
-        case .arrow(let d):
-            let map: [String: String] = ["up": "↑", "down": "↓", "left": "←", "right": "→"]
-            return map[d.rawValue] ?? "→"
-        case .function(let n): return "F\(n)"
-        case .char(let c): return String(c)
-        }
+        self.gesture(DragGesture(minimumDistance: 12).onEnded { g in
+            if g.translation.height < -12, let up = secondaries.up { emit(up) }
+            else if g.translation.height > 12, let down = secondaries.down { emit(down) }
+        })
     }
 }
 
@@ -221,20 +225,72 @@ struct MissingSlotView: View {
     }
 }
 
-/// Pad: drag = arrow key (dominant axis), tap = zoom active pane.
-/// (Long-press pane-mode + splits = a later slice.)
+/// Pad: SWIPE = arrow key in the swiped (dominant-axis) direction, and HOLDING the swipe
+/// auto-repeats it iOS-style (distance picks direction, held-time drives the rate; see
+/// SemicolynKit `ArrowRepeat`). No tap action: the pad is purely a directional control
+/// (device 2026-07-20: tap used to zoom the active pane, so a press meant to send an arrow
+/// zoomed a pane instead). Zoom lives on the long-press-pane gesture elsewhere.
 struct PadView: View {
     let vm: ConnectionViewModel
     @Environment(\.theme) private var theme
+
+    @State private var heldSince: Date?                 // set on the first crossing; nil = not held
+    @State private var lastTranslation: CGSize = .zero  // latest dx/dy, updated every onChanged
+    @State private var repeatTimer: Timer?
+
     var body: some View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
             Image(systemName: "dpad").foregroundStyle(Color(theme.text.primary))
         }
-        .onInputClickTap { vm.zoomActivePane() }
-        .gesture(DragGesture(minimumDistance: 16).onEnded { g in
-            let dx = g.translation.width, dy = g.translation.height
-            if abs(dx) > abs(dy) { vm.keybar.arrow(dx > 0 ? .right : .left) }
-            else { vm.keybar.arrow(dy > 0 ? .down : .up) }
-        })
+        .gesture(
+            DragGesture(minimumDistance: 16)
+                .onChanged { g in
+                    lastTranslation = g.translation           // always track the latest thumb pos
+                    guard heldSince == nil else { return }     // already holding; timer drives it
+                    fireArrow()                                // first fire on crossing 16pt
+                    heldSince = Date()
+                    DebugLog.shared.log(.keybar,
+                        "keybar:dpad swipe dx=\(Int(g.translation.width)) dy=\(Int(g.translation.height)) -> arrow=\(dominantArrow(dx: g.translation.width, dy: g.translation.height))")
+                    DebugLog.shared.log(.keybar, "keybar:dpad repeat start")
+                    scheduleNextRepeat()
+                }
+                .onEnded { _ in stopRepeat() }
+        )
+    }
+
+    /// Fire the arrow for the current thumb direction.
+    private func fireArrow() {
+        vm.keybar.arrow(dominantArrow(dx: lastTranslation.width, dy: lastTranslation.height))
+    }
+
+    /// Re-arm the repeat timer: ask the Kit decider for the interval at the current held-time.
+    /// While still in the initial-delay window it returns nil; poll again at the remaining delay.
+    private func scheduleNextRepeat() {
+        guard let since = heldSince else { return }
+        let held = Date().timeIntervalSince(since)
+        let delay: TimeInterval
+        let shouldFire: Bool
+        if let interval = ArrowRepeat.interval(heldFor: held) {
+            delay = interval
+            shouldFire = true
+        } else {
+            delay = max(0.01, ArrowRepeat.initialDelay - held)   // wait out the remaining delay
+            shouldFire = false
+        }
+        repeatTimer?.invalidate()
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                guard self.heldSince != nil else { return }      // released between arm and fire
+                if shouldFire { self.fireArrow() }
+                self.scheduleNextRepeat()
+            }
+        }
+    }
+
+    /// Stop repeating and reset held state (on release).
+    private func stopRepeat() {
+        repeatTimer?.invalidate()
+        repeatTimer = nil
+        heldSince = nil
     }
 }

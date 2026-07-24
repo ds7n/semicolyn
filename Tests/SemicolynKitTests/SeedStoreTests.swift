@@ -121,4 +121,52 @@ final class SeedStoreTests: XCTestCase {
                                 seed: seed.bigram.nextSource(after: "git"))
         XCTAssertEqual(s.suggestions(forPrefix: ""), ["status"])
     }
+
+    // Combined-blob codec: BundledSeed.combinedBlob() <-> BundledSeed(combinedBlob:).
+    // This is the seam the app-edge install and seedbuild both use; a drift here
+    // silently breaks seed install (device issue #3's exact failure).
+    func testCombinedBlobRoundTrips() {
+        let seed = BundledSeed(version: 7, unigramBlob: [1, 2, 3, 4], bigramBlob: [9, 8])
+        let blob = seed.combinedBlob()
+        let parsed = BundledSeed(combinedBlob: blob)
+        XCTAssertNotNil(parsed)
+        XCTAssertEqual(parsed?.version, 7)
+        XCTAssertEqual(parsed?.unigramBlob, [1, 2, 3, 4])
+        XCTAssertEqual(parsed?.bigramBlob, [9, 8])
+    }
+
+    func testCombinedBlobRoundTripsEmptyBlobs() {
+        let seed = BundledSeed(version: 1, unigramBlob: [], bigramBlob: [])
+        let parsed = BundledSeed(combinedBlob: seed.combinedBlob())
+        XCTAssertEqual(parsed?.version, 1)
+        XCTAssertEqual(parsed?.unigramBlob, [])
+        XCTAssertEqual(parsed?.bigramBlob, [])
+    }
+
+    func testParseRejectsTruncatedHeader() {
+        XCTAssertNil(BundledSeed(combinedBlob: [0x47, 0x53]))   // < headerSize (9)
+    }
+
+    func testParseRejectsWrongMagic() {
+        var blob = BundledSeed(version: 1, unigramBlob: [1], bigramBlob: [2]).combinedBlob()
+        blob[0] = 0x00                                          // corrupt "GSED"
+        XCTAssertNil(BundledSeed(combinedBlob: blob))
+    }
+
+    func testParseRejectsWrongFormatVersion() {
+        var blob = BundledSeed(version: 1, unigramBlob: [1], bigramBlob: [2]).combinedBlob()
+        blob[4] = 0x02                                          // formatVersion must be 1
+        XCTAssertNil(BundledSeed(combinedBlob: blob))
+    }
+
+    func testParseRejectsTrailingSlack() {
+        var blob = BundledSeed(version: 1, unigramBlob: [1], bigramBlob: [2]).combinedBlob()
+        blob.append(0xFF)                                       // extra byte past the bigram
+        XCTAssertNil(BundledSeed(combinedBlob: blob))
+    }
+
+    func testParseRejectsTruncatedBody() {
+        let blob = BundledSeed(version: 1, unigramBlob: [1, 2, 3], bigramBlob: [4]).combinedBlob()
+        XCTAssertNil(BundledSeed(combinedBlob: Array(blob.dropLast())))   // last body byte missing
+    }
 }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
 import SwiftTerm
+import CoreText
 import SemicolynKit
 
 /// Renders the active tmux window's panes as a grid of SwiftTerm `TerminalView`s,
@@ -93,6 +94,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 // Enable our alt-screen drag pan in lockstep with the isScrollEnabled
                 // flip (owns the drag in `.appOwnsInput`, where the native pan is parked).
                 v.coordinator?.setAltScreenPan(for: view, enabled: mode == .appOwnsInput)
+                v.coordinator?.setSwitchPan(for: view, enabled: mode != .appOwnsInput)
             }
         }
         return v
@@ -149,9 +151,17 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private var pinchRecognizers: [ObjectIdentifier: UIPinchGestureRecognizer] = [:]
         /// Per-pane gesture layer (replaces SwiftTerm's built-ins).
         private var gestureControllers: [ObjectIdentifier: TerminalGestureController] = [:]
-        /// Owns the two-phase window-switch slide (slide-out on swipe release, slide-in
-        /// on the next `apply` where the active window changed). See `WindowTransition`.
-        let windowTransition = WindowTransition()
+        /// Device #2 (Build 2): while a window switch is settling, the keybar/keyboard show
+        /// animation grows the container bounds through a burst of intermediate sizes
+        /// (e.g. 80x35 -> 80x44 -> 80x33). Sending each to tmux resized the window multiple
+        /// times, and a TRANSIENT wrong size landed on the active window -> content filled the
+        /// wrong row count -> "bottom halfway up, rest blank". This deadline extends the
+        /// resize debounce during the settle so only the FINAL settled size reaches tmux.
+        private var resizeSettleUntil: Date?
+        /// The extended debounce quiet window used while `resizeSettleUntil` is in the future -
+        /// long enough to span the keyboard/keybar grow animation (feel-tuned; the animation is
+        /// ~150-400ms). Outside the settle window the normal `ResizeDebounce.quiet` applies.
+        private static let switchResizeQuiet: TimeInterval = 0.45
         /// The `ContainerView` this coordinator drives; set in `makeUIView`. Weak since
         /// `ContainerView` already holds a weak back-reference to this coordinator (avoid
         /// a retain cycle across the UIViewRepresentable boundary).
@@ -277,18 +287,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     terminalView: view,
                     callbacks: .init(
                         isMultiWindowTmux: { [weak self] in self?.onIsMultiWindowTmux() ?? false },
-                        onSwitchWindow:    { [weak self] delta in
-                            DebugLog.shared.log(.lifecycle, "user-action: window-switch delta=\(delta)")
-                            if let self, let dir = windowSlideDirection(delta: delta),
-                               let content = self.containerView?.paneContentView {
-                                let w = content.bounds.width
-                                self.windowTransition.slideOut(dir.out, view: content, width: w)
-                                self.windowTransition.beginPending(inEdge: dir.in, timeout: 1.5) { [weak content] in
-                                    content?.transform = .identity   // stuck switch: snap back
-                                }
-                                DebugLog.shared.log(.gesture, "window-switch anim: out=\(dir.out) in=\(dir.in) delta=\(delta)")
-                            }
-                            self?.onSwitchWindow(delta)
+                        onSwitchWindow: { [weak self] delta in
+                            self?.onSwitchWindow(delta)   // tmux select-window (also used by esc-pill)
                         },
                         onLongPressZoom:   { [weak self] in self?.onZoomActivePane() },
                         onPlaceCursor:     { [weak self, weak view] col, row in
@@ -322,7 +322,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         },
                         sendBytes: { [weak self] bytes in self?.send(bytes) },
                         hasSelection: { [weak view] in view?.selectionActive ?? false },
-                        clearSelection: { [weak view] in view?.selectNone() }
+                        clearSelection: { [weak view] in view?.selectNone() },
+                        onDragCommit: { [weak self] delta in
+                            self?.onSwitchWindow(delta)   // tmux select-window; tmux redraws (KISS)
+                        }
                     )
                 )
                 gestureControllers[key] = controller
@@ -438,6 +441,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
             }
         }
 
+        /// Enable/disable a pane's switch pan (mirrors `setAltScreenPan`). Called from the
+        /// mode-transition handler so exactly one switch-owner is live per mode: `switchPan`
+        /// in `.localScroll`/`.mouseReporting`, `altScreenPan` in `.appOwnsInput`.
+        func setSwitchPan(for view: TerminalView, enabled: Bool) {
+            MainActor.assumeIsolated {
+                gestureControllers[ObjectIdentifier(view)]?.setSwitchPanEnabled(enabled)
+            }
+        }
+
         // MARK: - TerminalViewDelegate
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
@@ -465,11 +477,25 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// with the full-container grid (bounds ÷ measured cell) — the single accurate
         /// source, replacing the old coarse `sendApproxClientSize` estimate. Debounces
         /// rapid bursts (rotation / keyboard show-hide).
+        /// Arm the resize-settle window (device #2 Build 2): for the next `switchResizeQuiet`
+        /// seconds, `noteClientSize` uses the longer debounce so a switch's keyboard/keybar grow
+        /// animation coalesces to one final tmux resize instead of a burst of intermediate sizes.
+        func armResizeSettle() {
+            resizeSettleUntil = Date().addingTimeInterval(Self.switchResizeQuiet)
+        }
+
         func noteClientSize(cols: Int, rows: Int) {
-            resizeDebounce.note(cols: cols, rows: rows, at: Date())
-            DispatchQueue.main.asyncAfter(deadline: .now() + ResizeDebounce.quiet) { [weak self] in
+            let now = Date()
+            resizeDebounce.note(cols: cols, rows: rows, at: now)
+            // Device #2 (Build 2): during a switch-settle window use a LONGER quiet so the
+            // keyboard/keybar grow animation's intermediate sizes (35 -> 44 -> 33) coalesce to
+            // one emit of the final settled size, instead of resizing tmux mid-animation and
+            // stranding the active window at a transient row count (the half-blank pane).
+            let settling = (resizeSettleUntil.map { now < $0 }) ?? false
+            let quiet = settling ? Self.switchResizeQuiet : ResizeDebounce.quiet
+            DispatchQueue.main.asyncAfter(deadline: .now() + quiet) { [weak self] in
                 guard let self else { return }
-                if let size = self.resizeDebounce.tick(at: Date()) {
+                if let size = self.resizeDebounce.tick(at: Date(), quiet: quiet) {
                     self.onTmuxResize?(size.cols, size.rows)
                 }
             }
@@ -516,26 +542,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Pane-ID → live TerminalView; exposed for coordinator mouse-dot updates.
         var panes: [PaneID: TerminalView] = [:]
 
-        /// Wraps every pane subview so a later task can transform this ONE view to
-        /// slide a whole tmux window (window-switch animation). Fills `bounds`;
-        /// pane frames are computed in `apply(state:)` and are unchanged by this
-        /// wrapper since it exactly covers the container's coordinate space.
-        /// Added as a subview on first use (see `ensurePaneContentViewInstalled()`);
-        /// `layoutSubviews` keeps its frame pinned to `bounds` but never touches its
-        /// `.transform` (reserved for the future animation).
-        let paneContentView = UIView()
-        private var paneContentViewInstalled = false
-
-        /// Installs `paneContentView` as the first (and only) content-hosting subview,
-        /// lazily, the first time it's needed (mirrors `ContainerView` having no custom
-        /// `init` today). Idempotent.
-        private func ensurePaneContentViewInstalled() {
-            guard !paneContentViewInstalled else { return }
-            paneContentView.frame = bounds
-            addSubview(paneContentView)
-            paneContentViewInstalled = true
-        }
-
         /// Cached cell metrics so we don't re-measure the font on every layout pass.
         /// Nil'd by `invalidateCachedCell()` after a pinch font change.
         private var cachedCell: (w: Double, h: Double)?
@@ -545,9 +551,21 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// more often than the rendered layout actually changes (the render storm).
         private var lastRenderSignature: RenderSignature?
 
+        /// The pane layout applied by the last `apply` (device #2, 2026-07-20). `apply` sets
+        /// pane frames, but it is gated by `RenderSignature` (no geometry dependency), so when
+        /// the container bounds change WITHOUT a tmux-state change (the keybar/keyboard show
+        /// animation growing bounds after a window switch) the panes are never re-framed and a
+        /// newly-revealed pane stays sized to a stale, tiny bounds snapshot until a scroll
+        /// provokes a tmux event. `relayoutExistingPaneFrames()` replays this layout on a pure
+        /// geometry change so a revealed pane tracks the grow animation.
+        private var lastAppliedLayout: PaneLayout?
+        /// The bounds size at the last `layoutSubviews` relayout, to fire the geometry-only
+        /// pane re-frame ONLY when bounds actually changed (avoids churn under the render storm).
+        private var lastLaidOutBounds: CGSize = .zero
+
         /// The active window as of the last `apply` that reached the change-detect at the
         /// end of the method. Compared against `state.activeWindow` there to decide whether
-        /// a pending window-switch slide-in should run (see `WindowTransition`).
+        /// to arm the keybar-grow resize-settle debounce (see `armResizeSettle`).
         private var previousActiveWindow: WindowID?
 
         /// Clears the cached cell metrics so `resolvedCell()` re-measures on the next
@@ -564,30 +582,49 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// the old coarse `sendApproxClientSize` estimate. Debounced in the coordinator.
         override func layoutSubviews() {
             super.layoutSubviews()
-            // Keep the pane-hosting wrapper pinned to our bounds on every layout pass
-            // (rotation, keyboard show-hide, font change) BEFORE pane frames are
-            // computed below. Frame only - `.transform` is left alone (a later task
-            // animates it for the window-switch slide).
-            ensurePaneContentViewInstalled()
-            paneContentView.frame = bounds
+            // Device #1 (2026-07-20): the keybar (inputAccessoryView) is NOT propagated into
+            // our safeArea (si=(t0,b0) on device), so `bounds` includes the keybar+keyboard
+            // band and the terminal rendered behind the bar. Subtract the keybar height so
+            // every pane occupies only the visible area above the bar. kbH<=0 = keyboard down
+            // (no accessory) -> full height.
+            let kbH = firstResponderKeybarHeight()
+            let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height), keybarHeight: Double(kbH))
             let cell = resolvedCell()
-            guard let grid = terminalGrid(width: Double(bounds.width), height: Double(bounds.height),
+            // Grid from the KEYBAR-ADJUSTED height (device #1), not raw bounds.height.
+            guard let grid = terminalGrid(width: Double(bounds.width), height: usableH,
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
             // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15). Log the
-            // full geometry at the grid-computation boundary so a device trace can prove
-            // whether the container bounds already exclude the keybar (inputAccessoryView)
-            // area, or whether the grid is computed from pre-keyboard-avoidance bounds.
-            // `si` = safeAreaInsets; a nonzero `.bottom` = the system reserved space (home
-            // indicator / keyboard). `kb` = the active pane's keybar accessory height.
+            // full geometry at the grid-computation boundary. `si` = safeAreaInsets; a nonzero
+            // `.bottom` = system reserved space. `kbH` = the active pane's keybar accessory
+            // height; `usableH` = bounds.height with the keybar subtracted (what the grid uses).
+            // Logged under `.tmux` (default-ON) so the grid/client-size mismatch captures on a
+            // device build without a manual toggle.
             let si = safeAreaInsets
-            let kbH = firstResponderKeybarHeight()
-            // Logged under `.tmux` (default-ON) rather than `.keybar` (off): the
-            // grid/client-size mismatch (#D: we send tmux 80 cols while the window is
-            // laid out at 89) is a tmux-sizing concern, and it must capture on a device
-            // build without a manual toggle.
             DebugLog.shared.log(.tmux,
-                "sizing:tmux bounds=\(Int(bounds.width))x\(Int(bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) cell=\(String(format: "%.1f", cell.w))x\(String(format: "%.1f", cell.h)) kbH=\(String(format: "%.1f", kbH)) grid=\(grid.cols)x\(grid.rows)")
+                "sizing:tmux bounds=\(Int(bounds.width))x\(Int(bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) cell=\(String(format: "%.1f", cell.w))x\(String(format: "%.1f", cell.h)) kbH=\(String(format: "%.1f", kbH)) usableH=\(Int(usableH)) grid=\(grid.cols)x\(grid.rows)")
             coordinator?.noteClientSize(cols: grid.cols, rows: grid.rows)
+
+            // Device #2 (2026-07-20): re-frame existing panes when the container geometry
+            // changed WITHOUT a tmux-state change (the keybar/keyboard show animation growing
+            // bounds after a window switch). `apply` is gated by `RenderSignature` (no geometry
+            // dependency), so a pane revealed mid-grow stays at its stale tiny frame until a
+            // scroll provokes a tmux event. Fire only on an actual bounds-size change to avoid
+            // churn under the -CC render storm.
+            if bounds.size != lastLaidOutBounds {
+                lastLaidOutBounds = bounds.size
+                relayoutExistingPaneFrames(cell: cell)
+            }
+        }
+
+        /// Re-apply `paneRects` to the panes ALREADY in `panes` (no create/destroy, no
+        /// first-responder/border changes) so a revealed pane tracks a geometry-only bounds
+        /// change. No-ops when no layout has been applied yet. Device #2.
+        private func relayoutExistingPaneFrames(cell: (w: Double, h: Double)) {
+            guard let layout = lastAppliedLayout else { return }
+            for rect in paneRects(in: layout, cellWidth: cell.w, cellHeight: cell.h) {
+                guard let view = panes[rect.pane] else { continue }
+                view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
+            }
         }
 
         /// Sizing-diagnostic helper: the keybar (`inputAccessoryView`) height of whichever
@@ -639,6 +676,26 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 if cols > 0, rows > 0 {
                     let w = Double(optimal.width) / cols
                     let h = Double(optimal.height) / rows
+                    // DIAGNOSTIC (cell-width bug 2026-07-23): the .ttf says Hack/JetBrains Nerd
+                    // Fonts advance 'W' at 7.8pt@13, but getOptimalFrameSize yields ~5.0/col ->
+                    // we over-report cols to tmux -> text wraps/staircases. Log every candidate
+                    // measurement for the LIVE pane font so we know which path gives the true
+                    // advance on-device (getOptimalFrameSize vs UIFont "W".size vs a CTFont
+                    // unicode-advance via cmap). Remove once the fix is chosen.
+                    let f = pane.font
+                    let uikitW = Double("W".size(withAttributes: [.font: f]).width)
+                    var ctAdv = -1.0
+                    let ct = f as CTFont
+                    var uni: [UniChar] = Array("W".utf16)
+                    var glyphs = [CGGlyph](repeating: 0, count: uni.count)
+                    if CTFontGetGlyphsForCharacters(ct, &uni, &glyphs, uni.count) {
+                        var adv = CGSize.zero
+                        CTFontGetAdvancesForGlyphs(ct, .horizontal, &glyphs, &adv, 1)
+                        ctAdv = Double(adv.width)
+                    }
+                    let scale = pane.window?.screen.scale ?? UIScreen.main.scale
+                    DebugLog.shared.log(.render,
+                        "cell-probe fontName=\(f.fontName) pt=\(f.pointSize) optimalW/col=\(String(format: "%.2f", w)) uikitWsize=\(String(format: "%.2f", uikitW)) ctUnicodeAdv=\(String(format: "%.2f", ctAdv)) lineHeight=\(String(format: "%.2f", Double(f.lineHeight))) screenScale=\(scale) cols=\(Int(cols))")
                     if w > 0, h > 0 {
                         cachedCell = (w: w, h: h)
                         return (w: w, h: h)
@@ -663,10 +720,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
                    unregister: (PaneID) -> Void,
                    activeBorderColor: UIColor,
                    inactiveBorderColor: UIColor) {
-            // SwiftUI can call `apply` before this view's first `layoutSubviews` pass
-            // (e.g. immediately after `makeUIView`), and panes are parented into
-            // `paneContentView` below - ensure it exists before that happens.
-            ensurePaneContentViewInstalled()
             let sig = RenderSignature(state)
             guard sig != lastRenderSignature else { return }   // unchanged → skip re-layout
             let reason = renderChangeReason(old: lastRenderSignature, new: sig, state: state)
@@ -674,6 +727,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             DebugLog.shared.log(.render, "render:panes reason=\(reason) active=\(state.activeWindow.map { "@\($0.raw)" } ?? "nil") windows=\(state.windows.count) panes=\(state.activeWindow.flatMap { state.window($0) }?.visibleLayout?.panes.count ?? -1)")
             guard let win = state.activeWindow, let window = state.window(win),
                   let layout = window.visibleLayout else { return }
+            lastAppliedLayout = layout   // device #2: so layoutSubviews can re-frame on a geometry-only change
 
             let cell = resolvedCell()
             let rects = paneRects(in: layout, cellWidth: cell.w, cellHeight: cell.h)
@@ -731,7 +785,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         }
                         coordinator?.modeTracker.recompute(for: pane, terminal: term, altSource: src)
                     }
-                    paneContentView.addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
+                    addSubview(t); panes[rect.pane] = t; register(rect.pane, t)
                     coordinator?.installHalo(on: t, pane: pane)
                     // Prime once at mount so a pane reattaching into a running
                     // alt-screen app (vim/Claude) is correct from frame one.
@@ -744,17 +798,37 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     if let isAlt = coordinator?.vm.takeAltScreenOverride(for: pane) {
                         coordinator?.modeTracker.setAltScreenOverride(for: pane, isAlt: isAlt, terminal: t.getTerminal())
                     }
-                    // Sync our alt-screen pan to this pane's CURRENT mode. The prime /
-                    // override above fire `onChange` only on a mode CHANGE (deduped); a
-                    // pane that resolves straight to `.appOwnsInput` is covered, but this
-                    // guarantees the pan matches the mode regardless of dedup outcome.
+                    // Sync our alt-screen + switch pans to this pane's CURRENT mode. The
+                    // prime / override above fire `onChange` only on a mode CHANGE
+                    // (deduped); a pane that resolves straight to `.appOwnsInput` is
+                    // covered, but this guarantees the pans match the mode regardless of
+                    // dedup outcome.
                     if let coordinator {
                         coordinator.setAltScreenPan(
                             for: t, enabled: coordinator.modeTracker.mode(for: pane) == .appOwnsInput)
+                        coordinator.setSwitchPan(
+                            for: t, enabled: coordinator.modeTracker.mode(for: pane) != .appOwnsInput)
                     }
                     return t
                 }()
                 view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
+                // Staircase/wrap diagnostic (`.sizing`, default-OFF). Compare, for THIS
+                // pane, the three widths that must all agree or text re-wraps:
+                //   frameW   — the pane's on-screen point width we just set
+                //   stCols   — SwiftTerm's OWN buffer cols (frameW ÷ its cell); what it
+                //              actually lays glyphs out at
+                //   layoutW  — the pane width tmux put in %layout (the cols tmux formats
+                //              output for) — from `rect` via the cell
+                //   cell.w   — the cell we derived (5.0 on device)
+                // If stCols ≪ layoutW (e.g. 50 vs 80) the pane view is narrower than tmux
+                // thinks → tmux's 80-wide lines re-wrap in a ~50-wide SwiftTerm buffer =
+                // the staircase. If they match but it still staircases, the wrap is glyph
+                // advance vs cell (render), not buffer width.
+                DebugLog.shared.log(.sizing, {
+                    let term = view.getTerminal()
+                    let layoutCols = cell.w > 0 ? Int((Double(rect.width) / cell.w).rounded()) : -1
+                    return "sizing:pane @\(rect.pane.raw) frameW=\(Int(rect.width)) stCols=\(term.cols) stRows=\(term.rows) layoutCols≈\(layoutCols) cell.w=\(String(format: "%.2f", cell.w)) fontPt=\(String(format: "%.1f", Double(view.font.pointSize)))"
+                }())
                 let isActive = (rect.pane == window.activePane)
                 // The active-pane border only conveys meaning when there is more than
                 // one pane (it answers "which pane has focus"). In a single-pane window
@@ -785,15 +859,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 coordinator?.vm.requeryAltScreenState()
             }
 
-            // Window-switch slide-in: after rebuilding the new window's panes, if the active
-            // window changed and a transition is pending, slide the content in from the pending
-            // edge (design 2026-07-17). Runs after panes are positioned so it animates the
-            // final layout. `WindowTransition` is `@MainActor`; wrap in `assumeIsolated` to match
-            // the file's convention for @MainActor calls from this UIView method (apply always
-            // runs on the main thread via SwiftUI `updateUIView`).
-            if state.activeWindow != previousActiveWindow {
+            if state.activeWindow != previousActiveWindow, state.activeWindow != nil {
                 MainActor.assumeIsolated {
-                    coordinator?.windowTransition.consumePendingSlideIn(view: paneContentView, width: bounds.width)
+                    coordinator?.armResizeSettle()   // keybar-grow resize debounce on window change (KEEP)
                 }
             }
             previousActiveWindow = state.activeWindow

@@ -15,7 +15,7 @@ struct PromotionSlotView: View {
             Text(slot.tap).font(.system(.body, design: .monospaced)).foregroundStyle(Color(theme.text.primary))
             if let down = slot.down { Text(down).font(.system(size: 9)).foregroundStyle(Color(theme.text.secondary)) }
         }
-        .frame(minWidth: 34, minHeight: 34).padding(.horizontal, 6)
+        .frame(minWidth: 40, minHeight: 34).padding(.horizontal, 6)
         .background(Color(theme.keybar.slotBgPromoted))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .onInputClickTap { if let c = slot.tap.first { vm.keybar.tapSymbol(c) } }
@@ -33,15 +33,14 @@ struct FkeySlotView: View {
     let keybarSettings: KeybarSettingsStore
     @Environment(\.theme) private var theme
     var body: some View {
-        Text("F\(n)").font(.caption).foregroundStyle(Color(theme.text.primary))
-            .frame(minWidth: 34, minHeight: 34).padding(.horizontal, 6)
-            .background(Color(theme.keybar.slotBg))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .onInputClickTap { vm.fnTapFKey(n) }   // sends F-key + consumes one-shot Fn (Task 5)
-            .fixedKeySwipes(
-                resolveSecondaries(for: .fkey(n),
-                                   overrides: keybarSettings.settings.fixedKeySecondaries)
-            ) { v in vm.keybar.emitSecondary(v) }
+        let secondaries = resolveSecondaries(for: .fkey(n),
+                                             overrides: keybarSettings.settings.fixedKeySecondaries)
+        let g = hintGlyphs(for: secondaries)
+        SlotChrome(bg: Color(theme.keybar.slotBg), up: g.up, down: g.down) {
+            Text("F\(n)").font(.caption).foregroundStyle(Color(theme.text.primary))
+        }
+        .onInputClickTap { vm.fnTapFKey(n) }   // sends F-key + consumes one-shot Fn (Task 5)
+        .fixedKeySwipes(secondaries) { v in vm.keybar.emitSecondary(v) }
     }
 }
 
@@ -64,7 +63,7 @@ struct FnSlotView: View {
     }
     var body: some View {
         Text("Fn").font(.caption).foregroundStyle(Color(theme.text.primary))
-            .frame(minWidth: 34, minHeight: 34).padding(.horizontal, 6)
+            .frame(minWidth: 40, minHeight: 34).padding(.horizontal, 6)
             .background(bg).clipShape(RoundedRectangle(cornerRadius: 6))
             .onInputClickTap { vm.fnTap() }
     }

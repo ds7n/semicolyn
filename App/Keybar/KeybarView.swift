@@ -51,14 +51,26 @@ struct KeybarView: View {
     }
 
     /// Shared bar chrome: themed panel background + insets.
+    ///
+    /// Device #2 (Build 2): the full-width frame must align its content `.leading`, or SwiftUI
+    /// centers/distributes the bar's HStack across the full width and the locked keys spread
+    /// edge-to-edge with large gaps. `.leading` packs them at the leading edge (the Build-1
+    /// probe on the inner ScrollView was the wrong element; this is the real fix).
     @ViewBuilder private func barChrome<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         content()
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 8).padding(.vertical, 2)   // tightened input area (2026-07-24): 3→2
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(theme.surface.panel))
     }
 
     /// Full bar: locked region + horizontally-scrollable region.
+    ///
+    /// Device #2 (2026-07-20): the locked keys rendered spread edge-to-edge with large gaps
+    /// between them. The trailing horizontal `ScrollView` was not claiming the HStack's slack,
+    /// so the leftover width distributed across the fixed children instead of packing them left.
+    /// Pinning the ScrollView to `.frame(maxWidth: .infinity, alignment: .leading)` makes it
+    /// absorb all remaining width (content stays leading-aligned and pannable), so the locked
+    /// keys sit tight at the leading edge with only their `spacing: 6` gap.
     private var fullContent: some View {
         HStack(spacing: 6) {
             ForEach(Array(layout.locked.enumerated()), id: \.offset) { _, slot in
@@ -71,6 +83,7 @@ struct KeybarView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
