@@ -1,0 +1,213 @@
+<!--
+SPDX-FileCopyrightText: 2026 True Positive LLC
+SPDX-License-Identifier: GPL-3.0-only
+Keybar hint layout (device issue #2). Main glyph LEFT (large), swipe secondaries
+stacked RIGHT: swipe-up on top, swipe-down below. Faithful neonMidnight. Height tight.
+-->
+<title>Keybar hint layout — main + stacked secondaries</title>
+<style>
+  :root {
+    --page-bg:#f4f5f7; --page-fg:#1b1e24; --page-muted:#5b6270;
+    --card-bg:#fff; --card-line:#e3e6eb;
+    --warn:#b5730a; --warn-bg:#fff6e6; --good:#1f8a5b; --good-bg:#e9f7ef;
+    --kb-ground:#0E1118; --kb-slot:#161A24; --kb-slot-armed:#2A3346;
+    --kb-line:#232A3A; --kb-text:#E8EBF0; --kb-muted:#8A93A3;
+    --kb-accent:#FF6F5E; --kb-term:#05070B;
+    --mono: ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --page-bg:#0c0e12; --page-fg:#e6e9ef; --page-muted:#99a1b0;
+    --card-bg:#14171d; --card-line:#262b34;
+    --warn:#f5b74a; --warn-bg:#2a2010; --good:#6fd6a0; --good-bg:#10251a; } }
+  :root[data-theme="light"] { --page-bg:#f4f5f7; --page-fg:#1b1e24; --page-muted:#5b6270;
+    --card-bg:#fff; --card-line:#e3e6eb; --warn:#b5730a; --warn-bg:#fff6e6; --good:#1f8a5b; --good-bg:#e9f7ef; }
+  :root[data-theme="dark"] { --page-bg:#0c0e12; --page-fg:#e6e9ef; --page-muted:#99a1b0;
+    --card-bg:#14171d; --card-line:#262b34; --warn:#f5b74a; --warn-bg:#2a2010; --good:#6fd6a0; --good-bg:#10251a; }
+
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page-bg); color:var(--page-fg);
+    font-family:var(--sans); line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:900px; margin:0 auto; padding:32px 20px 80px; }
+  header h1 { font-size:1.5rem; margin:0 0 4px; letter-spacing:-.01em; text-wrap:balance; }
+  header p { margin:0; color:var(--page-muted); max-width:62ch; }
+  .eyebrow { font-size:.72rem; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--kb-accent); font-weight:600; margin-bottom:6px; }
+
+  .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:24px 0 8px;
+    padding:12px 14px; background:var(--card-bg); border:1px solid var(--card-line); border-radius:10px; }
+  .controls .label { font-size:.8rem; color:var(--page-muted); margin-right:4px; }
+  .seg { display:inline-flex; border:1px solid var(--card-line); border-radius:8px; overflow:hidden; }
+  .seg button { font:inherit; font-size:.82rem; border:0; background:transparent;
+    color:var(--page-fg); padding:6px 12px; cursor:pointer; }
+  .seg button[aria-pressed="true"] { background:var(--kb-accent); color:#1b0f0c; font-weight:600; }
+  .seg button:focus-visible { outline:2px solid var(--kb-accent); outline-offset:-2px; }
+
+  /* ===== the hint model: main LEFT, secondaries stacked RIGHT ===== */
+  /* used at both the zoom size and the real keybar size via font-size scaling */
+  .keycap { position:relative; background:var(--kb-slot); color:var(--kb-text);
+    border-radius:6px; font-family:var(--mono);
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:34px; height:34px; padding:0 6px; flex:0 0 auto; }
+  .keycap .main { font-size:15px; line-height:1; }
+  .keycap.esc .main { font-size:12px; }
+  .keycap .icon { font-size:17px; line-height:1; }
+  .keycap .corner { position:absolute; top:2px; right:3px; font-size:8px; color:var(--kb-muted); }
+
+  /* the stacked secondaries: a 2-row column immediately right of main */
+  .keycap.has-sec { padding-right:5px; }
+  .keycap .sec { display:inline-flex; flex-direction:column; justify-content:center;
+    align-items:center; margin-left:3px; color:var(--kb-muted); }
+  .keycap .sec .up, .keycap .sec .dn { font-size:8px; line-height:1.25; opacity:.9; }
+  /* single-swipe key: only the up slot filled, dn is an invisible spacer so main stays centered */
+  .keycap .sec .ghost { visibility:hidden; }
+
+  /* accent variant: tint the hints coral instead of muted grey */
+  .accentHints .keycap .sec .up, .accentHints .keycap .sec .dn { color:var(--kb-accent); opacity:.8; }
+
+  .keybar { background:var(--kb-ground); padding:5px 8px; display:flex; gap:6px;
+    align-items:center; border-top:1px solid var(--kb-line); }
+  .keybar.uniform .keycap { min-width:40px; }
+
+  .phone { margin:16px auto 0; max-width:400px; border-radius:30px; padding:10px;
+    background:#000; box-shadow:0 8px 40px rgba(0,0,0,.35); }
+  .screen { border-radius:22px; overflow:hidden; background:var(--kb-term); }
+  .term { height:116px; padding:12px 12px 0; font-family:var(--mono); font-size:12px;
+    color:#CFD6E4; background:var(--kb-term); }
+  .term .p { color:var(--kb-accent); } .term .c { color:#7CE0C4; } .term .dim { color:#4a5468; }
+  .caption { text-align:center; color:var(--page-muted); font-size:.82rem; margin:12px 0 0; }
+
+  /* zoom: the | key blown up, exactly your example */
+  .zoom { margin:22px auto 0; max-width:520px; background:var(--card-bg);
+    border:1px solid var(--card-line); border-radius:12px; padding:18px; }
+  .zoom h3 { margin:0 0 2px; font-size:.9rem; text-align:center; }
+  .zoom p { margin:0 0 14px; font-size:.82rem; color:var(--page-muted); text-align:center; }
+  .stage { background:var(--kb-ground); border-radius:10px; padding:26px;
+    display:flex; gap:22px; justify-content:center; align-items:center; flex-wrap:wrap; }
+  .bigcap { position:relative; background:var(--kb-slot); color:var(--kb-text);
+    border-radius:12px; font-family:var(--mono); height:90px; min-width:90px; padding:0 14px;
+    display:inline-flex; align-items:center; justify-content:center; }
+  .bigcap .main { font-size:40px; line-height:1; }
+  .bigcap .sec { display:inline-flex; flex-direction:column; justify-content:center;
+    align-items:center; margin-left:8px; color:var(--kb-muted); }
+  .bigcap .sec .up, .bigcap .sec .dn { font-size:19px; line-height:1.2; }
+  .accentHints .bigcap .sec .up, .accentHints .bigcap .sec .dn { color:var(--kb-accent); opacity:.85; }
+  .zcol { text-align:center; }
+  .zlabel { font-size:.74rem; color:var(--page-muted); margin-top:8px; }
+
+  .notes { margin-top:26px; display:grid; gap:10px; }
+  .note { display:grid; grid-template-columns:auto 1fr; gap:10px 12px; padding:12px 14px;
+    border-radius:10px; border:1px solid var(--card-line); background:var(--card-bg); font-size:.9rem; }
+  .tag { align-self:start; font-size:.68rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    padding:3px 7px; border-radius:5px; white-space:nowrap; }
+  .tag.fix { color:var(--good); background:var(--good-bg); }
+  .tag.q { color:var(--warn); background:var(--warn-bg); }
+  .note code, .caption code { font-family:var(--mono); font-size:.82em;
+    background:color-mix(in srgb, var(--page-fg) 8%, transparent); padding:1px 5px; border-radius:4px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Device issue #2 · keybar hint layout</div>
+    <h1>Main glyph left, swipe secondaries stacked right</h1>
+    <p>Your model: the tapped character is large on the left; its swipe actions sit to the right as two small stacked glyphs, <b>swipe-up on top, swipe-down below</b>. Example: <code>|</code> with <code>(</code> up and <code>)</code> down.</p>
+  </header>
+
+  <div class="controls">
+    <span class="label">Hint color</span>
+    <div class="seg" id="tint">
+      <button data-v="muted">Dim grey</button>
+      <button data-v="accent" aria-pressed="true">Coral accent</button>
+    </div>
+    <span class="label" style="margin-left:12px">Width</span>
+    <div class="seg" id="size">
+      <button data-v="natural">Natural</button>
+      <button data-v="uniform" aria-pressed="true">Uniform</button>
+    </div>
+    <span class="label" style="margin-left:12px; color:var(--good)">✓ chosen: coral + uniform</span>
+  </div>
+
+  <!-- ZOOM: exactly your example, | ( ) -->
+  <div class="zoom" id="zoom">
+    <h3>Close-up — your example</h3>
+    <p><code>|</code> taps <code>|</code> · swipe-up <code>(</code> · swipe-down <code>)</code></p>
+    <div class="stage">
+      <div class="zcol">
+        <div class="bigcap has-sec">
+          <span class="main">|</span>
+          <span class="sec"><span class="up">(</span><span class="dn">)</span></span>
+        </div>
+        <div class="zlabel">two swipes (up + down)</div>
+      </div>
+      <div class="zcol">
+        <div class="bigcap has-sec">
+          <span class="main">/</span>
+          <span class="sec"><span class="up">\</span><span class="dn ghost">x</span></span>
+        </div>
+        <div class="zlabel">one swipe (up only) — main stays centered</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="phone">
+    <div class="screen">
+      <div class="term">
+        <div><span class="p">~</span> <span class="dim">semicolyn@host</span></div>
+        <div><span class="c">git</span> commit</div>
+        <div><span class="p">~</span> <span style="opacity:.6">▋</span></div>
+      </div>
+      <div class="keybar" id="bar">
+        <div class="keycap esc"><span class="main">Esc</span><span class="corner">≡</span></div>
+        <div class="keycap"><span class="icon main">⊹</span></div>
+        <div class="keycap"><span class="main">⌃</span></div>
+        <div class="keycap has-sec">
+          <span class="main">⇥</span><span class="sec"><span class="up">⇤</span><span class="dn ghost">x</span></span>
+        </div>
+        <div class="keycap has-sec">
+          <span class="main">/</span><span class="sec"><span class="up">\</span><span class="dn ghost">x</span></span>
+        </div>
+        <div class="keycap has-sec">
+          <span class="main">|</span><span class="sec"><span class="up">(</span><span class="dn">)</span></span>
+        </div>
+        <div class="keycap"><span class="main">~</span></div>
+        <div class="keycap has-sec">
+          <span class="main">-</span><span class="sec"><span class="up">_</span><span class="dn ghost">x</span></span>
+        </div>
+        <div class="keycap"><span class="main">fn</span></div>
+      </div>
+    </div>
+  </div>
+  <p class="caption">On the bar, the <code>|</code> key shows <code>(</code> over <code>)</code> to its right; single-swipe keys (<code>/ - ⇥</code>) show just the top glyph, main stays centered.</p>
+
+  <div class="notes">
+    <div class="note">
+      <span class="tag fix">This layout</span>
+      <div><b>Main left, secondaries stacked right.</b> Swipe-up is the top small glyph, swipe-down the bottom. A key with only one swipe fills just the top slot (the bottom is an invisible spacer so the main glyph stays vertically centered).</div>
+    </div>
+    <div class="note">
+      <span class="tag q">Watch</span>
+      <div><b>Width.</b> The stack adds ~8-10px on the right of any key that has swipes. Toggle <b>Uniform</b> to see it with a common slot width. On a narrow bar this is the main tradeoff to eyeball.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const bar = document.getElementById('bar');
+  const zoom = document.getElementById('zoom');
+  const state = { tint:'accent', size:'uniform' };
+  function apply() {
+    const accent = state.tint === 'accent';
+    bar.classList.toggle('uniform', state.size === 'uniform');
+    document.body.classList.toggle('accentHints', accent);
+  }
+  for (const g of ['tint','size']) {
+    const el = document.getElementById(g);
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      state[g] = b.dataset.v;
+      [...el.querySelectorAll('button')].forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      apply();
+    });
+  }
+  apply();
+</script>

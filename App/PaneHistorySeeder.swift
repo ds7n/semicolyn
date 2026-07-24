@@ -37,8 +37,11 @@ final class PaneHistorySeeder {
     /// `.unseeded` flushes any already-buffered output and marks the pane seeded.
     func paneDidAppear(_ pane: PaneID) {
         var state = states[pane] ?? PaneSeedState()
-        if state.needsSeed {
-            if runtime.captureHistory(pane: pane, lines: scrollbackLines()) != nil {
+        let needsSeed = state.needsSeed
+        if needsSeed {
+            let lines = scrollbackLines()
+            let queued = runtime.captureHistory(pane: pane, lines: lines) != nil
+            if queued {
                 state.beginSeeding()
             } else {
                 // No capture will arrive → don't strand output. Feed any buffered bytes
@@ -48,6 +51,17 @@ final class PaneHistorySeeder {
                     view.feed(byteArray: flush[...])
                 }
             }
+            DebugLog.shared.log(.seed, decisionLine(
+                "seed:request",
+                inputs: [("pane", "%\(pane.raw)"), ("needsSeed", "\(needsSeed)"), ("lines", "\(lines)")],
+                outputs: [("captureQueued", "\(queued)")],
+                reason: queued ? "capture-sent" : "no-capture(lines<=0 or disabled)"))
+        } else {
+            DebugLog.shared.log(.seed, decisionLine(
+                "seed:request",
+                inputs: [("pane", "%\(pane.raw)"), ("needsSeed", "\(needsSeed)")],
+                outputs: [("captureQueued", "false")],
+                reason: "already-seeded"))
         }
         states[pane] = state
     }
@@ -92,8 +106,14 @@ final class PaneHistorySeeder {
             s.resync()
             states[pane] = s
         }
+        let visiblePanes = states.keys.filter { viewForPane($0) != nil }
+        DebugLog.shared.log(.seed, decisionLine(
+            "seed:resync",
+            inputs: [],
+            outputs: [("reset", "\(states.count)"), ("recaptured", "\(visiblePanes.count)")],
+            reason: "resync"))
         // Re-capture panes that currently have a view (visible).
-        for pane in states.keys where viewForPane(pane) != nil {
+        for pane in visiblePanes {
             paneDidAppear(pane)
         }
     }

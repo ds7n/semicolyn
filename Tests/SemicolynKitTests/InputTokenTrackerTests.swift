@@ -188,6 +188,54 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertEqual(committedTokens(Array("ssh alice:pw@host\r".utf8)), ["ssh"])
     }
 
+    // MARK: - Drop-gate tallies (privacy-safe diagnostics: counts only, never text)
+
+    func testSecretDropIncrementsSecretTallyOnly() {
+        // One dropped secret value → droppedAsSecret == 1, droppedInPaste == 0.
+        var t = InputTokenTracker()
+        _ = t.observe(Array("mysql -p hunter2\r".utf8))
+        XCTAssertEqual(t.droppedAsSecret, 1)
+        XCTAssertEqual(t.droppedInPaste, 0)
+    }
+
+    func testTwoFlaggedSecretsOnOneLineTallyTwo() {
+        // Two flag→value secrets on one line → the secret gate fires twice.
+        // (Matches `testTrackerReachBackOverSecretForBigram`: only the value AFTER a
+        // secret-flag is dropped, so each `-p <val>` pair contributes exactly one drop.)
+        var t = InputTokenTracker()
+        _ = t.observe(Array("mysql -p hunter2 -p swordfish\r".utf8))
+        XCTAssertEqual(t.droppedAsSecret, 2)
+    }
+
+    func testPasteDropIncrementsPasteTallyOnly() {
+        // The token accumulated inside a paste is dropped by L3 → droppedInPaste == 1,
+        // droppedAsSecret == 0 (the paste gate fired, the secret gate did not).
+        var t = InputTokenTracker()
+        var input: [UInt8] = Array("a ".utf8)
+        input += pasteOn; input += Array("bee".utf8); input += pasteOff
+        input += Array(" c".utf8); input += [0x0d]
+        _ = t.observe(input)
+        XCTAssertEqual(t.droppedInPaste, 1)
+        XCTAssertEqual(t.droppedAsSecret, 0)
+    }
+
+    func testCleanLineDropsNothing() {
+        // Negative case: an ordinary command drops zero tokens on either gate.
+        var t = InputTokenTracker()
+        _ = t.observe(Array("git status\r".utf8))
+        XCTAssertEqual(t.droppedInPaste, 0)
+        XCTAssertEqual(t.droppedAsSecret, 0)
+    }
+
+    func testResetClearsDropTallies() {
+        var t = InputTokenTracker()
+        _ = t.observe(Array("mysql -p hunter2\r".utf8))
+        XCTAssertEqual(t.droppedAsSecret, 1)
+        t.reset()
+        XCTAssertEqual(t.droppedAsSecret, 0)
+        XCTAssertEqual(t.droppedInPaste, 0)
+    }
+
     // MARK: - L4a latched commit verdict (the paste / single-chunk case)
 
     /// Feed bytes and return the latched last-committed-line opt-out.

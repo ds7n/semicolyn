@@ -51,8 +51,13 @@ final class TmuxRuntime {
     private var primeWindowIDs: Set<UInt64> = []
     /// In-flight `queryAlternateOn` submission ids awaiting their reply.
     private var altScreenQueryIDs: Set<UInt64> = []
-    /// Correlation ids for in-flight `capture-pane` history seeds, keyed to the pane.
-    private var historyCaptureIDs: [UInt64: PaneID] = [:]
+    /// Purpose of an in-flight `capture-pane`. Currently only a scrollback SEED (feeds
+    /// `PaneHistorySeeder` via `onHistoryCaptured`); the window-transition SNAPSHOT purpose
+    /// was removed with the drop-snapshot window-switch design (2026-07-19). Kept as an enum
+    /// so the capture-reply routing stays explicit if another purpose is added.
+    private enum CapturePurpose { case seed }
+    /// Correlation ids for in-flight `capture-pane` requests, keyed to (pane, purpose).
+    private var captureIDs: [UInt64: (pane: PaneID, purpose: CapturePurpose)] = [:]
     /// Fired when a capture response resolves: (pane, reconstructed history bytes).
     var onHistoryCaptured: ((PaneID, [UInt8]) -> Void)?
     /// Fired when a pane's history may be stale (%pause/%continue, reconnect, resize
@@ -151,16 +156,17 @@ final class TmuxRuntime {
                 } else {
                     DebugLog.shared.log(.tmux, "tmux alternate_on REPLY: NOT .ok")
                 }
-            } else if let pane = historyCaptureIDs.removeValue(forKey: resolved.id) {
+            } else if let entry = captureIDs.removeValue(forKey: resolved.id) {
+                let bytes: [UInt8]
                 if case .ok(let lines) = resolved.outcome {
-                    // Reconstruct feedable bytes: join body rows + trim capture-pane's
-                    // trailing blank padding (see Task 3 — confirmed vs real tmux 3.4).
-                    let bytes = reconstructHistory(fromLines: lines)
-                    DebugLog.shared.log(.tmux, "tmux capture REPLY: pane=%\(pane.raw) lines=\(lines.count) bytes=\(bytes.count)")
-                    onHistoryCaptured?(pane, bytes)
+                    bytes = reconstructHistory(fromLines: lines)
+                    DebugLog.shared.log(.tmux, "tmux capture REPLY: pane=%\(entry.pane.raw) purpose=\(entry.purpose) lines=\(lines.count) bytes=\(bytes.count)")
                 } else {
-                    DebugLog.shared.log(.tmux, "tmux capture REPLY: pane=%\(pane.raw) NOT .ok (capture errored)")
-                    onHistoryCaptured?(pane, [])   // fail toward live-only
+                    bytes = []
+                    DebugLog.shared.log(.tmux, "tmux capture REPLY: pane=%\(entry.pane.raw) purpose=\(entry.purpose) NOT .ok (capture errored)")
+                }
+                switch entry.purpose {
+                case .seed: onHistoryCaptured?(entry.pane, bytes)   // seed fails toward live-only ([])
                 }
             }
         }
@@ -266,8 +272,8 @@ final class TmuxRuntime {
     func captureHistory(pane: PaneID, lines: Int) -> UInt64? {
         guard let cmd = capturePaneCommand(paneID: pane, lines: lines),
               let id = writeTracked(cmd) else { return nil }
-        historyCaptureIDs[id] = pane
-        DebugLog.shared.log(.tmux, "tmux capture: pane=%\(pane.raw) lines=\(lines) id=\(id)")
+        captureIDs[id] = (pane, .seed)
+        DebugLog.shared.log(.tmux, "tmux capture: pane=%\(pane.raw) purpose=seed lines=\(lines) id=\(id)")
         return id
     }
 
