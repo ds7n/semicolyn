@@ -27,7 +27,7 @@ struct SlotChrome<Label: View>: View {
                 }
             }
         }
-        .frame(minWidth: 40, minHeight: 34)   // uniform width (device #2); tune on device
+        .frame(minWidth: 36, minHeight: 27)   // tightened input area (2026-07-24): 34→27 row, still tappable
         .padding(.horizontal, 6)
         .background(bg)
         .clipShape(RoundedRectangle(cornerRadius: 6))

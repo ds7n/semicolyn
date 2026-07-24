@@ -39,10 +39,11 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
 
     private let host: UIHostingController<KeybarAccessoryRoot>
 
-    /// Seed height for the initial frame before self-sizing corrects it (keybar row +
-    /// predictor strip ballpark). The real height comes from the hosting controller's
+    /// Seed height for the initial frame before self-sizing corrects it (tightened
+    /// keybar row ~33pt + the always-reserved predictor strip 18pt ≈ 51pt; 2026-07-24
+    /// input-area redesign). The real height comes from the hosting controller's
     /// intrinsic content size, not this constant.
-    private static let seedHeight: CGFloat = 88
+    private static let seedHeight: CGFloat = 51
 
     /// Last height reported by `intrinsicContentSize`, used to invalidate only when the
     /// content actually changes size (avoids a layout feedback loop in `layoutSubviews`).
