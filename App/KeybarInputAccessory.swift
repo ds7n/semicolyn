@@ -49,6 +49,12 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     /// content actually changes size (avoids a layout feedback loop in `layoutSubviews`).
     private var lastMeasuredHeight: CGFloat = 0
 
+    /// DIAGNOSTIC (input-area spacing 2026-07-24): the last `full` height the breakdown
+    /// probe logged, so it fires only when the measured height changes (not every
+    /// layout pass) — keeps the throwaway-host cost and log volume down. Remove with
+    /// the probe once the over-measure culprit is pinned.
+    private var lastBreakdownHeight: CGFloat = -1
+
     init(vm: ConnectionViewModel,
          keybarSettings: KeybarSettingsStore,
          theme: Theme,
@@ -107,6 +113,32 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
         let fitted = host.sizeThatFits(in: CGSize(width: bounds.width, height: .greatestFiniteMagnitude))
         let h = fitted.height > 0 ? fitted.height : Self.seedHeight
         DebugLog.shared.log(.keybar, "keybar:contentHeight h=\(h)")
+        // DIAGNOSTIC (input-area spacing bug 2026-07-24): the accessory over-measures
+        // (intrinsic ~90 vs ~50 drawn) → inflates kbH → dead space above the strip AND
+        // under the keybar. Measure the strip and keybar SEPARATELY via throwaway hosts
+        // to see which child over-reports (suspect: the horizontal ScrollView returns a
+        // greedy height under unbounded-height sizeThatFits). Gated `.keybar` (already on);
+        // remove once the culprit is pinned. `.greatestFiniteMagnitude` height mirrors the
+        // real measurement above; also probe a BOUNDED height to expose greedy growth.
+        if abs(h - lastBreakdownHeight) > 0.5 {
+            lastBreakdownHeight = h
+            DebugLog.shared.log(.keybar, {
+                let w = bounds.width
+                let root = host.rootView   // holds vm / keybarSettings / theme
+                func fit(_ v: some View, maxH: CGFloat) -> CGFloat {
+                    let hc = UIHostingController(rootView: v.environment(\.theme, root.theme))
+                    hc.view.backgroundColor = .clear
+                    return hc.sizeThatFits(in: CGSize(width: w, height: maxH)).height
+                }
+                let stripU = fit(PredictorStripView(vm: root.vm, predictorVM: root.vm.predictorVM),
+                                 maxH: .greatestFiniteMagnitude)
+                let barU = fit(KeybarView(keybarSettings: root.keybarSettings, vm: root.vm,
+                                          hardwareKeyboardConnected: false), maxH: .greatestFiniteMagnitude)
+                let barB = fit(KeybarView(keybarSettings: root.keybarSettings, vm: root.vm,
+                                          hardwareKeyboardConnected: false), maxH: 60)
+                return "keybar:breakdown full=\(String(format: "%.1f", h)) stripUnbounded=\(String(format: "%.1f", stripU)) barUnbounded=\(String(format: "%.1f", barU)) barBounded60=\(String(format: "%.1f", barB)) width=\(String(format: "%.0f", w))"
+            }())
+        }
         return h
     }
 
