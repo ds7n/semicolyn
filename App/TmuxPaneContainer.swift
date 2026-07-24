@@ -621,10 +621,28 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// change. No-ops when no layout has been applied yet. Device #2.
         private func relayoutExistingPaneFrames(cell: (w: Double, h: Double)) {
             guard let layout = lastAppliedLayout else { return }
-            for rect in paneRects(in: layout, cellWidth: cell.w, cellHeight: cell.h) {
+            for rect in fittedPaneRects(layout: layout, cell: cell) {
                 guard let view = panes[rect.pane] else { continue }
                 view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
             }
+        }
+
+        /// Pane rects fitted to the container's CURRENT usable area (bounds width × height
+        /// minus the keybar). We fit rather than use tmux's raw `%layout` geometry directly
+        /// because that geometry LAGS the client size we just reported — after a
+        /// keyboard/keybar show-hide or window switch, tmux's layout still reflects the old
+        /// (smaller) client, so a pane framed straight from it undershoots the visible area,
+        /// leaving dead space below the terminal content and above the keybar (device
+        /// 2026-07-24). `fitPaneRects` stretches the layout to fill the usable area exactly
+        /// (single pane) or proportionally (splits), so there is no gap regardless of the
+        /// tmux settle lag.
+        private func fittedPaneRects(layout: PaneLayout,
+                                     cell: (w: Double, h: Double)) -> [PaneRect] {
+            let raw = paneRects(in: layout, cellWidth: cell.w, cellHeight: cell.h)
+            let kbH = firstResponderKeybarHeight()
+            let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height),
+                                                keybarHeight: Double(kbH))
+            return fitPaneRects(raw, toWidth: Double(bounds.width), toHeight: usableH)
         }
 
         /// Sizing-diagnostic helper: the keybar (`inputAccessoryView`) height of whichever
@@ -730,7 +748,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             lastAppliedLayout = layout   // device #2: so layoutSubviews can re-frame on a geometry-only change
 
             let cell = resolvedCell()
-            let rects = paneRects(in: layout, cellWidth: cell.w, cellHeight: cell.h)
+            let rects = fittedPaneRects(layout: layout, cell: cell)   // fill usable area, not tmux's lagging layout
             let live = Set(rects.map(\.pane))
 
             // NOTE(v1): switching tmux windows destroys the off-screen window's pane views.
