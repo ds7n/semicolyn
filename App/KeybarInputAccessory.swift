@@ -39,6 +39,16 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
 
     private let host: UIHostingController<KeybarAccessoryRoot>
 
+    /// Off-screen measuring hosts for the two children, sized independently. We do NOT
+    /// measure the live `host` for height: `host.sizeThatFits` proved self-contaminating
+    /// on device (2026-07-24) — it returned the accessory's CURRENT frame (90) rather than
+    /// the ideal content (56 = 18 strip + 38 bar), because `sizingOptions =
+    /// .intrinsicContentSize` feeds the frame back into the measurement, toggling 56↔90 and
+    /// leaving dead space above the strip and under the keybar. Fresh, never-framed hosts
+    /// measure the true content height stably, so we sum strip + keybar from these instead.
+    private let stripMeasureHost: UIHostingController<AnyView>
+    private let barMeasureHost: UIHostingController<AnyView>
+
     /// Seed height for the initial frame before self-sizing corrects it (tightened
     /// keybar row ~33pt + the always-reserved predictor strip 18pt ≈ 51pt; 2026-07-24
     /// input-area redesign). The real height comes from the hosting controller's
@@ -48,12 +58,6 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     /// Last height reported by `intrinsicContentSize`, used to invalidate only when the
     /// content actually changes size (avoids a layout feedback loop in `layoutSubviews`).
     private var lastMeasuredHeight: CGFloat = 0
-
-    /// DIAGNOSTIC (input-area spacing 2026-07-24): the last `full` height the breakdown
-    /// probe logged, so it fires only when the measured height changes (not every
-    /// layout pass) — keeps the throwaway-host cost and log volume down. Remove with
-    /// the probe once the over-measure culprit is pinned.
-    private var lastBreakdownHeight: CGFloat = -1
 
     init(vm: ConnectionViewModel,
          keybarSettings: KeybarSettingsStore,
@@ -66,6 +70,20 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
         // The hosting controller computes its own intrinsic size from the live SwiftUI
         // content; the input view then hugs it (see `intrinsicContentSize`).
         host.sizingOptions = .intrinsicContentSize
+
+        // Off-screen measuring hosts (never added to the view tree, never framed) for the
+        // two children — measured independently so their heights are stable and free of
+        // the live host's frame-feedback (see property doc). Same env/theme as the live
+        // graph so the measurement matches what renders.
+        self.stripMeasureHost = UIHostingController(
+            rootView: AnyView(PredictorStripView(vm: vm, predictorVM: vm.predictorVM)
+                .environment(\.theme, theme)))
+        self.barMeasureHost = UIHostingController(
+            rootView: AnyView(KeybarView(keybarSettings: keybarSettings, vm: vm,
+                                         hardwareKeyboardConnected: hardwareKeyboardConnected)
+                .environment(\.theme, theme)))
+        stripMeasureHost.view.backgroundColor = .clear
+        barMeasureHost.view.backgroundColor = .clear
 
         super.init(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width,
                                  height: Self.seedHeight),
@@ -110,35 +128,21 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
         guard bounds.width > 0 else {
             return lastMeasuredHeight > 0 ? lastMeasuredHeight : Self.seedHeight
         }
-        let fitted = host.sizeThatFits(in: CGSize(width: bounds.width, height: .greatestFiniteMagnitude))
-        let h = fitted.height > 0 ? fitted.height : Self.seedHeight
-        DebugLog.shared.log(.keybar, "keybar:contentHeight h=\(h)")
-        // DIAGNOSTIC (input-area spacing bug 2026-07-24): the accessory over-measures
-        // (intrinsic ~90 vs ~50 drawn) → inflates kbH → dead space above the strip AND
-        // under the keybar. Measure the strip and keybar SEPARATELY via throwaway hosts
-        // to see which child over-reports (suspect: the horizontal ScrollView returns a
-        // greedy height under unbounded-height sizeThatFits). Gated `.keybar` (already on);
-        // remove once the culprit is pinned. `.greatestFiniteMagnitude` height mirrors the
-        // real measurement above; also probe a BOUNDED height to expose greedy growth.
-        if abs(h - lastBreakdownHeight) > 0.5 {
-            lastBreakdownHeight = h
-            DebugLog.shared.log(.keybar, {
-                let w = bounds.width
-                let root = host.rootView   // holds vm / keybarSettings / theme
-                func fit(_ v: some View, maxH: CGFloat) -> CGFloat {
-                    let hc = UIHostingController(rootView: v.environment(\.theme, root.theme))
-                    hc.view.backgroundColor = .clear
-                    return hc.sizeThatFits(in: CGSize(width: w, height: maxH)).height
-                }
-                let stripU = fit(PredictorStripView(vm: root.vm, predictorVM: root.vm.predictorVM),
-                                 maxH: .greatestFiniteMagnitude)
-                let barU = fit(KeybarView(keybarSettings: root.keybarSettings, vm: root.vm,
-                                          hardwareKeyboardConnected: false), maxH: .greatestFiniteMagnitude)
-                let barB = fit(KeybarView(keybarSettings: root.keybarSettings, vm: root.vm,
-                                          hardwareKeyboardConnected: false), maxH: 60)
-                return "keybar:breakdown full=\(String(format: "%.1f", h)) stripUnbounded=\(String(format: "%.1f", stripU)) barUnbounded=\(String(format: "%.1f", barU)) barBounded60=\(String(format: "%.1f", barB)) width=\(String(format: "%.0f", w))"
-            }())
-        }
+        // Measure the two children INDEPENDENTLY via the off-screen hosts and SUM them,
+        // instead of `host.sizeThatFits` on the combined graph. The combined measurement
+        // was self-contaminating on device (2026-07-24): it returned the accessory's
+        // current frame (90) not the ideal content (56 = 18 + 38), because the live host's
+        // `.intrinsicContentSize` sizing feeds its frame back into the measurement — the
+        // breakdown probe proved strip=18 and bar=38 are stable while `full` toggled 56↔90.
+        // Fresh, never-framed hosts have no frame to feed back, so this is stable.
+        let w = bounds.width
+        let stripH = stripMeasureHost.sizeThatFits(
+            in: CGSize(width: w, height: .greatestFiniteMagnitude)).height
+        let barH = barMeasureHost.sizeThatFits(
+            in: CGSize(width: w, height: .greatestFiniteMagnitude)).height
+        let sum = stripH + barH
+        let h = sum > 0 ? sum : Self.seedHeight
+        DebugLog.shared.log(.keybar, "keybar:contentHeight h=\(h) strip=\(String(format: "%.1f", stripH)) bar=\(String(format: "%.1f", barH))")
         return h
     }
 
