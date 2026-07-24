@@ -1,0 +1,4 @@
+seed content version: 1
+built from semicolyn: 9caee530c9c24149ae71002c52711ac0c26fab90
+tldr-pages: v2.3 @ 3b17800dbd75c5e19287e2f955c5886c446d2ec3 (CC-BY-4.0)
+fig autocomplete: aef52acff84c45edde61ae610cc2c964802b9a38 @ aef52acff84c45edde61ae610cc2c964802b9a38 (MIT)

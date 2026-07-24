@@ -46,4 +46,58 @@ final class PaneRectsTests: XCTestCase {
         XCTAssertEqual(rects[1], PaneRect(pane: PaneID(raw: 2), x: 0, y: 208, width: 320, height: 176))
         XCTAssertEqual(rects[2], PaneRect(pane: PaneID(raw: 3), x: 328, y: 0, width: 312, height: 384))
     }
+
+    // MARK: fitPaneRects — stretch tmux's lagging layout to the real usable area.
+
+    // The device bug: a single pane framed from a lagging tmux layout (280pt tall) into a
+    // taller usable area (356pt) leaves a gap. Fitting stretches it to fill exactly.
+    func testFitSinglePaneStretchesToUsableArea() {
+        let raw = [PaneRect(pane: PaneID(raw: 0), x: 0, y: 0, width: 400, height: 280)]
+        let fitted = fitPaneRects(raw, toWidth: 400, toHeight: 356)
+        XCTAssertEqual(fitted, [PaneRect(pane: PaneID(raw: 0), x: 0, y: 0, width: 400, height: 356)])
+    }
+
+    // Exact-fit input is unchanged (no spurious scaling when tmux already matches).
+    func testFitSinglePaneAlreadyExactIsIdentity() {
+        let raw = [PaneRect(pane: PaneID(raw: 0), x: 0, y: 0, width: 400, height: 356)]
+        XCTAssertEqual(fitPaneRects(raw, toWidth: 400, toHeight: 356), raw)
+    }
+
+    // A vertical split scales BOTH panes by the same factors and keeps them abutting
+    // (no gap, no overlap): bounding box 640×360 → fill 400×720 (sx=0.625, sy=2.0).
+    func testFitStackedSplitScalesProportionally() {
+        let raw = [
+            PaneRect(pane: PaneID(raw: 1), x: 0, y: 0,   width: 640, height: 180),
+            PaneRect(pane: PaneID(raw: 2), x: 0, y: 180, width: 640, height: 180),
+        ]
+        let fitted = fitPaneRects(raw, toWidth: 400, toHeight: 720)
+        XCTAssertEqual(fitted, [
+            PaneRect(pane: PaneID(raw: 1), x: 0, y: 0,   width: 400, height: 360),
+            PaneRect(pane: PaneID(raw: 2), x: 0, y: 360, width: 400, height: 360),
+        ])
+        // Panes still tile the target with no gap: pane2.y == pane1.height, sum == target.
+        XCTAssertEqual(fitted[0].height + fitted[1].height, 720, accuracy: 1e-9)
+        XCTAssertEqual(fitted[1].y, fitted[0].height, accuracy: 1e-9)
+    }
+
+    // Non-zero origin (a right/bottom pane) is honored: the bounding box is offset-based,
+    // so the fitted pane starts at 0 and fills the target.
+    func testFitHonorsNonZeroOrigin() {
+        let raw = [PaneRect(pane: PaneID(raw: 3), x: 328, y: 0, width: 312, height: 280)]
+        XCTAssertEqual(fitPaneRects(raw, toWidth: 312, toHeight: 356),
+                       [PaneRect(pane: PaneID(raw: 3), x: 0, y: 0, width: 312, height: 356)])
+    }
+
+    // Fail-closed: a non-positive target returns the rects UNCHANGED (never emits a
+    // zero/negative frame that would collapse the pane).
+    func testFitDegenerateTargetReturnsUnchanged() {
+        let raw = [PaneRect(pane: PaneID(raw: 0), x: 0, y: 0, width: 400, height: 280)]
+        XCTAssertEqual(fitPaneRects(raw, toWidth: 400, toHeight: 0), raw)
+        XCTAssertEqual(fitPaneRects(raw, toWidth: -1, toHeight: 356), raw)
+    }
+
+    // Fail-closed: empty input → empty (no crash on the min/max reductions).
+    func testFitEmptyIsEmpty() {
+        XCTAssertEqual(fitPaneRects([], toWidth: 400, toHeight: 356), [])
+    }
 }

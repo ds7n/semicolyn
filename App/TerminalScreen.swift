@@ -160,7 +160,11 @@ struct TerminalScreen: UIViewRepresentable {
                 },
                 sendBytes: { [weak coordinator = context.coordinator] bytes in coordinator?.send(bytes) },
                 hasSelection: { [weak terminal] in terminal?.selectionActive ?? false },
-                clearSelection: { [weak terminal] in terminal?.selectNone() }
+                clearSelection: { [weak terminal] in terminal?.selectNone() },
+                // Raw-PTY / single-pane terminal: no tmux windows to switch, so the
+                // finger-drag commit callback is a no-op here (it only fires when
+                // `isMultiWindowTmux` is true, which is always false in this screen).
+                onDragCommit: { _ in }
             )
         )
         context.coordinator.gestureController = gestureController
@@ -173,6 +177,7 @@ struct TerminalScreen: UIViewRepresentable {
         // alternate screen (reattach into a running vim/Claude) needs its pan enabled
         // now — `onChange` only fires on a future transition, not the prime.
         gestureController.setAltScreenPanEnabled(context.coordinator.modeTracker.mode == .appOwnsInput)
+        gestureController.setSwitchPanEnabled(context.coordinator.modeTracker.mode != .appOwnsInput)
         MainActor.assumeIsolated {
             DebugLog.shared.log(.seed, "scroll:init isScrollEnabled=\(terminal.isScrollEnabled) nativePan=\(terminal.panGestureRecognizer.isEnabled) contentSize=\(terminal.contentSize) offset=\(terminal.contentOffset)")
         }
