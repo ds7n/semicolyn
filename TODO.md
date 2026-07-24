@@ -30,6 +30,26 @@ The canonical status + pending-work list. Architecture and the spec/plan map liv
 
 ## Next (unblocked dev work)
 
+### 🔜 Swipe live-drag fix — branch `feat/finger-drag-window-transition`, PR #103
+
+Device root-cause (2026-07-19, `render:drag-xform`/`render:layout-vs-xform` trace): the live-drag
+window never moved because `ContainerView.layoutSubviews` wrote `paneContentView.frame = bounds`
+on every frame while the drag had set a non-identity `.transform` on that view. Setting `.frame`
+with an active transform is a UIKit contract violation (UIKit derives frame THROUGH the transform),
+so it cancelled the drag translation (trace: `tx=-288` but `frame.x=-0.3`). FIX (committed): when the
+transform is non-identity, position via `bounds` + `center` (applied independently of the transform);
+keep `frame = bounds` only at rest. Device-verify: slow-drag now moves the window 1:1 with the finger;
+`render:layout-vs-xform` should read `transform-preserved(bounds+center)`. THEN squash-merge #103.
+
+### ⚡ Perf: tame the -CC render storm (FOLLOW-UP, tracked)
+
+Same trace exposed a pre-existing perf/battery hit (NOT caused by the logging, which is zero-cost when
+off): `layoutSubviews` fires ~60x/sec during a drag (31 `sizing:tmux` passes in 0.5s), each recomputing
+the grid + measuring the font + `noteClientSize`. Driven by the ~1s `tmux context REPLY` poll + `%output`
+churn. FIX (own session, MEASURED): coalesce/debounce `layoutSubviews`→`noteClientSize`, skip grid
+recompute when bounds+cell unchanged, debounce the context poll. METRIC: the `sizing:tmux` frequency in a
+trace is the render-storm gauge (before/after). Do this AFTER the swipe fix ships + is device-confirmed.
+
 ### 🔜 Tap-yield + window-switch-animation retest — branch `fix/altscreen-tap-yield`, PR TBD
 
 Two items on this branch (ship together, next TF after the wheel merge). Wheel scroll is CONFIRMED working line-by-line in Claude under tmux -CC (build 55 trace: `drag-move keys=wheel`).

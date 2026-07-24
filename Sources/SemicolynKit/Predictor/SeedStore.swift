@@ -19,6 +19,48 @@ public struct BundledSeed: Sendable {
     }
 }
 
+extension BundledSeed {
+    /// Serialize to the single `seed_pinned` on-disk layout:
+    /// `magic | formatVersion | contentVersion | len|unigram | len|bigram`.
+    /// Identical bytes to what `SeedStore` writes on install, so the build tool and
+    /// the app-edge installer can never produce a layout `SeedStore.loadSeed` rejects.
+    public func combinedBlob() -> [UInt8] {
+        var out: [UInt8] = []
+        out.append(contentsOf: SeedBlobFormat.magic)
+        out.append(SeedBlobFormat.formatVersion)
+        appendLE32(&out, UInt32(max(0, version)))
+        appendLE32(&out, UInt32(unigramBlob.count))
+        out.append(contentsOf: unigramBlob)
+        appendLE32(&out, UInt32(bigramBlob.count))
+        out.append(contentsOf: bigramBlob)
+        return out
+    }
+
+    /// Parse the combined layout back into a `BundledSeed`. Fail-soft: nil on any
+    /// malformed input (short/wrong-magic/wrong-format/truncated body/trailing slack),
+    /// mirroring `SeedStore.loadSeed`'s never-throw contract.
+    public init?(combinedBlob bytes: [UInt8]) {
+        guard bytes.count >= SeedBlobFormat.headerSize,
+              Array(bytes[0..<4]) == SeedBlobFormat.magic,
+              bytes[4] == SeedBlobFormat.formatVersion,
+              let contentVersion = readLE32(bytes, 5) else { return nil }
+        var p = SeedBlobFormat.headerSize
+        guard let uni = readLengthPrefixed(bytes, &p),
+              let bi = readLengthPrefixed(bytes, &p),
+              p == bytes.count else { return nil }
+        self.init(version: Int(contentVersion), unigramBlob: uni, bigramBlob: bi)
+    }
+}
+
+/// The `seed_pinned` combined-blob layout constants, shared by `BundledSeed`'s
+/// codec and `SeedStore`'s install/load so the build tool and the app can never
+/// drift into a layout the other side rejects.
+enum SeedBlobFormat {
+    static let magic: [UInt8] = [0x47, 0x53, 0x45, 0x44]  // "GSED"
+    static let formatVersion: UInt8 = 1
+    static let headerSize = 9  // magic(4) + formatVersion(1) + contentVersion(4)
+}
+
 /// The loaded, queryable seed: a unigram vocabulary and a next-token bigram store,
 /// both already conforming to / exposing ``CandidateSource`` for ranking.
 public struct PredictorSeed: Sendable {
@@ -39,10 +81,6 @@ public struct SeedStore {
     private let directory: URL
 
     private var pinnedURL: URL { directory.appendingPathComponent("seed_pinned.sketch") }
-
-    private static let magic: [UInt8] = [0x47, 0x53, 0x45, 0x44]  // "GSED"
-    private static let formatVersion: UInt8 = 1
-    private static let headerSize = 9  // magic(4) + formatVersion(1) + contentVersion(4)
 
     public init(directory: URL) {
         self.directory = directory
@@ -72,15 +110,9 @@ public struct SeedStore {
     /// always belong to the same content release.
     public func loadSeed() -> PredictorSeed? {
         guard let bytes = pinnedBytes(),
-              bytes.count >= Self.headerSize,
-              Array(bytes[0..<4]) == Self.magic,
-              bytes[4] == Self.formatVersion else { return nil }
-        var p = Self.headerSize
-        guard let unigramBlob = readLengthPrefixed(bytes, &p),
-              let bigramBlob = readLengthPrefixed(bytes, &p),
-              p == bytes.count,                                   // no trailing slack
-              let unigram = Vocabulary(deserializing: unigramBlob),
-              let bigram = BigramVocabulary(deserializing: bigramBlob) else { return nil }
+              let bundled = BundledSeed(combinedBlob: bytes),
+              let unigram = Vocabulary(deserializing: bundled.unigramBlob),
+              let bigram = BigramVocabulary(deserializing: bundled.bigramBlob) else { return nil }
         return PredictorSeed(unigram: unigram, bigram: bigram)
     }
 
@@ -89,11 +121,8 @@ public struct SeedStore {
     /// triggers a clean re-install rather than wedging on a bad seed.
     private func installedVersion() -> Int? {
         guard let bytes = pinnedBytes(),
-              bytes.count >= Self.headerSize,
-              Array(bytes[0..<4]) == Self.magic,
-              bytes[4] == Self.formatVersion,
-              let version = readLE32(bytes, 5) else { return nil }
-        return Int(version)
+              let bundled = BundledSeed(combinedBlob: bytes) else { return nil }
+        return bundled.version
     }
 
     /// Read the whole pinned file, or `nil` if unreadable.
@@ -105,15 +134,7 @@ public struct SeedStore {
     /// `magic | formatVersion | contentVersion | len|unigram | len|bigram`. The
     /// content version is clamped to non-negative (a seed release counter).
     private func combinedBlob(_ bundled: BundledSeed) -> [UInt8] {
-        var out: [UInt8] = []
-        out.append(contentsOf: Self.magic)
-        out.append(Self.formatVersion)
-        appendLE32(&out, UInt32(max(0, bundled.version)))
-        appendLE32(&out, UInt32(bundled.unigramBlob.count))
-        out.append(contentsOf: bundled.unigramBlob)
-        appendLE32(&out, UInt32(bundled.bigramBlob.count))
-        out.append(contentsOf: bundled.bigramBlob)
-        return out
+        bundled.combinedBlob()
     }
 
     /// Atomically write `bytes` to `url`, applying complete file protection on iOS

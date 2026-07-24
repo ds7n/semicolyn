@@ -1,0 +1,5 @@
+SPDX-FileCopyrightText: 2026 True Positive LLC
+SPDX-License-Identifier: GPL-3.0-only
+
+This build artifact is derived from tldr-pages (CC-BY-4.0) and Fig autocomplete (MIT);
+see SEED_ATTRIBUTION.md and seed_v1.provenance.txt.
