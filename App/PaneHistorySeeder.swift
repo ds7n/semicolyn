@@ -13,6 +13,15 @@ final class PaneHistorySeeder {
     private let scrollbackLines: () -> Int
     private let viewForPane: (PaneID) -> TerminalView?
     private var states: [PaneID: PaneSeedState] = [:]
+    /// Panes whose history was just applied and need a bottom-align once the container's
+    /// resize settles. A switch feeds captured history while the pane is still mid-open-
+    /// animation at a tiny row count (e.g. 7 rows), which sets the scroll offset for that
+    /// small viewport; the pane then grows to its full height but the offset is never
+    /// corrected, so the last line (the prompt) sits ~N rows short of the bottom → a gap
+    /// above the keybar (device 2026-07-25). `bottomAlignSeededPanes()` (called on settle)
+    /// scrolls these to the bottom so the prompt is flush. Only freshly-seeded panes are
+    /// bottom-aligned; a pane the user manually scrolled up is never in this set.
+    private var pendingBottomAlign: Set<PaneID> = []
 
     init(runtime: TmuxRuntime,
          scrollbackLines: @escaping () -> Int,
@@ -124,10 +133,37 @@ final class PaneHistorySeeder {
             + "contentSize=\(view.contentSize) frame=\(view.frame.size)")
         clearScrollback(view)
         if !flush.isEmpty { view.feed(byteArray: flush[...]) }
+        // The feed above may have run while the pane is mid-open-animation (a switch feeds
+        // history at a tiny row count, e.g. 7 rows), leaving the scroll offset set for that
+        // small viewport. Bottom-align now so the prompt shows immediately, AND remember to
+        // re-align once the container's resize settles at the full height (the animation
+        // grows rows underneath this offset without correcting it → gap above the keybar).
+        view.scroll(toPosition: 1.0)
+        pendingBottomAlign.insert(pane)
         // Post-feed snapshot: distinguishes "fed but into viewport (contentSize≈frame →
         // no scrollback)" from "view not laid out (frame/contentSize 0)" from "fed OK".
         DebugLog.shared.log(.seed, "seed applyHistory pane=%\(pane.raw) "
             + "post: rows=\(t.rows) topRow=\(t.getTopVisibleRow()) contentSize=\(view.contentSize)")
+    }
+
+    /// Scroll every freshly-seeded pane to the bottom, then forget them. Called by the pane
+    /// container when its resize SETTLES (the debounced final size), so history seeded into a
+    /// mid-animation small viewport is re-aligned to the settled full height — the prompt then
+    /// sits flush above the keybar instead of leaving a gap. A pane the user manually scrolled
+    /// up is not in `pendingBottomAlign`, so its scrollback position is preserved.
+    func bottomAlignSeededPanes() {
+        guard !pendingBottomAlign.isEmpty else { return }
+        let panes = pendingBottomAlign
+        pendingBottomAlign.removeAll()
+        for pane in panes {
+            guard let view = viewForPane(pane) else { continue }
+            view.scroll(toPosition: 1.0)
+            DebugLog.shared.log(.seed, decisionLine(
+                "seed:bottomAlign",
+                inputs: [("pane", "%\(pane.raw)"), ("rows", "\(view.getTerminal().rows)")],
+                outputs: [("topRow", "\(view.getTerminal().getTopVisibleRow())")],
+                reason: "resize-settled"))
+        }
     }
 
     private func resyncAll() {

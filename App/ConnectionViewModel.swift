@@ -461,6 +461,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// is disabled or the pane has no live view.
     func recapturePaneHistory(_ pane: PaneID) { historySeeder?.recapture(pane) }
 
+    /// Re-align freshly-seeded panes to the bottom after a container resize settles. History
+    /// seeded during a window-switch is fed while the pane is still mid-open-animation at a
+    /// tiny row count, which strands the scroll offset short of the bottom once the pane grows
+    /// (the gap above the keybar, device 2026-07-25). Called on the debounced settle emit.
+    func bottomAlignSeededPanes() { historySeeder?.bottomAlignSeededPanes() }
+
     // MARK: - Teardown
 
     /// User-initiated disconnect (the connected-state Disconnect button). Tears the
