@@ -507,6 +507,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 guard let self else { return }
                 if let size = self.resizeDebounce.tick(at: Date(), quiet: quiet) {
                     self.onTmuxResize?(size.cols, size.rows)
+                    // The resize has settled at the final row count and the pane frames are at
+                    // full height. Re-align any pane whose history was seeded mid-open-animation
+                    // to the bottom, so the prompt sits flush above the keybar (device
+                    // 2026-07-25 gap). Next runloop tick, after the resize-driven reflow.
+                    DispatchQueue.main.async { [weak self] in
+                        MainActor.assumeIsolated { self?.vm.bottomAlignSeededPanes() }
+                    }
                 }
             }
         }
