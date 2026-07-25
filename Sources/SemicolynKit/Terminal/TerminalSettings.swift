@@ -92,7 +92,7 @@ public struct TerminalSettings: Equatable, Sendable, Codable {
                 scrollbackLines: Int = 5000,
                 fontFace: TerminalFont = FontCatalog.default.face,
                 altScrollMode: AltScrollMode = .wheel) {
-        self.fontSize = TerminalSettings.clampFont(fontSize)
+        self.fontSize = TerminalSettings.roundedFont(fontSize)
         self.cursorStyle = cursorStyle
         self.cursorBlink = cursorBlink
         self.scrollbackLines = scrollbackLines
@@ -111,7 +111,7 @@ public struct TerminalSettings: Equatable, Sendable, Codable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let fontSize = try c.decodeIfPresent(Double.self, forKey: .fontSize) ?? 13
-        self.fontSize = TerminalSettings.clampFont(fontSize)
+        self.fontSize = TerminalSettings.roundedFont(fontSize)
         self.cursorStyle = try c.decodeIfPresent(CursorStyle.self, forKey: .cursorStyle) ?? .block
         self.cursorBlink = try c.decodeIfPresent(Bool.self, forKey: .cursorBlink) ?? false
         self.scrollbackLines = try c.decodeIfPresent(Int.self, forKey: .scrollbackLines) ?? 5000
@@ -128,9 +128,19 @@ public struct TerminalSettings: Equatable, Sendable, Codable {
         }
     }
 
-    /// Clamp a requested font size into the legible range.
+    /// Clamp a requested font size into the legible range. Used for the LIVE pinch
+    /// scale (`.changed`), where a fractional value keeps the zoom smooth mid-gesture.
     public static func clampFont(_ pt: Double) -> Double {
         min(max(pt, fontRange.lowerBound), fontRange.upperBound)
+    }
+
+    /// The persisted/canonical font size: clamped AND rounded to the nearest whole pt.
+    /// Font sizes are always integers (the slider steps by 1; pinch-zoom scales smoothly
+    /// while dragging but commits an integer on release). Applied on decode too, so a
+    /// pre-existing fractional value (e.g. a persisted `8.043` from an earlier pinch)
+    /// normalizes to `8` on the next load.
+    public static func roundedFont(_ pt: Double) -> Double {
+        clampFont(pt).rounded()
     }
 
     /// Map a DECSCUSR parameter (`ESC [ <n> q`) to caret style + blink.

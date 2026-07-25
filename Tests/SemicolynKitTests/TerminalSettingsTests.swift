@@ -24,6 +24,31 @@ final class TerminalSettingsTests: XCTestCase {
         XCTAssertEqual(TerminalSettings(fontSize: 100).fontSize, 24)
     }
 
+    // roundedFont = the persisted/canonical size: clamped AND rounded to a whole pt.
+    func testRoundedFontRoundsToNearestInt() {
+        XCTAssertEqual(TerminalSettings.roundedFont(8.043364099818564), 8)  // the device value → 8
+        XCTAssertEqual(TerminalSettings.roundedFont(12.4), 12)              // rounds down
+        XCTAssertEqual(TerminalSettings.roundedFont(12.6), 13)             // rounds up
+        XCTAssertEqual(TerminalSettings.roundedFont(13.5), 14)             // .5 rounds away from zero (Swift default)
+        XCTAssertEqual(TerminalSettings.roundedFont(13), 13)              // already integer → unchanged
+    }
+
+    // Clamp still applies before rounding: out-of-range values land on the integer bound.
+    func testRoundedFontClampsThenRounds() {
+        XCTAssertEqual(TerminalSettings.roundedFont(6.2), 7)    // below min → clamp to 7
+        XCTAssertEqual(TerminalSettings.roundedFont(24.8), 24)  // above max → clamp to 24
+    }
+
+    // A fractional value persisted from an earlier pinch normalizes to an int on init AND
+    // on decode (the two entry points that store fontSize) — no fractional size survives.
+    func testFontSizeIsAlwaysIntegerViaInitAndDecode() throws {
+        XCTAssertEqual(TerminalSettings(fontSize: 8.043364099818564).fontSize, 8)
+        // Decode a blob carrying a fractional fontSize → normalized to 8 on load.
+        let json = #"{"fontSize":8.043364099818564}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(TerminalSettings.self, from: json)
+        XCTAssertEqual(decoded.fontSize, 8)
+    }
+
     func testDECSCUSRMap() {
         XCTAssertEqual(TerminalSettings.cursorStyle(fromDECSCUSR: 0).style, .block)
         XCTAssertTrue(TerminalSettings.cursorStyle(fromDECSCUSR: 0).blink)

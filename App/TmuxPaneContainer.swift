@@ -385,8 +385,19 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 baseFontSize = newSize
                 onInvalidateCachedCell?()
             case .ended:
-                baseFontSize = TerminalSettings.clampFont(baseFontSize)
+                // Snap the committed size to a whole pt (font sizes are always integers;
+                // the live `.changed` scale is smooth/fractional, this rounds on release).
+                baseFontSize = TerminalSettings.roundedFont(baseFontSize)
                 recognizer.scale = 1
+                // Re-apply the rounded font so the visible size matches the persisted
+                // integer (the last `.changed` left panes at the fractional size).
+                let settled = MainActor.assumeIsolated {
+                    TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(baseFontSize))
+                }
+                for view in pinchRecognizers.keys.compactMap({ paneView(for: $0) }) {
+                    view.font = settled
+                }
+                tappedView.font = settled
                 onInvalidateCachedCell?()
                 // Persist the zoomed size so it survives reconnect (and updates the
                 // Settings font-size slider) — mirrors the raw-terminal pinch handler.
