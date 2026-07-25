@@ -891,6 +891,20 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 MainActor.assumeIsolated {
                     coordinator?.armResizeSettle()   // keybar-grow resize debounce on window change (KEEP)
                 }
+                // Window SWITCH (not the initial attach). On a switch, the returned-to
+                // window's panes were destroyed while off-screen and re-created empty here,
+                // but their `PaneSeedState` persisted as `.seeded`, so `paneDidAppear` skipped
+                // the capture and the window rendered blank with the prior screen/scrollback
+                // lost until a full re-attach. Force a fresh `capture-pane` reseed for each
+                // pane of the now-active window so it repaints. The switch-vs-attach gate is
+                // pure + Linux-tested (WindowSwitchReseedDecision) — attach must NOT reseed
+                // (registerPane already seeded the fresh panes; reseeding double-captures).
+                if WindowSwitchReseedDecision.shouldReseed(previous: previousActiveWindow,
+                                                           new: state.activeWindow) {
+                    for rect in rects {
+                        coordinator?.vm.recapturePaneHistory(rect.pane)
+                    }
+                }
             }
             previousActiveWindow = state.activeWindow
         }
