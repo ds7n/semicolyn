@@ -45,18 +45,31 @@ final class CapturePaneCommandTests: XCTestCase {
         XCTAssertTrue(cmd.contains(" -J "), "capture must join wrapped lines (-J): \(cmd)")
     }
 
-    // Reconstruct: joins content lines with CR-LF + trailing CR-LF; escapes preserved.
-    // CR-LF (not bare LF) is required so SwiftTerm returns the cursor to column 0 per
-    // line (lineFeedMode/LNM is OFF by default → bare LF would staircase the history).
-    func testReconstructJoinsContentLinesWithCRLF() {
+    // Reconstruct: joins content lines with CR-LF and does NOT append a trailing newline;
+    // escapes preserved. CR-LF (not bare LF) is required so SwiftTerm returns the cursor to
+    // column 0 per line (lineFeedMode/LNM is OFF by default → bare LF would staircase the
+    // history). The LAST captured line is the pane's current line (the live shell prompt);
+    // appending a trailing CR-LF would push the cursor to a fresh blank line BELOW the
+    // prompt, stranding it there (device bug 2026-07-25: switched-to window put the prompt
+    // on its own line with the cursor below it, and the extra line showed as a gap above the
+    // keybar). So the cursor must rest AT the end of the last line, not below it.
+    func testReconstructJoinsContentLinesWithCRLFNoTrailingNewline() {
         let out = reconstructHistory(fromLines: ["\u{1b}[31mred\u{1b}[39m", "plain"])
-        XCTAssertEqual(out, Array("\u{1b}[31mred\u{1b}[39m\r\nplain\r\n".utf8))
+        XCTAssertEqual(out, Array("\u{1b}[31mred\u{1b}[39m\r\nplain".utf8))
     }
 
-    // Trailing blank lines (capture-pane bottom padding) are trimmed; CR-LF between rows.
+    // Single content line → no CR-LF at all; the cursor rests at the end of that line (the
+    // prompt), not on a new line below it.
+    func testReconstructSingleLineHasNoTrailingNewline() {
+        let out = reconstructHistory(fromLines: ["user@host:~$"])
+        XCTAssertEqual(out, Array("user@host:~$".utf8))
+    }
+
+    // Trailing blank lines (capture-pane bottom padding) are trimmed; CR-LF between rows,
+    // none after the last content row.
     func testReconstructTrimsTrailingBlanks() {
         let out = reconstructHistory(fromLines: ["a", "b", "", "   ", ""])
-        XCTAssertEqual(out, Array("a\r\nb\r\n".utf8))
+        XCTAssertEqual(out, Array("a\r\nb".utf8))
     }
 
     // All-blank input → empty (no spurious newline).
@@ -69,9 +82,10 @@ final class CapturePaneCommandTests: XCTestCase {
         XCTAssertEqual(reconstructHistory(fromLines: []), [])
     }
 
-    // Interior blank lines are KEPT (only trailing trimmed); each break is CR-LF.
+    // Interior blank lines are KEPT (only trailing trimmed); each break is CR-LF; no
+    // trailing newline after the last content line.
     func testReconstructKeepsInteriorBlanks() {
         let out = reconstructHistory(fromLines: ["a", "", "b"])
-        XCTAssertEqual(out, Array("a\r\n\r\nb\r\n".utf8))
+        XCTAssertEqual(out, Array("a\r\n\r\nb".utf8))
     }
 }
