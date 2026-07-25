@@ -323,10 +323,16 @@ struct TerminalScreen: UIViewRepresentable {
                 recognizer.scale = 1
                 baseSize = newSize
             case .ended:
-                // baseSize is already up-to-date from the .changed accumulation above;
-                // re-clamp and reset scale defensively.
-                baseSize = TerminalSettings.clampFont(baseSize)
+                // baseSize is up-to-date from the .changed accumulation; snap it to a
+                // whole pt on release (font sizes are always integers — the live scale
+                // above is smooth/fractional, this commits an integer).
+                baseSize = TerminalSettings.roundedFont(baseSize)
                 recognizer.scale = 1
+                // Re-apply the rounded font so the visible size matches the persisted
+                // integer (the last `.changed` left the terminal at the fractional size).
+                terminal.font = MainActor.assumeIsolated {
+                    TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(baseSize))
+                }
                 // Persist the zoomed size so it survives reconnect (and updates the
                 // Settings font-size slider). The store is @MainActor; this @objc
                 // callback is delivered on the main thread but is a nonisolated
