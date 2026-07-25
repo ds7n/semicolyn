@@ -453,6 +453,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// live emulator flag (Bug 2, 2026-07-16). No-op if not attached.
     func requeryAltScreenState() { tmux?.requeryAlternateOn() }
 
+    /// Force a fresh `capture-pane` reseed for a pane whose view is present. Called by the
+    /// pane container when a window-switch lands on a window: the returned-to pane's view was
+    /// destroyed while off-screen and re-created empty, but its `PaneSeedState` persisted as
+    /// `.seeded`, so it was never re-seeded and rendered blank with the prior screen/scrollback
+    /// lost until a full re-attach. This repaints it via the same seed pipeline. No-op if seeding
+    /// is disabled or the pane has no live view.
+    func recapturePaneHistory(_ pane: PaneID) { historySeeder?.recapture(pane) }
+
     // MARK: - Teardown
 
     /// User-initiated disconnect (the connected-state Disconnect button). Tears the
