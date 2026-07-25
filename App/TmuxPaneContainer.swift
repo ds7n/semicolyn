@@ -766,6 +766,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
             guard let win = state.activeWindow, let window = state.window(win),
                   let layout = window.visibleLayout else { return }
             lastAppliedLayout = layout   // device #2: so layoutSubviews can re-frame on a geometry-only change
+            // The render-storm early-out in layoutSubviews caches (bounds, cell, kbH). A window
+            // switch changes the LAYOUT without changing any of those three, so force the next
+            // layoutSubviews through the full body — otherwise a pass whose (bounds, cell, kbH)
+            // was already seen (e.g. the settled keyboard-up size) early-outs and skips the pane
+            // re-fit, stranding the pane at a mid-switch-animation frame → terminal sits too high
+            // with a gap above the keybar (device 2026-07-25, build 82).
+            lastLayoutInputs = nil
 
             let cell = resolvedCell()
             let rects = fittedPaneRects(layout: layout, cell: cell)   // fill usable area, not tmux's lagging layout
