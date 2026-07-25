@@ -573,6 +573,19 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// pane re-frame ONLY when bounds actually changed (avoids churn under the render storm).
         private var lastLaidOutBounds: CGSize = .zero
 
+        /// The three inputs the whole of `layoutSubviews` is a pure function of — cached so a
+        /// no-op pass (identical `bounds`, cell, and keybar height) returns immediately instead
+        /// of re-running grid math + `noteClientSize` ~60×/s under the -CC render storm (spec
+        /// `2026-07-25-cc-render-storm-earlyout-design.md`). Reset by `invalidateCachedCell`
+        /// (pinch) so the next pass is forced through. `nil` = "never laid out; always run".
+        private struct LayoutInputs: Equatable {
+            let bounds: CGSize
+            let cellW: Double
+            let cellH: Double
+            let keybarH: CGFloat
+        }
+        private var lastLayoutInputs: LayoutInputs?
+
         /// The active window as of the last `apply` that reached the change-detect at the
         /// end of the method. Compared against `state.activeWindow` there to decide whether
         /// to arm the keybar-grow resize-settle debounce (see `armResizeSettle`).
@@ -581,15 +594,22 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Clears the cached cell metrics so `resolvedCell()` re-measures on the next
         /// layout pass. Called by the coordinator's `onInvalidateCachedCell` hook after
         /// a pinch-zoom font change, ensuring pane rects reflect the new font geometry.
-        func invalidateCachedCell() { cachedCell = nil }
+        func invalidateCachedCell() {
+            cachedCell = nil
+            // Force the next layoutSubviews through the early-out (the cell metrics changed,
+            // so the cached layout inputs are stale even if bounds/keybar didn't move).
+            lastLayoutInputs = nil
+        }
 
         /// All live pane terminal views; used by `updateUIView` to re-apply the theme palette.
         var paneTerminalViews: [TerminalView] { Array(panes.values) }
 
-        /// On every layout pass (rotation, keyboard show-hide, font change) report the
-        /// full-container cell grid to tmux as the client size. Uses the measured cell
-        /// metrics, so it's accurate for any font — the single source that supersedes
-        /// the old coarse `sendApproxClientSize` estimate. Debounced in the coordinator.
+        /// On each layout pass whose geometry actually changed (rotation, keyboard show-hide,
+        /// font change) report the full-container cell grid to tmux as the client size. Uses
+        /// the measured cell metrics, so it's accurate for any font — the single source that
+        /// supersedes the old coarse `sendApproxClientSize` estimate. Debounced in the
+        /// coordinator. Redundant no-op passes (identical bounds/cell/keybar) early-out before
+        /// any work under the -CC render storm.
         override func layoutSubviews() {
             super.layoutSubviews()
             // Device #1 (2026-07-20): the keybar (inputAccessoryView) is NOT propagated into
@@ -598,8 +618,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // every pane occupies only the visible area above the bar. kbH<=0 = keyboard down
             // (no accessory) -> full height.
             let kbH = firstResponderKeybarHeight()
-            let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height), keybarHeight: Double(kbH))
             let cell = resolvedCell()
+            // Render-storm early-out (spec 2026-07-25): the entire body below is a pure
+            // function of (bounds.size, cell, kbH). Under the -CC storm layoutSubviews fires
+            // ~60×/s with these identical between passes; skip the redundant grid math +
+            // `noteClientSize` + pane re-fit when nothing that affects them changed. Any real
+            // geometry change (rotation/split/switch → bounds; pinch → cell via
+            // invalidateCachedCell; keyboard/predictor-strip → kbH) differs here and runs.
+            let inputs = LayoutInputs(bounds: bounds.size, cellW: cell.w, cellH: cell.h, keybarH: kbH)
+            if inputs == lastLayoutInputs { return }
+            lastLayoutInputs = inputs
+
+            let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height), keybarHeight: Double(kbH))
             // Grid from the KEYBAR-ADJUSTED height (device #1), not raw bounds.height.
             guard let grid = terminalGrid(width: Double(bounds.width), height: usableH,
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
