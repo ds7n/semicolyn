@@ -66,6 +66,36 @@ final class PaneHistorySeeder {
         states[pane] = state
     }
 
+    /// Force a fresh capture for a single pane whose view is (still) present — the
+    /// window-switch reseed. Switching tmux windows tears down the off-screen window's
+    /// pane views and re-creates empty ones on return, but the per-pane `PaneSeedState`
+    /// persists as `.seeded`, so `paneDidAppear` treats the fresh view as already-seeded
+    /// and never re-captures → the returned-to window renders blank (just a cursor) and
+    /// the prior screen/scrollback is lost until a full re-attach (which triggers
+    /// `resyncAll`). This resets the pane's state to `.unseeded` (dropping any stale
+    /// buffer) and re-issues `capture-pane`, repainting the window's current screen +
+    /// scrollback via the same pipeline attach uses. No-op if the pane has no live view
+    /// (nothing to feed the captured history into; `applyHistory` would drop it).
+    func recapture(_ pane: PaneID) {
+        guard viewForPane(pane) != nil else {
+            DebugLog.shared.log(.seed, decisionLine(
+                "seed:recapture",
+                inputs: [("pane", "%\(pane.raw)")],
+                outputs: [("recaptured", "false")],
+                reason: "no-view"))
+            return
+        }
+        var s = states[pane] ?? PaneSeedState()
+        s.resync()                 // → .unseeded, drop stale buffer
+        states[pane] = s
+        DebugLog.shared.log(.seed, decisionLine(
+            "seed:recapture",
+            inputs: [("pane", "%\(pane.raw)")],
+            outputs: [("recaptured", "true")],
+            reason: "window-switch"))
+        paneDidAppear(pane)        // re-issues capture-pane, re-arms buffering
+    }
+
     /// Route live pane output through the seed state (buffer during seed, else feed).
     func routeOutput(_ pane: PaneID, _ bytes: [UInt8]) -> [UInt8] {
         var state = states[pane] ?? PaneSeedState()
