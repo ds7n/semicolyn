@@ -31,7 +31,7 @@ public func capturePaneCommand(paneID: PaneID, lines: Int) -> String? {
 /// Reconstruct feedable history bytes from a `capture-pane` control-block body. tmux
 /// returns one screen row per line and pads the bottom of the pane with trailing blank
 /// lines; those are screen padding, not scrollback, so they are trimmed. Remaining lines
-/// are joined with **CR-LF** (`\r\n`, plus a trailing `\r\n` if any content remains) and
+/// are joined with **CR-LF** (`\r\n`) BETWEEN rows only, with **no trailing newline**, and
 /// UTF-8 encoded. Body lines carry literal escape sequences (`capture-pane -e`) which
 /// pass through unchanged. Empty input → empty bytes.
 ///
@@ -42,9 +42,17 @@ public func capturePaneCommand(paneID: PaneID, lines: Int) -> String? {
 /// seeded line therefore started at the previous line's end column → the whole history
 /// staircased down-and-right. A raw PTY hides this via the kernel's ONLCR translation;
 /// `capture-pane` output has none, so we must supply the carriage return ourselves.
+///
+/// **Why NO trailing newline (device bug 2026-07-25):** the LAST captured line is the
+/// pane's CURRENT line — the live shell prompt the cursor sits on. A trailing `\r\n` after
+/// it moved the cursor to a fresh blank line BELOW the prompt, so a switched-to (seeded)
+/// window rendered the prompt on its own line with the cursor stranded beneath it, and that
+/// extra line showed as a gap above the keybar (the live-attached landing window, fed
+/// directly with no capture-pane seed, never had it). Terminating BETWEEN rows but not
+/// after the last leaves the cursor at the end of the prompt, where the shell resumes.
 public func reconstructHistory(fromLines lines: [String]) -> [UInt8] {
     var end = lines.count
     while end > 0, lines[end - 1].allSatisfy(\.isWhitespace) { end -= 1 }
     guard end > 0 else { return [] }
-    return Array((lines[0..<end].joined(separator: "\r\n") + "\r\n").utf8)
+    return Array(lines[0..<end].joined(separator: "\r\n").utf8)
 }
