@@ -299,6 +299,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         pendingPaneBytes[pane] = nil
         paneLastTitles[pane] = nil
         pendingAltScreenOverrides[pane] = nil
+        // Drop the pane's seed state so a window-switch remount re-seeds from scratch, exactly
+        // like a first connect: the fresh view's `registerPane` → `paneDidAppear` issues ONE
+        // `capture-pane`. Without this the state persists `.seeded` and the remount either
+        // renders blank (skipped capture) or, with the old `apply()` recapture, double-fed the
+        // history → the keybar gap on switched-to windows (device 2026-07-26).
+        historySeeder?.forgetSeedState(pane)
     }
 
     /// The attach-time `#{alternate_on}` truth queued for `pane` (if the query reply
@@ -452,20 +458,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// is re-seeded authoritatively (via `onAltScreenReconcile`) instead of the unreliable
     /// live emulator flag (Bug 2, 2026-07-16). No-op if not attached.
     func requeryAltScreenState() { tmux?.requeryAlternateOn() }
-
-    /// Force a fresh `capture-pane` reseed for a pane whose view is present. Called by the
-    /// pane container when a window-switch lands on a window: the returned-to pane's view was
-    /// destroyed while off-screen and re-created empty, but its `PaneSeedState` persisted as
-    /// `.seeded`, so it was never re-seeded and rendered blank with the prior screen/scrollback
-    /// lost until a full re-attach. This repaints it via the same seed pipeline. No-op if seeding
-    /// is disabled or the pane has no live view.
-    func recapturePaneHistory(_ pane: PaneID) { historySeeder?.recapture(pane) }
-
-    /// Re-align freshly-seeded panes to the bottom after a container resize settles. History
-    /// seeded during a window-switch is fed while the pane is still mid-open-animation at a
-    /// tiny row count, which strands the scroll offset short of the bottom once the pane grows
-    /// (the gap above the keybar, device 2026-07-25). Called on the debounced settle emit.
-    func bottomAlignSeededPanes() { historySeeder?.bottomAlignSeededPanes() }
 
     // MARK: - Teardown
 
