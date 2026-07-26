@@ -13,15 +13,6 @@ final class PaneHistorySeeder {
     private let scrollbackLines: () -> Int
     private let viewForPane: (PaneID) -> TerminalView?
     private var states: [PaneID: PaneSeedState] = [:]
-    /// Panes whose history was just applied and need a bottom-align once the container's
-    /// resize settles. A switch feeds captured history while the pane is still mid-open-
-    /// animation at a tiny row count (e.g. 7 rows), which sets the scroll offset for that
-    /// small viewport; the pane then grows to its full height but the offset is never
-    /// corrected, so the last line (the prompt) sits ~N rows short of the bottom → a gap
-    /// above the keybar (device 2026-07-25). `bottomAlignSeededPanes()` (called on settle)
-    /// scrolls these to the bottom so the prompt is flush. Only freshly-seeded panes are
-    /// bottom-aligned; a pane the user manually scrolled up is never in this set.
-    private var pendingBottomAlign: Set<PaneID> = []
 
     init(runtime: TmuxRuntime,
          scrollbackLines: @escaping () -> Int,
@@ -75,34 +66,29 @@ final class PaneHistorySeeder {
         states[pane] = state
     }
 
-    /// Force a fresh capture for a single pane whose view is (still) present — the
-    /// window-switch reseed. Switching tmux windows tears down the off-screen window's
-    /// pane views and re-creates empty ones on return, but the per-pane `PaneSeedState`
-    /// persists as `.seeded`, so `paneDidAppear` treats the fresh view as already-seeded
-    /// and never re-captures → the returned-to window renders blank (just a cursor) and
-    /// the prior screen/scrollback is lost until a full re-attach (which triggers
-    /// `resyncAll`). This resets the pane's state to `.unseeded` (dropping any stale
-    /// buffer) and re-issues `capture-pane`, repainting the window's current screen +
-    /// scrollback via the same pipeline attach uses. No-op if the pane has no live view
-    /// (nothing to feed the captured history into; `applyHistory` would drop it).
-    func recapture(_ pane: PaneID) {
-        guard viewForPane(pane) != nil else {
-            DebugLog.shared.log(.seed, decisionLine(
-                "seed:recapture",
-                inputs: [("pane", "%\(pane.raw)")],
-                outputs: [("recaptured", "false")],
-                reason: "no-view"))
-            return
-        }
-        var s = states[pane] ?? PaneSeedState()
-        s.resync()                 // → .unseeded, drop stale buffer
-        states[pane] = s
+    /// Drop a pane's seed state when its view is torn down (window switch / reattach).
+    /// Switching tmux windows destroys the off-screen window's pane views and re-creates
+    /// fresh empty ones on return. The seed state must NOT persist across that: if it stayed
+    /// `.seeded`, the next `paneDidAppear` (fired by `registerPane` when the fresh view
+    /// mounts) would treat the empty view as already-seeded and skip the capture → the
+    /// returned-to window renders blank until a full re-attach. Forgetting it here makes the
+    /// remount seed EXACTLY like a first connect: one `paneDidAppear` → one `capture-pane`.
+    ///
+    /// This replaced an earlier `recapture()` that reset the state AND issued its own capture
+    /// from `apply()` — but `registerPane` already calls `paneDidAppear` on the fresh view, so
+    /// that was a SECOND capture whose reply double-fed the history (content duplicated →
+    /// viewport scrolled deep into the dup'd scrollback → the live prompt sat mid-buffer, not
+    /// at the screen bottom → a gap above the keybar on switched-to windows; first connect,
+    /// which seeds once, never had it — device 2026-07-26). One reset here, zero extra
+    /// captures, is the single-seed path both cases now share.
+    func forgetSeedState(_ pane: PaneID) {
+        guard states[pane] != nil else { return }
+        states[pane] = nil
         DebugLog.shared.log(.seed, decisionLine(
-            "seed:recapture",
+            "seed:forget",
             inputs: [("pane", "%\(pane.raw)")],
-            outputs: [("recaptured", "true")],
-            reason: "window-switch"))
-        paneDidAppear(pane)        // re-issues capture-pane, re-arms buffering
+            outputs: [("reset", "true")],
+            reason: "view-torn-down"))
     }
 
     /// Route live pane output through the seed state (buffer during seed, else feed).
@@ -133,37 +119,16 @@ final class PaneHistorySeeder {
             + "contentSize=\(view.contentSize) frame=\(view.frame.size)")
         clearScrollback(view)
         if !flush.isEmpty { view.feed(byteArray: flush[...]) }
-        // The feed above may have run while the pane is mid-open-animation (a switch feeds
-        // history at a tiny row count, e.g. 7 rows), leaving the scroll offset set for that
-        // small viewport. Bottom-align now so the prompt shows immediately, AND remember to
-        // re-align once the container's resize settles at the full height (the animation
-        // grows rows underneath this offset without correcting it → gap above the keybar).
-        view.scroll(toPosition: 1.0)
-        pendingBottomAlign.insert(pane)
+        // Feeding the history scrolls the terminal so the last line sits at the screen bottom
+        // (SwiftTerm's own newline handling), exactly as a first-connect seed does — no
+        // explicit re-scroll is needed now that a switch seeds ONCE. (The prior #106 bottom-
+        // align + settle re-align existed only to paper over the double-feed that
+        // `forgetSeedState` removes; feeding twice left the viewport scrolled deep into the
+        // duplicated scrollback, which the re-align couldn't fully undo — the keybar gap.)
         // Post-feed snapshot: distinguishes "fed but into viewport (contentSize≈frame →
         // no scrollback)" from "view not laid out (frame/contentSize 0)" from "fed OK".
         DebugLog.shared.log(.seed, "seed applyHistory pane=%\(pane.raw) "
             + "post: rows=\(t.rows) topRow=\(t.getTopVisibleRow()) contentSize=\(view.contentSize)")
-    }
-
-    /// Scroll every freshly-seeded pane to the bottom, then forget them. Called by the pane
-    /// container when its resize SETTLES (the debounced final size), so history seeded into a
-    /// mid-animation small viewport is re-aligned to the settled full height — the prompt then
-    /// sits flush above the keybar instead of leaving a gap. A pane the user manually scrolled
-    /// up is not in `pendingBottomAlign`, so its scrollback position is preserved.
-    func bottomAlignSeededPanes() {
-        guard !pendingBottomAlign.isEmpty else { return }
-        let panes = pendingBottomAlign
-        pendingBottomAlign.removeAll()
-        for pane in panes {
-            guard let view = viewForPane(pane) else { continue }
-            view.scroll(toPosition: 1.0)
-            DebugLog.shared.log(.seed, decisionLine(
-                "seed:bottomAlign",
-                inputs: [("pane", "%\(pane.raw)"), ("rows", "\(view.getTerminal().rows)")],
-                outputs: [("topRow", "\(view.getTerminal().getTopVisibleRow())")],
-                reason: "resize-settled"))
-        }
     }
 
     private func resyncAll() {

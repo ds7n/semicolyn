@@ -507,13 +507,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 guard let self else { return }
                 if let size = self.resizeDebounce.tick(at: Date(), quiet: quiet) {
                     self.onTmuxResize?(size.cols, size.rows)
-                    // The resize has settled at the final row count and the pane frames are at
-                    // full height. Re-align any pane whose history was seeded mid-open-animation
-                    // to the bottom, so the prompt sits flush above the keybar (device
-                    // 2026-07-25 gap). Next runloop tick, after the resize-driven reflow.
-                    DispatchQueue.main.async { [weak self] in
-                        MainActor.assumeIsolated { self?.vm.bottomAlignSeededPanes() }
-                    }
                 }
             }
         }
@@ -898,20 +891,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 MainActor.assumeIsolated {
                     coordinator?.armResizeSettle()   // keybar-grow resize debounce on window change (KEEP)
                 }
-                // Window SWITCH (not the initial attach). On a switch, the returned-to
-                // window's panes were destroyed while off-screen and re-created empty here,
-                // but their `PaneSeedState` persisted as `.seeded`, so `paneDidAppear` skipped
-                // the capture and the window rendered blank with the prior screen/scrollback
-                // lost until a full re-attach. Force a fresh `capture-pane` reseed for each
-                // pane of the now-active window so it repaints. The switch-vs-attach gate is
-                // pure + Linux-tested (WindowSwitchReseedDecision) — attach must NOT reseed
-                // (registerPane already seeded the fresh panes; reseeding double-captures).
-                if WindowSwitchReseedDecision.shouldReseed(previous: previousActiveWindow,
-                                                           new: state.activeWindow) {
-                    for rect in rects {
-                        coordinator?.vm.recapturePaneHistory(rect.pane)
-                    }
-                }
+                // NOTE: no explicit reseed here. Switching destroys the off-screen window's
+                // pane views; `unregisterPane` forgets their seed state, so the fresh views
+                // re-created above seed themselves via `registerPane` → `paneDidAppear` — ONE
+                // `capture-pane`, exactly like a first connect. An earlier `recapturePaneHistory`
+                // reseed here fired a SECOND capture on top of that, double-feeding the history
+                // and stranding the viewport mid-scrollback → the keybar gap (device 2026-07-26).
             }
             previousActiveWindow = state.activeWindow
         }
