@@ -74,6 +74,13 @@ final class DebugLog: ObservableObject {
     /// Record one diagnostic line in `category` — ONLY when diagnostics is enabled AND the
     /// category is on. The message is an autoclosure: nothing is evaluated when gated out
     /// (zero sacred-path cost). `category` defaults to `.lifecycle` for legacy call sites.
+    /// Whether `category` would currently be recorded (master gate + per-category toggle).
+    /// Lets a caller skip building an expensive diagnostic payload (e.g. iterating pane
+    /// frames) before calling `log`, for cases the autoclosure alone can't cheaply cover.
+    func isEnabled(_ category: LogCategory) -> Bool {
+        enabled && enabledCategories.contains(category)
+    }
+
     func log(_ category: LogCategory = .lifecycle, _ message: @autoclosure () -> String) {
         guard enabled, enabledCategories.contains(category) else { return }
         let now = Date().timeIntervalSinceReferenceDate

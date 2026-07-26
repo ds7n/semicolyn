@@ -459,6 +459,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// live emulator flag (Bug 2, 2026-07-16). No-op if not attached.
     func requeryAltScreenState() { tmux?.requeryAlternateOn() }
 
+    /// A pane's terminal row count changed (SwiftTerm `sizeChanged` → tmux resize landed).
+    /// Bottom-align it if it's a freshly-seeded pane whose viewport the resize stranded short of
+    /// the true bottom (the switched-window keybar gap; geometry log 2026-07-26). No-op otherwise.
+    func paneRowsDidChange(_ pane: PaneID, settledRows: Int) {
+        historySeeder?.bottomAlignAfterResize(pane, settledRows: settledRows)
+    }
+
     // MARK: - Teardown
 
     /// User-initiated disconnect (the connected-state Disconnect button). Tears the
