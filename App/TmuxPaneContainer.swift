@@ -701,23 +701,42 @@ struct TmuxPaneContainer: UIViewRepresentable {
             let si = safeAreaInsets
             let live = liveMeasuredCell()
             let liveStr = live.map { String(format: "%.2fx%.2f", $0.w, $0.h) } ?? "nil"
-            // Each pane's real frame + the lowest pane bottom (the gap is usableH − that).
+            // Per-pane FULL view + scroll-view geometry. When the frame/grid/cell/rows are all
+            // identical between a good and a gapped window (device 2026-07-26), the only place a
+            // difference can hide is HOW the terminal content is placed WITHIN that identical
+            // frame — the UIScrollView's contentOffset / contentInset / adjustedContentInset (a
+            // bottom inset or a non-zero offset shifts the rendered rows up from the bottom = a
+            // gap the frame math can't see), plus the terminal's own viewport (topRow / yDisp)
+            // and whether the pane is first responder (owns the keybar accessory).
             var maxBottom = 0.0
             var frames: [String] = []
             for (id, v) in panes.sorted(by: { $0.key.raw < $1.key.raw }) {
                 let f = v.frame
                 maxBottom = max(maxBottom, Double(f.maxY))
-                frames.append("%\(id.raw)=(y\(Int(f.minY))..\(Int(f.maxY)) h\(Int(f.height)) rows\(v.getTerminal().rows))")
+                let t = v.getTerminal()
+                let co = v.contentOffset, cs = v.contentSize
+                let ci = v.contentInset, ai = v.adjustedContentInset
+                let b = t.buffer
+                frames.append(
+                    "%\(id.raw)=(frame=\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width))x\(Int(f.height)) "
+                    + "vbounds=\(Int(v.bounds.width))x\(Int(v.bounds.height)) "
+                    + "rows\(t.rows) topRow\(t.getTopVisibleRow()) yDisp\(b.yDisp) scroll\(b.scrollTop)..\(b.scrollBottom) "
+                    + "contentSize=\(Int(cs.width))x\(Int(cs.height)) offset=\(Int(co.x)),\(Int(co.y)) "
+                    + "inset=(t\(Int(ci.top)),b\(Int(ci.bottom))) adjInset=(t\(Int(ai.top)),b\(Int(ai.bottom))) "
+                    + "fr=\(v.isFirstResponder) clip=\(v.clipsToBounds) hidden=\(v.isHidden) alpha=\(String(format: "%.1f", v.alpha)))")
             }
             let gapPx = usableH - maxBottom
-            let accFrame = panes.values.first(where: { $0.isFirstResponder })?
-                .inputAccessoryView.map { "\(Int($0.frame.width))x\(Int($0.frame.height))@y\(Int($0.frame.minY))" } ?? "none"
+            // The first-responder pane's keybar accessory frame AND its superview chain height,
+            // so an accessory or a wrapper view mis-sizing shows up too.
+            let fr = panes.values.first(where: { $0.isFirstResponder })
+            let accFrame = fr?.inputAccessoryView.map {
+                "\(Int($0.frame.width))x\(Int($0.frame.height))@y\(Int($0.frame.minY))" } ?? "none"
             DebugLog.shared.log(.geometry,
                 "geo:\(reason) bounds=\(Int(bounds.width))x\(Int(bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) "
                 + "kbH=\(String(format: "%.1f", kbH)) usableH=\(Int(usableH)) grid=\(grid.cols)x\(grid.rows) "
                 + "cellCached=\(String(format: "%.2fx%.2f", cell.w, cell.h)) cellLive=\(liveStr) "
-                + "panes=[\(frames.joined(separator: " "))] maxPaneBottom=\(Int(maxBottom)) "
-                + "gapPx=\(String(format: "%.1f", gapPx)) keybarFrame=\(accFrame)")
+                + "maxPaneBottom=\(Int(maxBottom)) gapPx=\(String(format: "%.1f", gapPx)) keybarFrame=\(accFrame) "
+                + "panes=[\(frames.joined(separator: " | "))]")
         }
 
         /// A FRESH, UNCACHED cell measurement straight from SwiftTerm's current optimal frame —
