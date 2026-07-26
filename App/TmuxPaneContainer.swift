@@ -168,6 +168,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// wrong row count -> "bottom halfway up, rest blank". This deadline extends the
         /// resize debounce during the settle so only the FINAL settled size reaches tmux.
         private var resizeSettleUntil: Date?
+        /// The row count of the container's most recent grid (`noteClientSize`). Used to tell a
+        /// pane's `sizeChanged` whether the resize has reached its FINAL size (so a freshly-seeded
+        /// pane's bottom-align can stop re-firing once the switch animation is done).
+        private var lastGridRows: Int = 0
         /// The extended debounce quiet window used while `resizeSettleUntil` is in the future -
         /// long enough to span the keyboard/keybar grow animation (feel-tuned; the animation is
         /// ~150-400ms). Outside the settle window the normal `ResizeDebounce.quiet` applies.
@@ -492,7 +496,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
         // tmux owns the visible geometry. The client size is driven by the full
         // container grid (`ContainerView.layoutSubviews` → `noteClientSize`), not a
         // per-pane size change — a single split pane's grid is not the client size.
-        func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
+        func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+            // The pane's terminal row count changed = the tmux resize landed. If this pane was
+            // freshly seeded and its viewport left short of the true bottom (the switched-window
+            // keybar gap), re-align it now that the resize completed. Reverse-lookup the PaneID
+            // from the source view (this callback is nonisolated; `vm` is @MainActor).
+            MainActor.assumeIsolated {
+                guard let pane = containerView?.panes.first(where: { $0.value === source })?.key else { return }
+                vm.paneRowsDidChange(pane, settledRows: lastGridRows)
+            }
+        }
 
         /// Debounced tmux client-size update. Called by `ContainerView.layoutSubviews`
         /// with the full-container grid (bounds ÷ measured cell) — the single accurate
@@ -506,6 +519,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         }
 
         func noteClientSize(cols: Int, rows: Int) {
+            lastGridRows = rows   // the target row count for freshly-seeded panes' bottom-align
             let now = Date()
             resizeDebounce.note(cols: cols, rows: rows, at: now)
             // Device #2 (Build 2): during a switch-settle window use a LONGER quiet so the
