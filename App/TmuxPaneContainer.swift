@@ -782,13 +782,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Control mode does not replay history on select-window, so switching back shows
             // a blank pane until new output arrives. Persisting per-window views is a future refinement.
 
-            // Remove panes tmux no longer reports; resign first-responder before removal.
-            for (id, view) in panes where !live.contains(id) {
-                view.resignFirstResponder()
-                coordinator?.removeHalo(from: view)
-                coordinator?.modeTracker.forget(id)
-                view.removeFromSuperview(); unregister(id); panes[id] = nil
-            }
+            // IMPORTANT (device 2026-07-26, the keybar gap): create + focus the NEW active pane
+            // BEFORE removing the old window's panes. The old pane is first responder; removing
+            // it (or resigning it) with no new first responder yet makes iOS animate the KEYBOARD
+            // OUT and then back IN when the new pane focuses — the container height swings (e.g.
+            // 412 → 746 → 412), and the pane's history seed, fed mid-swing, is left scrolled up
+            // → a gap above the keybar. Transferring first-responder directly from the old pane
+            // to the new one (both share the keybar `inputAccessoryView` context) keeps the
+            // keyboard up the whole time — no swing, so the seed lands at the bottom and stays.
+            // The old-pane teardown moved to AFTER the create loop below.
 
             // Create/position each pane; border the active one.
             // Track whether this apply CREATED any pane (window-switch/reattach): if so, we
@@ -876,6 +878,18 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     view.layer.borderColor = inactiveBorderColor.cgColor
                     view.layer.borderWidth = singlePane ? 0 : 0.5
                 }
+            }
+
+            // Now tear down panes tmux no longer reports — AFTER the new active pane took first
+            // responder above, so the keyboard never drops (see the note before the create loop).
+            // `resignFirstResponder()` on the old pane is a no-op for keyboard purposes now that
+            // the new pane owns it; `removeFromSuperview` + `unregister` (which forgets the seed
+            // state) complete the teardown.
+            for (id, view) in panes where !live.contains(id) {
+                view.resignFirstResponder()
+                coordinator?.removeHalo(from: view)
+                coordinator?.modeTracker.forget(id)
+                view.removeFromSuperview(); unregister(id); panes[id] = nil
             }
 
             // A pane was (re-)created this apply (window-switch/reattach). Re-query tmux's
