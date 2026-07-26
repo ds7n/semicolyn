@@ -13,6 +13,18 @@ final class PaneHistorySeeder {
     private let scrollbackLines: () -> Int
     private let viewForPane: (PaneID) -> TerminalView?
     private var states: [PaneID: PaneSeedState] = [:]
+    /// Panes whose history was just applied and still need a scroll-to-bottom once the
+    /// terminal's row count has SETTLED to the container grid. Confirmed root cause of the
+    /// switched-window keybar gap (geometry log 2026-07-26): the pane FRAME is correct
+    /// (gapPx=0), but `applyHistory` leaves the terminal's viewport SHORT of the true bottom
+    /// (e.g. topRow=192 when maxScrollback=214) — SwiftTerm's feed + the later async tmux
+    /// resize strand yDisp below yBase for panes reattaching into large scrollback. First
+    /// connect has small content that fits, so it never strands; reconnect re-seeds the same
+    /// large scrollback and strands identically (why only a full restart "fixed" it). The
+    /// container drains this set via `bottomAlignAfterResize` (fired from SwiftTerm
+    /// `sizeChanged`) when a pane's terminal rows reach the settled grid, forcing
+    /// topRow = maxScrollback.
+    private var pendingBottomAlign: Set<PaneID> = []
 
     init(runtime: TmuxRuntime,
          scrollbackLines: @escaping () -> Int,
@@ -82,6 +94,7 @@ final class PaneHistorySeeder {
     /// which seeds once, never had it — device 2026-07-26). One reset here, zero extra
     /// captures, is the single-seed path both cases now share.
     func forgetSeedState(_ pane: PaneID) {
+        pendingBottomAlign.remove(pane)   // its view is going away; drop any pending align
         guard states[pane] != nil else { return }
         states[pane] = nil
         DebugLog.shared.log(.seed, decisionLine(
@@ -119,16 +132,40 @@ final class PaneHistorySeeder {
             + "contentSize=\(view.contentSize) frame=\(view.frame.size)")
         clearScrollback(view)
         if !flush.isEmpty { view.feed(byteArray: flush[...]) }
-        // Feeding the history scrolls the terminal so the last line sits at the screen bottom
-        // (SwiftTerm's own newline handling), exactly as a first-connect seed does — no
-        // explicit re-scroll is needed now that a switch seeds ONCE. (The prior #106 bottom-
-        // align + settle re-align existed only to paper over the double-feed that
-        // `forgetSeedState` removes; feeding twice left the viewport scrolled deep into the
-        // duplicated scrollback, which the re-align couldn't fully undo — the keybar gap.)
+        // Scroll to the bottom now (best-effort) AND mark the pane so the container re-aligns
+        // once the terminal's rows SETTLE to the grid. Feeding leaves the viewport short of the
+        // true bottom when the pane reattaches into large scrollback and the tmux resize lands
+        // AFTER the feed (geometry log 2026-07-26: topRow=192 vs maxScrollback=214) → the gap.
+        // A single scroll here isn't enough because the row count is still mid-settle; the
+        // container's `bottomAlignIfRowsSettled` finishes the job when rows == grid.
+        view.scroll(toPosition: 1.0)
+        pendingBottomAlign.insert(pane)
         // Post-feed snapshot: distinguishes "fed but into viewport (contentSize≈frame →
         // no scrollback)" from "view not laid out (frame/contentSize 0)" from "fed OK".
         DebugLog.shared.log(.seed, "seed applyHistory pane=%\(pane.raw) "
             + "post: rows=\(t.rows) topRow=\(t.getTopVisibleRow()) contentSize=\(view.contentSize)")
+    }
+
+    /// Called when a pane's terminal ROW COUNT changes (SwiftTerm `sizeChanged` → a tmux resize
+    /// landed), with `settledRows` = the row count the container currently wants (its last grid).
+    /// While the pane is freshly-seeded and pending, EVERY resize re-scrolls it to the true
+    /// bottom — the switched-window resize arrives as a SEQUENCE (e.g. 62 → 37 → 32), and any
+    /// one of them can re-strand the viewport, so aligning only once is not enough. The pane is
+    /// cleared from pending only when its rows reach `settledRows` (the animation is done), so a
+    /// later user scroll-up is preserved. This is the fix for the keybar gap: the seed leaves
+    /// `topRow` short of `maxScrollback` because the resize lands after the feed (geometry log
+    /// 2026-07-26: topRow=192 vs a 214 bottom). No-op if the pane isn't pending.
+    func bottomAlignAfterResize(_ pane: PaneID, settledRows: Int) {
+        guard pendingBottomAlign.contains(pane), let view = viewForPane(pane) else { return }
+        view.scroll(toPosition: 1.0)
+        let t = view.getTerminal()
+        let done = (t.rows == settledRows)
+        if done { pendingBottomAlign.remove(pane) }
+        DebugLog.shared.log(.seed, decisionLine(
+            "seed:bottomAlign",
+            inputs: [("pane", "%\(pane.raw)"), ("rows", "\(t.rows)"), ("settledRows", "\(settledRows)")],
+            outputs: [("topRow", "\(t.getTopVisibleRow())"), ("cleared", "\(done)")],
+            reason: done ? "rows-settled" : "resize-step"))
     }
 
     private func resyncAll() {
