@@ -72,6 +72,17 @@ struct TmuxPaneContainer: UIViewRepresentable {
         let v = ContainerView()
         v.coordinator = context.coordinator
         context.coordinator.containerView = v
+        // Identity + singleton snapshot at view creation (the `.geometry` diagnostic). The
+        // switched-window gap "resets only on a full app restart, NOT on reconnect" — so the
+        // culprit survives a connection teardown. This logs the ContainerView + Coordinator
+        // ObjectIdentifiers (are they FRESH per connect, or reused?) alongside the app-singleton
+        // font/cell state (TerminalFontProvider + settings), so a device capture proves what
+        // persists across a reconnect vs a process restart.
+        let coordID = UInt(bitPattern: ObjectIdentifier(context.coordinator).hashValue)
+        let viewID = UInt(bitPattern: ObjectIdentifier(v).hashValue)
+        DebugLog.shared.log(.geometry,
+            "geo:makeUIView containerView=0x\(String(viewID, radix: 16)) coordinator=0x\(String(coordID, radix: 16)) "
+            + "settingsFont=\(settings.fontFace):\(settings.fontSize) baseFontSize=\(context.coordinator.baseFontSize)")
         // Wire the coordinator's cache-invalidation hook so a pinch font change
         // forces pane-rect metrics to recompute on the next layout pass.
         context.coordinator.onInvalidateCachedCell = { [weak v] in v?.invalidateCachedCell() }
@@ -595,6 +606,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// layout pass. Called by the coordinator's `onInvalidateCachedCell` hook after
         /// a pinch-zoom font change, ensuring pane rects reflect the new font geometry.
         func invalidateCachedCell() {
+            let old = cachedCell.map { String(format: "%.2fx%.2f", $0.w, $0.h) } ?? "nil"
+            DebugLog.shared.log(.geometry, "geo:invalidateCell was=\(old) → nil (re-measure next layout)")
             cachedCell = nil
             // Force the next layoutSubviews through the early-out (the cell metrics changed,
             // so the cached layout inputs are stale even if bounds/keybar didn't move).
@@ -654,6 +667,57 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 lastLaidOutBounds = bounds.size
                 relayoutExistingPaneFrames(cell: cell)
             }
+            logGeometry(reason: "layout", cell: cell, kbH: kbH, usableH: usableH, grid: grid)
+        }
+
+        /// Comprehensive geometry snapshot (the `.geometry` diagnostic). Logged on-change from
+        /// `layoutSubviews` so a device build self-explains layout bugs — the switched-window
+        /// keybar gap (2026-07-26), the font-stuck-at-8pt cell issue, etc. Everything a layout
+        /// gap could come from, at the moment the frames are set:
+        ///  • container `bounds` + `safeAreaInsets` + `kbH` breakdown → the space we lay into;
+        ///  • `resolvedCell()` CACHED vs a FRESH live re-measure vs SwiftTerm's own optimal frame
+        ///    → catches a stale cached cell driving a wrong grid (the reconnect-survives suspect);
+        ///  • each pane's ACTUAL on-screen frame (`y..maxY` × height) → catches a pane that does
+        ///    not reach the keybar even though `fitPaneRects` targeted `usableH`;
+        ///  • `gapPx` = `usableH − maxPaneBottom` → the container-level gap in points, directly;
+        ///  • the keybar accessory's own frame → where the keybar actually sits.
+        private func logGeometry(reason: String, cell: (w: Double, h: Double),
+                                 kbH: CGFloat, usableH: Double, grid: (cols: Int, rows: Int)) {
+            guard DebugLog.shared.isEnabled(.geometry) else { return }
+            let si = safeAreaInsets
+            let live = liveMeasuredCell()
+            let liveStr = live.map { String(format: "%.2fx%.2f", $0.w, $0.h) } ?? "nil"
+            // Each pane's real frame + the lowest pane bottom (the gap is usableH − that).
+            var maxBottom = 0.0
+            var frames: [String] = []
+            for (id, v) in panes.sorted(by: { $0.key.raw < $1.key.raw }) {
+                let f = v.frame
+                maxBottom = max(maxBottom, Double(f.maxY))
+                frames.append("%\(id.raw)=(y\(Int(f.minY))..\(Int(f.maxY)) h\(Int(f.height)) rows\(v.getTerminal().rows))")
+            }
+            let gapPx = usableH - maxBottom
+            let accFrame = panes.values.first(where: { $0.isFirstResponder })?
+                .inputAccessoryView.map { "\(Int($0.frame.width))x\(Int($0.frame.height))@y\(Int($0.frame.minY))" } ?? "none"
+            DebugLog.shared.log(.geometry,
+                "geo:\(reason) bounds=\(Int(bounds.width))x\(Int(bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) "
+                + "kbH=\(String(format: "%.1f", kbH)) usableH=\(Int(usableH)) grid=\(grid.cols)x\(grid.rows) "
+                + "cellCached=\(String(format: "%.2fx%.2f", cell.w, cell.h)) cellLive=\(liveStr) "
+                + "panes=[\(frames.joined(separator: " "))] maxPaneBottom=\(Int(maxBottom)) "
+                + "gapPx=\(String(format: "%.1f", gapPx)) keybarFrame=\(accFrame)")
+        }
+
+        /// A FRESH, UNCACHED cell measurement straight from SwiftTerm's current optimal frame —
+        /// the comparison against `resolvedCell()`'s cache. If cached ≠ live, the cache is stale
+        /// (a wrong grid → gap). Nil before any pane exists. Does not touch `cachedCell`.
+        private func liveMeasuredCell() -> (w: Double, h: Double)? {
+            guard let pane = panes.values.first else { return nil }
+            let optimal = pane.getOptimalFrameSize()
+            let term = pane.getTerminal()
+            let cols = Double(term.cols), rows = Double(term.rows)
+            guard cols > 0, rows > 0 else { return nil }
+            let w = Double(optimal.width) / cols, h = Double(optimal.height) / rows
+            guard w > 0, h > 0 else { return nil }
+            return (w: w, h: h)
         }
 
         /// Re-apply `paneRects` to the panes ALREADY in `panes` (no create/destroy, no

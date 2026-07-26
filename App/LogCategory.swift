@@ -15,6 +15,7 @@ enum LogCategory: String, CaseIterable, Sendable {
     case predictor   // suggestion lifecycle + secret-exclusion gates
     case keybar      // accessory sizing, macro resolution, live-edit apply
     case seed        // tmux history seeding
+    case geometry    // container bounds/cell/grid/pane-frame + view identity across connects
 
     /// UserDefaults key backing the per-category toggle.
     var storageKey: String { "diagnostics.logcat.\(rawValue)" }
@@ -35,12 +36,15 @@ enum LogCategory: String, CaseIterable, Sendable {
         case .predictor: return "Suggestion lifecycle and secret-exclusion gates. Verbose."
         case .keybar:    return "Accessory sizing, macro resolution, live-edit apply. Verbose."
         case .seed:      return "tmux scrollback history seeding."
+        case .geometry:  return "Container bounds, cell metrics, grid, pane frames, and view identity across connects."
         }
     }
 
     /// Categories ON by default: low-volume, high-diagnostic-value. The high-volume /
     /// niche ones (gesture/render/input/predictor/keybar) default OFF (opt-in when needed).
-    static let defaultEnabled: Set<LogCategory> = [.lifecycle, .connect, .tmux, .seed]
+    /// `geometry` is ON by default while the switched-window layout gap is under active
+    /// investigation (it logs on-change, so it stays low-volume).
+    static let defaultEnabled: Set<LogCategory> = [.lifecycle, .connect, .tmux, .seed, .geometry]
 
     var defaultOn: Bool { Self.defaultEnabled.contains(self) }
 }
