@@ -22,6 +22,33 @@ final class PaneTerminalView: TerminalView {
     /// mouse-mode transition with this view's emulator terminal.
     var onModeRelevantChange: ((ModeRelevantEvent, Terminal) -> Void)?
 
+    /// Full geometry on EVERY layout, in BOTH the raw-SSH (`TerminalScreen`) and tmux -CC
+    /// (`TmuxPaneContainer`) paths — this is the shared pane view for both. The `.geometry`
+    /// diagnostic previously only fired in the -CC container's `layoutSubviews`, so the WORKING
+    /// raw path emitted nothing to diff against (a raw-mode tmux window switch doesn't change
+    /// SwiftTerm's grid, so `sizeChanged` never fired either). Logging here captures the raw
+    /// path continuously so its terminal placement (no keybar gap) can be compared field-for-
+    /// field with the -CC path's (the ~56px keybar gap). `geo:pane` = this view; correlate with
+    /// the surrounding `transport=RAW` vs `geo:layout` lines to know which mode produced it.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard DebugLog.shared.isEnabled(.geometry) else { return }
+        let f = frame, co = contentOffset, cs = contentSize
+        let ci = contentInset, ai = adjustedContentInset
+        let t = getTerminal(), b = t.buffer
+        let sv = superview
+        DebugLog.shared.log(.geometry,
+            "geo:pane frame=\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width))x\(Int(f.height)) "
+            + "vbounds=\(Int(bounds.width))x\(Int(bounds.height)) super=\(sv.map { String(describing: type(of: $0)) } ?? "nil")"
+            + "(\(sv.map { "\(Int($0.bounds.width))x\(Int($0.bounds.height))" } ?? "-")) "
+            + "grid=\(t.cols)x\(t.rows) topRow\(t.getTopVisibleRow()) yDisp\(b.yDisp) scroll\(b.scrollTop)..\(b.scrollBottom) "
+            + "contentSize=\(Int(cs.width))x\(Int(cs.height)) offset=\(Int(co.x)),\(Int(co.y)) "
+            + "inset=(t\(Int(ci.top)),b\(Int(ci.bottom))) adjInset=(t\(Int(ai.top)),b\(Int(ai.bottom))) "
+            + "fr=\(isFirstResponder) clip=\(clipsToBounds) "
+            + "accH=\(String(format: "%.0f", (inputAccessoryView as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1)) "
+            + "accFrameH=\(inputAccessoryView.map { Int($0.frame.height) } ?? -1)")
+    }
+
     override func bufferActivated(source: Terminal) {
         super.bufferActivated(source: source)
         onModeRelevantChange?(.bufferChanged, source)
