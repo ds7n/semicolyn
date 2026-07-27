@@ -418,6 +418,26 @@ struct TerminalScreen: UIViewRepresentable {
                 // sizing concern that must capture on device without a manual toggle (#D).
                 DebugLog.shared.log(.tmux,
                     "sizing:raw bounds=\(Int(source.bounds.width))x\(Int(source.bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) kbH=\(String(format: "%.1f", kbH)) grid=\(newCols)x\(newRows)")
+                // Full geometry for the RAW path, mirroring `TmuxPaneContainer`'s `geo:layout`,
+                // so the WORKING raw render (no keybar gap) can be diffed field-for-field against
+                // the gapping -CC path. Raw reports SwiftTerm's OWN self-measured grid and never
+                // subtracts the keybar (the terminal fills its view, keybar floats over it); -CC
+                // shrinks the pane by kbH. This line exposes exactly how raw places the same
+                // TerminalView so the divergence is visible, not inferred (device 2026-07-27).
+                if DebugLog.shared.isEnabled(.geometry) {
+                    let f = source.frame, co = source.contentOffset, cs = source.contentSize
+                    let ci = source.contentInset, ai = source.adjustedContentInset
+                    let t = source.getTerminal(), b = t.buffer
+                    DebugLog.shared.log(.geometry,
+                        "geo:raw frame=\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width))x\(Int(f.height)) "
+                        + "vbounds=\(Int(source.bounds.width))x\(Int(source.bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) "
+                        + "kbH=\(String(format: "%.1f", kbH)) grid=\(newCols)x\(newRows) rows\(t.rows) "
+                        + "topRow\(t.getTopVisibleRow()) yDisp\(b.yDisp) scroll\(b.scrollTop)..\(b.scrollBottom) "
+                        + "contentSize=\(Int(cs.width))x\(Int(cs.height)) offset=\(Int(co.x)),\(Int(co.y)) "
+                        + "inset=(t\(Int(ci.top)),b\(Int(ci.bottom))) adjInset=(t\(Int(ai.top)),b\(Int(ai.bottom))) "
+                        + "fr=\(source.isFirstResponder) clip=\(source.clipsToBounds) "
+                        + "accFrame=\(source.inputAccessoryView.map { "\(Int($0.frame.width))x\(Int($0.frame.height))@y\(Int($0.frame.minY))" } ?? "none")")
+                }
             }
             resizeDebounce.note(cols: newCols, rows: newRows, at: Date())
             let session = self.session

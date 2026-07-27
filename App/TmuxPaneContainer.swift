@@ -656,8 +656,19 @@ struct TmuxPaneContainer: UIViewRepresentable {
             if inputs == lastLayoutInputs { return }
             lastLayoutInputs = inputs
 
-            let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height), keybarHeight: Double(kbH))
-            // Grid from the KEYBAR-ADJUSTED height (device #1), not raw bounds.height.
+            // Fix (device 2026-07-27, the switched-window keybar gap): compute the grid from the
+            // FULL container height, NOT `bounds − kbH`, matching the raw-SSH path (TerminalScreen)
+            // which has NO gap. Root cause from the raw-vs-CC geo:pane diff: raw sizes its terminal
+            // to the full height (pane = 402x778) and lets the keybar float over the bottom rows;
+            // -CC subtracted kbH → pane = 402x356 inside a 402x412 container, reserving a keybar-
+            // height band INSIDE the ContainerView. But the keybar is an `inputAccessoryView`
+            // hosted in its OWN window over the bottom of the screen — it never fills that reserved
+            // band, so the band was dead black = the gap. SwiftTerm derives its own row count from
+            // `frame.height / cellHeight` (contentInset does NOT change it), so the only self-
+            // consistent, no-gap layout is: pane frame = full container (via `fittedPaneRects`
+            // below) AND the reported grid = full-height rows. The keybar then floats over the
+            // bottom row(s), exactly like the raw path the user confirmed is correct.
+            let usableH = Double(bounds.height)
             guard let grid = terminalGrid(width: Double(bounds.width), height: usableH,
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
             // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15). Log the
@@ -701,23 +712,42 @@ struct TmuxPaneContainer: UIViewRepresentable {
             let si = safeAreaInsets
             let live = liveMeasuredCell()
             let liveStr = live.map { String(format: "%.2fx%.2f", $0.w, $0.h) } ?? "nil"
-            // Each pane's real frame + the lowest pane bottom (the gap is usableH − that).
+            // Per-pane FULL view + scroll-view geometry. When the frame/grid/cell/rows are all
+            // identical between a good and a gapped window (device 2026-07-26), the only place a
+            // difference can hide is HOW the terminal content is placed WITHIN that identical
+            // frame — the UIScrollView's contentOffset / contentInset / adjustedContentInset (a
+            // bottom inset or a non-zero offset shifts the rendered rows up from the bottom = a
+            // gap the frame math can't see), plus the terminal's own viewport (topRow / yDisp)
+            // and whether the pane is first responder (owns the keybar accessory).
             var maxBottom = 0.0
             var frames: [String] = []
             for (id, v) in panes.sorted(by: { $0.key.raw < $1.key.raw }) {
                 let f = v.frame
                 maxBottom = max(maxBottom, Double(f.maxY))
-                frames.append("%\(id.raw)=(y\(Int(f.minY))..\(Int(f.maxY)) h\(Int(f.height)) rows\(v.getTerminal().rows))")
+                let t = v.getTerminal()
+                let co = v.contentOffset, cs = v.contentSize
+                let ci = v.contentInset, ai = v.adjustedContentInset
+                let b = t.buffer
+                frames.append(
+                    "%\(id.raw)=(frame=\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width))x\(Int(f.height)) "
+                    + "vbounds=\(Int(v.bounds.width))x\(Int(v.bounds.height)) "
+                    + "rows\(t.rows) topRow\(t.getTopVisibleRow()) yDisp\(b.yDisp) scroll\(b.scrollTop)..\(b.scrollBottom) "
+                    + "contentSize=\(Int(cs.width))x\(Int(cs.height)) offset=\(Int(co.x)),\(Int(co.y)) "
+                    + "inset=(t\(Int(ci.top)),b\(Int(ci.bottom))) adjInset=(t\(Int(ai.top)),b\(Int(ai.bottom))) "
+                    + "fr=\(v.isFirstResponder) clip=\(v.clipsToBounds) hidden=\(v.isHidden) alpha=\(String(format: "%.1f", v.alpha)))")
             }
             let gapPx = usableH - maxBottom
-            let accFrame = panes.values.first(where: { $0.isFirstResponder })?
-                .inputAccessoryView.map { "\(Int($0.frame.width))x\(Int($0.frame.height))@y\(Int($0.frame.minY))" } ?? "none"
+            // The first-responder pane's keybar accessory frame AND its superview chain height,
+            // so an accessory or a wrapper view mis-sizing shows up too.
+            let fr = panes.values.first(where: { $0.isFirstResponder })
+            let accFrame = fr?.inputAccessoryView.map {
+                "\(Int($0.frame.width))x\(Int($0.frame.height))@y\(Int($0.frame.minY))" } ?? "none"
             DebugLog.shared.log(.geometry,
                 "geo:\(reason) bounds=\(Int(bounds.width))x\(Int(bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) "
                 + "kbH=\(String(format: "%.1f", kbH)) usableH=\(Int(usableH)) grid=\(grid.cols)x\(grid.rows) "
                 + "cellCached=\(String(format: "%.2fx%.2f", cell.w, cell.h)) cellLive=\(liveStr) "
-                + "panes=[\(frames.joined(separator: " "))] maxPaneBottom=\(Int(maxBottom)) "
-                + "gapPx=\(String(format: "%.1f", gapPx)) keybarFrame=\(accFrame)")
+                + "maxPaneBottom=\(Int(maxBottom)) gapPx=\(String(format: "%.1f", gapPx)) keybarFrame=\(accFrame) "
+                + "panes=[\(frames.joined(separator: " | "))]")
         }
 
         /// A FRESH, UNCACHED cell measurement straight from SwiftTerm's current optimal frame —
@@ -745,22 +775,22 @@ struct TmuxPaneContainer: UIViewRepresentable {
             }
         }
 
-        /// Pane rects fitted to the container's CURRENT usable area (bounds width × height
-        /// minus the keybar). We fit rather than use tmux's raw `%layout` geometry directly
-        /// because that geometry LAGS the client size we just reported — after a
-        /// keyboard/keybar show-hide or window switch, tmux's layout still reflects the old
-        /// (smaller) client, so a pane framed straight from it undershoots the visible area,
-        /// leaving dead space below the terminal content and above the keybar (device
-        /// 2026-07-24). `fitPaneRects` stretches the layout to fill the usable area exactly
-        /// (single pane) or proportionally (splits), so there is no gap regardless of the
-        /// tmux settle lag.
+        /// Pane rects fitted to the container's FULL bounds (width × height). We fit rather than
+        /// use tmux's raw `%layout` geometry directly because that geometry LAGS the client size
+        /// we just reported — after a keyboard/keybar show-hide or window switch, tmux's layout
+        /// still reflects the old (smaller) client, so a pane framed straight from it undershoots
+        /// the area (device 2026-07-24). `fitPaneRects` stretches the layout to fill exactly.
+        ///
+        /// Option 1 fix (2026-07-27): fit to the FULL `bounds.height`, NOT `bounds − kbH`. The
+        /// keybar is an `inputAccessoryView` floating over the bottom of the screen, not a view
+        /// occupying the container; reserving `kbH` inside the container left a dead black band =
+        /// the keybar gap. The pane fills the whole container (like the raw path); the keybar
+        /// height is handled by each pane's `contentInset.bottom` (set where panes are framed),
+        /// which scrolls the terminal's bottom rows above the floating keybar.
         private func fittedPaneRects(layout: PaneLayout,
                                      cell: (w: Double, h: Double)) -> [PaneRect] {
             let raw = paneRects(in: layout, cellWidth: cell.w, cellHeight: cell.h)
-            let kbH = firstResponderKeybarHeight()
-            let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height),
-                                                keybarHeight: Double(kbH))
-            return fitPaneRects(raw, toWidth: Double(bounds.width), toHeight: usableH)
+            return fitPaneRects(raw, toWidth: Double(bounds.width), toHeight: Double(bounds.height))
         }
 
         /// Sizing-diagnostic helper: the keybar (`inputAccessoryView`) height of whichever
