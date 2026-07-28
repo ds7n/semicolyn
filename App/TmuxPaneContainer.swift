@@ -115,7 +115,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
     func updateUIView(_ uiView: ContainerView, context: Context) {
         uiView.apply(state: state, register: register, unregister: unregister)
-        // Refresh halo and dot colors on theme changes.
+        // Refresh halo and dot colors on theme changes. Also keep the coordinator's
+        // stored `theme` current: `applyActiveBorder` and `makeKeybarAccessory` both
+        // read it, and without this line a runtime theme change (Settings →
+        // Appearance) would leave pane borders (and newly-created panes' keybar
+        // accessories) frozen on the connect-time theme forever.
+        context.coordinator.theme = theme
         context.coordinator.bellHaloColor = UIColor(Color(theme.bell.edge))
         context.coordinator.accentDotColor = UIColor(Color(theme.accent.primary.alpha(0.40)))
         // Recolor every live pane when the theme changes.
