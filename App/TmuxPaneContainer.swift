@@ -686,12 +686,17 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // changed WITHOUT a tmux-state change (the keybar/keyboard show animation growing
             // bounds after a window switch). `apply` is gated by `RenderSignature` (no geometry
             // dependency), so a pane revealed mid-grow stays at its stale tiny frame until a
-            // scroll provokes a tmux event. Fire only on an actual bounds-size change to avoid
-            // churn under the -CC render storm.
-            if bounds.size != lastLaidOutBounds {
-                lastLaidOutBounds = bounds.size
-                relayoutExistingPaneFrames(cell: cell)
-            }
+            // scroll provokes a tmux event. Re-fit existing panes to the CURRENT bounds on every
+            // pass that gets past the early-out above — reaching here already means a real
+            // geometry change (bounds/cell/kbH), and `fittedPaneRects` depends on `bounds`, so
+            // re-fitting is always correct and cheap. The prior `bounds.size != lastLaidOutBounds`
+            // gate skipped the FINAL re-fit for the FIRST window (its frame was set by an early
+            // `apply()` at a mid-animation bounds, and the settle grow didn't re-fit it), leaving
+            // the first window's terminal ~kbH too tall / behind the keybar until a switch's
+            // `apply()` re-framed it (device 2026-07-28). `lastLaidOutBounds` retained for the
+            // diagnostic only.
+            lastLaidOutBounds = bounds.size
+            relayoutExistingPaneFrames(cell: cell)
             logGeometry(reason: "layout", cell: cell, kbH: kbH, usableH: usableH, grid: grid)
         }
 
