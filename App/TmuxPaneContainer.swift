@@ -198,11 +198,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// updated there. Read by each pane's `isActivePane` callback so a tap can tell
         /// whether it landed on the currently-focused pane.
         var currentActivePane: PaneID?
-        /// Optimistic focus hint: the pane the user just tapped, applied to the
-        /// accent border locally before tmux echoes the layout. Cleared/superseded
-        /// on the next `apply()`. Never the source of truth (server-derived
-        /// `window.activePane` is).
-        var pendingActivePane: PaneID? = nil
         /// Tracks each pane's `InteractionMode`, recomputed from `PaneTerminalView`'s
         /// `bufferActivated`/`mouseModeChanged` overrides (event-driven, replaces the
         /// old render-time poll in `updateMouseDots`).
@@ -333,7 +328,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
                             guard let self else { return }
                             // Optimistic: move border + first responder locally now, before
                             // tmux echoes the layout via the next authoritative `apply()`.
-                            self.pendingActivePane = pane
                             let singlePane = (self.containerView?.panes.count ?? 0) <= 1
                             self.applyActiveBorder(active: pane, singlePane: singlePane)
                             view?.becomeFirstResponder()
@@ -1034,11 +1028,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // one pane (it answers "which pane has focus"). In a single-pane window
             // it reads as a pointless coral rim around the whole terminal, so
             // suppress ALL border chrome there. Keyboard focus is unaffected.
-            // `applyActiveBorder` is the authoritative source (tmux's `window.activePane`);
-            // it also supersedes any optimistic `pendingActivePane` set by a tap.
+            // `applyActiveBorder` is the authoritative source (tmux's `window.activePane`).
             let singlePane = (rects.count <= 1)
             coordinator?.currentActivePane = window.activePane
-            coordinator?.pendingActivePane = nil
             coordinator?.applyActiveBorder(active: window.activePane, singlePane: singlePane)
 
             // Now tear down panes tmux no longer reports, AFTER the new active pane took first
