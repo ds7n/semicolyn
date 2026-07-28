@@ -39,9 +39,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
     var onZoomActivePane: (() -> Void)? = nil
     /// Single tap on a pane: place the cursor at the tapped cell.
     var onPlaceCursor: ((TerminalView, Int, Int) -> Void)? = nil
-    /// The connection view model — passed to each pane's inputAccessory-hosted keybar.
+    /// The connection view model, passed to each pane's inputAccessory-hosted keybar.
     var vm: ConnectionViewModel
-    /// Keybar customization store — passed to each pane's inputAccessory-hosted keybar.
+    /// Keybar customization store, passed to each pane's inputAccessory-hosted keybar.
     var keybarSettings: KeybarSettingsStore = AppStores.shared.keybarSettings
     /// Whether a hardware keyboard is connected (drives the keybar's compact/hidden mode).
     var hardwareKeyboardConnected: Bool = false
@@ -73,7 +73,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         v.coordinator = context.coordinator
         context.coordinator.containerView = v
         // Identity + singleton snapshot at view creation (the `.geometry` diagnostic). The
-        // switched-window gap "resets only on a full app restart, NOT on reconnect" — so the
+        // switched-window gap "resets only on a full app restart, NOT on reconnect", so the
         // culprit survives a connection teardown. This logs the ContainerView + Coordinator
         // ObjectIdentifiers (are they FRESH per connect, or reused?) alongside the app-singleton
         // font/cell state (TerminalFontProvider + settings), so a device capture proves what
@@ -89,12 +89,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
         // Refresh mouse-dot visibility immediately on a mode transition, rather than
         // waiting for the next SwiftUI `updateUIView` pass. Also flip ownership of the
         // drag/tap axis for the transitioning pane: native scroll only in `.localScroll`.
-        // `allowMouseReporting` is ON ONLY in `.mouseReporting` — NOT `.appOwnsInput`.
+        // `allowMouseReporting` is ON ONLY in `.mouseReporting`, NOT `.appOwnsInput`.
         // With it on in `.appOwnsInput`, SwiftTerm forwards the finger drag to the app as
         // SGR mouse events before our `handleScrollViewPan` can translate it to arrow keys,
         // so alt-screen panes (Claude/vim) don't scroll (device trace, build 44: a Claude
-        // drag emitted 98+ SGR mouse sends, 0 arrows, and — because SwiftTerm consumed the
-        // touch — 0 of our gesture logs fired). See the twin in TerminalScreen.
+        // drag emitted 98+ SGR mouse sends, 0 arrows, and, because SwiftTerm consumed the
+        // touch, 0 of our gesture logs fired). See the twin in TerminalScreen.
         context.coordinator.modeTracker.onChange = { [weak v] pane, mode in
             guard let v else { return }
             v.coordinator?.updateMouseDots(for: v.panes)
@@ -181,7 +181,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// a retain cycle across the UIViewRepresentable boundary).
         weak var containerView: ContainerView?
         /// Callbacks supplied by the container/VM (set at construction, refreshed in
-        /// `updateUIView` — mirrors `onTmuxResize`).
+        /// `updateUIView`, mirrors `onTmuxResize`).
         var onIsMultiWindowTmux: () -> Bool = { false }
         var onSwitchWindow: (Int) -> Void = { _ in }
         var onZoomActivePane: () -> Void = { }
@@ -191,7 +191,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// old render-time poll in `updateMouseDots`).
         let modeTracker = PaneModeTracker()
         /// Baseline font size for pinch-zoom; shared across all panes in this window.
-        /// Updated on `.ended`; persists for the window's lifetime only (not stored to host — v1.5+).
+        /// Updated on `.ended`; persists for the window's lifetime only (not stored to host, v1.5+).
         var baseFontSize: Double
         /// Last font face/size applied FROM SETTINGS (not a pinch). `updateUIView`
         /// re-applies to all panes when these differ from the incoming settings, so a
@@ -309,6 +309,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
                             guard let view else { return }
                             self?.onPlaceCursor(view, col, row)
                         },
+                        isActivePane: { false },  // TODO(task4): real tap-to-focus wiring
+                        onSelectPane: { },        // TODO(task4): real tap-to-focus wiring
                         currentMode: { [weak self] in self?.modeTracker.mode(for: pane) ?? .localScroll },
                         applicationCursorKeys: { [weak view] in view?.getTerminal().applicationCursor ?? false },
                         altScrollDecision: { [weak self] in
@@ -415,7 +417,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 tappedView.font = settled
                 onInvalidateCachedCell?()
                 // Persist the zoomed size so it survives reconnect (and updates the
-                // Settings font-size slider) — mirrors the raw-terminal pinch handler.
+                // Settings font-size slider), mirrors the raw-terminal pinch handler.
                 MainActor.assumeIsolated {
                     DebugLog.shared.log(.lifecycle, "user-action: zoom pinch → font=\(baseFontSize)")
                     let store = AppStores.shared.terminalSettings
@@ -435,10 +437,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
         }
 
         /// Update the mouse-dot *visual* for each visible pane from the event-driven
-        /// `modeTracker` (no longer polls terminal state here — `PaneTerminalView`'s
+        /// `modeTracker` (no longer polls terminal state here, `PaneTerminalView`'s
         /// `bufferActivated`/`mouseModeChanged` overrides keep `modeTracker` current).
         /// `isScrollEnabled` / `allowMouseReporting` ownership flips live in
-        /// `modeTracker.onChange` (see `makeUIView`), not here — this used to also
+        /// `modeTracker.onChange` (see `makeUIView`), not here, this used to also
         /// reassign `allowMouseReporting` on every SwiftUI `updateUIView` pass, which
         /// would have clobbered the `onChange` flip's `.mouseReporting` case back to
         /// `false` on the very next render.
@@ -453,7 +455,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         /// Enable/disable a pane's alt-screen drag pan (the arrow-key synthesizer that
         /// owns the drag in `.appOwnsInput`). Routed through the Coordinator so the
-        /// `gestureControllers` store stays private — the mode-transition handler and the
+        /// `gestureControllers` store stays private, the mode-transition handler and the
         /// pane-install path (different types, same file) both call this rather than
         /// reaching into the dictionary. Mirrors `updateMouseDots`.
         func setAltScreenPan(for view: TerminalView, enabled: Bool) {
@@ -478,7 +480,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         // MARK: - TerminalViewDelegate
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
-            // Diagnostic (build 28, key-repeat investigation) — see TerminalScreen.send.
+            // Diagnostic (build 28, key-repeat investigation), see TerminalScreen.send.
             // Redacted the same way as the raw-SSH path: `.input` category (default OFF),
             // gated by the keystrokeContent toggle, with password lines never logged.
             // (Delegate callback is a nonisolated context; hop to the main actor.)
@@ -495,7 +497,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         // tmux owns the visible geometry. The client size is driven by the full
         // container grid (`ContainerView.layoutSubviews` → `noteClientSize`), not a
-        // per-pane size change — a single split pane's grid is not the client size.
+        // per-pane size change, a single split pane's grid is not the client size.
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
             // The pane's terminal row count changed = the tmux resize landed. If this pane was
             // freshly seeded and its viewport left short of the true bottom (the switched-window
@@ -508,7 +510,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         }
 
         /// Debounced tmux client-size update. Called by `ContainerView.layoutSubviews`
-        /// with the full-container grid (bounds ÷ measured cell) — the single accurate
+        /// with the full-container grid (bounds ÷ measured cell), the single accurate
         /// source, replacing the old coarse `sendApproxClientSize` estimate. Debounces
         /// rapid bursts (rotation / keyboard show-hide).
         /// Arm the resize-settle window (device #2 Build 2): for the next `switchResizeQuiet`
@@ -582,7 +584,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         private var cachedCell: (w: Double, h: Double)?
 
         /// Last-applied render signature. `apply(state:)` skips the (expensive) pane re-layout
-        /// when the new state's signature matches — the SwiftUI `updateUIView` pass fires far
+        /// when the new state's signature matches, the SwiftUI `updateUIView` pass fires far
         /// more often than the rendered layout actually changes (the render storm).
         private var lastRenderSignature: RenderSignature?
 
@@ -598,7 +600,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// pane re-frame ONLY when bounds actually changed (avoids churn under the render storm).
         private var lastLaidOutBounds: CGSize = .zero
 
-        /// The three inputs the whole of `layoutSubviews` is a pure function of — cached so a
+        /// The three inputs the whole of `layoutSubviews` is a pure function of, cached so a
         /// no-op pass (identical `bounds`, cell, and keybar height) returns immediately instead
         /// of re-running grid math + `noteClientSize` ~60×/s under the -CC render storm (spec
         /// `2026-07-25-cc-render-storm-earlyout-design.md`). Reset by `invalidateCachedCell`
@@ -633,7 +635,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         /// On each layout pass whose geometry actually changed (rotation, keyboard show-hide,
         /// font change) report the full-container cell grid to tmux as the client size. Uses
-        /// the measured cell metrics, so it's accurate for any font — the single source that
+        /// the measured cell metrics, so it's accurate for any font, the single source that
         /// supersedes the old coarse `sendApproxClientSize` estimate. Debounced in the
         /// coordinator. Redundant no-op passes (identical bounds/cell/keybar) early-out before
         /// any work under the -CC render storm.
@@ -662,7 +664,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // to the full height (pane = 402x778) and lets the keybar float over the bottom rows;
             // -CC subtracted kbH → pane = 402x356 inside a 402x412 container, reserving a keybar-
             // height band INSIDE the ContainerView. But the keybar is an `inputAccessoryView`
-            // hosted in its OWN window over the bottom of the screen — it never fills that reserved
+            // hosted in its OWN window over the bottom of the screen, it never fills that reserved
             // band, so the band was dead black = the gap. SwiftTerm derives its own row count from
             // `frame.height / cellHeight` (contentInset does NOT change it), so the only self-
             // consistent, no-gap layout is: pane frame = full container (via `fittedPaneRects`
@@ -687,7 +689,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // bounds after a window switch). `apply` is gated by `RenderSignature` (no geometry
             // dependency), so a pane revealed mid-grow stays at its stale tiny frame until a
             // scroll provokes a tmux event. Re-fit existing panes to the CURRENT bounds on every
-            // pass that gets past the early-out above — reaching here already means a real
+            // pass that gets past the early-out above, reaching here already means a real
             // geometry change (bounds/cell/kbH), and `fittedPaneRects` depends on `bounds`, so
             // re-fitting is always correct and cheap. The prior `bounds.size != lastLaidOutBounds`
             // gate skipped the FINAL re-fit for the FIRST window (its frame was set by an early
@@ -701,7 +703,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         }
 
         /// Comprehensive geometry snapshot (the `.geometry` diagnostic). Logged on-change from
-        /// `layoutSubviews` so a device build self-explains layout bugs — the switched-window
+        /// `layoutSubviews` so a device build self-explains layout bugs, the switched-window
         /// keybar gap (2026-07-26), the font-stuck-at-8pt cell issue, etc. Everything a layout
         /// gap could come from, at the moment the frames are set:
         ///  • container `bounds` + `safeAreaInsets` + `kbH` breakdown → the space we lay into;
@@ -720,7 +722,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Per-pane FULL view + scroll-view geometry. When the frame/grid/cell/rows are all
             // identical between a good and a gapped window (device 2026-07-26), the only place a
             // difference can hide is HOW the terminal content is placed WITHIN that identical
-            // frame — the UIScrollView's contentOffset / contentInset / adjustedContentInset (a
+            // frame, the UIScrollView's contentOffset / contentInset / adjustedContentInset (a
             // bottom inset or a non-zero offset shifts the rendered rows up from the bottom = a
             // gap the frame math can't see), plus the terminal's own viewport (topRow / yDisp)
             // and whether the pane is first responder (owns the keybar accessory).
@@ -755,7 +757,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 + "panes=[\(frames.joined(separator: " | "))]")
         }
 
-        /// A FRESH, UNCACHED cell measurement straight from SwiftTerm's current optimal frame —
+        /// A FRESH, UNCACHED cell measurement straight from SwiftTerm's current optimal frame,
         /// the comparison against `resolvedCell()`'s cache. If cached ≠ live, the cache is stale
         /// (a wrong grid → gap). Nil before any pane exists. Does not touch `cachedCell`.
         private func liveMeasuredCell() -> (w: Double, h: Double)? {
@@ -782,7 +784,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         /// Pane rects fitted to the container's FULL bounds (width × height). We fit rather than
         /// use tmux's raw `%layout` geometry directly because that geometry LAGS the client size
-        /// we just reported — after a keyboard/keybar show-hide or window switch, tmux's layout
+        /// we just reported, after a keyboard/keybar show-hide or window switch, tmux's layout
         /// still reflects the old (smaller) client, so a pane framed straight from it undershoots
         /// the area (device 2026-07-24). `fitPaneRects` stretches the layout to fill exactly.
         ///
@@ -821,8 +823,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// exactly what SwiftTerm renders. A prior fix derived the cell from the font
         /// (`"W".size()` + `lineHeight`) to break the 1×N-collapse feedback loop, but that
         /// formula differs from SwiftTerm's (`ceil("W".width·scale)/scale`,
-        /// `ceil(ascent+descent+leading)·lineSpacing`), leaving the reported grid 1–2 cols
-        /// off. Reading SwiftTerm's cell back is both exact and loop-immune — the old
+        /// `ceil(ascent+descent+leading)·lineSpacing`), leaving the reported grid 1-2 cols
+        /// off. Reading SwiftTerm's cell back is both exact and loop-immune, the old
         /// collapse came from `viewBounds ÷ cols` (bounds and cols disagree mid-zoom);
         /// here the `cols` cancels out of `cellDimension·cols ÷ cols`, so zoom state can't
         /// poison it. Cached until the font changes (`invalidateCachedCell()` on a pinch).
@@ -831,14 +833,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Simplest correct source: ask SwiftTerm for the cell it actually renders
             // with. `getOptimalFrameSize()` returns `cellDimension × (cols, rows)`, so
             // dividing back out by `cols`/`rows` recovers SwiftTerm's own snapped cell
-            // EXACTLY — no re-deriving it from `"W".size()` + lineHeight, which differs
+            // EXACTLY, no re-deriving it from `"W".size()` + lineHeight, which differs
             // from SwiftTerm's `ceil("W".width·scale)/scale` and `ceil(ascent+descent+
-            // leading)`; that mismatch left the reported grid 1–2 cols off.
+            // leading)`; that mismatch left the reported grid 1-2 cols off.
             //
             // This is NOT the old `bounds ÷ cols` readback that caused the 1×N collapse:
             // there the numerator was the pane's *view bounds* (which disagree with cols
             // during a zoom transient → poisoned cell). Here numerator and denominator
-            // are `cellDimension·cols` and `cols` — the `cols` cancels, yielding
+            // are `cellDimension·cols` and `cols`, the `cols` cancels, yielding
             // `cellDimension` regardless of zoom state. Loop-immune by construction.
             if let pane = panes.values.first {
                 let optimal = pane.getOptimalFrameSize()
@@ -855,7 +857,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             }
             // Before any pane exists we can't ask SwiftTerm yet; fall back to the
             // configured font's measurement (left UNcached so the next pass upgrades to
-            // SwiftTerm's real cell). Pure font math — no bounds, no cols — so a zoomed
+            // SwiftTerm's real cell). Pure font math, no bounds, no cols, so a zoomed
             // pane can never corrupt this path either.
             let font = coordinator.map { TerminalFontProvider.shared.font(for: $0.settings.fontFace,
                                                                           size: CGFloat($0.baseFontSize)) }
@@ -881,7 +883,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             lastAppliedLayout = layout   // device #2: so layoutSubviews can re-frame on a geometry-only change
             // The render-storm early-out in layoutSubviews caches (bounds, cell, kbH). A window
             // switch changes the LAYOUT without changing any of those three, so force the next
-            // layoutSubviews through the full body — otherwise a pass whose (bounds, cell, kbH)
+            // layoutSubviews through the full body, otherwise a pass whose (bounds, cell, kbH)
             // was already seen (e.g. the settled keyboard-up size) early-outs and skips the pane
             // re-fit, stranding the pane at a mid-switch-animation frame → terminal sits too high
             // with a gap above the keybar (device 2026-07-25, build 82).
@@ -898,11 +900,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // IMPORTANT (device 2026-07-26, the keybar gap): create + focus the NEW active pane
             // BEFORE removing the old window's panes. The old pane is first responder; removing
             // it (or resigning it) with no new first responder yet makes iOS animate the KEYBOARD
-            // OUT and then back IN when the new pane focuses — the container height swings (e.g.
+            // OUT and then back IN when the new pane focuses, the container height swings (e.g.
             // 412 → 746 → 412), and the pane's history seed, fed mid-swing, is left scrolled up
             // → a gap above the keybar. Transferring first-responder directly from the old pane
             // to the new one (both share the keybar `inputAccessoryView` context) keeps the
-            // keyboard up the whole time — no swing, so the seed lands at the bottom and stays.
+            // keyboard up the whole time, no swing, so the seed lands at the bottom and stays.
             // The old-pane teardown moved to AFTER the create loop below.
 
             // Create/position each pane; border the active one.
@@ -926,15 +928,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     if let s = coordinator?.settings {
                         t.font = TerminalFontProvider.shared.font(for: s.fontFace, size: CGFloat(s.fontSize))
                         // Give the pane a scrollback buffer so the user can scroll
-                        // back through session output — the raw-SSH path already does
+                        // back through session output, the raw-SSH path already does
                         // this (TerminalScreen.swift); tmux panes were missing it, so
                         // SwiftTerm's tiny default left nothing to scroll to. (Pre-attach
-                        // history is separate: control mode doesn't replay it — that
+                        // history is separate: control mode doesn't replay it, that
                         // needs tmux copy-mode/capture-pane, a future capability.)
                         t.getTerminal().options.scrollback = s.scrollbackLines
                     }
                     // Event-driven InteractionMode: `pane` (this pane's PaneID) is
-                    // captured directly by the closure — no reverse `paneID(for:)`
+                    // captured directly by the closure, no reverse `paneID(for:)`
                     // lookup needed, since this view is created for exactly this pane.
                     let pane = rect.pane
                     t.onModeRelevantChange = { [weak coordinator] event, term in
@@ -993,7 +995,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 }
             }
 
-            // Now tear down panes tmux no longer reports — AFTER the new active pane took first
+            // Now tear down panes tmux no longer reports, AFTER the new active pane took first
             // responder above, so the keyboard never drops (see the note before the create loop).
             // `resignFirstResponder()` on the old pane is a no-op for keyboard purposes now that
             // the new pane owns it; `removeFromSuperview` + `unregister` (which forgets the seed
@@ -1020,7 +1022,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 }
                 // NOTE: no explicit reseed here. Switching destroys the off-screen window's
                 // pane views; `unregisterPane` forgets their seed state, so the fresh views
-                // re-created above seed themselves via `registerPane` → `paneDidAppear` — ONE
+                // re-created above seed themselves via `registerPane` → `paneDidAppear`, ONE
                 // `capture-pane`, exactly like a first connect. An earlier `recapturePaneHistory`
                 // reseed here fired a SECOND capture on top of that, double-feeding the history
                 // and stranding the viewport mid-scrollback → the keybar gap (device 2026-07-26).
@@ -1028,7 +1030,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             previousActiveWindow = state.activeWindow
         }
 
-        /// Why a render fired — for the `.render` diagnostic. Compares the previous signature-
+        /// Why a render fired, for the `.render` diagnostic. Compares the previous signature-
         /// bearing state to the new one via cheap field checks. Best-effort labeling.
         private func renderChangeReason(old: RenderSignature?, new: RenderSignature, state: TmuxSessionState) -> String {
             old == nil ? "initial" : "changed"
