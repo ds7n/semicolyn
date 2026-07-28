@@ -17,7 +17,7 @@ struct TerminalScreen: UIViewRepresentable {
     /// The live session is retained here for resize notifications only.
     let session: ShellSession?
     /// Optional explicit resize sink (debounced cols/rows). When set, it OWNS
-    /// resize delivery and `session?.resize` is NOT called — used by the Mosh path
+    /// resize delivery and `session?.resize` is NOT called, used by the Mosh path
     /// (which has no `ShellSession`; it drives `MoshSession.resizeCols:rows:` via
     /// `vm.setMoshClientSize`). When nil, resize falls back to `session?.resize`
     /// (the raw-SSH path). Mirrors the tmux branch's `onTmuxResize` convention.
@@ -33,9 +33,9 @@ struct TerminalScreen: UIViewRepresentable {
     var onTitle: ((String) -> Void)? = nil
     /// Called when the user taps an ssh:// link; routes to the confirm-connect sheet.
     var onSSHLink: ((URL) -> Void)? = nil
-    /// The connection view model — passed to the inputAccessory-hosted keybar/predictor.
+    /// The connection view model, passed to the inputAccessory-hosted keybar/predictor.
     var vm: ConnectionViewModel
-    /// Keybar customization store — passed to the inputAccessory-hosted keybar.
+    /// Keybar customization store, passed to the inputAccessory-hosted keybar.
     var keybarSettings: KeybarSettingsStore = AppStores.shared.keybarSettings
     /// Whether a hardware keyboard is connected (drives the keybar's compact/hidden mode).
     var hardwareKeyboardConnected: Bool = false
@@ -61,13 +61,13 @@ struct TerminalScreen: UIViewRepresentable {
             coordinator?.modeTracker.recompute(terminal: term, altSource: .rawLive)
         }
         // Flip drag/tap ownership on a mode transition (replaces the init-time
-        // dot-only closure — also refreshes the dot alongside). `isScrollEnabled`
+        // dot-only closure, also refreshes the dot alongside). `isScrollEnabled`
         // parks SwiftTerm's native pan in `appOwnsInput`.
         //
         // `allowMouseReporting` is ON ONLY in `.mouseReporting`. It must be OFF in
         // `.appOwnsInput`: with it on, SwiftTerm forwards the finger drag to the app as
         // SGR mouse events BEFORE our `handleScrollViewPan` can translate it into arrow
-        // keys — so the alt-screen drag→arrows path never runs and Claude/vim panes don't
+        // keys, so the alt-screen drag→arrows path never runs and Claude/vim panes don't
         // scroll (device trace, build 44: a drag emitted 98 SGR mouse sends, 0 arrows).
         // The spec's "tap→mouse in appOwnsInput" is subordinate to drag→arrows here, since
         // a single SwiftTerm boolean governs both and drag-scroll is the primary need.
@@ -121,7 +121,7 @@ struct TerminalScreen: UIViewRepresentable {
         // controller reads `currentMode()` to route drag/tap accordingly.
         terminal.allowMouseReporting = false
 
-        // Restore the keyboard (and, with it, the keybar — which now rides as the
+        // Restore the keyboard (and, with it, the keybar, which now rides as the
         // terminal's inputAccessoryView, PR #66) after it's been dismissed. A tap only
         // re-claims first responder when the terminal is NOT already first responder;
         // when the keyboard is up this recognizer no-ops and SwiftTerm's own tap
@@ -147,6 +147,9 @@ struct TerminalScreen: UIViewRepresentable {
                     guard let terminal else { return }
                     coordinator?.placeCursor(toCol: col, toRow: row, in: terminal)
                 },
+                // Raw shell has exactly one pane, always active, and no tmux select-pane.
+                isActivePane: { true },
+                onSelectPane: { },
                 currentMode: { [weak coordinator = context.coordinator] in coordinator?.modeTracker.mode ?? .localScroll },
                 applicationCursorKeys: { [weak terminal] in terminal?.getTerminal().applicationCursor ?? false },
                 altScrollDecision: { [weak coordinator = context.coordinator] in
@@ -175,7 +178,7 @@ struct TerminalScreen: UIViewRepresentable {
         // Sync our alt-screen pan to the CURRENT mode: the mode was primed above (line
         // ~81) BEFORE this controller existed, so a terminal that mounts already on the
         // alternate screen (reattach into a running vim/Claude) needs its pan enabled
-        // now — `onChange` only fires on a future transition, not the prime.
+        // now, `onChange` only fires on a future transition, not the prime.
         gestureController.setAltScreenPanEnabled(context.coordinator.modeTracker.mode == .appOwnsInput)
         gestureController.setSwitchPanEnabled(context.coordinator.modeTracker.mode != .appOwnsInput)
         MainActor.assumeIsolated {
@@ -192,7 +195,7 @@ struct TerminalScreen: UIViewRepresentable {
     func updateUIView(_ uiView: TerminalView, context: Context) {
         // Claim keyboard focus ONCE when the view first lands in a window (so the
         // on-screen keyboard + keybar accessory appear). We don't re-claim on later
-        // passes — a user who dismisses the keyboard is not fought here. Re-showing it
+        // passes, a user who dismisses the keyboard is not fought here. Re-showing it
         // after dismissal is the job of `handleRestoreTap` (tap the terminal).
         if !context.coordinator.didInitialFocus, uiView.window != nil {
             context.coordinator.didInitialFocus = true
@@ -247,7 +250,7 @@ struct TerminalScreen: UIViewRepresentable {
         /// the terminal's mouse mode is active so mouse events reach the app.
         var selectionLongPress: UILongPressGestureRecognizer?
         /// Baseline font size for pinch-zoom; updated when a pinch gesture ends.
-        /// Persists for the window's lifetime only (not stored to the host — v1.5+).
+        /// Persists for the window's lifetime only (not stored to the host, v1.5+).
         var baseSize: Double
         /// Last font face/size applied FROM SETTINGS (not from a pinch). Used by
         /// `updateUIView` to detect a settings change (picker) and re-apply live,
@@ -324,7 +327,7 @@ struct TerminalScreen: UIViewRepresentable {
                 baseSize = newSize
             case .ended:
                 // baseSize is up-to-date from the .changed accumulation; snap it to a
-                // whole pt on release (font sizes are always integers — the live scale
+                // whole pt on release (font sizes are always integers, the live scale
                 // above is smooth/fractional, this commits an integer).
                 baseSize = TerminalSettings.roundedFont(baseSize)
                 recognizer.scale = 1
@@ -351,7 +354,7 @@ struct TerminalScreen: UIViewRepresentable {
         }
 
         /// Re-show the keyboard (and the keybar accessory) after the user has dismissed
-        /// it. Only acts when the terminal is NOT already first responder — when the
+        /// it. Only acts when the terminal is NOT already first responder, when the
         /// keyboard is up, this no-ops and SwiftTerm's own tap (cursor placement) is
         /// unaffected (this recognizer has `cancelsTouchesInView = false`).
         @objc func handleRestoreTap(_ recognizer: UITapGestureRecognizer) {
@@ -385,7 +388,7 @@ struct TerminalScreen: UIViewRepresentable {
         }
 
         /// Place the terminal cursor at (toCol,toRow) by emitting arrow keys from the
-        /// current cursor cell (single-tap cursor placement — reuses the pure encoders).
+        /// current cursor cell (single-tap cursor placement, reuses the pure encoders).
         func placeCursor(toCol: Int, toRow: Int, in view: TerminalView) {
             let term = view.getTerminal()
             let cur = term.getCursorLocation()   // .x = col, .y = row (see SwiftTermEchoOracle)
@@ -458,10 +461,10 @@ struct TerminalScreen: UIViewRepresentable {
         }
 
         /// Update the mouse-dot *visual* from the event-driven `modeTracker` (no
-        /// longer polls terminal state here — `PaneTerminalView`'s
+        /// longer polls terminal state here, `PaneTerminalView`'s
         /// `bufferActivated`/`mouseModeChanged` overrides keep `modeTracker` current).
         /// `isScrollEnabled` / `allowMouseReporting` ownership flips live in
-        /// `modeTracker.onChange` (see `makeUIView`), not here — this used to also
+        /// `modeTracker.onChange` (see `makeUIView`), not here, this used to also
         /// reassign `allowMouseReporting` on every SwiftUI `updateUIView` pass, which
         /// would have clobbered the `onChange` flip's `.mouseReporting` case back to
         /// `false` on the very next render.
@@ -509,8 +512,8 @@ struct TerminalScreen: UIViewRepresentable {
 /// sequence (`ESC [ <n> SP q`).
 ///
 /// This is the mechanism the Plan C spec calls for ("engine applies `\x1b[<n> q`
-/// overrides") and uses only SwiftTerm's `feed` — already exercised for PTY
-/// output — so it avoids any dependency on a native cursor-style property. The
+/// overrides") and uses only SwiftTerm's `feed`, already exercised for PTY
+/// output, so it avoids any dependency on a native cursor-style property. The
 /// `style` parameter is qualified to `SemicolynKit.CursorStyle` to disambiguate
 /// from SwiftTerm's own `CursorStyle`.
 private func applyCursor(to terminal: TerminalView, style: SemicolynKit.CursorStyle, blink: Bool) {

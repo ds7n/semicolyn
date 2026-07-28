@@ -6,7 +6,7 @@ import SemicolynKit
 
 /// Owns the terminal touch map for a single `TerminalView`, replacing SwiftTerm's
 /// built-in tap/long-press recognizers. In `.localScroll` a single-finger vertical
-/// drag scrolls via the terminal's NATIVE `UIScrollView` pan (kept enabled — we do
+/// drag scrolls via the terminal's NATIVE `UIScrollView` pan (kept enabled, we do
 /// not fight it); in `.appOwnsInput` (alt-screen) the mount parks that pan
 /// (`isScrollEnabled = false`) and this controller streams the drag to the app as
 /// arrow-key runs. A horizontal drag on the native pan is axis-locked via
@@ -16,7 +16,7 @@ import SemicolynKit
 /// double/triple-tap word/line-select; long-press zooms the tmux pane; two-finger
 /// tap shows the edit menu. Routing is mode-driven: the mount tracks each pane's
 /// `InteractionMode` (`.localScroll` / `.appOwnsInput` / `.mouseReporting`) and this
-/// controller reads it via `currentMode()` — a `.mouseReporting` pane yields taps to
+/// controller reads it via `currentMode()`, a `.mouseReporting` pane yields taps to
 /// SwiftTerm's mouse forwarding (`allowMouseReporting = true`, set by the mount), while
 /// an `.appOwnsInput` (alt-screen) pane keeps `allowMouseReporting = false` so SwiftTerm
 /// does NOT consume the drag as mouse: its vertical drag is translated into arrow-key
@@ -25,7 +25,7 @@ import SemicolynKit
 /// SwiftTerm's own tap/long-press/pan recognizers are added via plain
 /// `addGestureRecognizer` calls but never stored behind a public accessor (its
 /// `disableMousePanGesture()` / `disableSelectionPanGesture()` helpers are
-/// `internal`, not `public`, in the pinned SwiftTerm release — not reachable from
+/// `internal`, not `public`, in the pinned SwiftTerm release, not reachable from
 /// this module). We disable everything SwiftTerm has installed by scanning
 /// `terminalView.gestureRecognizers` for recognizers that are not ours, which also
 /// covers its two pan recognizers on the rare case they're already attached at
@@ -37,6 +37,12 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let onSwitchWindow: (Int) -> Void
         let onLongPressZoom: () -> Void
         let onPlaceCursor: (_ toCol: Int, _ toRow: Int) -> Void
+        /// Whether THIS pane is currently the active (focused) pane. Read fresh
+        /// on each tap; backs the tap-to-focus decision.
+        let isActivePane: () -> Bool
+        /// Focus THIS pane (tap on an inactive pane). Optimistically moves the
+        /// accent border locally, then sends `select-pane -t %N`.
+        let onSelectPane: () -> Void
         /// The pane's current `InteractionMode`: snapshotted once at drag `.began`,
         /// and read fresh on each tap. The single source of truth for gesture routing.
         let currentMode: () -> InteractionMode
@@ -93,7 +99,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private var flingCoord: (col: Int, row: Int) = (1, 1)
 
     // Our recognizers (kept so we can identify + remove them, and so the delegate can
-    // tell ours apart from SwiftTerm's). Note: vertical scroll is NOT one of ours — it
+    // tell ours apart from SwiftTerm's). Note: vertical scroll is NOT one of ours, it
     // stays on the terminal's native UIScrollView pan; the horizontal window-switch is
     // driven by our own `switchPan` (see `handleSwitchPan`), not by riding that pan.
     private var ours: [UIGestureRecognizer] = []
@@ -113,7 +119,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// inherited pan). This pan survives that flip because it is our own,
     /// independent recognizer. Gating it on the mode guarantees exactly ONE live
     /// drag-recognizer per mode (native pan in `.localScroll`, this one in
-    /// `.appOwnsInput`) — no straddle.
+    /// `.appOwnsInput`), no straddle.
     private var altScreenPan: UIPanGestureRecognizer!
     /// OUR always-on window-switch pan. Unlike `altScreenPan` (only `.appOwnsInput`), this is
     /// enabled in `.localScroll`/`.mouseReporting` where the plain-shell swipe used to ride
@@ -138,7 +144,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // `addGestureRecognizer` calls with no public stored handle → disable everything
         // currently attached that is NOT ours. Ours aren't installed yet at this point,
         // so every existing recognizer here is SwiftTerm's (or a sibling like pinch,
-        // which the mount installs AFTER this controller — order matters, see mount).
+        // which the mount installs AFTER this controller, order matters, see mount).
         //
         // CRUCIAL EXCEPTION: `TerminalView` is a `UIScrollView` and scrolls via its
         // INHERITED `panGestureRecognizer`. We must NOT disable it: doing so kills
@@ -156,7 +162,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// Disable SwiftTerm's LAZILY-created selection/mouse pan recognizers.
     ///
     /// The init-time `disableSwiftTermRecognizers` sweep is a one-time snapshot, but
-    /// SwiftTerm creates its `panSelectionGesture` (and `panMouseGesture`) on demand —
+    /// SwiftTerm creates its `panSelectionGesture` (and `panMouseGesture`) on demand,
     /// `enableSelectionPanGesture()` runs the first time a selection becomes active, i.e.
     /// AFTER our sweep. That recognizer (an extra `UIPanGestureRecognizer` that is neither
     /// ours nor the inherited scroll pan) then hijacks every subsequent drag as a text
@@ -168,7 +174,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     ///
     /// NOTE (build 42): this is now DEFENSE-IN-DEPTH, not the primary guard. It only runs
     /// on the scroll pan's `.began`, which never fires when the selection pan *wins*
-    /// arbitration — that case is what let selection survive. The primary fix is the
+    /// arbitration, that case is what let selection survive. The primary fix is the
     /// simultaneity delegate (`.selectionPan` mutually-exclusive with `.scrollPan` +
     /// `shouldRequireFailureOf` subordinating it), which makes the scroll pan win before
     /// the selection pan can start. This sweep stays as a cheap belt-and-suspenders.
@@ -233,7 +239,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         twoFingerTap.delegate = self
 
         // Tap disambiguation: single waits for double to fail, double waits for triple.
-        // single-tap deliberately requires ONLY double (not triple) — so cursor
+        // single-tap deliberately requires ONLY double (not triple), so cursor
         // placement resolves after a single failed-double window, not the full
         // single→double→triple chain. Keeps all three gestures.
         singleTap.require(toFail: doubleTap)
@@ -242,7 +248,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         editMenu = UIEditMenuInteraction(delegate: self)
         view.addInteraction(editMenu)
 
-        // OUR alt-screen drag pan. Starts DISABLED — the pane mounts in `.localScroll`
+        // OUR alt-screen drag pan. Starts DISABLED, the pane mounts in `.localScroll`
         // where the native scroll pan owns the drag. The mount enables it on transition
         // into `.appOwnsInput` (see `setAltScreenPanEnabled`), where `isScrollEnabled =
         // false` has parked the native pan and this is the only live drag-owner.
@@ -266,7 +272,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
         // Tap snappiness: UIScrollView delays content-touch delivery (~150ms) to first
         // decide whether a touch is the start of a scroll, which made single-tap cursor
-        // placement feel sluggish. Deliver touches immediately — our tap recognizers no
+        // placement feel sluggish. Deliver touches immediately, our tap recognizers no
         // longer wait on the scroll-detection window. (The pan still recognizes a drag
         // fine; only the initial delivery delay is removed.)
         view.delaysContentTouches = false
@@ -282,7 +288,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     /// Enable OUR alt-screen drag pan (arrow-key synthesis) for exactly the
     /// `.appOwnsInput` mode, and disable it otherwise. Called by the mount from the
-    /// `modeTracker.onChange` handler — the same place it flips `view.isScrollEnabled` —
+    /// `modeTracker.onChange` handler, the same place it flips `view.isScrollEnabled`,
     /// so the two toggles stay in lockstep: native scroll pan and our pan are never both
     /// live. `enabled == (mode == .appOwnsInput)` at the call site.
     func setAltScreenPanEnabled(_ enabled: Bool) {
@@ -456,7 +462,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         }
     }
 
-    /// OUR alt-screen drag pan — enabled ONLY in `.appOwnsInput` (via
+    /// OUR alt-screen drag pan, enabled ONLY in `.appOwnsInput` (via
     /// `setAltScreenPanEnabled`). The mount has parked the native scroll pan
     /// (`isScrollEnabled = false`) there, so this is the single live drag-owner: it
     /// translates the vertical drag into arrow-key runs (`AltScreenScroll`) streamed to
@@ -615,31 +621,28 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // (which called `becomeFirstResponder`), and PR #90's `editingInteractionConfiguration
         // = .none` suppressed the system tap-to-focus, so nothing re-presented the keyboard
         // after a dismiss (device report, build 44). Raise it explicitly here in EVERY mode
-        // — even an alt-screen/mouse-reporting app needs the keyboard to type.
+        //, even an alt-screen/mouse-reporting app needs the keyboard to type.
         if !view.isFirstResponder {
             let ok = view.becomeFirstResponder()
             DebugLog.shared.log(.gesture, "gesture:singleTap becomeFirstResponder=\(ok)")
         }
-        switch callbacks.currentMode() {
-        case .mouseReporting, .appOwnsInput:
-            // App owns clicks. In `.mouseReporting` SwiftTerm forwards the tap as a mouse
-            // event (`allowMouseReporting = true`). In `.appOwnsInput` we keep mouse
-            // reporting OFF (so the drag reaches our arrow path), so the tap simply yields
-            // — no cursor placement, no mouse. Either way, don't place a cursor here.
+        switch paneTapAction(isActivePane: callbacks.isActivePane(),
+                             mode: callbacks.currentMode(),
+                             hasSelection: callbacks.hasSelection()) {
+        case .focusPane:
+            callbacks.onSelectPane()
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=focus-pane")
+        case .active(.clearSelection):
+            callbacks.clearSelection()
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=clear")
+        case .active(.placeCursor):
+            let p = g.location(in: view)
+            let target = cell(at: p, in: view)
+            callbacks.onPlaceCursor(target.col, target.row)
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=place at=(\(target.col),\(target.row))")
+        case .yield:
             DebugLog.shared.log(.gesture, "gesture:singleTap action=appOwns mode=\(callbacks.currentMode())")
             return
-        case .localScroll:
-            let action = tapAction(hasSelection: callbacks.hasSelection())
-            switch action {
-            case .clearSelection:
-                callbacks.clearSelection()
-                DebugLog.shared.log(.gesture, "gesture:singleTap action=clear")
-            case .placeCursor:
-                let p = g.location(in: view)
-                let target = cell(at: p, in: view)
-                callbacks.onPlaceCursor(target.col, target.row)
-                DebugLog.shared.log(.gesture, "gesture:singleTap action=place at=(\(target.col),\(target.row))")
-            }
         }
     }
 
@@ -736,7 +739,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         if g is UIPinchGestureRecognizer { return .pinch }
         if g is UITapGestureRecognizer { return .tap }
         // A pan that is neither the inherited scroll pan, our alt-screen pan, nor one of
-        // our taps/long-press is SwiftTerm's lazily-created selection/mouse pan — the
+        // our taps/long-press is SwiftTerm's lazily-created selection/mouse pan, the
         // recognizer that hijacks a drag as text selection. Classifying it as
         // `.selectionPan` makes the simultaneity policy exclude it from co-recognizing
         // with the scroll pan.
@@ -746,7 +749,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     // Simultaneity policy lives in Kit (`gesturesMayRecognizeSimultaneously`): pinch
     // coexists with the 1-finger pan/taps, but the long-press must NOT co-recognize
-    // with the scroll pan — otherwise a moving-finger drag was treated as a held-touch
+    // with the scroll pan, otherwise a moving-finger drag was treated as a held-touch
     // text selection (device trace 2026-07-13: every drag started a selection). Making
     // that one pairing exclusive lets the pan cancel the long-press on movement.
     func gestureRecognizer(_ g: UIGestureRecognizer,
