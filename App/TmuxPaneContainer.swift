@@ -39,6 +39,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
     var onZoomActivePane: (() -> Void)? = nil
     /// Single tap on a pane: place the cursor at the tapped cell.
     var onPlaceCursor: ((TerminalView, Int, Int) -> Void)? = nil
+    /// Single tap on an inactive pane: focus it (tap-to-focus, `select-pane -t %N`).
+    var onSelectPane: ((PaneID) -> Void)? = nil
     /// The connection view model, passed to each pane's inputAccessory-hosted keybar.
     var vm: ConnectionViewModel
     /// Keybar customization store, passed to each pane's inputAccessory-hosted keybar.
@@ -58,6 +60,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         if let onSwitchWindow { c.onSwitchWindow = onSwitchWindow }
         if let onZoomActivePane { c.onZoomActivePane = onZoomActivePane }
         if let onPlaceCursor { c.onPlaceCursor = onPlaceCursor }
+        if let onSelectPane { c.onSelectPane = onSelectPane }
         // Late-arriving alternate_on reply (pane already mounted by the time tmux
         // answers the attach-prime query): reconcile straight into modeTracker.
         // The early-arriving case (reply before mount) is handled at pane-creation
@@ -111,9 +114,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: ContainerView, context: Context) {
-        uiView.apply(state: state, register: register, unregister: unregister,
-                     activeBorderColor: UIColor(Color(theme.focus.paneBorder)),
-                     inactiveBorderColor: UIColor(Color(theme.focus.paneBorderInactive)))
+        uiView.apply(state: state, register: register, unregister: unregister)
         // Refresh halo and dot colors on theme changes.
         context.coordinator.bellHaloColor = UIColor(Color(theme.bell.edge))
         context.coordinator.accentDotColor = UIColor(Color(theme.accent.primary.alpha(0.40)))
@@ -141,6 +142,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
         if let onSwitchWindow { context.coordinator.onSwitchWindow = onSwitchWindow }
         if let onZoomActivePane { context.coordinator.onZoomActivePane = onZoomActivePane }
         if let onPlaceCursor { context.coordinator.onPlaceCursor = onPlaceCursor }
+        if let onSelectPane { context.coordinator.onSelectPane = onSelectPane }
         // Update mouse-active dot visibility and selection gesture state for all panes.
         context.coordinator.updateMouseDots(for: uiView.panes)
     }
@@ -186,6 +188,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
         var onSwitchWindow: (Int) -> Void = { _ in }
         var onZoomActivePane: () -> Void = { }
         var onPlaceCursor: (TerminalView, Int, Int) -> Void = { _, _, _ in }
+        var onSelectPane: (PaneID) -> Void = { _ in }
+        /// The active pane as of the last authoritative `apply()` (from `window.activePane`),
+        /// updated there. Read by each pane's `isActivePane` callback so a tap can tell
+        /// whether it landed on the currently-focused pane.
+        var currentActivePane: PaneID?
+        /// Optimistic focus hint: the pane the user just tapped, applied to the
+        /// accent border locally before tmux echoes the layout. Cleared/superseded
+        /// on the next `apply()`. Never the source of truth (server-derived
+        /// `window.activePane` is).
+        var pendingActivePane: PaneID? = nil
         /// Tracks each pane's `InteractionMode`, recomputed from `PaneTerminalView`'s
         /// `bufferActivated`/`mouseModeChanged` overrides (event-driven, replaces the
         /// old render-time poll in `updateMouseDots`).
@@ -309,8 +321,20 @@ struct TmuxPaneContainer: UIViewRepresentable {
                             guard let view else { return }
                             self?.onPlaceCursor(view, col, row)
                         },
-                        isActivePane: { false },  // TODO(task4): real tap-to-focus wiring
-                        onSelectPane: { },        // TODO(task4): real tap-to-focus wiring
+                        isActivePane: { [weak self] in
+                            self?.currentActivePane == pane
+                        },
+                        onSelectPane: { [weak self, weak view] in
+                            guard let self else { return }
+                            // Optimistic: move border + first responder locally now, before
+                            // tmux echoes the layout via the next authoritative `apply()`.
+                            self.pendingActivePane = pane
+                            let singlePane = (self.containerView?.panes.count ?? 0) <= 1
+                            self.applyActiveBorder(active: pane, singlePane: singlePane)
+                            view?.becomeFirstResponder()
+                            // Then tell tmux; the echoed layout confirms via apply().
+                            self.onSelectPane(pane)
+                        },
                         currentMode: { [weak self] in self?.modeTracker.mode(for: pane) ?? .localScroll },
                         applicationCursorKeys: { [weak view] in view?.getTerminal().applicationCursor ?? false },
                         altScrollDecision: { [weak self] in
@@ -450,6 +474,25 @@ struct TmuxPaneContainer: UIViewRepresentable {
             for (id, view) in panes {
                 let mode = modeTracker.mode(for: id)
                 mouseDots[ObjectIdentifier(view)]?.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
+            }
+        }
+
+        /// Apply active/inactive border chrome for `active` across the container's live
+        /// panes. Shared by `ContainerView.apply()` (authoritative, on tmux layout) and
+        /// the optimistic tap path (`onSelectPane` below). Single-pane windows show no
+        /// border (a lone coral rim is meaningless).
+        func applyActiveBorder(active: PaneID?, singlePane: Bool) {
+            let activeBorderColor = UIColor(Color(theme.focus.paneBorder))
+            let inactiveBorderColor = UIColor(Color(theme.focus.paneBorderInactive))
+            for (pane, view) in containerView?.panes ?? [:] {
+                let isActive = (pane == active)
+                if isActive {
+                    view.layer.borderWidth = singlePane ? 0 : 1.5
+                    if !singlePane { view.layer.borderColor = activeBorderColor.cgColor }
+                } else {
+                    view.layer.borderColor = inactiveBorderColor.cgColor
+                    view.layer.borderWidth = singlePane ? 0 : 0.5
+                }
             }
         }
 
@@ -870,9 +913,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
 
         func apply(state: TmuxSessionState,
                    register: (PaneID, TerminalView) -> Void,
-                   unregister: (PaneID) -> Void,
-                   activeBorderColor: UIColor,
-                   inactiveBorderColor: UIColor) {
+                   unregister: (PaneID) -> Void) {
             let sig = RenderSignature(state)
             guard sig != lastRenderSignature else { return }   // unchanged → skip re-layout
             let reason = renderChangeReason(old: lastRenderSignature, new: sig, state: state)
@@ -975,25 +1016,25 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 }()
                 view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
                 let isActive = (rect.pane == window.activePane)
-                // The active-pane border only conveys meaning when there is more than
-                // one pane (it answers "which pane has focus"). In a single-pane window
-                // it reads as a pointless coral rim around the whole terminal, so
-                // suppress ALL border chrome there. Keyboard focus is unaffected.
-                let singlePane = (rects.count <= 1)
                 if isActive {
-                    view.layer.borderWidth = singlePane ? 0 : 1.5
-                    if !singlePane { view.layer.borderColor = activeBorderColor.cgColor }
                     if !view.isFirstResponder {
                         let ok = view.becomeFirstResponder()
                         DebugLog.shared.log(.tmux, "pane \(rect.pane) ACTIVE existed=\(existed) inWindow=\(view.window != nil) becomeFirstResponder→\(ok) isFR=\(view.isFirstResponder)")
                     } else {
                         DebugLog.shared.log(.tmux, "pane \(rect.pane) ACTIVE already firstResponder")
                     }
-                } else {
-                    view.layer.borderColor = inactiveBorderColor.cgColor
-                    view.layer.borderWidth = singlePane ? 0 : 0.5
                 }
             }
+            // The active-pane border only conveys meaning when there is more than
+            // one pane (it answers "which pane has focus"). In a single-pane window
+            // it reads as a pointless coral rim around the whole terminal, so
+            // suppress ALL border chrome there. Keyboard focus is unaffected.
+            // `applyActiveBorder` is the authoritative source (tmux's `window.activePane`);
+            // it also supersedes any optimistic `pendingActivePane` set by a tap.
+            let singlePane = (rects.count <= 1)
+            coordinator?.currentActivePane = window.activePane
+            coordinator?.pendingActivePane = nil
+            coordinator?.applyActiveBorder(active: window.activePane, singlePane: singlePane)
 
             // Now tear down panes tmux no longer reports, AFTER the new active pane took first
             // responder above, so the keyboard never drops (see the note before the create loop).
