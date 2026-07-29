@@ -657,6 +657,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         subordinateSelectionPan(on: view)
         DebugLog.shared.log(.gesture,
             "sel:double loc=\(p) mode=\(callbacks.currentMode()) cell=(\(col),\(row)) word=(\(start),\(end)) chars=\"\(selectedChars(row: row, startCol: start, endCol: end, in: view))\"")
+        // SwiftTerm's `selectionChanged` schedules its repaint on the main queue and
+        // coalesces via a `pendingSelectionChanged` flag; under tmux -CC the alt-screen
+        // streams frames whose own redraws can win that race, leaving the highlight
+        // undrawn (device 2026-07-29: selection correct + copyable but no visible
+        // highlight). Force a synchronous repaint of the selection now.
+        view.setNeedsDisplay(view.bounds)
+        DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
         presentEditMenu(at: p, in: view)
     }
 
@@ -672,6 +679,9 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         subordinateSelectionPan(on: view)
         DebugLog.shared.log(.gesture,
             "sel:triple loc=\(p) mode=\(callbacks.currentMode()) row=\(row) chars=\"\(selectedChars(row: row, startCol: 0, endCol: cols - 1, in: view))\"")
+        // Force a synchronous repaint (see handleDoubleTap for why).
+        view.setNeedsDisplay(view.bounds)
+        DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
         presentEditMenu(at: p, in: view)
     }
 
