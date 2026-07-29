@@ -147,9 +147,13 @@ public func wordBounds(cols: Int, col: Int,
 }
 ```
 
-Note: this matches the existing App-side walk exactly. It does NOT force the
-tapped cell to be a word char (mirrors current behavior: on whitespace, both
-loops fail their `isWordChar(neighbor)` guard and the range stays `(col, col)`).
+Note (CORRECTED 2026-07-29, ruling recorded): the tapped cell IS guarded, a
+`guard isWordChar(clamped) else { return (clamped, clamped) }` makes a tap on a
+space degenerate. This is a DELIBERATE behavior change from the old App-side
+walk, which had no such guard and would join the two words on either side of a
+tapped space (e.g. tap the gap in `foo bar` -> selected `foo bar`). The new
+degenerate-on-space behavior was chosen by the user (matches iOS/most editors).
+Task 2 wires this knowingly.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
