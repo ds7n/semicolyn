@@ -436,3 +436,33 @@ lock).
 
 ---
 
+## Topic 5: Window swiping [LOCKED]
+
+**Horizontal swipe switches WINDOWS only** (whole screen changes to the next/prev
+tmux window, panes and all). It NEVER moves pane-to-pane focus, that is tap-only
+(Topic 1/2, tap an inactive pane to focus it). One gesture, one meaning; no native
+iOS precedent for "swipe to move split focus," and it would collide with the window
+switch.
+
+- **Direction:** swipe LEFT → next window (index +1); swipe RIGHT → previous window
+  (index −1). Matches iOS page/tab-carousel muscle memory (principle 1).
+- **Wrap-around (infinite carousel):** past the last window → first; before the
+  first → last. No hard stop and no end-bounce (with wrap there are no ends to
+  bounce against). User-ruled 2026-07-30.
+- **Snappy (principle 3):** fire on RELEASE past a horizontal-distance threshold;
+  apply the target window OPTIMISTICALLY/locally (redraw the new window
+  immediately), then reconcile with tmux `select-window`. The user never waits a
+  network round-trip to see the window change. **No animation** (KISS, retained from
+  the 2026-07-22 window-switch pass; the animated slide/dim machinery was
+  deliberately deleted).
+- **Disambiguation:** engages only on a HORIZONTAL-dominant drag (`DragAxisLock`
+  decides axis at gesture start). A vertical-dominant drag is scroll (Topic 4).
+  This single axis-lock is what keeps BOTH scroll and switch instant, no shared
+  "which gesture?" delay.
+- **Existing machinery reused:** `DragAxisLock` + `SwitchCommitDecision` +
+  `select-window` are already built and Kit-tested (2026-07-22 KISS pass); Topic 5
+  is those, made consistent with the axis-lock priority above. Nothing new to
+  invent here.
+
+---
+
