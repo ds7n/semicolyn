@@ -620,8 +620,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // A tap always raises the keyboard. We replaced SwiftTerm's own tap recognizer
         // (which called `becomeFirstResponder`), and PR #90's `editingInteractionConfiguration
         // = .none` suppressed the system tap-to-focus, so nothing re-presented the keyboard
-        // after a dismiss (device report, build 44). Raise it explicitly here in EVERY mode
-        //, even an alt-screen/mouse-reporting app needs the keyboard to type.
+        // after a dismiss (device report, build 44). Raise it explicitly here in EVERY mode:
+        // even an alt-screen/mouse-reporting app needs the keyboard to type.
         if !view.isFirstResponder {
             let ok = view.becomeFirstResponder()
             DebugLog.shared.log(.gesture, "gesture:singleTap becomeFirstResponder=\(ok)")
@@ -649,43 +649,42 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     @objc private func handleDoubleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
         DebugLog.shared.log(.gesture, "gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
-        // Word-select only makes sense on the NORMAL screen (`.localScroll`). On an
-        // app-owned screen (`.appOwnsInput` = Claude/vim/htop, or `.mouseReporting`) the app
-        // draws the alternate screen, so a LOCAL SwiftTerm selection keyed on `term.rows`
-        // does not correspond to what is rendered (device build 55: a double-tap selected a
-        // garbage bottom row regardless of tap position). Yield, exactly like single-tap.
-        guard callbacks.currentMode() == .localScroll else {
-            DebugLog.shared.log(.gesture, "gr:doubleTap yield mode=\(callbacks.currentMode())")
-            return
-        }
+        // Word-select runs in every mode: it selects against SwiftTerm's local grid,
+        // which under tmux -CC is the currently-visible content. (Pre-#102 alt-screen
+        // mis-selection was a tap->cell coordinate bug, since fixed by TapRowMapping +
+        // full-height panes; proven on device 2026-07-29.)
         let p = g.location(in: view)
         let (col, row) = cell(at: p, in: view)
-        // Word-select: expand from the tapped cell across non-space runs on that row.
         let (start, end) = wordBounds(col: col, row: row, in: view)
-        DebugLog.shared.log(.gesture, "sel:before hasActive=\(view.hasActiveSelection)")
         view.setSelectionRange(start: Position(col: start, row: row), end: Position(col: end, row: row))
-        subordinateSelectionPan(on: view)   // the selection pan is created now; subordinate it at birth
-        DebugLog.shared.log(.gesture, "sel:after set (\(start),\(row))-(\(end),\(row)) hasActive=\(view.hasActiveSelection)")
+        subordinateSelectionPan(on: view)
+        DebugLog.shared.log(.gesture,
+            "sel:double loc=\(p) mode=\(callbacks.currentMode()) cell=(\(col),\(row)) word=(\(start),\(end)) chars=\"\(selectedChars(row: row, startCol: start, endCol: end, in: view))\"")
+        // SwiftTerm's `selectionChanged` schedules its repaint on the main queue and
+        // coalesces via a `pendingSelectionChanged` flag; under tmux -CC the alt-screen
+        // streams frames whose own redraws can win that race, leaving the highlight
+        // undrawn (device 2026-07-29: selection correct + copyable but no visible
+        // highlight). Force a synchronous repaint of the selection now.
+        view.setNeedsDisplay(view.bounds)
+        DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
         presentEditMenu(at: p, in: view)
     }
 
     @objc private func handleTripleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
         DebugLog.shared.log(.gesture, "gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
-        // Line-select only makes sense on the NORMAL screen (see `handleDoubleTap`): yield on
-        // an app-owned screen where a local selection does not match the app's render.
-        guard callbacks.currentMode() == .localScroll else {
-            DebugLog.shared.log(.gesture, "gr:tripleTap yield mode=\(callbacks.currentMode())")
-            return
-        }
+        // Line-select runs in every mode (see handleDoubleTap).
         let p = g.location(in: view)
         let (_, row) = cell(at: p, in: view)
         let cols = max(view.getTerminal().cols, 1)
-        DebugLog.shared.log(.gesture, "sel:before hasActive=\(view.hasActiveSelection)")
         view.setSelectionRange(start: Position(col: 0, row: row),
                                end: Position(col: cols - 1, row: row))
-        subordinateSelectionPan(on: view)   // the selection pan is created now; subordinate it at birth
-        DebugLog.shared.log(.gesture, "sel:after set (0,\(row))-(\(cols - 1),\(row)) hasActive=\(view.hasActiveSelection)")
+        subordinateSelectionPan(on: view)
+        DebugLog.shared.log(.gesture,
+            "sel:triple loc=\(p) mode=\(callbacks.currentMode()) row=\(row) chars=\"\(selectedChars(row: row, startCol: 0, endCol: cols - 1, in: view))\"")
+        // Force a synchronous repaint (see handleDoubleTap for why).
+        view.setNeedsDisplay(view.bounds)
+        DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
         presentEditMenu(at: p, in: view)
     }
 
@@ -703,20 +702,31 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: Selection helpers
 
-    /// Word bounds on a row: walk left/right from `col` over non-space glyphs.
+    /// Word bounds on a row, backed by SwiftTerm's grid. Delegates the walk to
+    /// the pure `wordBounds(cols:col:isWordChar:)` (Kit-tested).
     private func wordBounds(col: Int, row: Int, in view: TerminalView) -> (Int, Int) {
         let term = view.getTerminal()
         let cols = max(term.cols, 1)
         func isWordChar(_ c: Int) -> Bool {
-            guard let cd = term.getCharData(col: c, row: row) else { return false }
-            let ch = cd.getCharacter()   // CharData.getCharacter(); matches SwiftTermEchoOracle usage
+            guard c >= 0, c < cols, let cd = term.getCharData(col: c, row: row) else { return false }
+            let ch = cd.getCharacter()
             return !(ch == " " || ch == "\t" || ch == "\0")
         }
-        var lo = min(max(col, 0), cols - 1)
-        var hi = lo
-        while lo > 0, isWordChar(lo - 1) { lo -= 1 }
-        while hi < cols - 1, isWordChar(hi + 1) { hi += 1 }
-        return (lo, hi)
+        let r = SemicolynKit.wordBounds(cols: cols, col: col, isWordChar: isWordChar)
+        return (r.start, r.end)
+    }
+
+    /// The characters currently in `[startCol, endCol]` on `row`, for diagnostics.
+    /// Truncated to 120. Read via `getCharData` (same source selection uses).
+    private func selectedChars(row: Int, startCol: Int, endCol: Int, in view: TerminalView) -> String {
+        let term = view.getTerminal()
+        var s = ""
+        var c = startCol
+        while c <= endCol, s.count < 120 {
+            if let cd = term.getCharData(col: c, row: row) { s.append(cd.getCharacter()) }
+            c += 1
+        }
+        return s
     }
 
     private func presentEditMenu(at point: CGPoint, in view: TerminalView) {
