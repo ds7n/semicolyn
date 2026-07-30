@@ -335,3 +335,104 @@ fallback. All of it is grid-aware (snaps to real cells), which native could not 
 
 ---
 
+## Rendering engine: SwiftTerm behind a `TerminalRenderer` protocol [LOCKED]
+
+**The question (raised 2026-07-30):** the user is not attached to SwiftTerm. The
+goal is the target experience (native feel, native functionality, no speedbumps);
+the engine's fate is an OUTPUT of the requirements, not a protected input. No
+sunk-cost. So: keep SwiftTerm, replace it, or something in between, whatever the
+requirements adjudicate, item by item.
+
+**Coupling survey (ground truth, 2026-07-30, read-only over the App tier):**
+- **~1,900 LOC** touches SwiftTerm, ALL in the App tier. `SemicolynKit`, the tmux
+  `-CC` control-mode parser, the predictor, and the keybar have **ZERO** SwiftTerm
+  dependency. Our logic is already renderer-agnostic; only the VIEW layer is coupled.
+- The coupled API surface is **narrow and well-shaped**: `feed(byteArray:)` in;
+  reads of `getCharData(col:row:)`, `cols`/`rows`, `isCurrentBufferAlternate`,
+  `mouseMode`/`applicationCursor`, `getCursorLocation()`, `buffer.yDisp`. Plus the
+  9-method `TerminalViewDelegate`.
+- SwiftTerm is **stock upstream, unforked**, `from: "1.0.0"` in `project.yml`.
+- **DECISIVE for scrolling:** on iOS, SwiftTerm's `TerminalView` *is a
+  `UIScrollView`* (`iOSTerminalView.swift:54`). Native scroll physics, deceleration,
+  and rubber-band bounce are already the engine, not something we'd have to build
+  or replace the renderer to get.
+
+**DECISION: keep SwiftTerm, wrapped behind a thin `TerminalRenderer` protocol.**
+The protocol exposes exactly the narrow surface above (`feed`, `cellAt`/`charData`,
+`gridSize`, `isAlternate`, `mouseMode`, `cursor`, delegate events). Revisit an
+engine swap ONLY when a specific requirement is shown to be structurally impossible
+on SwiftTerm. Rationale:
+- **No sunk cost to protect:** the protocol makes a future swap cheap (per the
+  survey, replacement is a bounded multi-week project *behind the protocol*, with
+  gestures/selection/tmux/predictor untouched). We do not have to make a
+  keep-vs-replace bet now; we defer it and keep it cheap.
+- **Nothing so far forces a swap.** The two user goals, native scroll FEEL and no
+  speedbumps, are both reachable in our OWN code (scroll = configure the
+  UIScrollView we already are; speedbumps = fix our gesture arbitration). The one
+  thing SwiftTerm genuinely cannot do, native `UITextInteraction` selection, we
+  already chose to build custom and grid-aware (3f-RESULT), which is BETTER here,
+  not a compromise.
+- Building the protocol is also the prerequisite for the future ET renderer
+  (Track 3), so it is not throwaway work.
+
+**This is engine-neutral by construction:** every later topic states its target
+experience first, then tests "can SwiftTerm deliver this?" The protocol is where a
+"no" gets absorbed cheaply.
+
+---
+
+## Topic 4: Scrolling [LOCKED]
+
+Target experience (engine-neutral): native iOS feel, zero speedbumps, snappy by
+construction (principle 3). Decomposes by mode.
+
+### 4a. Normal shell (`.localScroll`) [LOCKED]
+- **Native `UIScrollView` rubber-band bounce.** SwiftTerm's iOS `TerminalView`
+  already IS a `UIScrollView` (`iOSTerminalView.swift:54`) and sets no
+  `bounces`/`decelerationRate` overrides, so native bounce is essentially FREE:
+  keep `isScrollEnabled = true`, ensure `bounces`/`alwaysBounceVertical = true` and
+  `decelerationRate = .normal`. This is a CONFIG task on the scroll view we already
+  own, NOT a renderer change.
+- **Drag tracks the finger 1:1 from contact; flick → momentum → decelerate → bounce
+  at the ends.** Genuine UIKit physics.
+- **Passive: sends nothing, no focus change** (Topic 1). Reading shell history never
+  steals focus.
+- **Instant: history is the local SwiftTerm buffer, zero network on any drag**
+  (principle 3). Deep server-backed history is DEFERRED (matches the one-screenful
+  + seeded-scrollback scope from Topic 3e); no automatic network fetch on a drag
+  boundary (that would be the exact lag principle 3 forbids).
+- **Content-drag is ALWAYS scroll.** Drag-to-select-from-scratch on the shell is
+  DROPPED; selection starts only via double/triple-tap + handle-drag + long-press
+  (Topic 3). This is what lets the scroll pan win a vertical drag INSTANTLY with no
+  "scroll or select?" disambiguation delay.
+
+### 4b. Alt-screen (`.appOwnsInput`, Claude/vim) [LOCKED, carried from Topic 1]
+- **1:1 finger-follow translated to the app's scroll** (arrow keys / xterm
+  Alt-Scroll) **+ momentum.**
+- **Sends bytes → FOCUSES the pane** (Topic 1).
+- **No rubber-band bounce**, correct and intended: there is no local content to
+  bounce against (the remote app owns the screen), exactly like every native
+  terminal. "Bounce" is a `.localScroll`-only affordance.
+
+### 4c. Mouse-mode (`.mouseReporting`, `mouse=a`) [LOCKED]
+- A drag forwards as SGR mouse events (the app asked for mouse). No local scroll,
+  no bounce. Focuses (sends bytes). Consistent with Topic 2's mouse-mode tap.
+
+### 4d. The speedbump root cause + fix [LOCKED as the implementation target]
+The "sluggish / doesn't start scrolling" feel is OUR gesture arbitration, not the
+renderer:
+- We flip `isScrollEnabled` per mode (`TerminalScreen.swift:76`) and, in
+  `.appOwnsInput`, disable the native pan and re-implement scroll via our own
+  `altScreenPan` (`TerminalGestureController.swift`).
+- Our recognizer sweep disables SwiftTerm's recognizers and layers `switchPan` +
+  `altScreenPan` competing for the same vertical drag.
+
+**Fix target:** a vertical-dominant content-drag is owned by the scroll pan
+IMMEDIATELY; `switchPan` (window switch, Topic 5) engages only on a
+horizontal-dominant drag (the existing `DragAxisLock` decides axis). No shared
+disambiguation delay on the common vertical-scroll case. Alt-screen keeps its
+1:1→arrows pan, but that pan likewise starts on contact (no threshold beyond axis
+lock).
+
+---
+
