@@ -670,9 +670,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // undrawn (device 2026-07-29: selection correct + copyable but no visible
         // highlight). Force a synchronous repaint of the selection now.
         view.setNeedsDisplay(view.bounds)
-        if let pane = view as? PaneTerminalView {
-            pane.armSelectionRepaintMode = modeStr
-            pane.armSelectionRepaintDiag = true
+        // phase=repaint: run AFTER this runloop turn's layout/draw pass so we observe
+        // whether the selection survived to repaint (candidate #1). No SwiftTerm override
+        // is used (draw/selectionChanged are not open / are non-open protocol witnesses in
+        // the CI-resolved SwiftTerm, so cross-module overriding fails to compile).
+        DispatchQueue.main.async { [weak view] in
+            guard let view else { return }
+            DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "repaint", mode: modeStr))
         }
         DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
         // AFTER the forced synchronous repaint request (the guessed 64dc281 fix):
@@ -700,9 +704,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             "sel:triple loc=\(p) mode=\(callbacks.currentMode()) row=\(row) chars=\"\(selectedChars(row: row, startCol: 0, endCol: cols - 1, in: view))\"")
         // Force a synchronous repaint (see handleDoubleTap for why).
         view.setNeedsDisplay(view.bounds)
-        if let pane = view as? PaneTerminalView {
-            pane.armSelectionRepaintMode = modeStr
-            pane.armSelectionRepaintDiag = true
+        // phase=repaint: run AFTER this runloop turn's layout/draw pass so we observe
+        // whether the selection survived to repaint (candidate #1). No SwiftTerm override
+        // is used (draw/selectionChanged are not open / are non-open protocol witnesses in
+        // the CI-resolved SwiftTerm, so cross-module overriding fails to compile).
+        DispatchQueue.main.async { [weak view] in
+            guard let view else { return }
+            DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "repaint", mode: modeStr))
         }
         DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
         // AFTER the forced synchronous repaint request (the guessed 64dc281 fix):

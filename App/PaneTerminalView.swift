@@ -58,30 +58,6 @@ final class PaneTerminalView: TerminalView {
         onModeRelevantChange?(.mouseChanged, source)
     }
 
-    /// Set true by the gesture controller right after a selection is made, so the
-    /// NEXT SwiftTerm selection-state change logs the live selection state (spec 3g
-    /// candidate #1: selection cleared by a mode-transition / tmux -CC repaint between
-    /// set and draw). One-shot: cleared after it fires once.
-    var armSelectionRepaintDiag: Bool = false
-    /// The mode string captured at arm time, echoed on the repaint line for
-    /// normal-vs-alt comparison.
-    var armSelectionRepaintMode: String = "?"
-
-    /// Diagnostic probe only; behavior must not change, so `super.selectionChanged` is
-    /// called FIRST and unconditionally. `draw(_:)` is `public` (not `open`) in SwiftTerm
-    /// so it cannot be overridden cross-module; `selectionChanged` IS `open` and fires
-    /// whenever SwiftTerm's selection state changes and its repaint is scheduled, a
-    /// directly-observable signal for whether the selection survived from `set`
-    /// (device 2026-07-29: no visible highlight).
-    override func selectionChanged(source: Terminal) {
-        super.selectionChanged(source: source)
-        if armSelectionRepaintDiag {
-            armSelectionRepaintDiag = false
-            DebugLog.shared.log(.selection,
-                SelectionDiagnostics.snapshot(self, phase: "repaint", mode: armSelectionRepaintMode))
-        }
-    }
-
     // MARK: Native text-interaction suppression
     //
     // `TerminalView` conforms to `UITextInput` (+ `UIKeyInput`) and becomes first
