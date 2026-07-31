@@ -657,6 +657,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let (col, row) = cell(at: p, in: view)
         let (start, end) = wordBounds(col: col, row: row, in: view)
         view.setSelectionRange(start: Position(col: start, row: row), end: Position(col: end, row: row))
+        // AFTER setSelectionRange (before any repaint): candidate-3 check (zero-width
+        // range on alt-screen) + candidate-2 (color) captured at set time.
+        let modeStr = "\(callbacks.currentMode())"
+        DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "set", mode: modeStr))
         subordinateSelectionPan(on: view)
         DebugLog.shared.log(.gesture,
             "sel:double loc=\(p) mode=\(callbacks.currentMode()) cell=(\(col),\(row)) word=(\(start),\(end)) chars=\"\(selectedChars(row: row, startCol: start, endCol: end, in: view))\"")
@@ -667,6 +671,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // highlight). Force a synchronous repaint of the selection now.
         view.setNeedsDisplay(view.bounds)
         DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
+        // AFTER the forced synchronous repaint request (the guessed 64dc281 fix):
+        // if active is still true here but the highlight never draws, candidate #1
+        // (repaint race) is implicated; the phase=repaint line (Task 5) confirms.
+        DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "redraw", mode: modeStr))
         presentEditMenu(at: p, in: view)
     }
 
@@ -679,12 +687,20 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let cols = max(view.getTerminal().cols, 1)
         view.setSelectionRange(start: Position(col: 0, row: row),
                                end: Position(col: cols - 1, row: row))
+        // AFTER setSelectionRange (before any repaint): candidate-3 check (zero-width
+        // range on alt-screen) + candidate-2 (color) captured at set time.
+        let modeStr = "\(callbacks.currentMode())"
+        DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "set", mode: modeStr))
         subordinateSelectionPan(on: view)
         DebugLog.shared.log(.gesture,
             "sel:triple loc=\(p) mode=\(callbacks.currentMode()) row=\(row) chars=\"\(selectedChars(row: row, startCol: 0, endCol: cols - 1, in: view))\"")
         // Force a synchronous repaint (see handleDoubleTap for why).
         view.setNeedsDisplay(view.bounds)
         DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
+        // AFTER the forced synchronous repaint request (the guessed 64dc281 fix):
+        // if active is still true here but the highlight never draws, candidate #1
+        // (repaint race) is implicated; the phase=repaint line (Task 5) confirms.
+        DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "redraw", mode: modeStr))
         presentEditMenu(at: p, in: view)
     }
 
