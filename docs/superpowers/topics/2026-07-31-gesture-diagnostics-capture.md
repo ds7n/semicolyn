@@ -49,8 +49,16 @@ moving to the read table.
 sel:diag phase=<set|redraw|repaint> mode=<localScroll|appOwnsInput|...> active=<bool> selLen=<int> color=rgba(r,g,b,a)
 ```
 
-- `phase`: which point in the pipeline this snapshot was taken (after set, after
-  redraw, at repaint time).
+- `phase`: which point in the pipeline this snapshot was taken. `set` = right after
+  `setSelectionRange`; `redraw` = right after the forced `setNeedsDisplay`; `repaint`
+  = fired from SwiftTerm's `open func selectionChanged(source:)` hook, i.e. on the
+  next SELECTION-STATE CHANGE after the selection was armed. (Note: `repaint` is NOT
+  a per-pixel draw callback. SwiftTerm's `draw(_:)` is `public` not `open` so it
+  cannot be overridden from the App module; `selectionChanged` is the closest OPEN
+  hook. It fires when a repaint clears/changes the selection, which is exactly the
+  candidate-#1 signal, but it does NOT fire on a repaint that leaves the selection
+  state untouched, so it slightly narrows candidate #4/#5 coverage, see the read
+  table note.)
 - `mode`: the caller's current interaction mode string.
 - `active`: whether the terminal view reports a selection is active
   (`view.selectionActive`).
@@ -71,6 +79,7 @@ whichever pattern actually appears in the alt-screen capture.
 | `active=true` at all three phases, but `color=rgba(...)` has an alpha (last component) of `0.00` | #2: highlight color is transparent or unset at draw time | |
 | `active=true` at all three phases, non-transparent color, but `selLen=0` (especially only on the alt-screen captures, not the normal-pane ones) | #3: degenerate / zero-length selection | |
 | `active=true` at `phase=repaint`, non-transparent color, `selLen>0`, yet no highlight is visible on screen | #4 / #5: something else is drawing over the highlight (overlay), or the dirty-rect for the highlight is missed on repaint | |
+| No `phase=repaint` line appears at all for a gesture (only `set` + `redraw`) | The selection state never changed again after arming, so `selectionChanged` never fired. This RULES IN candidates #2/#4/#5 (state stayed valid, highlight just did not render) and rules OUT candidate #1 for that gesture. Cross-check the visible-highlight observation. | |
 
 Record which row matched for each of the four captured gestures (normal word,
 normal line, alt-screen word, alt-screen line). The Selection-UI slice's fix task is
