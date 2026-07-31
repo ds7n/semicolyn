@@ -51,14 +51,20 @@ sel:diag phase=<set|redraw|repaint> mode=<localScroll|appOwnsInput|...> active=<
 
 - `phase`: which point in the pipeline this snapshot was taken. `set` = right after
   `setSelectionRange`; `redraw` = right after the forced `setNeedsDisplay`; `repaint`
-  = fired from SwiftTerm's `open func selectionChanged(source:)` hook, i.e. on the
-  next SELECTION-STATE CHANGE after the selection was armed. (Note: `repaint` is NOT
-  a per-pixel draw callback. SwiftTerm's `draw(_:)` is `public` not `open` so it
-  cannot be overridden from the App module; `selectionChanged` is the closest OPEN
-  hook. It fires when a repaint clears/changes the selection, which is exactly the
-  candidate-#1 signal, but it does NOT fire on a repaint that leaves the selection
-  state untouched, so it slightly narrows candidate #4/#5 coverage, see the read
-  table note.)
+  = taken from a `Task { @MainActor [weak view] in ... }` scheduled immediately after
+  the forced `setNeedsDisplay` (`App/TerminalGestureController.swift` lines 677 and
+  711). It runs on the NEXT main-runloop turn, after the current turn's layout/draw
+  pass has had a chance to run, so it captures the selection state one runloop-turn
+  later. The `[weak view]` guard only drops the line if the terminal view was
+  deallocated in the meantime (essentially never during a live capture). (Note:
+  `repaint` is NOT a per-pixel draw callback and it does NOT fire on a real
+  selection-state-change hook. SwiftTerm's `draw(_:)` and `selectionChanged(source:)`
+  are non-open in the CI-resolved v1.15.0, so they cannot be overridden cross-module;
+  the runloop-hop `Task` is the workaround. It is still a useful candidate-#1 signal:
+  if a repaint cleared the selection within that turn, `active` will read false at
+  `phase=repaint`. But because it fires unconditionally every time (not gated on
+  anything changing), it is not a guaranteed draw-time reading, see the read table
+  note.)
 - `mode`: the caller's current interaction mode string.
 - `active`: whether the terminal view reports a selection is active
   (`view.selectionActive`).
@@ -79,7 +85,7 @@ whichever pattern actually appears in the alt-screen capture.
 | `active=true` at all three phases, but `color=rgba(...)` has an alpha (last component) of `0.00` | #2: highlight color is transparent or unset at draw time | |
 | `active=true` at all three phases, non-transparent color, but `selLen=0` (especially only on the alt-screen captures, not the normal-pane ones) | #3: degenerate / zero-length selection | |
 | `active=true` at `phase=repaint`, non-transparent color, `selLen>0`, yet no highlight is visible on screen | #4 / #5: something else is drawing over the highlight (overlay), or the dirty-rect for the highlight is missed on repaint | |
-| No `phase=repaint` line appears at all for a gesture (only `set` + `redraw`) | The selection state never changed again after arming, so `selectionChanged` never fired. This RULES IN candidates #2/#4/#5 (state stayed valid, highlight just did not render) and rules OUT candidate #1 for that gesture. Cross-check the visible-highlight observation. | |
+| Caveat: `phase=repaint` is a runloop-hop snapshot (one main-runloop turn after the forced `setNeedsDisplay`), not a real draw-time reading, and it fires on every gesture (the `[weak view]` guard essentially never drops it). A selection cleared by a LATER tmux -CC frame, after that `Task` turn has already run, can still read `active=true` at `phase=repaint` and falsely point at #4/#5. Always cross-check the `phase=repaint` line against the actual on-screen highlight, not just the logged `active` value. | n/a (methodology caveat, not a distinct candidate) | |
 
 Record which row matched for each of the four captured gestures (normal word,
 normal line, alt-screen word, alt-screen line). The Selection-UI slice's fix task is
