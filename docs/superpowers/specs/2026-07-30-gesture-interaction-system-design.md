@@ -466,3 +466,126 @@ switch.
 
 ---
 
+## Topic 6: Zoom + pane management (the "Pad") [LOCKED]
+
+Zoom and all pane-structure management live on the **Pad**, a fused
+arrow-input + pane-management widget in the keybar's locked-left section (adopting
+and stress-correcting the 2026-06-15 keybar-customization design). This also fills
+a real gap found 2026-07-30: **there is currently NO touch-accessible way to
+split / create / close panes** (splits existed only as hardware-keyboard `⌘D`/`⌘-`
+shortcuts; the Pad's pane-mode was designed but deferred at Phase-4a and never
+built). Topic 6 is where touch pane-management gets its home.
+
+### 6a. Pad gestures [LOCKED]
+
+| Gesture | Action | Notes |
+|---|---|---|
+| **Drag from center** | Arrow keystroke ↑ ↓ ← → | Highest-frequency use; unchanged. |
+| **Single-tap** | **No-op** | Makes double-tap instant (no recognizer delay) and kills accidental-arrow-fires. A tap is just "you missed the drag." |
+| **Double-tap** | **Zoom toggle** (active/focused pane) | 1-step, native precedent (Photos/Maps/Safari double-tap-zoom), displaces nothing. No-op when there is only 1 pane (nothing to zoom). |
+| **Long-press (~400ms, still)** | Arm **pane-mode**: bronze tint + armed overlay (6c) | Light engage-haptic. |
+| **Long-press + swipe** | **Split** (direction per 6b) | The accelerator path. |
+| **Long-press + release (no swipe)** | Pane-mode **menu** (6c) with every op tappable | The discoverable path. |
+
+**Zoom indicator lives ON THE PAD** (a glyph that flips, e.g. `⊕`→`⊖`, plus a
+bronze "zoomed" state), NOT on a pane corner-index badge. The 2026-06-15 design's
+corner-badge `⊕` is RETIRED (user 2026-07-30: no new corner chrome; the control
+that performs zoom carries its own state).
+
+**Stress-test corrections applied (why this differs from the 2026-06-15 design):**
+- **Zoom moved OFF single-tap → onto double-tap.** Original tap=zoom put an
+  accident-prone tap (missed micro-flick on the most-touched control) onto a rare,
+  disruptive full-screen layout change. Asymmetric risk (meant a tiny arrow, got a
+  jarring zoom). Double-tap requires deliberate intent; single-tap is now safe
+  no-op. (Resolves Problem 1.)
+- **Overloaded "tap = zoom OR default-split when 1 pane" ELIMINATED.** Same tap
+  meaning two structural things by pane-count was a memory burden (principle 1).
+  Gone: tap is always no-op, zoom is always double-tap, split is always
+  long-press+swipe/menu, regardless of pane count. (Resolves Problem 2.)
+- **Zoom indicator moved off the pane corner-badge onto the Pad.** (Resolves
+  Problem 3 + user's no-corner-chrome preference.)
+
+**Single-pane rules:** double-tap-zoom = no-op (the one pane already fills the
+screen); long-press+swipe **split works** (this is how you go 1→2 panes);
+**Swap/Close are hidden** (nothing to swap; closing the sole pane = kill-window,
+which is window-management, not pane-management).
+
+**Long-press is location-scoped (deliberate, documented):** on the terminal grid
+long-press = text selection (Topic 3); on the Pad long-press = arm pane-mode.
+Different views, no collision, standard iOS (long-press a photo vs a link differ).
+Stated here so it reads as a choice, not an accident.
+
+### 6b. Split direction: "paper cut" model, default + user-flippable [LOCKED]
+
+**Mental model (default):** the swipe traces the **cut line** through the terminal
+("cutting a piece of paper"); the two panes end up on either side of that cut.
+
+| Swipe (finger motion) | Cut line drawn | Resulting panes | tmux (never shown to user) |
+|---|---|---|---|
+| **Left/Right (horizontal)** | horizontal line | **stacked top/bottom** | `split-window -v` |
+| **Up/Down (vertical)** | vertical line | **side-by-side left/right** | `split-window -h` |
+
+**The UI never uses the words "horizontal split" / "vertical split"** (the tmux
+flag names are famously inverted from the words, a known footgun). All user-facing
+text describes the RESULT ("panes stack top & bottom" / "panes sit left & right")
+plus a layout-diagram icon (⊟ stacked / ▯▯ side-by-side).
+
+**Why this is user-FLIPPABLE (honest critique, 2026-07-30):** the paper-cut model
+is internally coherent but conflicts with the intuition of the touch-native
+majority, who read **swipe-direction = arrangement-direction** (swipe sideways →
+side-by-side). The implementer reflexively inverted it repeatedly in design
+discussion, evidence users will too. Rather than pick a winner, the mapping is the
+DEFAULT (paper-cut, user's model) with a Settings toggle to flip to
+motion=arrangement. Both models are legitimate; the disagreement becomes a
+preference, not a guess.
+
+- **Default (paper-cut):** L/R-swipe → stacked; T/B-swipe → side-by-side.
+- **Flipped (motion=arrangement):** L/R-swipe → side-by-side; T/B-swipe → stacked.
+
+**Single source of truth:** a Kit-level `SplitSwipeMapping` enum
+(`SemicolynKit`, Linux-tested) that the gesture handler, the armed-overlay live
+preview, the Tips docs text, and the tmux-command selection ALL read. Nothing
+hard-codes a direction; flipping the setting re-renders every surface
+automatically. This is exactly the pure-decision-logic that belongs in the Kit
+tier.
+
+**Settings placement:** `Settings → Gestures → "Split swipe direction"`, presented
+as **two preview diagrams** (an animated finger-swipe → resulting layout for each
+option) with a **short caption** each. Picture-first because words repeatedly
+failed to disambiguate this in design (this thread is the evidence). Minimal prose.
+
+### 6c. Armed pane-mode overlay [LOCKED]
+
+Long-press the Pad → light haptic, Pad fills bronze (~20%), a callout overlay
+appears **anchored above the Pad** (points down at it). Two seamless modes off one
+long-press:
+
+**Accelerator (finger still held):** a compact cross showing the two split axes.
+As the finger moves toward an axis, the overlay shows a **LIVE PREVIEW of the
+resulting pane layout** (⊟ stacked / ▯▯ side-by-side per the active
+`SplitSwipeMapping`), highlighting the axis the finger is heading toward. You SEE
+the result before you release, every time, this live preview is what makes either
+mapping safe (never guessing). Release past the axis threshold → that split fires.
+
+**Menu (released without swiping):** the hints resolve into a tappable list, every
+pane op explicit and discoverable (the "always a discoverable path" fix for
+Problem 5, splits are no longer gesture-only / discover-by-accident):
+- **Split into top/bottom** (⊟)
+- **Split into left/right** (▯▯)
+- **Zoom pane** (⊕, or ⊖ if zoomed) *(greyed at 1 pane)*
+- **Swap with next** *(hidden at 1 pane)*
+- **Close pane** *(hidden at 1 pane)*
+
+So EVERY pane op is reachable two ways: fast gesture (swipe / double-tap) OR the
+discoverable menu (hold → glance → tap). Nothing is hidden-and-gesture-only. The
+menu labels use RESULT language + the layout icon, bound to `SplitSwipeMapping`.
+
+**Dismiss:** tap outside / pick an action. No commit on a stray release without a
+past-threshold swipe.
+
+**Discoverability funnel:** `≡` hint-glyph on the Pad (same pattern as the Esc
+pill) → user long-presses → armed overlay reveals everything → Tips & Gestures
+screen (`?`) documents it in result-language, text bound to the active mapping.
+
+---
+
