@@ -674,7 +674,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // whether the selection survived to repaint (candidate #1). No SwiftTerm override
         // is used (draw/selectionChanged are not open / are non-open protocol witnesses in
         // the CI-resolved SwiftTerm, so cross-module overriding fails to compile).
-        DispatchQueue.main.async { [weak view] in
+        Task { @MainActor [weak view] in
             guard let view else { return }
             DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "repaint", mode: modeStr))
         }
@@ -708,7 +708,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // whether the selection survived to repaint (candidate #1). No SwiftTerm override
         // is used (draw/selectionChanged are not open / are non-open protocol witnesses in
         // the CI-resolved SwiftTerm, so cross-module overriding fails to compile).
-        DispatchQueue.main.async { [weak view] in
+        Task { @MainActor [weak view] in
             guard let view else { return }
             DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "repaint", mode: modeStr))
         }
