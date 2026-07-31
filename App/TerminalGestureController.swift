@@ -670,6 +670,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // undrawn (device 2026-07-29: selection correct + copyable but no visible
         // highlight). Force a synchronous repaint of the selection now.
         view.setNeedsDisplay(view.bounds)
+        if let pane = view as? PaneTerminalView {
+            pane.armSelectionRepaintMode = modeStr
+            pane.armSelectionRepaintDiag = true
+        }
         DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
         // AFTER the forced synchronous repaint request (the guessed 64dc281 fix):
         // if active is still true here but the highlight never draws, candidate #1
@@ -696,6 +700,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             "sel:triple loc=\(p) mode=\(callbacks.currentMode()) row=\(row) chars=\"\(selectedChars(row: row, startCol: 0, endCol: cols - 1, in: view))\"")
         // Force a synchronous repaint (see handleDoubleTap for why).
         view.setNeedsDisplay(view.bounds)
+        if let pane = view as? PaneTerminalView {
+            pane.armSelectionRepaintMode = modeStr
+            pane.armSelectionRepaintDiag = true
+        }
         DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
         // AFTER the forced synchronous repaint request (the guessed 64dc281 fix):
         // if active is still true here but the highlight never draws, candidate #1
