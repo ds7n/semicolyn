@@ -3,8 +3,9 @@
 
 # Gesture & Interaction System Design
 
-**Status:** IN PROGRESS (interactive design, 2026-07-30). This is the canonical
-specification for semicolyn's entire touch-interaction system. It supersedes the
+**Status:** LOCKED (interactive design completed 2026-07-31; Topics 1-8 + engine
+decision + zoom trigger all locked). This is the canonical specification for
+semicolyn's entire touch-interaction system. It supersedes the
 scattered and partially-defunct gesture decisions in `docs/brainstorming-decisions.md`
 (the 2026-07-10 "terminal-gesture-system" and 2026-06 cursor-drag specs are retired;
 this document replaces them).
@@ -165,7 +166,7 @@ accelerator, but is not the primary and is not required.
 
 ---
 
-## Topic 3: Text selection, copy, paste [MOSTLY LOCKED; one item pending investigation]
+## Topic 3: Text selection, copy, paste [LOCKED; 3g highlight fix is an implementation-time diagnostic, not an open design question]
 
 The freshest pain point and the reason for this whole design pass. Target: text
 selection that feels second-nature, exactly like native iOS text.
@@ -677,4 +678,99 @@ zoom across two controls (principle 1). The Esc pill keeps its
 window-nav/picker/Settings gesture set unchanged.
 
 ---
+
+## Topic 8: Cross-cutting (disambiguation, precedence, latency, haptics) [LOCKED]
+
+The global rules that make every per-topic gesture coexist without fighting. Most
+follow from Topics 1-7; recorded here as one coherent set.
+
+### 8a. Precedence & disambiguation [LOCKED, mostly derived]
+**On the terminal grid**, a touch resolves in this order:
+1. **Axis-lock on a content-drag** (`DragAxisLock`, decided at gesture start):
+   vertical-dominant → SCROLL (Topic 4); horizontal-dominant → WINDOW-SWITCH
+   (Topic 5). One decision, no shared "scroll or switch?" delay.
+2. **Taps** → focus / selection (Topics 1-3): single-tap focus/dismiss,
+   double-tap sub-word select, triple-tap line. Selecting/tapping FOCUSES
+   (Topic 1).
+3. **Long-press** → text selection start (Topic 3).
+4. **Content-drag NEVER initiates selection** (selection is tap/handle/long-press
+   only), which is what lets the scroll/switch axis-lock win a drag instantly.
+5. **Mode gates:** `.appOwnsInput` (alt-screen) → drag = 1:1→arrows + focus;
+   `.mouseReporting` → drag/tap = SGR mouse. `.localScroll` (shell) → the above.
+
+**Keybar vs terminal:** separate views (`inputAccessoryView`), hit-tested
+independently, no cross-talk (Topic 7b). **Intra-keybar:** L/R = scroll in the
+scroll region; L/R-swipe widgets only in locked regions (Topic 7b invariant).
+
+### 8b. Latency (principle 3) [LOCKED, derived]
+Every gesture that crosses tmux/network applies its effect **OPTIMISTICALLY and
+LOCALLY the instant it is recognized, then reconciles** with the tmux echo:
+- Focus-follows-input → move accent border + first responder immediately, then
+  `select-pane` (Topic 1).
+- Window-switch → redraw target window immediately, then `select-window` (Topic 5).
+- Split / zoom → reflect the layout change locally, then reconcile with tmux.
+- Font pinch → re-render at new cell size live; **debounce the tmux resize** to
+  fire once on pinch-end (`ResizeDebounce`/`armResizeSettle`) so the reflow round-
+  trip happens once, on release (Topic 6a font-zoom). The user never waits a round-
+  trip to SEE a gesture's effect. Where a wait is unavoidable it is called out, not
+  hidden.
+
+### 8c. Haptics [LOCKED]
+**Goal (user, 2026-07-31): tactile confirmation that a KEY PRESS actually
+registered**, kill the "did that key press land?" uncertainty. Two distinct
+feedback classes:
+
+1. **Key presses → system keyboard click/haptic** via
+   `UIDevice.playInputClick()` (`InputClickFeedback`). This HONORS the user's own
+   iOS keyboard-feedback settings (native by construction, principle 1): our keys
+   feel exactly like the system keyboard, on or off per their preference. Applies
+   to:
+   - Every keybar key TAP (Esc, Tab, symbols, modifiers, F-keys), already wired.
+   - **Every Pad ARROW keystroke** (per-arrow tick, incl. held-repeat): arrows ARE
+     key presses and carry the same "did it register?" uncertainty. Subtle
+     `playInputClick` tick, not a heavy impact.
+2. **Structural commits → a DISTINCT light impact haptic**
+   (`UIImpactFeedbackGenerator`, clearly different feel from the key click):
+   window-switch (and wrap), zoom toggle, split commit, arm-pane-mode engage,
+   copy-done. These also have visual confirmation; the haptic reinforces "the
+   structural thing happened" and reads as different from a keystroke.
+
+**Never haptic on:** scroll motion, single-tap-no-op, or any high-frequency non-key
+event (would buzz constantly).
+
+**Settings:** a master haptics toggle governs the STRUCTURAL haptics; the key-press
+class already defers to the user's system keyboard-feedback setting (so a user who
+disabled keyboard haptics system-wide gets silent keys automatically).
+
+**DIAGNOSTIC (diagnose-don't-guess, the workflow lesson):** `InputClickFeedback`
+flags that `playInputClick()` MAY be a silent no-op from the keybar's accessory-view
+mount context (unverified on device). This is likely a contributor to the "am I sure
+it pressed?" feeling. Required: **device-verify that `playInputClick()` actually
+fires** from the keybar mount; if silent, do the flagged pivot (host controls in a
+real `UIInputView` / `InputClickAudioHost`) OR fall back to an explicit
+`UISelectionFeedbackGenerator` tick for key presses. Do NOT ship assuming it works.
+
+---
+
+## Status: all topics locked (2026-07-31)
+
+Topics 1-8 + the rendering-engine decision + the zoom trigger are LOCKED. This
+document is the canonical interaction spec. Next: implementation planning
+(build-order below is the natural sequence).
+
+**Natural build order (each device-verified before the next):**
+1. **Diagnostics first** (diagnose-don't-guess): (a) the invisible-selection-
+   highlight root cause (3g) on a logging build; (b) whether `playInputClick()`
+   fires from the keybar mount (8c).
+2. **Selection UI** (Topic 3): fix highlight → custom draggable handles → custom
+   loupe → sub-word/line/long-press-drag + focus-on-select + bracketed paste.
+3. **Scroll + focus-follows-input** (Topics 1/2/4): native UIScrollView bounce on
+   shell; fix the gesture-arbitration speedbump; focus-on-any-byte-sending gesture.
+4. **Window swipe** (Topic 5): axis-locked horizontal swipe, wrap, optimistic
+   redraw.
+5. **Pad pane-management** (Topic 6): double-tap zoom + long-press pane-mode overlay
+   + splits (`SplitSwipeMapping` Kit setting) + the armed-overlay live preview/menu.
+6. **Keybar three-region layout + full config** (Topic 7) + the L/R invariant
+   config-time guardrail.
+7. **Haptics pass** (Topic 8c) once the mount-context diagnostic is resolved.
 
