@@ -589,3 +589,92 @@ screen (`?`) documents it in result-language, text bound to the active mapping.
 
 ---
 
+## Topic 7: Keybar [LOCKED]
+
+Ratifies the existing per-key gesture model (2026-06-15 keybar-customization
+design, largely built through Phase 4) against this redesign's principles, and
+adds three things: the fixed-region-only-L/R invariant, a three-region layout, and
+the full-configurability scope with a config-time guardrail.
+
+### 7a. Per-key gesture model [RATIFIED]
+Every keybar slot supports up to **4 bindings**: `tap` / `swipe-up` / `swipe-down`
+/ `long-press` (slot editor requires ≥1). Dim edge-glyphs hint bound swipes; `≡`
+hints long-press. Built-in widgets keep their designed gestures:
+- **Esc pill:** tap=Esc; swipe-L/R=prev/next window (wraps); swipe-up=quick window
+  picker; swipe-down=new window; long-press=unified picker (windows/hosts/Connect/
+  Settings).
+- **Pad:** drag=arrows; single-tap=no-op; double-tap=zoom; long-press=pane-mode
+  overlay; long-press+swipe=split (Topic 6).
+- **Modifier:** tap=arm Ctrl (one-shot); swipe-up=arm Alt; swipe-down=arm Shift.
+
+### 7b. The fixed-region-only-L/R invariant [LOCKED]
+**Horizontal-swipe bindings are permitted ONLY on widgets in a LOCKED (fixed)
+region; slots in the SCROLLABLE region are vertical-swipe (up/down) only.** In the
+scroll region a horizontal drag is reserved for **scrolling the keybar**; a slot
+L/R-swipe there would fight the scroll (the exact ambiguous, device-loop-fragile
+case to avoid).
+
+Why this is safe and sufficient (verified against the code 2026-07-30):
+- The keybar is the terminal's `inputAccessoryView` (a separate `UIInputView`), so
+  a keybar swipe and a terminal swipe (Topic 5) are hit-tested to different views
+  and **cannot cross-talk**, there is no keybar-vs-terminal L/R tension at all.
+- The only real L/R contention is INTRA-keybar: scroll vs a slot's L/R-swipe. The
+  locked regions do not scroll, so L/R widgets placed there (Esc pill, Pad) have no
+  scroll to fight. The Pad's arrows are a radial drag-from-center, not an L/R that
+  competes with a neighbor.
+- Therefore: keep the Esc pill's swipe-L/R (no cost), keep the Pad, and DISALLOW
+  L/R bindings on scroll-region slots. Actions that would want L/R on a scroll slot
+  go on swipe-up/down instead.
+
+**Enforced at CONFIG time, not just runtime:** the keybar editor hides/disables the
+L/R binding options for any slot currently in the scroll region, so a user cannot
+even create the ambiguous binding. Moving a slot from a locked region to the scroll
+region drops (or warns about) any L/R binding it had.
+
+### 7c. Three-region layout [LOCKED]
+`KeybarLayout` changes from one locked array to **two**:
+`lockedLeft` | `scroll` | `lockedRight`. The scrollable region sits between two
+fixed regions.
+- **Default:** `lockedLeft` keeps its current contents (Esc pill, modifiers, Tab,
+  …) **minus the Pad**; **Pad moves to `lockedRight` by default** (arrows under the
+  right thumb, Esc/modifiers under the left). Nothing else on the right by default.
+- Both locked regions are valid homes for L/R-swipe widgets (7b); the scroll region
+  between them stays vertical-only.
+- **Cleanup:** the existing `KeybarLayoutDirection` enum (`.lockedLeft`/
+  `.lockedRight`) was a WHOLE-BAR mirror (which side the single locked region
+  anchored to). With true left+right regions that "which side is locked" meaning is
+  obsolete; the enum is repurposed to drive ONLY the handedness mirror (7e), not
+  region existence. Implementer to migrate persisted layouts (old single `locked`
+  array → `lockedLeft`, with Pad relocated to `lockedRight`).
+- `KeybarView.fullContent`: `HStack { lockedLeft… ; ScrollView{ scroll… } ;
+  lockedRight… }`.
+
+### 7d. Full configurability [LOCKED]
+The keybar is fully user-configurable (extends the existing `KeybarEditorView`).
+Configurable dimensions:
+- **Placement:** every slot's region (lockedLeft / scroll / lockedRight) and order
+  within it; slots are movable between all three regions (drag-reorder,
+  cross-region moves).
+- **Presence:** add / remove slots; custom slots and pinned macros via the existing
+  custom-slot + macro editors.
+- **Per-key bindings:** tap / swipe-up / swipe-down / long-press per slot (existing
+  fixed-key-secondary + custom-slot editors), subject to the 7b invariant (L/R only
+  offered for locked-region slots).
+The editor presents three reorderable lists (Left-locked, Scroll, Right-locked)
+plus the mirror toggle.
+
+### 7e. Handedness mirror [LOCKED]
+Keep a one-tap **mirror toggle** for left-handed use. It now **swaps the two locked
+regions** (lockedLeft ↔ lockedRight contents) and flips the scroll direction, a
+fast handedness swap without re-dragging every slot. Gesture semantics stay
+physical (a pure layout mirror; swipe directions are unaffected, per the existing
+reverse-bar rule).
+
+### 7f. Parked Esc-key-zoom idea [RESOLVED: dropped]
+The Topic-2/zoom-trigger note parked "maybe tie zoom to the Esc key." RESOLVED:
+zoom lives on the **Pad** (double-tap, Topic 6). No Esc-key zoom, it would split
+zoom across two controls (principle 1). The Esc pill keeps its
+window-nav/picker/Settings gesture set unchanged.
+
+---
+
