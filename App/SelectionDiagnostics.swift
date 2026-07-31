@@ -4,33 +4,20 @@ import UIKit
 import SwiftTerm
 
 /// One-line snapshot of a terminal view's live selection state for the
-/// invisible-highlight diagnostic (spec 3g). Reports the ACTIVE flag, the
-/// selection grid range, and the configured highlight COLOR at a given phase
-/// (after-set / after-redraw / on-repaint), so the device log shows exactly
-/// where state diverges between normal-screen and alt-screen. Logs coordinates
-/// and a color description only, never selected text content (privacy).
+/// invisible-highlight diagnostic (spec 3g). Reports the ACTIVE flag, a
+/// content-free selection-length proxy, and the configured highlight COLOR
+/// at a given phase (after-set / after-redraw / on-repaint), so the device
+/// log shows exactly where state diverges between normal-screen and
+/// alt-screen. Logs a length count and a color description only, never
+/// selected text content (privacy).
 enum SelectionDiagnostics {
     /// `phase` is one of "set" | "redraw" | "repaint". `mode` is the caller's
     /// current interaction mode string (e.g. "localScroll" / "appOwnsInput").
     static func snapshot(_ view: TerminalView, phase: String, mode: String) -> String {
         let active = view.selectionActive
         let color = describe(view.selectedTextBackgroundColor)
-
-        guard let sel = view.selection else {
-            return "sel:diag phase=\(phase) mode=\(mode) active=\(active) range=nil span=0 color=\(color)"
-        }
-
-        let start = sel.start
-        let end = sel.end
-        let range = "(\(start.col),\(start.row))->(\(end.col),\(end.row))"
-        let span: Int
-        if start.row == end.row {
-            span = end.col - start.col
-        } else {
-            let cols = view.getTerminal().cols
-            span = (end.row - start.row) * cols + (end.col - start.col)
-        }
-        return "sel:diag phase=\(phase) mode=\(mode) active=\(active) range=\(range) span=\(span) color=\(color)"
+        let selLen = view.getSelection()?.count ?? 0
+        return "sel:diag phase=\(phase) mode=\(mode) active=\(active) selLen=\(selLen) color=\(color)"
     }
 
     /// Human-readable color + alpha so a transparent/unset highlight (candidate #2)
