@@ -178,6 +178,8 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
         super.didMoveToWindow()
         let inChain = (window != nil)
         InputClickFeedback.hostInChainDescription = inChain ? "audioFeedbackHost@window" : "detached"
-        DebugLog.shared.log(.keybar, "keybar:clickprobe host=\(InputClickFeedback.hostInChainDescription) conformsAudioFeedback=true")
+        MainActor.assumeIsolated {
+            DebugLog.shared.log(.keybar, "keybar:clickprobe host=\(InputClickFeedback.hostInChainDescription) conformsAudioFeedback=true")
+        }
     }
 }

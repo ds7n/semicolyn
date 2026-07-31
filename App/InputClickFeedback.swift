@@ -22,7 +22,9 @@ enum InputClickFeedback {
     static func play() {
         UIDevice.current.playInputClick()
         if diagnosticsEnabled {
-            DebugLog.shared.log(.keybar, "keybar:clickprobe called=playInputClick host=\(hostInChainDescription)")
+            MainActor.assumeIsolated {
+                DebugLog.shared.log(.keybar, "keybar:clickprobe called=playInputClick host=\(hostInChainDescription)")
+            }
         }
     }
 
