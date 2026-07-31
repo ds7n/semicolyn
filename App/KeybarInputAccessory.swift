@@ -6,8 +6,8 @@ import SemicolynKit
 
 /// The SwiftUI root hosted inside `KeybarInputAccessory`. It owns the
 /// `@ObservedObject`s directly (rather than being erased to `AnyView` at the
-/// `UIHostingController` boundary), so a change to `keybarSettings.settings` — e.g. the
-/// user adding a swipe secondary in the editor — re-evaluates the graph and updates the
+/// `UIHostingController` boundary), so a change to `keybarSettings.settings`, e.g. the
+/// user adding a swipe secondary in the editor, re-evaluates the graph and updates the
 /// keybar live, without an app restart.
 struct KeybarAccessoryRoot: View {
     @ObservedObject var vm: ConnectionViewModel
@@ -29,7 +29,7 @@ struct KeybarAccessoryRoot: View {
 /// The keybar's real audio-feedback host. A `UIInputView` conforming to
 /// `UIInputViewAudioFeedback`, assigned as the terminal's `inputAccessoryView`, so
 /// `UIDevice.playInputClick()` (fired by `.onInputClickTap` on the keybar/predictor)
-/// actually plays the keyboard click — mirroring the user's iOS keyboard
+/// actually plays the keyboard click, mirroring the user's iOS keyboard
 /// sound+haptic setting. It renders the existing keybar + predictor SwiftUI via a
 /// `UIHostingController<KeybarAccessoryRoot>`. The hosting controller self-sizes from
 /// its intrinsic content, so the input view hugs the keyboard with no phantom gap and
@@ -41,7 +41,7 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
 
     /// Off-screen measuring hosts for the two children, sized independently. We do NOT
     /// measure the live `host` for height: `host.sizeThatFits` proved self-contaminating
-    /// on device (2026-07-24) — it returned the accessory's CURRENT frame (90) rather than
+    /// on device (2026-07-24), it returned the accessory's CURRENT frame (90) rather than
     /// the ideal content (56 = 18 strip + 38 bar), because `sizingOptions =
     /// .intrinsicContentSize` feeds the frame back into the measurement, toggling 56↔90 and
     /// leaving dead space above the strip and under the keybar. Fresh, never-framed hosts
@@ -72,7 +72,7 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
         host.sizingOptions = .intrinsicContentSize
 
         // Off-screen measuring hosts (never added to the view tree, never framed) for the
-        // two children — measured independently so their heights are stable and free of
+        // two children, measured independently so their heights are stable and free of
         // the live host's frame-feedback (see property doc). Same env/theme as the live
         // graph so the measurement matches what renders.
         self.stripMeasureHost = UIHostingController(
@@ -94,7 +94,7 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
         host.view.backgroundColor = .clear
         host.view.translatesAutoresizingMaskIntoConstraints = false
         addSubview(host.view)
-        // Pin leading/trailing/top only — NOT bottom. Pinning the bottom too would
+        // Pin leading/trailing/top only, NOT bottom. Pinning the bottom too would
         // force host.view to fill the input view's (seeded 88pt) height, and since
         // `intrinsicContentSize` below measures host.view, that made the measurement
         // circular: input height ← intrinsicContentSize ← host.view height ← input
@@ -112,8 +112,8 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     /// The SwiftUI content's own ideal height at the current width. Uses
-    /// `UIHostingController.sizeThatFits(in:)` — which asks SwiftUI directly "how tall
-    /// is your content at this width?" — instead of `systemLayoutSizeFitting` on
+    /// `UIHostingController.sizeThatFits(in:)`, which asks SwiftUI directly "how tall
+    /// is your content at this width?", instead of `systemLayoutSizeFitting` on
     /// `host.view`. The latter resolved against host.view's Auto Layout constraints,
     /// which (when the bottom edge was pinned to the input view) collapsed to the input
     /// view's seed height rather than the content height. `sizeThatFits` is immune to
@@ -132,7 +132,7 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
         // instead of `host.sizeThatFits` on the combined graph. The combined measurement
         // was self-contaminating on device (2026-07-24): it returned the accessory's
         // current frame (90) not the ideal content (56 = 18 + 38), because the live host's
-        // `.intrinsicContentSize` sizing feeds its frame back into the measurement — the
+        // `.intrinsicContentSize` sizing feeds its frame back into the measurement, the
         // breakdown probe proved strip=18 and bar=38 are stable while `full` toggled 56↔90.
         // Fresh, never-framed hosts have no frame to feed back, so this is stable.
         let w = bounds.width
@@ -157,7 +157,7 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     }
 
     /// Re-measure when the hosted content changes size (predictor strip appearing /
-    /// disappearing, keybar hidden toggle) so the input view resizes to match — but only
+    /// disappearing, keybar hidden toggle) so the input view resizes to match, but only
     /// invalidate when the height actually changed, so we don't spin a layout loop.
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -166,5 +166,18 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
             DebugLog.shared.log(.keybar, "keybar:invalidate h=\(h) prev=\(lastMeasuredHeight)")
             invalidateIntrinsicContentSize()
         }
+    }
+
+    /// Reports whether this `UIInputViewAudioFeedback` host is actually in the
+    /// responder chain (attached to a window). `InputClickFeedback.play()` fires
+    /// `UIDevice.playInputClick()` from SwiftUI tap handlers that render inside this
+    /// accessory; if this host never attaches to a window, that call is a silent
+    /// no-op (see `InputClickFeedback.swift`'s header). This is the device-verify
+    /// probe for that question.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        let inChain = (window != nil)
+        InputClickFeedback.hostInChainDescription = inChain ? "audioFeedbackHost@window" : "detached"
+        DebugLog.shared.log(.keybar, "keybar:clickprobe host=\(InputClickFeedback.hostInChainDescription) conformsAudioFeedback=true")
     }
 }
