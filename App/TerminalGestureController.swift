@@ -149,6 +149,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private var storedStart: (col: Int, row: Int)?
     private var storedEnd: (col: Int, row: Int)?
 
+    /// The floating magnifier shown while `handlePan` is dragging a selection handle
+    /// (see `handleHandlePan`'s `.changed`/`.ended` branches); tracks the finger and
+    /// hides on release.
+    private lazy var loupe: SelectionLoupeView? = SelectionLoupeView()
+
     init(terminalView: TerminalView, callbacks: Callbacks) {
         self.terminalView = terminalView
         self.callbacks = callbacks
@@ -669,10 +674,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             view.setSelectionRange(start: Position(col: o.start.col, row: o.start.row),
                                    end: Position(col: o.end.col, row: o.end.row))
             storedStart = o.start; storedEnd = o.end
-            // Task 7: loupe?.show(around: p, in: view)
+            loupe?.show(around: p, in: view)
         case .ended, .cancelled, .failed:
             anchoredEnd = nil; draggingEnd = nil
-            // Task 7: loupe?.hide()
+            loupe?.hide()
             presentEditMenu(at: p, in: view)
         default: break
         }
