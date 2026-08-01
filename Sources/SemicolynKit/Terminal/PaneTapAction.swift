@@ -11,7 +11,8 @@
 public enum PaneTapAction: Equatable, Sendable {
     /// Inactive pane: focus it (`select-pane`), consume the tap.
     case focusPane
-    /// Active pane in `.localScroll`: the existing tap behavior (place / clear).
+    /// Active pane: the tap behavior (place / clear / re-summon). A live selection is
+    /// handled this way in every mode; with no selection this only applies in `.localScroll`.
     case active(TapAction)
     /// Active pane in an app-owned mode (`.appOwnsInput` / `.mouseReporting`):
     /// yield (SwiftTerm forwards the click, or nothing happens).
@@ -21,11 +22,17 @@ public enum PaneTapAction: Equatable, Sendable {
 /// Pure decider for a single tap on a pane. See `PaneTapAction`.
 public func paneTapAction(isActivePane: Bool,
                           mode: InteractionMode,
-                          hasSelection: Bool) -> PaneTapAction {
+                          hasSelection: Bool,
+                          tapInsideSelection: Bool) -> PaneTapAction {
     guard isActivePane else { return .focusPane }
+    // A live selection's tap-to-(re-summon/clear) applies in every mode, before the
+    // app-owned yield: double-tap can create a selection on the alt-screen too.
+    if hasSelection {
+        return .active(tapAction(hasSelection: true, tapInsideSelection: tapInsideSelection))
+    }
     switch mode {
     case .localScroll:
-        return .active(tapAction(hasSelection: hasSelection))
+        return .active(tapAction(hasSelection: false, tapInsideSelection: false))
     case .appOwnsInput, .mouseReporting:
         return .yield
     }

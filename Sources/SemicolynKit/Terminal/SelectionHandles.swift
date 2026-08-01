@@ -53,3 +53,14 @@ public func orderedSelection(a: (col: Int, row: Int), b: (col: Int, row: Int))
     if a.row < b.row || (a.row == b.row && a.col <= b.col) { return (a, b) }
     return (b, a)
 }
+
+/// Whether the grid cell (col,row) lies within the selection spanning `start`..`end`
+/// (row-major, inclusive). Handles reversed input via `orderedSelection`.
+public func isWithinSelection(col: Int, row: Int,
+                              start: (col: Int, row: Int), end: (col: Int, row: Int)) -> Bool {
+    let o = orderedSelection(a: start, b: end)
+    if row < o.start.row || row > o.end.row { return false }
+    if row == o.start.row && col < o.start.col { return false }
+    if row == o.end.row && col > o.end.col { return false }
+    return true
+}

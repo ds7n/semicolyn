@@ -769,18 +769,30 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             let ok = view.becomeFirstResponder()
             DebugLog.shared.log(.gesture, "gesture:singleTap becomeFirstResponder=\(ok)")
         }
+        let p = g.location(in: view)
+        // Tap-inside test for the copy-menu re-summon rule (Topic 3c): a tap ON an active
+        // selection re-summons the menu instead of clearing it. Uses the same absolute-row
+        // space as `storedStart`/`storedEnd` (see `cell(at:in:)`).
+        let tapInside: Bool = {
+            guard callbacks.hasSelection(), let s = storedStart, let e = storedEnd else { return false }
+            let target = cell(at: p, in: view)
+            return SemicolynKit.isWithinSelection(col: target.col, row: target.absoluteRow, start: s, end: e)
+        }()
         switch paneTapAction(isActivePane: callbacks.isActivePane(),
                              mode: callbacks.currentMode(),
-                             hasSelection: callbacks.hasSelection()) {
+                             hasSelection: callbacks.hasSelection(),
+                             tapInsideSelection: tapInside) {
         case .focusPane:
             callbacks.onSelectPane()
             DebugLog.shared.log(.gesture, "gesture:singleTap action=focus-pane")
+        case .active(.reSummonMenu):
+            presentEditMenu(at: p, in: view)
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=reSummonMenu")
         case .active(.clearSelection):
             callbacks.clearSelection()
             storedStart = nil; storedEnd = nil
             DebugLog.shared.log(.gesture, "gesture:singleTap action=clear")
         case .active(.placeCursor):
-            let p = g.location(in: view)
             let target = cell(at: p, in: view)
             callbacks.onPlaceCursor(target.col, target.viewportRow)
             DebugLog.shared.log(.gesture, "gesture:singleTap action=place at=(\(target.col),\(target.viewportRow))")
@@ -868,7 +880,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     }
 
     @objc private func handleTwoFingerTap(_ g: UITapGestureRecognizer) {
-        guard let view = terminalView else { return }
+        guard let view = terminalView, view.hasActiveSelection else { return }
         DebugLog.shared.log(.gesture, "gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
         presentEditMenu(at: g.location(in: view), in: view)
     }
