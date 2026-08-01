@@ -612,11 +612,18 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // are required to fail against this recognizer (see `shouldRequireFailureOf`), so a
         // bare `return` on `.began` would leave this recognizer stuck in `.began` (UIKit has
         // already transitioned its state before invoking the target/action) with nothing to
-        // cancel it, PERMANENTLY blocking scroll/switch on any pane with no active selection.
-        // Explicitly cancelling makes the recognizer resolve immediately, exactly like the
-        // handle-miss path below.
+        // release the pans waiting on it, PERMANENTLY blocking scroll/switch on any pane
+        // with no active selection. Force-cancel via the isEnabled bounce (same proven idiom
+        // `beginDrag` uses on `longPress`, see its comment above): writing `g.state =
+        // .cancelled` directly on a stock, non-subclassed UIPanGestureRecognizer is not
+        // reliably honored by UIKit's arbitration engine and may not release a recognizer
+        // that `shouldRequireFailureOf` this one, whereas disabling/re-enabling forces a real
+        // failure UIKit's dependency graph does honor.
         guard let view = terminalView, view.hasActiveSelection else {
-            if g.state == .began || g.state == .changed { g.state = .cancelled }
+            if g.state == .began || g.state == .changed {
+                g.isEnabled = false
+                g.isEnabled = true
+            }
             return
         }
         let p = g.location(in: view)
@@ -628,7 +635,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         switch g.state {
         case .began:
             // Compute each endpoint's on-screen rect from the STORED selection positions.
-            guard let ends = currentSelectionEnds(in: view) else { g.state = .cancelled; return }
+            guard let ends = currentSelectionEnds(in: view) else {
+                // Force-cancel via isEnabled bounce, not `g.state = .cancelled` (see the
+                // no-active-selection guard above for why).
+                g.isEnabled = false
+                g.isEnabled = true
+                return
+            }
             let startRect = cellRect(col: ends.start.col, row: ends.start.row, cellW: cellW, cellH: cellH, in: view)
             let endRect   = cellRect(col: ends.end.col,   row: ends.end.row,   cellW: cellW, cellH: cellH, in: view)
             draggingEnd = SemicolynKit.hitTestHandle(
@@ -638,7 +651,12 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                 endRect: SelectionHandleRect(x: Double(endRect.origin.x), y: Double(endRect.origin.y),
                                              width: Double(endRect.width), height: Double(endRect.height)),
                 slop: 22)
-            if draggingEnd == nil { g.state = .cancelled; return }   // not a handle: let content own it
+            if draggingEnd == nil {
+                // not a handle: let content own it (isEnabled bounce, see above)
+                g.isEnabled = false
+                g.isEnabled = true
+                return
+            }
             anchoredEnd = (draggingEnd == .start) ? ends.end : ends.start
             callbacks.onSelectPane()   // handle-drag focuses too
             DebugLog.shared.log(.gesture, "gesture:handlePan action=grab end=\(String(describing: draggingEnd))")
