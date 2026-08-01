@@ -3,6 +3,24 @@
 
 # Status & TODO
 
+## Resume here (2026-08-01)
+
+**Gesture redesign: full spec LOCKED (8 topics) + diagnostics slice SHIPPED + root cause of the invisible-highlight bug FOUND.**
+
+- **Spec (canonical, LOCKED):** `docs/superpowers/specs/2026-07-30-gesture-interaction-system-design.md`. All 8 topics + engine decision + zoom trigger locked. Build order = 7 slices; slice 1 (diagnostics) done.
+- **Diagnostics slice: DONE.** Branch `feat/gesture-diagnostics` (off `test/focus-plus-selection`), macOS-CI-green on code `4784773`, HEAD `878ea4a`, all pushed to github. Instrumentation-only. Shipped to TestFlight (build 102 = run 30669541913).
+- **DIAGNOSIS COMPLETE (the whole point):** invisible selection highlight = **yDisp coordinate-space mismatch**. Device `sel:diag` logs showed active=true / selLen>0 / color alpha=0.30 at all phases (ruling out the 3 top candidates); SwiftTerm v1.15.0 source shows the draw loop (`selectedColumnsRange`) matches ABSOLUTE buffer rows but our `setSelectionRange` stores VIEWPORT-relative rows (`TapRowMapping` strips yDisp) -> on alt-screen (yDisp>0) no row matches -> no highlight, though copy works. Full writeup: `docs/superpowers/topics/2026-07-31-gesture-diagnostics-capture.md` (RESULT section) + auto-memory `highlight-invisible-rootcause-2026-08-01`.
+
+**EXACT NEXT ACTION:** start **slice 2 (Selection UI, Topic 3)** with a short brainstorm on the fix path for the yDisp mismatch: (a) reconcile the row space so both SwiftTerm's draw loop and `getSelection`/text are correct, vs (b) draw a CUSTOM highlight fill keyed on our own coords (aligns with the locked custom selection UI: handles + loupe). The trap: `getSelection` adds yDisp itself, so a naive flip to absolute rows breaks copied text. Then plan + build slice 2 (highlight fix -> handles -> loupe -> sub-word/focus-on-select/bracketed paste), device-verify each.
+
+**Before any main-merge of feat/gesture-diagnostics:** flip `InputClickFeedback.diagnosticsEnabled` true->false; the guessed `setNeedsDisplay` (64dc281) is deliberately kept for now.
+
+**Session lessons (cost real CI cycles):** `git push` BEFORE `gh workflow run`; diagnose against the CI-RESOLVED dep version (SwiftTerm resolves to v1.15.0); SwiftTerm draw/selectionChanged are non-open (not overridable cross-module); the @MainActor DebugLog trap is active even in Swift-5 mode. Also: TestFlight build number = CI run_number, so numbers collide across branches (a real identify-the-build gotcha).
+
+Stray: an untracked `swiftterm-150/` clone is in the repo root (my diagnosis throwaway; not committed; `rm -rf swiftterm-150` to remove).
+
+---
+
 The canonical status + pending-work list. Architecture and the spec/plan map live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the full decision log (incl. per-spec "out of scope") in [docs/brainstorming-decisions.md](docs/brainstorming-decisions.md).
 
 **Headline:** design complete; a connect-and-get-a-shell MVP builds for the iOS Simulator. The protocol + logic tiers are built and Linux-tested; the app shell is built and validated by macOS CI. Not yet device-installable (needs Apple Developer signing).

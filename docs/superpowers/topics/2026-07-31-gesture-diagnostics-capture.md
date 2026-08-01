@@ -121,3 +121,41 @@ Record, in project memory and in the follow-up slice's brief:
 2. Whether the keybar's `host=` value was `audioFeedbackHost@window` or `detached`,
    and if `audioFeedbackHost@window` with still-silent device audio, note that as
    "expected, no pivot" rather than as an open bug.
+
+## RESULT (captured 2026-08-01, TestFlight build 102 = run 30669541913)
+
+**Highlight root cause: DIAGNOSED. Not candidates #1/#2/#3.** All captured
+`sel:diag` triples were `mode=appOwnsInput` (alt-screen) and every phase read
+identically: `active=true selLen=8|55 color=rgba(1.00,0.44,0.37,0.30)`.
+- `active=true` at set + redraw + repaint -> selection NOT cleared (rules out #1).
+- `selLen` non-zero -> real selection (rules out #3; consistent with copy menu).
+- color alpha `0.30`, non-transparent -> highlight color is set (rules out #2).
+
+So the selection state is fully healthy yet no highlight draws -> candidate #4/#5,
+and cross-referencing SwiftTerm v1.15.0 source pins it to a **yDisp
+coordinate-space mismatch**: our `setSelectionRange` stores a VIEWPORT-relative row
+(`TapRowMapping` strips `yDisp`), but SwiftTerm's draw loop
+(`AppleTerminalView.selectedColumnsRange`) matches the selection against ABSOLUTE
+buffer rows (`displayBuffer.yDisp` + offset) by exact `==`. When `yDisp > 0`
+(always on the alt-screen), no visible row matches -> no cell gets the highlight
+background -> invisible highlight. `getSelection()` reads the stored coords (and
+adds `yDisp` itself), so copy still returns the correct text, which is exactly the
+observed "selects + copy works, no highlight" symptom.
+
+The guessed `setNeedsDisplay` (64dc281) was irrelevant: the highlight was never
+going to draw regardless of repaint, because the row match fails.
+
+**Trap for the fix (slice 2):** the same `Position.row` feeds two SwiftTerm paths
+that want OPPOSITE spaces, `getSelection`/text wants viewport-relative (adds yDisp
+itself), the draw loop wants absolute. A naive flip to absolute rows may fix the
+highlight but double-count in `getSelection` and break copied text. Fix is designed
+in slice 2 (Selection UI): either reconcile the row space for both, or (aligned
+with the locked CUSTOM selection UI) draw a custom highlight fill keyed on our own
+stored coords, bypassing SwiftTerm's row-equality entirely. Add a Kit test with a
+`yDisp > 0` boundary case.
+
+**playInputClick / haptic:** `keybar:clickprobe` lines were captured (10x). [Read
+the `host=` value from the sink before the next slice: `audioFeedbackHost@window`
+means the mount is fine and any silence is the user's system keyboard-feedback
+setting; `detached`/`unknown` means pivot to a real UIInputView host or
+`UISelectionFeedbackGenerator`.]
