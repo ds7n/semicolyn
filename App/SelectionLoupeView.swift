@@ -40,13 +40,22 @@ final class SelectionLoupeView: UIView {
         isHidden = false
 
         // SemicolynKit's `loupeCenter` uses plain-Double geometry (no CoreGraphics on
-        // Linux, see LoupeGeometry.swift); convert at this call boundary.
+        // Linux, see LoupeGeometry.swift); convert at this call boundary. Its inputs
+        // (`terminal.bounds`, `point`) are both in terminal's own LOCAL coordinate
+        // space, so the returned center is in that same local space too.
         let c = SemicolynKit.loupeCenter(
             finger: SelectionHandlePoint(x: Double(point.x), y: Double(point.y)),
             boundsWidth: Double(terminal.bounds.width), boundsHeight: Double(terminal.bounds.height),
             loupeWidth: Double(bounds.width), loupeHeight: Double(bounds.height),
             verticalOffset: Double(verticalOffset))
-        self.center = CGPoint(x: c.x, y: c.y)
+        let local = CGPoint(x: c.x, y: c.y)
+        // `self.center` is interpreted in `self.superview`'s space (= host), which is
+        // terminal's SIBLING space, not terminal's own space: they differ by
+        // `terminal.frame.origin`, nonzero for any pane not at the container's
+        // top-left (every pane but one in a multi-pane tmux -CC layout). Convert
+        // local -> host space before assigning, or the loupe renders offset from
+        // the finger by the pane's origin.
+        self.center = host.convert(local, from: terminal)
 
         let now = CACurrentMediaTime()
         guard now - lastSnapshot >= minSnapshotInterval else { return }
