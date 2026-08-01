@@ -678,7 +678,9 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         case .ended, .cancelled, .failed:
             anchoredEnd = nil; draggingEnd = nil
             loupe?.hide()
-            presentEditMenu(at: p, in: view)
+            if g.state == .ended {
+                presentEditMenu(at: p, in: view)
+            }
         default: break
         }
     }
