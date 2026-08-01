@@ -816,26 +816,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         view.setSelectionRange(start: Position(col: start, row: absoluteRow),
                                end: Position(col: end, row: absoluteRow))
         storedStart = (col: start, row: absoluteRow); storedEnd = (col: end, row: absoluteRow)
-        // AFTER setSelectionRange (before any repaint): candidate-3 check (zero-width
-        // range on alt-screen) + candidate-2 (color) captured at set time.
-        let modeStr = "\(callbacks.currentMode())"
-        DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "set", mode: modeStr))
         subordinateSelectionPan(on: view)
         DebugLog.shared.log(.gesture,
-            "sel:double loc=\(p) mode=\(callbacks.currentMode()) cell=(\(col),\(viewportRow)) abs=\(absoluteRow) word=(\(start),\(end)) chars=\"\(selectedChars(row: viewportRow, startCol: start, endCol: end, in: view))\"")
-        // phase=repaint: run AFTER this runloop turn's layout/draw pass so we observe
-        // whether the selection survived to repaint (candidate #1). No SwiftTerm override
-        // is used (draw/selectionChanged are not open / are non-open protocol witnesses in
-        // the CI-resolved SwiftTerm, so cross-module overriding fails to compile).
-        Task { @MainActor [weak view] in
-            guard let view else { return }
-            DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "repaint", mode: modeStr))
-        }
+            "sel:double loc=\(p) mode=\(callbacks.currentMode()) cell=(\(col),\(viewportRow)) abs=\(absoluteRow) word=(\(start),\(end))")
         DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
-        // AFTER the forced synchronous repaint request (the guessed 64dc281 fix):
-        // if active is still true here but the highlight never draws, candidate #1
-        // (repaint race) is implicated; the phase=repaint line (Task 5) confirms.
-        DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "redraw", mode: modeStr))
         presentEditMenu(at: p, in: view)
     }
 
@@ -850,26 +834,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         view.setSelectionRange(start: Position(col: 0, row: absoluteRow),
                                end: Position(col: cols - 1, row: absoluteRow))
         storedStart = (col: 0, row: absoluteRow); storedEnd = (col: cols - 1, row: absoluteRow)
-        // AFTER setSelectionRange (before any repaint): candidate-3 check (zero-width
-        // range on alt-screen) + candidate-2 (color) captured at set time.
-        let modeStr = "\(callbacks.currentMode())"
-        DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "set", mode: modeStr))
         subordinateSelectionPan(on: view)
         DebugLog.shared.log(.gesture,
-            "sel:triple loc=\(p) mode=\(callbacks.currentMode()) cell=(\(viewportRow)) abs=\(absoluteRow) chars=\"\(selectedChars(row: viewportRow, startCol: 0, endCol: cols - 1, in: view))\"")
-        // phase=repaint: run AFTER this runloop turn's layout/draw pass so we observe
-        // whether the selection survived to repaint (candidate #1). No SwiftTerm override
-        // is used (draw/selectionChanged are not open / are non-open protocol witnesses in
-        // the CI-resolved SwiftTerm, so cross-module overriding fails to compile).
-        Task { @MainActor [weak view] in
-            guard let view else { return }
-            DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "repaint", mode: modeStr))
-        }
+            "sel:triple loc=\(p) mode=\(callbacks.currentMode()) cell=(\(viewportRow)) abs=\(absoluteRow)")
         DebugLog.shared.log(.gesture, "sel:redraw hasActive=\(view.hasActiveSelection)")
-        // AFTER the forced synchronous repaint request (the guessed 64dc281 fix):
-        // if active is still true here but the highlight never draws, candidate #1
-        // (repaint race) is implicated; the phase=repaint line (Task 5) confirms.
-        DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "redraw", mode: modeStr))
         presentEditMenu(at: p, in: view)
     }
 
@@ -901,19 +869,6 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         }
         let r = SemicolynKit.subWordBounds(cols: cols, col: col, classOf: classOf)
         return (r.start, r.end)
-    }
-
-    /// The characters currently in `[startCol, endCol]` on `row`, for diagnostics.
-    /// Truncated to 120. Read via `getCharData` (same source selection uses).
-    private func selectedChars(row: Int, startCol: Int, endCol: Int, in view: TerminalView) -> String {
-        let term = view.getTerminal()
-        var s = ""
-        var c = startCol
-        while c <= endCol, s.count < 120 {
-            if let cd = term.getCharData(col: c, row: row) { s.append(cd.getCharacter()) }
-            c += 1
-        }
-        return s
     }
 
     private func presentEditMenu(at point: CGPoint, in view: TerminalView) {

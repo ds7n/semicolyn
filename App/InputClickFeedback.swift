@@ -29,8 +29,7 @@ enum InputClickFeedback {
     }
 
     /// Toggle from the diagnostics session; default off so shipping builds are silent.
-    /// Enabled for the diagnostics slice; flip to false before merging to main.
-    static var diagnosticsEnabled = true
+    static var diagnosticsEnabled = false
 
     /// Whether a `UIInputViewAudioFeedback` responder is currently reachable. The
     /// probe (`KeybarInputAccessory.didMoveToWindow`) sets this from the accessory

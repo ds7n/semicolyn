@@ -11,7 +11,6 @@ enum LogCategory: String, CaseIterable, Sendable {
     case tmux        // control-mode send / %reply / state-apply / pane register
     case render      // pane/window render, log-on-change only
     case gesture     // tap/pan/long-press/pinch handlers + classify decisions
-    case selection   // selection set/redraw/repaint state: active flag, range, color (NO content)
     case input       // keystroke structural events (length/backspace/modifier), NOT content
     case predictor   // suggestion lifecycle + secret-exclusion gates
     case keybar      // accessory sizing, macro resolution, live-edit apply
@@ -33,7 +32,6 @@ enum LogCategory: String, CaseIterable, Sendable {
         case .tmux:      return "tmux control-mode sends, %replies, state-apply, pane registration."
         case .render:    return "Pane/window render events (logged only on change). Verbose."
         case .gesture:   return "Tap, pan, long-press, pinch handlers and swipe-vs-scroll classification."
-        case .selection: return "Selection set, redraw, repaint state: active flag, range, color. Verbose."
         case .input:     return "Keystroke structure (length, backspace, modifiers), never key content. Verbose."
         case .predictor: return "Suggestion lifecycle and secret-exclusion gates. Verbose."
         case .keybar:    return "Accessory sizing, macro resolution, live-edit apply. Verbose."
@@ -46,7 +44,7 @@ enum LogCategory: String, CaseIterable, Sendable {
     /// niche ones (gesture/render/input/predictor/keybar) default OFF (opt-in when needed).
     /// `geometry` is ON by default while the switched-window layout gap is under active
     /// investigation (it logs on-change, so it stays low-volume).
-    static let defaultEnabled: Set<LogCategory> = [.lifecycle, .connect, .tmux, .seed, .geometry, .selection]
+    static let defaultEnabled: Set<LogCategory> = [.lifecycle, .connect, .tmux, .seed, .geometry]
 
     var defaultOn: Bool { Self.defaultEnabled.contains(self) }
 }
