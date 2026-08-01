@@ -73,3 +73,68 @@ final class WordBoundsTests: XCTestCase {
         XCTAssertEqual(r.end, 3)
     }
 }
+
+/// Sub-word selection breaks on a character-class change (word / space / punct), matching
+/// iOS/desktop double-click. Fixes the "double-tap grabbed the whole .claude-staging-oauth.json"
+/// bug: double-tapping `staging` selects `staging`, not the whole token.
+final class SubWordBoundsTests: XCTestCase {
+    // Model the string ".claude-staging-oauth.json" as a class function over columns.
+    private func classer(_ s: String) -> (Int) -> CharClass {
+        let chars = Array(s)
+        return { i in
+            guard i >= 0, i < chars.count else { return .space }
+            let c = chars[i]
+            if c == " " || c == "\t" || c == "\0" { return .space }
+            if SemicolynKit.selectionPunctuation.contains(c) { return .punct }
+            return .word
+        }
+    }
+
+    // EP: a word run is bounded by the surrounding punctuation.
+    func testWordRunBreaksOnPunct() {
+        let s = ".claude-staging-oauth.json"     // indices: 0='.' 1..6='claude' 7='-' 8..14='staging' ...
+        let (start, end) = SemicolynKit.subWordBounds(cols: s.count, col: 10, classOf: classer(s))
+        XCTAssertEqual(start, 8)   // 's' of staging
+        XCTAssertEqual(end, 14)    // 'g' of staging
+    }
+
+    // EP: tapping ON punctuation selects the contiguous punct run (here a single '-').
+    func testPunctRun() {
+        let s = ".claude-staging-oauth.json"
+        let (start, end) = SemicolynKit.subWordBounds(cols: s.count, col: 7, classOf: classer(s))
+        XCTAssertEqual(start, 7)
+        XCTAssertEqual(end, 7)
+    }
+
+    // EP: tapping a space yields a degenerate single-cell range.
+    func testSpaceDegenerate() {
+        let s = "ab cd"
+        let (start, end) = SemicolynKit.subWordBounds(cols: s.count, col: 2, classOf: classer(s))
+        XCTAssertEqual(start, 2)
+        XCTAssertEqual(end, 2)
+    }
+
+    // BVA: first column, word run to the left edge.
+    func testFirstColumnWord() {
+        let s = "abc def"
+        let (start, end) = SemicolynKit.subWordBounds(cols: s.count, col: 0, classOf: classer(s))
+        XCTAssertEqual(start, 0)
+        XCTAssertEqual(end, 2)
+    }
+
+    // BVA: last column, word run to the right edge.
+    func testLastColumnWord() {
+        let s = "abc def"
+        let (start, end) = SemicolynKit.subWordBounds(cols: s.count, col: 6, classOf: classer(s))
+        XCTAssertEqual(start, 4)
+        XCTAssertEqual(end, 6)
+    }
+
+    // BVA: col past cols clamps in.
+    func testColClamped() {
+        let s = "abc"
+        let (start, end) = SemicolynKit.subWordBounds(cols: s.count, col: 99, classOf: classer(s))
+        XCTAssertEqual(start, 0)
+        XCTAssertEqual(end, 2)
+    }
+}

@@ -23,3 +23,39 @@ public func wordBounds(cols: Int, col: Int,
     while hi < maxCol, isWordChar(hi + 1) { hi += 1 }
     return (lo, hi)
 }
+
+/// Character class for sub-word selection boundaries.
+public enum CharClass: Sendable {
+    case word
+    case space
+    case punct
+}
+
+/// The punctuation set that breaks a sub-word selection (double-tap), matching iOS/desktop
+/// double-click. Single source of truth: the App classifier and any docs read this.
+public let selectionPunctuation: Set<Character> = [
+    ".", "-", "/", "_", ",", ":", ";", "=", "@", "~",
+    "(", ")", "[", "]", "{", "}", "<", ">",
+    "|", "&", "!", "?", "*", "\"", "'"
+]
+
+/// Sub-word bounds on a single terminal row: from the tapped column, extend left and right
+/// while the character CLASS stays equal to the tapped cell's class. `classOf(i)` returns the
+/// class of column `i` and MUST return `.space` for out-of-range `i` (so the run stops at the
+/// row edges). `col` is clamped into `0..<cols`. A tap on a `.space` cell yields the degenerate
+/// `(col, col)`. Returns the inclusive `(start, end)` column range.
+///
+/// Pure and view-free (Linux-testable); the App supplies `classOf` backed by `getCharData`.
+public func subWordBounds(cols: Int, col: Int,
+                          classOf: (Int) -> CharClass) -> (start: Int, end: Int) {
+    let maxCol = max(cols - 1, 0)
+    let clamped = min(max(col, 0), maxCol)
+    let tapped = classOf(clamped)
+    if tapped == .space { return (clamped, clamped) }
+
+    var lo = clamped
+    var hi = clamped
+    while lo > 0, classOf(lo - 1) == tapped { lo -= 1 }
+    while hi < maxCol, classOf(hi + 1) == tapped { hi += 1 }
+    return (lo, hi)
+}
