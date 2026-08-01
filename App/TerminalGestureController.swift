@@ -826,7 +826,13 @@ extension TerminalGestureController: @preconcurrency UIEditMenuInteractionDelega
             items.append(UIAction(title: "Copy") { [weak view] _ in view?.copy(nil) })
         }
         if UIPasteboard.general.hasStrings {
-            items.append(UIAction(title: "Paste") { [weak view] _ in view?.paste(nil) })
+            items.append(UIAction(title: "Paste") { [weak self] _ in
+                guard let self, let text = UIPasteboard.general.string, !text.isEmpty else { return }
+                // Always bracket: apps that enabled bracketed paste get delimited text; apps
+                // that did not simply ignore the ESC[200~/ESC[201~ markers.
+                let bytes = SemicolynKit.bracketedPasteBytes(text, bracketed: true)
+                self.callbacks.sendBytes(bytes)
+            })
         }
         return UIMenu(children: items.isEmpty ? suggestedActions : items)
     }
