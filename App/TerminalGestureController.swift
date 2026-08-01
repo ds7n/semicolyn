@@ -658,7 +658,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // full-height panes; proven on device 2026-07-29.)
         let p = g.location(in: view)
         let (col, viewportRow, absoluteRow) = cell(at: p, in: view)
-        let (start, end) = wordBounds(col: col, row: viewportRow, in: view)
+        let (start, end) = subWordBoundsApp(col: col, row: viewportRow, in: view)
+        callbacks.onSelectPane()   // focus-on-select (Topic 1): optimistic local focus + select-pane
         view.setSelectionRange(start: Position(col: start, row: absoluteRow),
                                end: Position(col: end, row: absoluteRow))
         // AFTER setSelectionRange (before any repaint): candidate-3 check (zero-width
@@ -691,6 +692,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let p = g.location(in: view)
         let (_, viewportRow, absoluteRow) = cell(at: p, in: view)
         let cols = max(view.getTerminal().cols, 1)
+        callbacks.onSelectPane()   // focus-on-select (Topic 1)
         view.setSelectionRange(start: Position(col: 0, row: absoluteRow),
                                end: Position(col: cols - 1, row: absoluteRow))
         // AFTER setSelectionRange (before any repaint): candidate-3 check (zero-width
@@ -730,17 +732,19 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: Selection helpers
 
-    /// Word bounds on a row, backed by SwiftTerm's grid. Delegates the walk to
-    /// the pure `wordBounds(cols:col:isWordChar:)` (Kit-tested).
-    private func wordBounds(col: Int, row: Int, in view: TerminalView) -> (Int, Int) {
+    /// Sub-word bounds on `row` using SwiftTerm's `getCharData` to classify each cell.
+    /// `row` is the VIEWPORT row (getCharData adds yDisp itself).
+    private func subWordBoundsApp(col: Int, row: Int, in view: TerminalView) -> (Int, Int) {
         let term = view.getTerminal()
         let cols = max(term.cols, 1)
-        func isWordChar(_ c: Int) -> Bool {
-            guard c >= 0, c < cols, let cd = term.getCharData(col: c, row: row) else { return false }
+        func classOf(_ c: Int) -> CharClass {
+            guard c >= 0, c < cols, let cd = term.getCharData(col: c, row: row) else { return .space }
             let ch = cd.getCharacter()
-            return !(ch == " " || ch == "\t" || ch == "\0")
+            if ch == " " || ch == "\t" || ch == "\0" { return .space }
+            if SemicolynKit.selectionPunctuation.contains(ch) { return .punct }
+            return .word
         }
-        let r = SemicolynKit.wordBounds(cols: cols, col: col, isWordChar: isWordChar)
+        let r = SemicolynKit.subWordBounds(cols: cols, col: col, classOf: classOf)
         return (r.start, r.end)
     }
 
