@@ -306,27 +306,30 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: Cell geometry
 
-    /// Convert a point in the terminal view to a (col, row) cell using the terminal's
-    /// current grid and the view's content size (SwiftTerm lays cells out uniformly).
-    private func cell(at point: CGPoint, in view: TerminalView) -> (col: Int, row: Int) {
+    /// Convert a point in the terminal view to a cell using the terminal's current grid
+    /// and the view's content size (SwiftTerm lays cells out uniformly). Returns BOTH a
+    /// viewport row and an absolute (content/buffer) row, see below.
+    private func cell(at point: CGPoint, in view: TerminalView) -> (col: Int, viewportRow: Int, absoluteRow: Int) {
         let term = view.getTerminal()
         let cols = max(term.cols, 1)
         let rows = max(term.rows, 1)
         let cellW = view.bounds.width / CGFloat(cols)
         let cellH = view.bounds.height / CGFloat(rows)
-        guard cellW > 0, cellH > 0 else { return (0, 0) }
+        guard cellW > 0, cellH > 0 else { return (0, 0, 0) }
         let col = min(cols - 1, max(0, Int(point.x / cellW)))
-        // `point` is `gesture.location(in: view)`, and `view` is a UIScrollView, so `point`
-        // is in CONTENT space (includes the scroll offset). SwiftTerm's own `calculateTapHit`
-        // and its selection / `getCharData` APIs want a VIEWPORT screen row (0..<rows); its
-        // `getLine` adds `buffer.yDisp` itself. So convert content -> viewport by subtracting
-        // `contentOffset.y`, and do NOT add `yDisp` (adding it double-counts: the old
-        // "double/triple-tap selected a row far above the tap once scrolled" bug). Vertical
-        // scroll does not affect `col`, so `point.x` is used directly above.
-        let row = TapRowMapping.row(contentY: Double(point.y),
-                                    contentOffsetY: Double(view.contentOffset.y),
-                                    cellHeight: Double(cellH), rows: rows)
-        return (col, row)
+        // `point` is content-space (the view is a UIScrollView). Two row spaces are needed:
+        //  - viewportRow (0..<rows) for getCharData/getLine (SwiftTerm adds yDisp itself).
+        //  - absoluteRow (content/buffer row) for setSelectionRange: the highlight draw loop
+        //    and the copy path index buffer.lines[row] ABSOLUTELY, so a viewport row never
+        //    matches once scrolled/alt-screen (yDisp>0) => the invisible-highlight bug.
+        let viewportRow = TapRowMapping.row(contentY: Double(point.y),
+                                            contentOffsetY: Double(view.contentOffset.y),
+                                            cellHeight: Double(cellH), rows: rows)
+        let totalRows = max(Int(view.contentSize.height / cellH), rows)
+        let absoluteRow = TapRowMapping.absoluteRow(contentY: Double(point.y),
+                                                    cellHeight: Double(cellH),
+                                                    totalRows: totalRows)
+        return (col, viewportRow, absoluteRow)
     }
 
     // MARK: Handlers
@@ -638,8 +641,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         case .active(.placeCursor):
             let p = g.location(in: view)
             let target = cell(at: p, in: view)
-            callbacks.onPlaceCursor(target.col, target.row)
-            DebugLog.shared.log(.gesture, "gesture:singleTap action=place at=(\(target.col),\(target.row))")
+            callbacks.onPlaceCursor(target.col, target.viewportRow)
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=place at=(\(target.col),\(target.viewportRow))")
         case .yield:
             DebugLog.shared.log(.gesture, "gesture:singleTap action=appOwns mode=\(callbacks.currentMode())")
             return
@@ -654,22 +657,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // mis-selection was a tap->cell coordinate bug, since fixed by TapRowMapping +
         // full-height panes; proven on device 2026-07-29.)
         let p = g.location(in: view)
-        let (col, row) = cell(at: p, in: view)
-        let (start, end) = wordBounds(col: col, row: row, in: view)
-        view.setSelectionRange(start: Position(col: start, row: row), end: Position(col: end, row: row))
+        let (col, viewportRow, absoluteRow) = cell(at: p, in: view)
+        let (start, end) = wordBounds(col: col, row: viewportRow, in: view)
+        view.setSelectionRange(start: Position(col: start, row: absoluteRow),
+                               end: Position(col: end, row: absoluteRow))
         // AFTER setSelectionRange (before any repaint): candidate-3 check (zero-width
         // range on alt-screen) + candidate-2 (color) captured at set time.
         let modeStr = "\(callbacks.currentMode())"
         DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "set", mode: modeStr))
         subordinateSelectionPan(on: view)
         DebugLog.shared.log(.gesture,
-            "sel:double loc=\(p) mode=\(callbacks.currentMode()) cell=(\(col),\(row)) word=(\(start),\(end)) chars=\"\(selectedChars(row: row, startCol: start, endCol: end, in: view))\"")
-        // SwiftTerm's `selectionChanged` schedules its repaint on the main queue and
-        // coalesces via a `pendingSelectionChanged` flag; under tmux -CC the alt-screen
-        // streams frames whose own redraws can win that race, leaving the highlight
-        // undrawn (device 2026-07-29: selection correct + copyable but no visible
-        // highlight). Force a synchronous repaint of the selection now.
-        view.setNeedsDisplay(view.bounds)
+            "sel:double loc=\(p) mode=\(callbacks.currentMode()) cell=(\(col),\(viewportRow)) abs=\(absoluteRow) word=(\(start),\(end)) chars=\"\(selectedChars(row: viewportRow, startCol: start, endCol: end, in: view))\"")
         // phase=repaint: run AFTER this runloop turn's layout/draw pass so we observe
         // whether the selection survived to repaint (candidate #1). No SwiftTerm override
         // is used (draw/selectionChanged are not open / are non-open protocol witnesses in
@@ -691,19 +689,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         DebugLog.shared.log(.gesture, "gr:\(#function) state=\(g.state.rawValue) loc=\(g.location(in: view))")
         // Line-select runs in every mode (see handleDoubleTap).
         let p = g.location(in: view)
-        let (_, row) = cell(at: p, in: view)
+        let (_, viewportRow, absoluteRow) = cell(at: p, in: view)
         let cols = max(view.getTerminal().cols, 1)
-        view.setSelectionRange(start: Position(col: 0, row: row),
-                               end: Position(col: cols - 1, row: row))
+        view.setSelectionRange(start: Position(col: 0, row: absoluteRow),
+                               end: Position(col: cols - 1, row: absoluteRow))
         // AFTER setSelectionRange (before any repaint): candidate-3 check (zero-width
         // range on alt-screen) + candidate-2 (color) captured at set time.
         let modeStr = "\(callbacks.currentMode())"
         DebugLog.shared.log(.selection, SelectionDiagnostics.snapshot(view, phase: "set", mode: modeStr))
         subordinateSelectionPan(on: view)
         DebugLog.shared.log(.gesture,
-            "sel:triple loc=\(p) mode=\(callbacks.currentMode()) row=\(row) chars=\"\(selectedChars(row: row, startCol: 0, endCol: cols - 1, in: view))\"")
-        // Force a synchronous repaint (see handleDoubleTap for why).
-        view.setNeedsDisplay(view.bounds)
+            "sel:triple loc=\(p) mode=\(callbacks.currentMode()) cell=(\(viewportRow)) abs=\(absoluteRow) chars=\"\(selectedChars(row: viewportRow, startCol: 0, endCol: cols - 1, in: view))\"")
         // phase=repaint: run AFTER this runloop turn's layout/draw pass so we observe
         // whether the selection survived to repaint (candidate #1). No SwiftTerm override
         // is used (draw/selectionChanged are not open / are non-open protocol witnesses in
