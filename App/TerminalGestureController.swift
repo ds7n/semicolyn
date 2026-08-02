@@ -355,8 +355,14 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let term = view.getTerminal()
         let cols = max(term.cols, 1)
         let rows = max(term.rows, 1)
-        let cellW = view.bounds.width / CGFloat(cols)
-        let cellH = view.bounds.height / CGFloat(rows)
+        // SwiftTerm derives rows = floor(bounds.height / trueCellHeight), so
+        // bounds.height / rows OVERESTIMATES the true cell height by the fractional
+        // leftover row; that overestimate makes taps land 1-2 rows too high. `caretFrame`
+        // is the caret view's frame, exactly one true cell, so prefer it; it reads .zero
+        // before the caret view exists, so fall back to the bounds/count formula then.
+        let caret = view.caretFrame
+        let cellW = caret.width  > 0 ? caret.width  : view.bounds.width  / CGFloat(cols)
+        let cellH = caret.height > 0 ? caret.height : view.bounds.height / CGFloat(rows)
         guard cellW > 0, cellH > 0 else { return (0, 0, 0) }
         let col = min(cols - 1, max(0, Int(point.x / cellW)))
         // `point` is content-space (the view is a UIScrollView). Two row spaces are needed:
@@ -634,8 +640,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let p = g.location(in: view)
         let term = view.getTerminal()
         let cols = max(term.cols, 1), rows = max(term.rows, 1)
-        let cellW = view.bounds.width / CGFloat(cols)
-        let cellH = view.bounds.height / CGFloat(rows)
+        // Same true-cell-height fix as `cell(at:in:)`: bounds.height / rows overestimates
+        // the true cell height (SwiftTerm floors), which would misplace handle rects and
+        // the moving-cell column; prefer `caretFrame` (one true cell), fall back when
+        // it's still .zero (caret view not yet created).
+        let caret = view.caretFrame
+        let cellW = caret.width  > 0 ? caret.width  : view.bounds.width  / CGFloat(cols)
+        let cellH = caret.height > 0 ? caret.height : view.bounds.height / CGFloat(rows)
 
         switch g.state {
         case .began:
