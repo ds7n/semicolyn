@@ -739,7 +739,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15). Log the
             // full geometry at the grid-computation boundary. `si` = safeAreaInsets; a nonzero
             // `.bottom` = system reserved space. `kbH` = the active pane's keybar accessory
-            // height; `usableH` = bounds.height with the keybar subtracted (what the grid uses).
+            // height; `usableH` = the keyboardLayoutGuide keybar top (or the measured-height
+            // fallback); the pane bottom is laid out to it (what the grid uses).
             // Logged under `.tmux` (default-ON) so the grid/client-size mismatch captures on a
             // device build without a manual toggle.
             let si = safeAreaInsets
@@ -878,9 +879,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// frame height with no inset input, so a full-height pane frame rendered rows all the way
         /// behind the keybar, hiding the bottom rows on the (non-scrollable) alt-screen (2026-08-01/
         /// 02 fix, ref `docs/superpowers/specs/2026-08-02-keybar-inset-geometry-design.md`).
-        /// `usableHeight` is `visibleTerminalHeight(bounds.height, kbH)`, the SAME value the grid
-        /// (`layoutSubviews`) uses, so the reported grid and the actual pane frame agree and the
-        /// pane's bottom edge lands exactly at the keybar's top: no dead band, no hidden rows.
+        /// `usableHeight` is the keyboardLayoutGuide top (the real keybar top), or the
+        /// `visibleTerminalHeight(bounds.height, kbH)` measured-height fallback when the guide has
+        /// no usable frame, the SAME value the grid (`layoutSubviews`) uses, so the reported grid
+        /// and the actual pane frame agree and the pane's bottom edge lands exactly at the keybar's
+        /// top: no dead band, no hidden rows.
         private func fittedPaneRects(layout: PaneLayout,
                                      cell: (w: Double, h: Double),
                                      usableHeight: Double) -> [PaneRect] {
