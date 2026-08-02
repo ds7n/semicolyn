@@ -49,9 +49,56 @@ gap happened when the pane was shortened but not aligned to the keybar; the
 hidden rows happen when the pane is full-height so the grid overshoots the
 visible area.
 
-## The fix: one live-kbH inset, applied consistently
+## CORRECTION (2026-08-02, device round 2): inset the CONTAINER, not the panes
 
-**Model (user-chosen): the container excludes the keybar.** The terminal's usable
+The first implementation of "the fix" below shortened the PANES (grid + pane
+frames = `bounds.height - kbH`) but left the CONTAINER full-height (`bounds`
+stayed 417). That works ON FIRST CONNECT but REGRESSES to a dead band AFTER an
+app-switch / window-change. Device evidence (the new container-space diagnostic):
+both states have `bounds=417, usableH=361, pane=361, gapPx=0.0`, but post-switch
+`kbTopY=417 gapToKeybar=56.0` (keybar top is at the FULL container bottom 417,
+pane bottom is 361 -> 56px dead band), plus `paneRows=37` (SwiftTerm grid stale).
+The keybar is an `inputAccessoryView` anchored to the keyboard/container bottom,
+NOT to the pane bottom, so shortening the pane leaves the keybar floating below a
+gap once it re-lays-out on re-entry. `gapPx` (pane vs the reduced usable region)
+reads 0 and HID this; only the container-space `gapToKeybar` exposed it.
+
+**Corrected model (user-chosen): inset the CONTAINER itself so its bottom edge is
+at the keybar top, then let panes fill the full (now-shorter) container.** The
+keybar CANNOT use `.safeAreaInset` (that mount was deliberately removed so the
+keybar follows the active pane as an `inputAccessoryView`, see `SessionView.swift`
+comments ~122/179). Instead, pin the container's BOTTOM to the
+`keyboardLayoutGuide.topAnchor` (iOS 15+), which auto-tracks the keyboard (and
+thus the accessory-anchored keybar) across show/hide/animation AND the
+post-switch re-layout that broke the pane-only approach. Then:
+
+- The container's `bounds.height` ALREADY excludes the keybar (it ends at the
+  keyboard/keybar top), so REVERT the per-pane subtraction: grid and pane frames
+  use the FULL container `bounds.height` again (which is now the reduced height).
+  Pane bottom == container bottom == keybar top in EVERY state by construction.
+- When the keyboard is DOWN (no accessory), `keyboardLayoutGuide` collapses to the
+  safe-area bottom, so the container fills the full screen (correct keyboard-down).
+- Keep the Kit `visibleTerminalHeight` helper and its tests: they still guard the
+  "reduced height -> correct row count" math, and if the container-inset approach
+  ever needs a manual kbH fallback (keyboardLayoutGuide unavailable), it is the
+  reduction to use.
+
+**Verification (self-checking, already built):** the corrected model must make
+`gapToKeybar ~= 0` (container-space) in BOTH first-connect and post-switch states,
+not just `gapPx ~= 0`. That is the pass/fail signal. If `keyboardLayoutGuide.top`
+tracks the keyboard frame EXCLUDING the accessory (so the container bottom lands
+one keybar-height too low), `gapToKeybar` will show a residual ~= kbH and the
+anchor is adjusted by the keybar height; the diagnostic tells us which, on the
+first build, instead of guessing.
+
+## (SUPERSEDED by the CORRECTION above) The fix: one live-kbH inset, applied consistently
+
+The pane-only inset described here is RETAINED for history; the CONTRACTION above
+replaces "shorten the panes" with "inset the container". The consistency principle
+(one live kbH, grid and frames agree) still holds; the correction is about WHICH
+view gets shortened (container, not panes).
+
+**Model: the container excludes the keybar.** The terminal's usable
 region is `bounds.height - kbH`, and BOTH the tmux grid rows AND the pane frames
 derive from that SAME value on EVERY layout pass:
 
