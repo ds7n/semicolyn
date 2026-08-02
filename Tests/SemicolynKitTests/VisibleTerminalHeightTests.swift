@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// `visibleTerminalHeight` — the terminal-usable height once the keybar/keyboard
+/// `visibleTerminalHeight`, the terminal-usable height once the keybar/keyboard
 /// accessory's reserved bottom band is removed. Device #1 (2026-07-20): the tmux
 /// grid was computed from raw container bounds that INCLUDED the keybar, so the
 /// terminal rendered behind the bar. This is the one Linux-testable piece of that
@@ -38,5 +38,26 @@ final class VisibleTerminalHeightTests: XCTestCase {
         let grid = terminalGrid(width: 402, height: usable, cellWidth: 5, cellHeight: 10)
         XCTAssertEqual(grid?.rows, 33)
         XCTAssertEqual(grid?.cols, 80)
+    }
+
+    // Device 2026-08-02 (Claude Code alt-screen hidden-rows bug): bounds 417pt, keybar 56pt,
+    // cell height 11.15 -> the grid must use the keybar-reduced height, not the full 417.
+    // Full 417/11.15 = 37 rows (bottom ~5 rows render behind the keybar); 361/11.15 = 32 rows fit.
+    func testDeviceKeybarReducedRowCount() {
+        let usable = visibleTerminalHeight(rawHeight: 417, keybarHeight: 56)
+        XCTAssertEqual(usable, 361, accuracy: 1e-9)
+        let grid = terminalGrid(width: 402, height: usable, cellWidth: 5.66, cellHeight: 11.15)
+        XCTAssertEqual(grid?.rows, 32)
+        // Contrast: the buggy full-height path yields 37 (the hidden-rows count).
+        let buggy = terminalGrid(width: 402, height: 417, cellWidth: 5.66, cellHeight: 11.15)
+        XCTAssertEqual(buggy?.rows, 37)
+    }
+
+    // Keyboard-down (kbH sentinel -1) MUST leave the full height so the keyboard-down layout
+    // is unchanged (regression guard for the fix's kbH<=0 branch).
+    func testKeyboardDownFullHeightRowCount() {
+        let usable = visibleTerminalHeight(rawHeight: 417, keybarHeight: -1)
+        XCTAssertEqual(usable, 417, accuracy: 1e-9)
+        XCTAssertEqual(terminalGrid(width: 402, height: usable, cellWidth: 5.66, cellHeight: 11.15)?.rows, 37)
     }
 }
