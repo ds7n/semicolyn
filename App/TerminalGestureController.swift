@@ -366,17 +366,26 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         guard cellW > 0, cellH > 0 else { return (0, 0, 0) }
         let col = min(cols - 1, max(0, Int(point.x / cellW)))
         // `point` is content-space (the view is a UIScrollView). Two row spaces are needed:
-        //  - viewportRow (0..<rows) for getCharData/getLine (SwiftTerm adds yDisp itself).
         //  - absoluteRow (content/buffer row) for setSelectionRange: the highlight draw loop
         //    and the copy path index buffer.lines[row] ABSOLUTELY, so a viewport row never
         //    matches once scrolled/alt-screen (yDisp>0) => the invisible-highlight bug.
-        let viewportRow = TapRowMapping.row(contentY: Double(point.y),
-                                            contentOffsetY: Double(view.contentOffset.y),
-                                            cellHeight: Double(cellH), rows: rows)
+        //  - viewportRow (0..<rows) for getCharData/getLine (SwiftTerm adds yDisp itself).
+        // viewportRow is derived from absoluteRow, NOT from `view.contentOffset.y`: the
+        // scroll-view's contentOffset drifts from the terminal's true `buffer.yDisp` by a
+        // few rows (inset/scroll-timing), so `TapRowMapping.row` (contentOffset-based) picks
+        // a viewport row that, once getCharData/getLine re-add the REAL yDisp, resolves to a
+        // DIFFERENT absolute line than the one the highlight draws from `absoluteRow`. That
+        // mismatch fed the word-boundary scanner wrong characters, landing sub-word
+        // boundaries right at the tap column (1-char/partial-word selections). Subtracting
+        // the terminal's own `getTopVisibleRow()` (== buffer.yDisp exactly) from absoluteRow
+        // guarantees `absoluteRow - yDisp + yDisp == absoluteRow`, so getCharData/getLine
+        // read the SAME line setSelectionRange/the highlight use.
         let totalRows = max(Int(view.contentSize.height / cellH), rows)
         let absoluteRow = TapRowMapping.absoluteRow(contentY: Double(point.y),
                                                     cellHeight: Double(cellH),
                                                     totalRows: totalRows)
+        let yDisp = term.getTopVisibleRow()
+        let viewportRow = max(0, min(rows - 1, absoluteRow - yDisp))
         return (col, viewportRow, absoluteRow)
     }
 

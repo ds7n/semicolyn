@@ -16,17 +16,19 @@ extension SwiftTerm.Color {
 }
 
 /// Applies a theme's terminal palette to a live SwiftTerm view: installs the 16
-/// ANSI colors and sets fg/bg/cursor/cursor-text/selection (both the selection
-/// background AND foreground, an invert scheme, selected glyphs render in the
-/// terminal's background color against the accent selection background so they
-/// stay readable regardless of theme). Called at view creation and whenever the
-/// observed theme changes.
+/// ANSI colors and sets fg/bg/cursor/cursor-text/selection. Selection is TRUE
+/// REVERSE-VIDEO (a straight fg<->bg swap), not the theme's translucent
+/// `selection` color: selected-text background is the terminal foreground color
+/// and selected-text foreground is the terminal background color, so the
+/// selection is opaque and always contrasts, matching classic terminal
+/// reverse-video rather than a muddy alpha overlay. Called at view creation and
+/// whenever the observed theme changes.
 func applyPalette(_ palette: TerminalPalette, to view: TerminalView) {
     view.installColors(palette.ansi16.map { SwiftTerm.Color(themeColor: $0) })
     view.nativeForegroundColor = UIColor(Color(palette.fg))
     view.nativeBackgroundColor = UIColor(Color(palette.bg))
     view.caretColor = UIColor(Color(palette.cursor))
     view.caretTextColor = UIColor(Color(palette.cursorText))
-    view.selectedTextBackgroundColor = UIColor(Color(palette.selection))
+    view.selectedTextBackgroundColor = UIColor(Color(palette.fg))
     view.selectedTextForegroundColor = UIColor(Color(palette.bg))
 }

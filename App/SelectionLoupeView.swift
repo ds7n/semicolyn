@@ -40,22 +40,36 @@ final class SelectionLoupeView: UIView {
         isHidden = false
 
         // SemicolynKit's `loupeCenter` uses plain-Double geometry (no CoreGraphics on
-        // Linux, see LoupeGeometry.swift); convert at this call boundary. Its inputs
-        // (`terminal.bounds`, `point`) are both in terminal's own LOCAL coordinate
-        // space, so the returned center is in that same local space too.
+        // Linux, see LoupeGeometry.swift) and treats its `boundsWidth`/`boundsHeight` box
+        // as an origin-0 VIEWPORT (it clamps the vertical-offset center into
+        // `[halfH, boundsHeight - halfH]`). `terminal` is a `UIScrollView` (SwiftTerm's
+        // TerminalView), so `point` here is CONTENT space, which can be far below the
+        // origin-0 viewport once scrolled (e.g. content y=1521 vs a ~223pt-tall viewport).
+        // Feeding that content-space point straight into loupeCenter made the clamp treat
+        // a legitimate up-offset position as far past the bottom edge, so it clamped hard
+        // to the bottom = loupe under the finger instead of offset above it. Convert finger
+        // and clamp box into the SAME viewport space (subtract contentOffset) before
+        // calling loupeCenter, then convert its viewport-space answer back to content
+        // space (add contentOffset back) before the existing content->host convert below.
+        // `terminal`'s static param type is UIView (not UIScrollView) so this stays a safe
+        // optional cast; a non-scroll-view terminal falls back to offset zero (today's
+        // unconverted behavior).
+        let contentOffset = (terminal as? UIScrollView)?.contentOffset ?? .zero
+        let vx = point.x - contentOffset.x
+        let vy = point.y - contentOffset.y
         let c = SemicolynKit.loupeCenter(
-            finger: SelectionHandlePoint(x: Double(point.x), y: Double(point.y)),
+            finger: SelectionHandlePoint(x: Double(vx), y: Double(vy)),
             boundsWidth: Double(terminal.bounds.width), boundsHeight: Double(terminal.bounds.height),
             loupeWidth: Double(bounds.width), loupeHeight: Double(bounds.height),
             verticalOffset: Double(verticalOffset))
-        let local = CGPoint(x: c.x, y: c.y)
+        let contentCenter = CGPoint(x: c.x + contentOffset.x, y: c.y + contentOffset.y)
         // `self.center` is interpreted in `self.superview`'s space (= host), which is
         // terminal's SIBLING space, not terminal's own space: they differ by
         // `terminal.frame.origin`, nonzero for any pane not at the container's
         // top-left (every pane but one in a multi-pane tmux -CC layout). Convert
-        // local -> host space before assigning, or the loupe renders offset from
+        // content -> host space before assigning, or the loupe renders offset from
         // the finger by the pane's origin.
-        self.center = host.convert(local, from: terminal)
+        self.center = host.convert(contentCenter, from: terminal)
 
         let now = CACurrentMediaTime()
         guard now - lastSnapshot >= minSnapshotInterval else { return }
