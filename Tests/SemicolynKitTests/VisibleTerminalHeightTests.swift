@@ -60,4 +60,28 @@ final class VisibleTerminalHeightTests: XCTestCase {
         XCTAssertEqual(usable, 417, accuracy: 1e-9)
         XCTAssertEqual(terminalGrid(width: 402, height: usable, cellWidth: 5.66, cellHeight: 11.15)?.rows, 37)
     }
+
+    // keyboardLayoutGuide gives the keyboard/keybar TOP in container coords; the pane bottom is
+    // exactly there. A valid top (e.g. 361 in a 417 container) is the usable height directly.
+    func testUsableFromKeyboardTopValid() {
+        XCTAssertEqual(usableHeightFromKeyboardTop(rawHeight: 417, keyboardTopY: 361), 361, accuracy: 1e-9)
+    }
+    // Keyboard down (nil frame) -> full height.
+    func testUsableFromKeyboardTopNil() {
+        XCTAssertEqual(usableHeightFromKeyboardTop(rawHeight: 417, keyboardTopY: nil), 417, accuracy: 1e-9)
+    }
+    // Degenerate (top <= 0) -> full height (fail open, no zero/negative pane).
+    func testUsableFromKeyboardTopNonPositive() {
+        XCTAssertEqual(usableHeightFromKeyboardTop(rawHeight: 417, keyboardTopY: 0), 417, accuracy: 1e-9)
+        XCTAssertEqual(usableHeightFromKeyboardTop(rawHeight: 417, keyboardTopY: -5), 417, accuracy: 1e-9)
+    }
+    // Top beyond the container height (guide reported larger) -> clamp to rawHeight.
+    func testUsableFromKeyboardTopBeyond() {
+        XCTAssertEqual(usableHeightFromKeyboardTop(rawHeight: 417, keyboardTopY: 500), 417, accuracy: 1e-9)
+    }
+    // Compose to the row count: 361 top, 11.15 cell -> 32 rows (the correct fit).
+    func testUsableFromKeyboardTopComposesToRows() {
+        let usable = usableHeightFromKeyboardTop(rawHeight: 417, keyboardTopY: 361)
+        XCTAssertEqual(terminalGrid(width: 402, height: usable, cellWidth: 5.66, cellHeight: 11.15)?.rows, 32)
+    }
 }
