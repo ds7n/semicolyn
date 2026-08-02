@@ -691,9 +691,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             let col = min(cols - 1, max(0, Int(p.x / cellW)))
             let moving = (col: col, row: absRow)
             let o = SemicolynKit.orderedSelection(a: anchor, b: moving)
-            view.setSelectionRange(start: Position(col: o.start.col, row: o.start.row),
-                                   end: Position(col: o.end.col, row: o.end.row))
-            storedStart = o.start; storedEnd = o.end
+            applyInclusiveSelection(start: o.start, end: o.end, in: view)
             loupe?.show(around: p, in: view)
         case .ended, .cancelled, .failed:
             anchoredEnd = nil; draggingEnd = nil
@@ -835,9 +833,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let (col, viewportRow, absoluteRow) = cell(at: p, in: view)
         let (start, end) = subWordBoundsApp(col: col, row: viewportRow, in: view)
         callbacks.onSelectPane()   // focus-on-select (Topic 1): optimistic local focus + select-pane
-        view.setSelectionRange(start: Position(col: start, row: absoluteRow),
-                               end: Position(col: end, row: absoluteRow))
-        storedStart = (col: start, row: absoluteRow); storedEnd = (col: end, row: absoluteRow)
+        applyInclusiveSelection(start: (col: start, row: absoluteRow), end: (col: end, row: absoluteRow), in: view)
         subordinateSelectionPan(on: view)
         DebugLog.shared.log(.gesture,
             "sel:double loc=\(p) mode=\(callbacks.currentMode()) cell=(\(col),\(viewportRow)) abs=\(absoluteRow) word=(\(start),\(end))")
@@ -853,9 +849,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         let (_, viewportRow, absoluteRow) = cell(at: p, in: view)
         let cols = max(view.getTerminal().cols, 1)
         callbacks.onSelectPane()   // focus-on-select (Topic 1)
-        view.setSelectionRange(start: Position(col: 0, row: absoluteRow),
-                               end: Position(col: cols - 1, row: absoluteRow))
-        storedStart = (col: 0, row: absoluteRow); storedEnd = (col: cols - 1, row: absoluteRow)
+        applyInclusiveSelection(start: (col: 0, row: absoluteRow), end: (col: cols - 1, row: absoluteRow), in: view)
         subordinateSelectionPan(on: view)
         DebugLog.shared.log(.gesture,
             "sel:triple loc=\(p) mode=\(callbacks.currentMode()) cell=(\(viewportRow)) abs=\(absoluteRow)")
@@ -891,6 +885,19 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         }
         let r = SemicolynKit.subWordBounds(cols: cols, col: col, classOf: classOf)
         return (r.start, r.end)
+    }
+
+    /// Apply a selection given INCLUSIVE grid positions (start..end, both cells included).
+    /// SwiftTerm's `setSelectionRange` treats `end.col` as EXCLUSIVE (its highlight fill and
+    /// copy path both select `[start.col, end.col)`), so the inclusive end column is passed
+    /// as `end.col + 1` to include the last character. `storedStart`/`storedEnd` remain
+    /// INCLUSIVE (hit-testing / isWithinSelection / handle rects use inclusive columns).
+    private func applyInclusiveSelection(start: (col: Int, row: Int), end: (col: Int, row: Int),
+                                         in view: TerminalView) {
+        view.setSelectionRange(start: Position(col: start.col, row: start.row),
+                               end: Position(col: end.col + 1, row: end.row))
+        storedStart = start
+        storedEnd = end
     }
 
     private func presentEditMenu(at point: CGPoint, in view: TerminalView) {
