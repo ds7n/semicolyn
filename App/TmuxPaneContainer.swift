@@ -700,19 +700,24 @@ struct TmuxPaneContainer: UIViewRepresentable {
             if inputs == lastLayoutInputs { return }
             lastLayoutInputs = inputs
 
-            // Fix (device 2026-07-27, the switched-window keybar gap): compute the grid from the
-            // FULL container height, NOT `bounds − kbH`, matching the raw-SSH path (TerminalScreen)
-            // which has NO gap. Root cause from the raw-vs-CC geo:pane diff: raw sizes its terminal
-            // to the full height (pane = 402x778) and lets the keybar float over the bottom rows;
-            // -CC subtracted kbH → pane = 402x356 inside a 402x412 container, reserving a keybar-
-            // height band INSIDE the ContainerView. But the keybar is an `inputAccessoryView`
-            // hosted in its OWN window over the bottom of the screen, it never fills that reserved
-            // band, so the band was dead black = the gap. SwiftTerm derives its own row count from
-            // `frame.height / cellHeight` (contentInset does NOT change it), so the only self-
-            // consistent, no-gap layout is: pane frame = full container (via `fittedPaneRects`
-            // below) AND the reported grid = full-height rows. The keybar then floats over the
-            // bottom row(s), exactly like the raw path the user confirmed is correct.
-            let usableH = Double(bounds.height)
+            // Fix (device 2026-07-27, the switched-window keybar gap): the FULL-container-height
+            // attempt below is HISTORICAL, kept for context, and was WRONG. It computed the grid
+            // from the full container height, matching the raw-SSH path (TerminalScreen), reasoning
+            // that the keybar (an `inputAccessoryView` in its own window) floats over the bottom
+            // rows without reserving space inside the ContainerView. That held for the GRID, but
+            // SwiftTerm pins its OWN row count to `frame.height / cellHeight` with no inset input,
+            // so once the pane frame was ALSO stretched to the full height (`fittedPaneRects`
+            // below, matching the grid), the terminal rendered rows all the way to the container's
+            // bottom edge, behind the keybar. On the alt-screen (Claude Code / vim), which cannot
+            // scroll, those bottom rows (prompt + status line) became permanently unreachable
+            // (device 2026-08-01/02, ref `docs/superpowers/specs/2026-08-02-keybar-inset-geometry-
+            // design.md`). The fix restores a SINGLE consistent inset: both the grid AND every pane
+            // frame (via `fittedPaneRects(usableHeight:)`) are computed from the SAME keybar-reduced
+            // height, `visibleTerminalHeight(bounds.height, kbH)` (Kit-tested; kbH<=0 = keyboard
+            // down = full height). The pane's bottom edge then lands exactly at the keybar's top,
+            // so the keybar floats over the region the pane no longer occupies, nothing renders
+            // behind it, and the alt-screen's bottom rows stay visible.
+            let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height), keybarHeight: Double(kbH))
             guard let grid = terminalGrid(width: Double(bounds.width), height: usableH,
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
             // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15). Log the
@@ -740,7 +745,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // `apply()` re-framed it (device 2026-07-28). `lastLaidOutBounds` retained for the
             // diagnostic only.
             lastLaidOutBounds = bounds.size
-            relayoutExistingPaneFrames(cell: cell)
+            relayoutExistingPaneFrames(cell: cell, usableHeight: usableH)
             logGeometry(reason: "layout", cell: cell, kbH: kbH, usableH: usableH, grid: grid)
         }
 
@@ -816,30 +821,35 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// Re-apply `paneRects` to the panes ALREADY in `panes` (no create/destroy, no
         /// first-responder/border changes) so a revealed pane tracks a geometry-only bounds
         /// change. No-ops when no layout has been applied yet. Device #2.
-        private func relayoutExistingPaneFrames(cell: (w: Double, h: Double)) {
+        private func relayoutExistingPaneFrames(cell: (w: Double, h: Double), usableHeight: Double) {
             guard let layout = lastAppliedLayout else { return }
-            for rect in fittedPaneRects(layout: layout, cell: cell) {
+            for rect in fittedPaneRects(layout: layout, cell: cell, usableHeight: usableHeight) {
                 guard let view = panes[rect.pane] else { continue }
                 view.frame = CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
             }
         }
 
-        /// Pane rects fitted to the container's FULL bounds (width × height). We fit rather than
-        /// use tmux's raw `%layout` geometry directly because that geometry LAGS the client size
-        /// we just reported, after a keyboard/keybar show-hide or window switch, tmux's layout
-        /// still reflects the old (smaller) client, so a pane framed straight from it undershoots
-        /// the area (device 2026-07-24). `fitPaneRects` stretches the layout to fill exactly.
+        /// Pane rects fitted to the container's width and the keybar-REDUCED usable height. We fit
+        /// rather than use tmux's raw `%layout` geometry directly because that geometry LAGS the
+        /// client size we just reported, after a keyboard/keybar show-hide or window switch, tmux's
+        /// layout still reflects the old (smaller) client, so a pane framed straight from it
+        /// undershoots the area (device 2026-07-24). `fitPaneRects` stretches the layout to fill
+        /// exactly.
         ///
-        /// Option 1 fix (2026-07-27): fit to the FULL `bounds.height`, NOT `bounds − kbH`. The
+        /// Option 1 (2026-07-27, fit to the FULL `bounds.height`) is HISTORICAL and was WRONG: the
         /// keybar is an `inputAccessoryView` floating over the bottom of the screen, not a view
-        /// occupying the container; reserving `kbH` inside the container left a dead black band =
-        /// the keybar gap. The pane fills the whole container (like the raw path); the keybar
-        /// height is handled by each pane's `contentInset.bottom` (set where panes are framed),
-        /// which scrolls the terminal's bottom rows above the floating keybar.
+        /// occupying the container, but SwiftTerm pins its rendered row count to the pane's OWN
+        /// frame height with no inset input, so a full-height pane frame rendered rows all the way
+        /// behind the keybar, hiding the bottom rows on the (non-scrollable) alt-screen (2026-08-01/
+        /// 02 fix, ref `docs/superpowers/specs/2026-08-02-keybar-inset-geometry-design.md`).
+        /// `usableHeight` is `visibleTerminalHeight(bounds.height, kbH)`, the SAME value the grid
+        /// (`layoutSubviews`) uses, so the reported grid and the actual pane frame agree and the
+        /// pane's bottom edge lands exactly at the keybar's top: no dead band, no hidden rows.
         private func fittedPaneRects(layout: PaneLayout,
-                                     cell: (w: Double, h: Double)) -> [PaneRect] {
+                                     cell: (w: Double, h: Double),
+                                     usableHeight: Double) -> [PaneRect] {
             let raw = paneRects(in: layout, cellWidth: cell.w, cellHeight: cell.h)
-            return fitPaneRects(raw, toWidth: Double(bounds.width), toHeight: Double(bounds.height))
+            return fitPaneRects(raw, toWidth: Double(bounds.width), toHeight: usableHeight)
         }
 
         /// Sizing-diagnostic helper: the keybar (`inputAccessoryView`) height of whichever
@@ -930,7 +940,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
             lastLayoutInputs = nil
 
             let cell = resolvedCell()
-            let rects = fittedPaneRects(layout: layout, cell: cell)   // fill usable area, not tmux's lagging layout
+            // Same keybar-reduced height `layoutSubviews` computes for the grid, recomputed here
+            // from the live keybar (an authoritative `apply` can land between layout passes, e.g.
+            // right after a window switch) so a pane framed by `apply` agrees with the grid tmux
+            // was just told, rather than a stale full-height frame that renders behind the keybar.
+            let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height),
+                                                keybarHeight: Double(firstResponderKeybarHeight()))
+            let rects = fittedPaneRects(layout: layout, cell: cell, usableHeight: usableH)   // fill usable area, not tmux's lagging layout
             let live = Set(rects.map(\.pane))
 
             // NOTE(v1): switching tmux windows destroys the off-screen window's pane views.
