@@ -759,7 +759,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
         ///  • each pane's ACTUAL on-screen frame (`y..maxY` × height) → catches a pane that does
         ///    not reach the keybar even though `fitPaneRects` targeted `usableH`;
         ///  • `gapPx` = `usableH − maxPaneBottom` → the container-level gap in points, directly;
-        ///  • the keybar accessory's own frame → where the keybar actually sits.
+        ///  • the keybar accessory's own frame (its OWN window's coordinate space, informational
+        ///    only) plus `kbTopY`/`gapToKeybar`, the accessory's top edge CONVERTED into this
+        ///    container's coordinate space so it is directly comparable to `maxPaneBottom`
+        ///    (the raw accessory frame lives in a different UIKit window and cannot be compared
+        ///    to container-space values without this conversion).
         private func logGeometry(reason: String, cell: (w: Double, h: Double),
                                  kbH: CGFloat, usableH: Double, grid: (cols: Int, rows: Int)) {
             guard DebugLog.shared.isEnabled(.geometry) else { return }
@@ -796,11 +800,27 @@ struct TmuxPaneContainer: UIViewRepresentable {
             let fr = panes.values.first(where: { $0.isFirstResponder })
             let accFrame = fr?.inputAccessoryView.map {
                 "\(Int($0.frame.width))x\(Int($0.frame.height))@y\(Int($0.frame.minY))" } ?? "none"
+            // `accFrame`'s `minY` above is in the accessory's OWN window (inputAccessoryView is
+            // hosted in a separate UIKit window, not a subview of this ContainerView), so it is
+            // NOT directly comparable to `maxPaneBottom` (this container's coordinate space): a
+            // raw `keybarFrame@y` vs `maxPaneBottom` comparison silently mixes two coordinate
+            // spaces and can look aligned/misaligned by coincidence. Convert the accessory's top
+            // edge into THIS container's space via `self.convert(_:from:)` so `kbTopY` is directly
+            // comparable to `maxPaneBottom`, giving one real cross-check number, `gapToKeybar`
+            // (0 = pane bottom exactly meets the keybar top, the intended post-fix state).
+            let kbTopY: CGFloat? = fr?.inputAccessoryView.flatMap { acc -> CGFloat? in
+                guard let accSuper = acc.superview else { return nil }
+                return self.convert(CGPoint(x: acc.frame.minX, y: acc.frame.minY), from: accSuper).y
+            }
+            let kbTopYStr = kbTopY.map { String(Int($0)) } ?? "nil"
+            let gapToKeybar = kbTopY.map { Double($0) - maxBottom }
+            let gapToKeybarStr = gapToKeybar.map { String(format: "%.1f", $0) } ?? "nil"
             DebugLog.shared.log(.geometry,
                 "geo:\(reason) bounds=\(Int(bounds.width))x\(Int(bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) "
                 + "kbH=\(String(format: "%.1f", kbH)) usableH=\(Int(usableH)) grid=\(grid.cols)x\(grid.rows) "
                 + "cellCached=\(String(format: "%.2fx%.2f", cell.w, cell.h)) cellLive=\(liveStr) "
                 + "maxPaneBottom=\(Int(maxBottom)) gapPx=\(String(format: "%.1f", gapPx)) keybarFrame=\(accFrame) "
+                + "kbTopY=\(kbTopYStr) gapToKeybar=\(gapToKeybarStr) "
                 + "panes=[\(frames.joined(separator: " | "))]")
         }
 
