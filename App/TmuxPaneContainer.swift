@@ -652,6 +652,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             let cellW: Double
             let cellH: Double
             let keybarH: CGFloat
+            let keyboardTop: Double?
         }
         private var lastLayoutInputs: LayoutInputs?
 
@@ -690,13 +691,19 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // (no accessory) -> full height.
             let kbH = firstResponderKeybarHeight()
             let cell = resolvedCell()
+            // Computed once per pass and reused for both the early-out key (below) and the
+            // usableH closure, so the guide is read exactly once per layout pass.
+            let kbTop = keyboardTopInContainer()
             // Render-storm early-out (spec 2026-07-25): the entire body below is a pure
-            // function of (bounds.size, cell, kbH). Under the -CC storm layoutSubviews fires
-            // ~60×/s with these identical between passes; skip the redundant grid math +
-            // `noteClientSize` + pane re-fit when nothing that affects them changed. Any real
-            // geometry change (rotation/split/switch → bounds; pinch → cell via
-            // invalidateCachedCell; keyboard/predictor-strip → kbH) differs here and runs.
-            let inputs = LayoutInputs(bounds: bounds.size, cellW: cell.w, cellH: cell.h, keybarH: kbH)
+            // function of (bounds.size, cell, kbH, keyboardTop). Under the -CC storm
+            // layoutSubviews fires ~60×/s with these identical between passes; skip the
+            // redundant grid math + `noteClientSize` + pane re-fit when nothing that affects
+            // them changed. Any real geometry change (rotation/split/switch → bounds; pinch →
+            // cell via invalidateCachedCell; keyboard/predictor-strip → kbH; the keyboard
+            // re-laying-out post-app-switch with bounds/kbH unchanged → keyboardTop) differs
+            // here and runs.
+            let inputs = LayoutInputs(bounds: bounds.size, cellW: cell.w, cellH: cell.h,
+                                      keybarH: kbH, keyboardTop: kbTop)
             if inputs == lastLayoutInputs { return }
             lastLayoutInputs = inputs
 
@@ -712,12 +719,21 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // scroll, those bottom rows (prompt + status line) became permanently unreachable
             // (device 2026-08-01/02, ref `docs/superpowers/specs/2026-08-02-keybar-inset-geometry-
             // design.md`). The fix restores a SINGLE consistent inset: both the grid AND every pane
-            // frame (via `fittedPaneRects(usableHeight:)`) are computed from the SAME keybar-reduced
-            // height, `visibleTerminalHeight(bounds.height, kbH)` (Kit-tested; kbH<=0 = keyboard
-            // down = full height). The pane's bottom edge then lands exactly at the keybar's top,
-            // so the keybar floats over the region the pane no longer occupies, nothing renders
-            // behind it, and the alt-screen's bottom rows stay visible.
-            let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height), keybarHeight: Double(kbH))
+            // frame (via `fittedPaneRects(usableHeight:)`) are computed from the SAME usable
+            // height. Prefer the REAL keyboard/keybar top from `keyboardLayoutGuide` (it
+            // re-lays-out correctly after an app-switch, which a measured keybar height did
+            // not: device 2026-08-02 gapToKeybar=56 post-switch). Fall back to the measured-
+            // height reduction, `visibleTerminalHeight(bounds.height, kbH)` (Kit-tested; kbH<=0
+            // = keyboard down = full height), only if the guide has no usable frame. The pane's
+            // bottom edge then lands exactly at the keybar's top, so the keybar floats over the
+            // region the pane no longer occupies, nothing renders behind it, and the alt-screen's
+            // bottom rows stay visible.
+            let usableH: Double = {
+                if let top = kbTop {
+                    return usableHeightFromKeyboardTop(rawHeight: Double(bounds.height), keyboardTopY: top)
+                }
+                return visibleTerminalHeight(rawHeight: Double(bounds.height), keybarHeight: Double(kbH))
+            }()
             guard let grid = terminalGrid(width: Double(bounds.width), height: usableH,
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
             // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15). Log the
@@ -886,6 +902,17 @@ struct TmuxPaneContainer: UIViewRepresentable {
             return -1
         }
 
+        /// The keyboard/keybar top edge in THIS view's coordinate space, via `keyboardLayoutGuide`
+        /// (iOS 15+, auto-tracks the keyboard + its inputAccessoryView across show/hide/animation
+        /// and the post-app-switch re-layout that a measured keybar height missed). Returns nil when
+        /// the keyboard is down / the guide has no usable frame, so the caller falls back to full
+        /// height. The pane bottom is laid out to this Y so it meets the keybar top with no dead band.
+        private func keyboardTopInContainer() -> Double? {
+            let f = keyboardLayoutGuide.layoutFrame
+            guard f.height > 0, f.width > 0, f.minY.isFinite, f.minY > 0 else { return nil }
+            return Double(f.minY)
+        }
+
         /// Cell metrics (monospace → uniform cell), used both to compute the container
         /// grid we report to tmux as the client size AND to place panes from the tmux
         /// layout (`paneRects`).
@@ -960,12 +987,19 @@ struct TmuxPaneContainer: UIViewRepresentable {
             lastLayoutInputs = nil
 
             let cell = resolvedCell()
-            // Same keybar-reduced height `layoutSubviews` computes for the grid, recomputed here
-            // from the live keybar (an authoritative `apply` can land between layout passes, e.g.
-            // right after a window switch) so a pane framed by `apply` agrees with the grid tmux
-            // was just told, rather than a stale full-height frame that renders behind the keybar.
-            let usableH = visibleTerminalHeight(rawHeight: Double(bounds.height),
-                                                keybarHeight: Double(firstResponderKeybarHeight()))
+            // Same usable-height source `layoutSubviews` computes for the grid, recomputed here
+            // (an authoritative `apply` can land between layout passes, e.g. right after a window
+            // switch) so a pane framed by `apply` agrees with the grid tmux was just told, rather
+            // than a stale full-height frame that renders behind the keybar. Prefer the REAL
+            // keyboard/keybar top from `keyboardLayoutGuide` (re-lays-out correctly post-app-switch);
+            // fall back to the measured-height reduction only if the guide has no usable frame.
+            let usableH: Double = {
+                if let top = keyboardTopInContainer() {
+                    return usableHeightFromKeyboardTop(rawHeight: Double(bounds.height), keyboardTopY: top)
+                }
+                return visibleTerminalHeight(rawHeight: Double(bounds.height),
+                                             keybarHeight: Double(firstResponderKeybarHeight()))
+            }()
             let rects = fittedPaneRects(layout: layout, cell: cell, usableHeight: usableH)   // fill usable area, not tmux's lagging layout
             let live = Set(rects.map(\.pane))
 
