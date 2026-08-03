@@ -3,11 +3,11 @@
 
 # Semicolyn CI.
 #
-#   linux-swift : SemicolynKit + SeedKit pure-logic tests (swift-crypto)        — the fast loop
-#   linux-rust  : Rust SSH core, unit + integration vs containerized sshd   — the fast loop
+#   linux-swift : SemicolynKit + SeedKit pure-logic tests (swift-crypto)       , the fast loop
+#   linux-rust  : Rust SSH core, unit + integration vs containerized sshd  , the fast loop
 #   lint        : cargo fmt --check + clippy
-#   macos       : the Apple-gated path Linux can't reach — builds SemicolynKit under CryptoKit,
-#                 Mosh.xcframework (vendored blinksh/mosh — M1), and the UniFFI XCFramework
+#   macos       : the Apple-gated path Linux can't reach, builds SemicolynKit under CryptoKit,
+#                 Mosh.xcframework (vendored blinksh/mosh, M1), and the UniFFI XCFramework
 #                 (compiles the Rust core for all three iOS triples, validating aws-lc-rs on iOS
 #                 = roadmap risk D4).
 #
@@ -56,8 +56,8 @@ jobs:
       - name: Start sshd fixtures
         # sshd-legacy reuses the semicolyn-sshd image; bring both up on the compose
         # network. --wait blocks until each service's healthcheck reports "listening
-        # on :22" (see docker-compose.yml), so the container is truly ready — not just
-        # "Started" — before the probe below runs.
+        # on :22" (see docker-compose.yml), so the container is truly ready, not just
+        # "Started", before the probe below runs.
         run: docker compose up -d --wait sshd sshd-legacy
 
       - name: cargo test (waits for sshd, then runs unit + integration)
@@ -122,10 +122,21 @@ jobs:
       - name: Add iOS Rust targets
         run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 
-      - name: Build Mosh.xcframework (cross-compile vendored blinksh/mosh — M1)
+      - name: Build Mosh.xcframework (cross-compile vendored blinksh/mosh, M1)
         run: bash scripts/build-mosh-xcframework.sh
 
-      - name: Build UniFFI XCFramework (compiles Rust core for all iOS triples — D4)
+      - name: Install CMake + Ninja (eternaltermlib cross-build)
+        # The Mosh build already uses cmake for protobuf; ET drives cmake directly via
+        # the leetal/ios-cmake toolchain. macos-14 ships cmake, but pin it defensively.
+        run: brew list cmake >/dev/null 2>&1 || brew install cmake ninja
+
+      - name: Build ETerminal.xcframework (cross-compile vendored eternaltermlib, ET)
+        # Must precede any swift build / xcodebuild: Package.swift references
+        # ETerminal.xcframework as a macOS-only binaryTarget, so resolution fails
+        # until it exists (same reason as the UniFFI + Mosh frameworks below).
+        run: bash scripts/build-etios-xcframework.sh
+
+      - name: Build UniFFI XCFramework (compiles Rust core for all iOS triples, D4)
         # Must precede any swift build: the macOS package manifest references this
         # xcframework (binaryTarget), so resolution fails until it exists.
         run: bash scripts/build-xcframework.sh
@@ -146,7 +157,7 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO build
 
-      - name: Test MoshSession bridge plumbing (loopback fake mosh_main — M3)
+      - name: Test MoshSession bridge plumbing (loopback fake mosh_main, M3)
         # Runs the Obj-C++ bridge tests on a booted simulator. Verifies the pipe /
         # thread / setvbuf plumbing without a network (fake_mosh_main echoes input).
         run: |
