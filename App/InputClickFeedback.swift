@@ -9,19 +9,33 @@ import UIKit
 ///
 /// iOS does NOT expose the keyboard-feedback settings to apps (you cannot read
 /// "is keyboard haptic/sound on?"). The one API that HONORS them is
-/// `UIDevice.current.playInputClick()` — it plays the keyboard click/haptic only
+/// `UIDevice.current.playInputClick()`, it plays the keyboard click/haptic only
 /// if/how the user has enabled it. Apple's contract is that it fires inside a view
 /// conforming to `UIInputViewAudioFeedback`; the click SOUND in particular needs
 /// that context (`InputClickAudioHost` below provides it). The HAPTIC portion is
 /// observed to honor the setting more broadly. Because our keybar mounts as a
 /// SwiftUI `.safeAreaInset` (not a `UIInputView`), whether the click actually fires
-/// from these contexts is DEVICE-VERIFIED — if it is a silent no-op, the pivot is
+/// from these contexts is DEVICE-VERIFIED, if it is a silent no-op, the pivot is
 /// to host these controls inside `InputClickAudioHost` / a real input view.
 enum InputClickFeedback {
     /// Play the keyboard click, honoring the user's system keyboard feedback settings.
     static func play() {
         UIDevice.current.playInputClick()
+        if diagnosticsEnabled {
+            MainActor.assumeIsolated {
+                DebugLog.shared.log(.keybar, "keybar:clickprobe called=playInputClick host=\(hostInChainDescription)")
+            }
+        }
     }
+
+    /// Toggle from the diagnostics session; default off so shipping builds are silent.
+    static var diagnosticsEnabled = false
+
+    /// Whether a `UIInputViewAudioFeedback` responder is currently reachable. The
+    /// probe (`KeybarInputAccessory.didMoveToWindow`) sets this from the accessory
+    /// host; if it stays "unknown", the host never entered the chain, which is
+    /// exactly the silent no-op this file's header warns about.
+    static var hostInChainDescription = "unknown"
 }
 
 // The `UIInputViewAudioFeedback` responder context for `playInputClick()` is provided

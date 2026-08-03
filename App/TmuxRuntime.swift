@@ -39,7 +39,7 @@ final class TmuxRuntime {
     var onContextsChanged: (() -> Void)?
 
     /// DIAGNOSTIC (temporary, tmux blank-panes investigation): fired after every
-    /// `ingest` with a one-line summary of what the app currently sees — lifecycle,
+    /// `ingest` with a one-line summary of what the app currently sees, lifecycle,
     /// whether an active window + visible layout exist (the guard that gates pane
     /// rendering), window/pane counts, and total bytes received. Remove once the
     /// blank-panes root cause is confirmed on device.
@@ -61,7 +61,7 @@ final class TmuxRuntime {
     /// Fired when a capture response resolves: (pane, reconstructed history bytes).
     var onHistoryCaptured: ((PaneID, [UInt8]) -> Void)?
     /// Fired when a pane's history may be stale (%pause/%continue, reconnect, resize
-    /// desync) — the seeder should mark affected panes unseeded and re-capture.
+    /// desync), the seeder should mark affected panes unseeded and re-capture.
     var onResyncAll: (() -> Void)?
     /// Called once per pane at attach with tmux's `#{alternate_on}` truth, so the
     /// mode tracker can reconcile a pane that was already on the alternate screen
@@ -97,10 +97,10 @@ final class TmuxRuntime {
         if out.stateChanged { onStateChanged?(controller.state) }
         // Attach-prime: on the .attaching→.attached edge the controller asks us to
         // discover the current windows (tmux emits none spontaneously on attach to
-        // an existing session — the blank-panes bug). Send refresh-client (a nudge)
+        // an existing session, the blank-panes bug). Send refresh-client (a nudge)
         // + a tracked list-windows whose reply we parse below.
         if !out.attachedPrimeCommands.isEmpty {
-            // The `.attaching → .attached` edge fires exactly once per attach — first
+            // The `.attaching → .attached` edge fires exactly once per attach, first
             // connect AND every reattach/reconnect (a fresh TmuxRuntime is built each
             // time). No `%pause`/`%continue` event exists in the control-mode parser
             // yet, so this is the highest-value resync trigger reachable from here:
@@ -198,7 +198,7 @@ final class TmuxRuntime {
     /// Encode keystrokes as `send-keys` to the active pane and write to the channel.
     func sendInput(_ bytes: [UInt8]) {
         guard let pane = activePane else {
-            DebugLog.shared.log(.tmux, "sendInput: NO activePane — dropping \(bytes.count)B")
+            DebugLog.shared.log(.tmux, "sendInput: NO activePane, dropping \(bytes.count)B")
             return
         }
         guard let line = TmuxCommand.sendKeys(target: pane, bytes: bytes) else { return }
@@ -217,6 +217,14 @@ final class TmuxRuntime {
         guard let pane = activePane else { return }
         DebugLog.shared.log(.tmux, "tmux:send zoom-pane target=%\(pane.raw)")
         write(TmuxCommand.zoomPane(target: pane))
+    }
+
+    /// Focus a specific pane by id (tap-to-focus). Unlike `selectPaneRelative`,
+    /// this targets `%N` directly. tmux emits the layout change that re-keys the
+    /// active pane in `apply()`.
+    func selectPane(target: PaneID) {
+        DebugLog.shared.log(.tmux, "tmux:send select-pane target=%\(target.raw)")
+        write(TmuxCommand.selectPane(target: target))
     }
 
     /// Open a new tmux window (Phase 4e `⌘T`).
