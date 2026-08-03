@@ -3,21 +3,23 @@
 
 # Status & TODO
 
-## Resume here (2026-08-01)
+## Resume here (2026-08-03)
 
-**Gesture redesign: full spec LOCKED (8 topics) + diagnostics slice SHIPPED + root cause of the invisible-highlight bug FOUND.**
+**Selection UI + terminal/keybar geometry: SHIPPED. PR #114 open vs `main`, CI green, device-confirmed. Awaiting review + squash-merge.**
 
-- **Spec (canonical, LOCKED):** `docs/superpowers/specs/2026-07-30-gesture-interaction-system-design.md`. All 8 topics + engine decision + zoom trigger locked. Build order = 7 slices; slice 1 (diagnostics) done.
-- **Diagnostics slice: DONE.** Branch `feat/gesture-diagnostics` (off `test/focus-plus-selection`), macOS-CI-green on code `4784773`, HEAD `878ea4a`, all pushed to github. Instrumentation-only. Shipped to TestFlight (build 102 = run 30669541913).
-- **DIAGNOSIS COMPLETE (the whole point):** invisible selection highlight = **yDisp coordinate-space mismatch**. Device `sel:diag` logs showed active=true / selLen>0 / color alpha=0.30 at all phases (ruling out the 3 top candidates); SwiftTerm v1.15.0 source shows the draw loop (`selectedColumnsRange`) matches ABSOLUTE buffer rows but our `setSelectionRange` stores VIEWPORT-relative rows (`TapRowMapping` strips yDisp) -> on alt-screen (yDisp>0) no row matches -> no highlight, though copy works. Full writeup: `docs/superpowers/topics/2026-07-31-gesture-diagnostics-capture.md` (RESULT section) + auto-memory `highlight-invisible-rootcause-2026-08-01`.
+- **PR:** [#114](https://github.com/ds7n/semicolyn/pull/114) `feat: custom terminal selection UI + keybar/tap geometry fixes`, branch `feat/gesture-diagnostics`, head `655b31a`, all CI jobs green (macos/linux-swift/linux-rust/lint). **#113 CLOSED as superseded.** Full Kit suite 1387/0.
+- **Device-confirmed on TestFlight** (4 rounds): visible highlight on alt-screen, sub-word double-tap (full word), draggable handles, loupe offset-above-finger, reverse-video colors, last character included, keybar gap gone on first-connect AND post-app-switch.
+- **What shipped:** the whole Topic 3 selection UI (yDisp absolute-row highlight fix, `subWordBounds`, focus-on-select, bracketed paste, handles, custom loupe, copy-menu re-summon, reverse-video colors, exclusive-end last-column fix) + geometry (tap-location via `caretFrame` true cell size; keybar overlap fixed by laying panes to `keyboardLayoutGuide` top). Design/plans: `docs/superpowers/specs|plans/2026-08-0{1,2}-*`.
 
-**EXACT NEXT ACTION:** start **slice 2 (Selection UI, Topic 3)** with a short brainstorm on the fix path for the yDisp mismatch: (a) reconcile the row space so both SwiftTerm's draw loop and `getSelection`/text are correct, vs (b) draw a CUSTOM highlight fill keyed on our own coords (aligns with the locked custom selection UI: handles + loupe). The trap: `getSelection` adds yDisp itself, so a naive flip to absolute rows breaks copied text. Then plan + build slice 2 (highlight fix -> handles -> loupe -> sub-word/focus-on-select/bracketed paste), device-verify each.
+**EXACT NEXT ACTION:** none blocking. When ready, review + squash-merge #114 to `main`. Then two queued follow-ups (each needs its own brainstorm):
+1. **Predictor prose-vocab** (user-requested 2026-08-02): seed regular/prose text into the DEFAULT prediction DB so prompting Claude yields suggestions; CLI vocab stays PREFERRED, prose is the fallback. Touch SeedKit + predictor ranking; keep the 8-layer secret-exclusion intact. Memory `predictor-add-regular-text-todo-2026-08-01`.
+2. **Pad pane-management (Topic 6):** the arrow-cluster is arrows-only for now; the double-tap-zoom / long-press-split+menu slice is deliberately deferred (it would remove the only current long-press-zoom trigger before its replacement exists).
 
-**Before any main-merge of feat/gesture-diagnostics:** flip `InputClickFeedback.diagnosticsEnabled` true->false; the guessed `setNeedsDisplay` (64dc281) is deliberately kept for now.
+**Known contingency (device-passed, but watch):** if `keyboardLayoutGuide` ever reports a constant ~kbH residual in the `geo:layout` `gapToKeybar` field, the guide is excluding the inputAccessoryView; the one-line fix is `top - firstResponderKeybarHeight()`. Read the number, don't guess (memory `keybar-gap-post-switch-2026-08-02`).
 
-**Session lessons (cost real CI cycles):** `git push` BEFORE `gh workflow run`; diagnose against the CI-RESOLVED dep version (SwiftTerm resolves to v1.15.0); SwiftTerm draw/selectionChanged are non-open (not overridable cross-module); the @MainActor DebugLog trap is active even in Swift-5 mode. Also: TestFlight build number = CI run_number, so numbers collide across branches (a real identify-the-build gotcha).
+**Session lessons:** SwiftTerm resolves to **v1.15.0** (the repo's `swiftterm-150/` clone is MIS-TAGGED 1.5.0 = wrong version; clone `v1.15.0` for truth); SwiftTerm rows = `frame.height/cellHeight`, no inset input; `setSelectionRange` end.col is EXCLUSIVE; the true cell size is `view.caretFrame` (not `bounds/rows`); TestFlight upload can hit transient network -1009 (rerun clears it).
 
-Stray: an untracked `swiftterm-150/` clone is in the repo root (my diagnosis throwaway; not committed; `rm -rf swiftterm-150` to remove).
+Stray untracked (NOT part of the branch, leave or clean at will): `swiftterm-150/` (mis-tagged clone), `extern/eternaltermlib`, `extern/swift-sodium`, `mockups/drafts/*`, `docs/superpowers/topics/2026-07-20-four-device-issues-resume.md`.
 
 ---
 
