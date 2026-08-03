@@ -326,6 +326,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         for gr in ours { view.removeGestureRecognizer(gr) }
         view.removeInteraction(editMenu)
         ours = []
+        // The loupe was added to the persistent ContainerView (terminal.superview) on first
+        // show(); hiding alone leaves an orphaned hidden subview behind on pane teardown, and
+        // each per-pane controller owns its own loupe, so window switches would accumulate them.
+        loupe?.removeFromSuperview()
+        loupe = nil
     }
 
     /// Enable OUR alt-screen drag pan (arrow-key synthesis) for exactly the
