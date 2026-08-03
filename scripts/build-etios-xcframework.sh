@@ -180,9 +180,10 @@ build_slice() {
   test -f "$sodium_lib" || { echo "FATAL: sodium slice missing: $sodium_lib"; exit 1; }
   test -f "$sodium_inc/sodium.h" || { echo "FATAL: sodium.h missing at $sodium_inc"; exit 1; }
 
-  # 3. CMake-configure + build eternaltermlib (static libs only; tests skipped by
-  #    not building the test target, we only build eternaltermlib, which pulls
-  #    et_base transitively).
+  # 3. CMake-configure + build eternaltermlib (static libs only). ET_BUILD_TESTS=OFF
+  #    skips the test subdir AT CONFIGURE time, otherwise its FetchContent(googletest)
+  #    would clone + configure gtest under the iOS cross toolchain (wasteful, can fail).
+  #    We build only the eternaltermlib target, which pulls et_base transitively.
   local cmbuild="$workdir/build"
   rm -rf "$cmbuild"
   cmake -S "$ET_SRC" -B "$cmbuild" \
@@ -193,6 +194,7 @@ build_slice() {
     -DENABLE_BITCODE=OFF \
     -DCMAKE_BUILD_TYPE=Release \
     -DET_HTTP_TLS=OFF \
+    -DET_BUILD_TESTS=OFF \
     -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
     -DCMAKE_FIND_ROOT_PATH="$prefix" \
     -DCMAKE_PREFIX_PATH="$prefix" \
