@@ -7,7 +7,7 @@ import Foundation
 /// client size on rotation/layout: the container's bounds divided by the *real*
 /// cell size (from the rendered font), not a hardcoded estimate.
 ///
-/// Floors each axis — a partial trailing cell isn't usable — then clamps to a
+/// Floors each axis, a partial trailing cell isn't usable, then clamps to a
 /// minimum 1×1 (a terminal is never zero cells). Returns nil for degenerate input
 /// (any non-positive dimension or cell), failing closed rather than emitting a
 /// bogus size, consistent with the other pure terminal helpers.
@@ -30,4 +30,18 @@ public func terminalGrid(width: Double, height: Double,
 public func visibleTerminalHeight(rawHeight: Double, keybarHeight: Double) -> Double {
     guard keybarHeight > 0 else { return rawHeight }
     return max(0, rawHeight - keybarHeight)
+}
+
+/// The terminal-usable height when the keyboard/keybar top is known from UIKit's
+/// `keyboardLayoutGuide`. `keyboardTopY` is the guide's `layoutFrame.minY` in the container's
+/// coordinate space (the pane bottom sits exactly there); `nil` when the keyboard is down or the
+/// guide has no usable frame. Returns `keyboardTopY` when it is a valid interior value
+/// (`0 < keyboardTopY <= rawHeight`), else the full `rawHeight` (fail open: keyboard-down or a
+/// bogus guide value must never yield a zero/negative pane). This is preferred over
+/// `visibleTerminalHeight(rawHeight:keybarHeight:)` because it uses the keybar's REAL position
+/// (which re-lays-out after an app-switch) instead of a measured height that only aligns on first
+/// connect.
+public func usableHeightFromKeyboardTop(rawHeight: Double, keyboardTopY: Double?) -> Double {
+    guard let top = keyboardTopY, top > 0, top <= rawHeight else { return rawHeight }
+    return top
 }

@@ -9,7 +9,7 @@ enum LogCategory: String, CaseIterable, Sendable {
     case lifecycle   // connect/attach/disconnect, app fg/bg, transport switch
     case connect     // auth, hostkey, mosh fallback, reconnect
     case tmux        // control-mode send / %reply / state-apply / pane register
-    case render      // pane/window render — log-on-change only
+    case render      // pane/window render, log-on-change only
     case gesture     // tap/pan/long-press/pinch handlers + classify decisions
     case input       // keystroke structural events (length/backspace/modifier), NOT content
     case predictor   // suggestion lifecycle + secret-exclusion gates
@@ -32,7 +32,7 @@ enum LogCategory: String, CaseIterable, Sendable {
         case .tmux:      return "tmux control-mode sends, %replies, state-apply, pane registration."
         case .render:    return "Pane/window render events (logged only on change). Verbose."
         case .gesture:   return "Tap, pan, long-press, pinch handlers and swipe-vs-scroll classification."
-        case .input:     return "Keystroke structure (length, backspace, modifiers) — never key content. Verbose."
+        case .input:     return "Keystroke structure (length, backspace, modifiers), never key content. Verbose."
         case .predictor: return "Suggestion lifecycle and secret-exclusion gates. Verbose."
         case .keybar:    return "Accessory sizing, macro resolution, live-edit apply. Verbose."
         case .seed:      return "tmux scrollback history seeding."

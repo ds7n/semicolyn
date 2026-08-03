@@ -5,13 +5,13 @@ import XCTest
 
 /// A single tap dismisses an active selection first; otherwise it places the cursor.
 final class TapActionTests: XCTestCase {
-    // EP: selection present → the tap clears it (does NOT place cursor).
+    // EP: selection present, tap outside it → the tap clears it (does NOT place cursor).
     func testTapWithSelectionClears() {
-        XCTAssertEqual(tapAction(hasSelection: true), .clearSelection)
+        XCTAssertEqual(tapAction(hasSelection: true, tapInsideSelection: false), .clearSelection)
     }
 
     // EP: no selection → the tap places the cursor.
     func testTapWithoutSelectionPlaces() {
-        XCTAssertEqual(tapAction(hasSelection: false), .placeCursor)
+        XCTAssertEqual(tapAction(hasSelection: false, tapInsideSelection: false), .placeCursor)
     }
 }
