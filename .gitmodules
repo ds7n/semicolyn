@@ -7,3 +7,6 @@
 [submodule "extern/swift-sodium"]
 	path = extern/swift-sodium
 	url = https://github.com/jedisct1/swift-sodium.git
+[submodule "extern/ios-cmake"]
+	path = extern/ios-cmake
+	url = https://github.com/leetal/ios-cmake
