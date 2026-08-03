@@ -79,11 +79,12 @@ struct SessionView: View {
                             onSwitchWindow: { [weak vm] delta in vm?.selectAdjacentWindowWrapping(delta) },
                             onZoomActivePane: { [weak vm] in vm?.zoomActivePane() },
                             onPlaceCursor: { [weak vm] view, col, row in vm?.placeTmuxCursor(view, toCol: col, toRow: row) },
+                            onSelectPane: { [weak vm] pane in vm?.selectPane(pane) },
                             vm: vm,
                             keybarSettings: AppStores.shared.keybarSettings,
                             hardwareKeyboardConnected: hardwareKeyboard.isConnected)
                         // Client size is reported by the pane container's layout pass
-                        // (bounds ÷ measured cell) via onTmuxResize — no coarse estimate.
+                        // (bounds ÷ measured cell) via onTmuxResize, no coarse estimate.
                     }
                     .overlay(alignment: .top) {
                         if let reason = vm.degraded {
@@ -129,7 +130,7 @@ struct SessionView: View {
                                    // session?.resize. (Note: MoshSession is currently seeded at
                                    // 80×24 and corrected by the first resize event here; to avoid
                                    // that brief initial reflow we could plumb the real grid size
-                                   // into attachMoshIfPossible before creating the session — a
+                                   // into attachMoshIfPossible before creating the session, a
                                    // future refinement, see item #5 Q2(b).)
                                    onResize: vm.isMoshActive
                                        ? { [weak vm] cols, rows in vm?.setMoshClientSize(cols: cols, rows: rows) }
@@ -178,7 +179,7 @@ struct SessionView: View {
                         // (see TerminalScreen); no .safeAreaInset keybar here anymore.
                 }
             } else if resolving {
-                // Resolution not yet run — show a neutral spinner with no label
+                // Resolution not yet run, show a neutral spinner with no label
                 // so the "Connecting to <host>…" text never flashes before we
                 // know which path to take.
                 ProgressView()
@@ -241,11 +242,11 @@ struct SessionView: View {
             if case .idle = newState { dismiss() }
             // Dump the effective logging config once a session goes live, so a device
             // trace shows whether logging/categories were actually on (build 44: the
-            // stream was empty because the master gate was off — this makes that explicit
+            // stream was empty because the master gate was off, this makes that explicit
             // instead of leaving us to guess). Ungated: records even when logging is off.
             if case .shell = newState { DebugLog.shared.logConfig(reason: "connect") }
         }
-        // Host-key prompt sheet — mirrors ConnectView exactly.
+        // Host-key prompt sheet, mirrors ConnectView exactly.
         // `onDismiss` fails closed: if the sheet is dismissed without an explicit
         // button tap, treat it as rejection so the continuation is never leaked.
         .sheet(item: $vm.pendingPrompt, onDismiss: { vm.resolvePrompt(false) }) { prompt in
@@ -261,7 +262,7 @@ struct SessionView: View {
             }
             .interactiveDismissDisabled()
         }
-        // Hardware-keyboard Cmd-shortcuts — registered only while in the shell so
+        // Hardware-keyboard Cmd-shortcuts, registered only while in the shell so
         // they never shadow text editing on the connect/password screens (4e).
         .background {
             if case .shell = vm.state { KeyboardCommandsView(vm: vm) }
@@ -362,7 +363,7 @@ struct SessionView: View {
     }
 
     /// True if the host resolves to an identity whose private key is available on
-    /// this device — the same check `ConnectionViewModel.authenticate` gates on.
+    /// this device, the same check `ConnectionViewModel.authenticate` gates on.
     /// A Keychain read error is treated as "no usable key" here (the connect path
     /// re-reads and surfaces a genuine failure), so a transient error only means we
     /// fall back to the password prompt rather than silently blocking.
@@ -395,7 +396,7 @@ struct SessionView: View {
                     SecureField("Password", text: $password)
                     // This prompt only appears when the host has no usable key. Key
                     // auth is used automatically for hosts with an assigned identity.
-                    Text("No SSH key assigned to this host — enter a password, or assign an identity in the host editor to use key auth.")
+                    Text("No SSH key assigned to this host, enter a password, or assign an identity in the host editor to use key auth.")
                         .font(.caption)
                         .foregroundStyle(Color(theme.text.secondary))
                 }
@@ -436,7 +437,7 @@ struct SessionView: View {
     // MARK: - Status / connecting / error
 
     /// Shown while connecting or on failure (when not in the password prompt).
-    /// Wraps content in a `NavigationStack` so a Close button is always reachable —
+    /// Wraps content in a `NavigationStack` so a Close button is always reachable,
     /// unlike `passwordPrompt`, this view may be shown without any surrounding nav host.
     private var statusView: some View {
         NavigationStack {
@@ -466,7 +467,7 @@ struct SessionView: View {
                         .tint(Color(theme.accent.primary))
                     }
                 case .shell:
-                    // Handled in the outer `Group` — this branch is unreachable here.
+                    // Handled in the outer `Group`, this branch is unreachable here.
                     EmptyView()
                 }
             }

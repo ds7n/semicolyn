@@ -228,7 +228,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// attached, else straight to the raw-PTY channel.
     func sendTerminalInput(_ bytes: [UInt8]) {
         // ── SACRED PATH ─────────────────────────────────────────────────────────
-        // The transport write is the FIRST thing that happens — nothing (not even a
+        // The transport write is the FIRST thing that happens, nothing (not even a
         // string interpolation) runs ahead of it. Do NOT add work above this block.
         let signpost = PerfSignposts.input.beginInterval("send")
         if let moshSession {
@@ -262,7 +262,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     }
 
     /// The `TerminalView` the user is currently typing into: the tmux active
-    /// pane, or — in a raw (non-tmux) session — the single registered pane.
+    /// pane, or, in a raw (non-tmux) session, the single registered pane.
     /// Nil until a pane is registered. Used by the L1 echo oracle.
     private func activePaneView() -> TerminalView? {
         if let win = tmuxState?.activeWindow,
@@ -277,7 +277,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     // MARK: - Pane registry + tmux commands
 
     /// Called by TmuxPaneContainer when a pane's view is created. Seeds history for
-    /// the pane, then flushes any bytes that arrived before the view existed —
+    /// the pane, then flushes any bytes that arrived before the view existed,
     /// THROUGH the seeder, so that pre-view output is buffered by `PaneSeedState`
     /// (it's `.seeding` after `paneDidAppear`) and replayed AFTER the captured
     /// history, preserving the history-before-live-output ordering. Feeding the
@@ -334,6 +334,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Toggle zoom on the active pane (Pad tap). No-op in raw-PTY mode.
     func zoomActivePane() { tmux?.zoomActivePane() }
 
+    /// Focus a pane by tapping it (tap-to-focus). No-op in raw-PTY mode.
+    func selectPane(_ pane: PaneID) { tmux?.selectPane(target: pane) }
+
     /// Esc-pill swipe-right: next tmux window (wraps). No-op with <2 windows.
     func selectNextWindow() { stepWindow(+1) }
     /// Esc-pill swipe-left: previous tmux window (wraps).
@@ -369,7 +372,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     }
 
     /// Whether the in-progress input line looks like a password/secret entry, per
-    /// `passwordDetector`'s verdict (used ONLY to gate diagnostic key-content logging —
+    /// `passwordDetector`'s verdict (used ONLY to gate diagnostic key-content logging,
     /// see `TerminalScreen.Coordinator.send`; has no effect on predictor learning, which
     /// reads the detector directly).
     func currentLineIsPassword() -> Bool { !passwordDetector.shouldLearnCommittedLine() }
@@ -527,7 +530,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// supplied password. Returns the outcome; the caller maps non-success to a
     /// `.failed` state.
     ///
-    /// Publickey-present-but-rejected is NOT silently promoted to password auth —
+    /// Publickey-present-but-rejected is NOT silently promoted to password auth,
     /// the outcome is returned as-is (matches the cert-auth no-fallback rule).
     private func authenticate(conn: Connection, user: String, host: Host,
                               defaults: Defaults, password: String) async throws -> AuthOutcome {
@@ -566,7 +569,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     }
 
     /// Present the confirm-and-connect sheet for a tapped ssh:// link. Parses the
-    /// URL and silently ignores anything that isn't a usable ssh:// target — a tap
+    /// URL and silently ignores anything that isn't a usable ssh:// target, a tap
     /// never connects on its own (Phase-3c ssh:// link seam).
     func presentSSHLink(_ url: URL) {
         guard let target = parseSSHURL(url.absoluteString) else { return }
@@ -636,7 +639,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         output.onHarvestBytes = { [weak self] bytes in
             guard let self else { return }
             // Feed output to the password-prompt gate only. We deliberately no longer
-            // harvest free terminal output as suggestion candidates — that pulled the
+            // harvest free terminal output as suggestion candidates, that pulled the
             // shell prompt (Starship) into suggestions. Suggestions now source from
             // typed-command echo (record) + seed only. (predictor-suggestion-hygiene spec, Fix 1.)
             self.passwordDetector.noteOutput(bytes)
@@ -669,7 +672,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     /// Run the `mosh-server` bootstrap over a one-shot exec and return its stdout
     /// (empty string if nothing came back or the channel failed). Resolves when the
-    /// exec channel closes or a 2s guard fires — same race as `probeTmuxVersion`.
+    /// exec channel closes or a 2s guard fires, same race as `probeTmuxVersion`.
     private func captureMoshBootstrap(conn: Connection, command: String) async -> String {
         let sink = TerminalShellOutput()
         var captured: [UInt8] = []
@@ -732,10 +735,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // mosh-client's getaddrinfo uses AI_NUMERICHOST (numeric IP only, NO DNS),
             // so it rejects a hostname. Resolve host.hostName to a numeric IP here
             // (SSH already reached the host, so it resolves). If we can't resolve, don't
-            // hand mosh a name it will reject — fall back to SSH with a clear reason.
+            // hand mosh a name it will reject, fall back to SSH with a clear reason.
             guard let moshIP = MoshHostResolver.numericAddress(for: host.hostName) else {
                 DebugLog.shared.log(.connect, "mosh: could not resolve \(host.hostName) to an IP → SSH fallback")
-                moshFallback = "Mosh: couldn't resolve \(host.hostName) — using SSH"
+                moshFallback = "Mosh: couldn't resolve \(host.hostName), using SSH"
                 return false
             }
             DebugLog.shared.log(.connect, "mosh: resolved \(host.hostName) → \(moshIP)")
@@ -754,8 +757,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // Route Mosh output through the SAME buffered entry point as the Rust
             // SSH path (`output.onOutput`) rather than calling the stored `onBytes`
             // sink directly. Mosh's first framebuffer diff is emitted synchronously
-            // during `sess.start()` — before `state = .shell` triggers SwiftUI's
-            // `makeUIView`, which is what installs the render sink — so a direct
+            // during `sess.start()`, before `state = .shell` triggers SwiftUI's
+            // `makeUIView`, which is what installs the render sink, so a direct
             // `onBytes?` call would silently drop that frame (nil sink → no-op) and
             // leave the terminal permanently blank. `onOutput` appends to the
             // `PendingOutputBuffer`, which replays on sink-install. (Harvest stays
@@ -768,8 +771,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // Frames are flowing: the UDP path is up. `moshFirstFrameSeen` is no
                 // longer the exit discriminator (that's reason+elapsed now), but it
                 // still records that a frame arrived; cancelling the watchdog here is
-                // the important effect — the loop signalled life, so don't SSH-fall-back.
-                DebugLog.shared.log(.connect, "mosh: onFirstFrame — UDP handshake up, frames flowing")
+                // the important effect, the loop signalled life, so don't SSH-fall-back.
+                DebugLog.shared.log(.connect, "mosh: onFirstFrame, UDP handshake up, frames flowing")
                 self?.moshFirstFrameSeen = true
                 self?.moshWatchdog?.cancel(); self?.moshWatchdog = nil
                 DebugLog.shared.log(.connect, "mosh: watchdog cancelled (onFirstFrame)")
@@ -813,9 +816,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     self.moshSession?.stop()
                     self.moshSession = nil
                     // Surface the REAL reason captured from mosh's stderr (e.g.
-                    // "Mosh failed: Crypto: … — using SSH") when we have it; the bridge
+                    // "Mosh failed: Crypto: …, using SSH") when we have it; the bridge
                     // falls back to a generic string only when nothing was captured.
-                    self.moshFallback = reason ?? "Mosh connection failed — using SSH"
+                    self.moshFallback = reason ?? "Mosh connection failed, using SSH"
                     DebugLog.shared.log(.connect, "mosh: exit fallbackSSH (elapsed=\(String(format: "%.2f", elapsed))s) → SSH fallback")
                     Task { [weak self] in
                         guard let self else { return }
@@ -828,7 +831,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     }
                 }
             }
-            DebugLog.shared.log(.connect, "mosh: sess.start() — UDP session launching, state=.shell")
+            DebugLog.shared.log(.connect, "mosh: sess.start(), UDP session launching, state=.shell")
             sess.start()
             moshSession = sess
             connection = conn
@@ -846,7 +849,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 DebugLog.shared.log(.connect, "mosh: watchdog fired (no frame/exit in 10s) → SSH fallback")
                 self.moshSession?.stop()
                 self.moshSession = nil
-                self.moshFallback = "Mosh didn't connect — using SSH"
+                self.moshFallback = "Mosh didn't connect, using SSH"
                 do {
                     try await self.attachSSHShell(conn: conn, host: host, defaults: defaults)
                 } catch {
@@ -906,7 +909,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         self.historySeeder = seeder
         guard let startCmd = runtime.makeStartCommand() else {
             // Controller couldn't build a start command (e.g. an invalid resolved
-            // session name — which a Defaults-level value can be, since the Defaults
+            // session name, which a Defaults-level value can be, since the Defaults
             // editor has no per-field validation). Surface it via the degraded
             // banner instead of silently dropping to a raw shell everywhere.
             DebugLog.shared.log(.lifecycle, "attachTmux: makeStartCommand nil (bad session name) → degraded raw shell")
@@ -922,12 +925,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             } else if self.renderablePanes.contains(pane) {
                 self.pendingPaneBytes[pane, default: []].append(contentsOf: bytes)
             } else {
-                // Pane not in the visible layout — drop to prevent unbounded
+                // Pane not in the visible layout, drop to prevent unbounded
                 // buffering, and don't harvest output the user can't see.
                 return
             }
             // Feed output to the password-prompt gate only. We deliberately no longer
-            // harvest free terminal output as suggestion candidates — that pulled the
+            // harvest free terminal output as suggestion candidates, that pulled the
             // shell prompt (Starship) into suggestions. Suggestions now source from
             // typed-command echo (record) + seed only. (predictor-suggestion-hygiene spec, Fix 1.)
             self.passwordDetector.noteOutput(bytes)
@@ -945,7 +948,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             DebugLog.shared.log(.tmux, "tmux:activeWindow=\(state.activeWindow.map { "@\($0.raw)" } ?? "nil") wins=\(state.windows.count)")
             let newActive = state.activeWindow.flatMap { state.window($0)?.activePane }
             if oldActive != newActive {
-                // Active pane changed (e.g. ⌘]) — re-publish the new active pane's
+                // Active pane changed (e.g. ⌘]), re-publish the new active pane's
                 // last-known title so the window title isn't left stale.
                 self.terminalTitle = titleOnActiveChange(active: newActive, lastTitles: self.paneLastTitles)
             }
@@ -1021,7 +1024,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         session = sess
         self.tmux = runtime   // retain to keep control mode alive
         state = .shell
-        DebugLog.shared.log(.lifecycle, "attachTmux: exec opened, tmux SET, state=.shell — awaiting tmux output")
+        DebugLog.shared.log(.lifecycle, "attachTmux: exec opened, tmux SET, state=.shell, awaiting tmux output")
         runtime.startContextPolling()
     }
 
@@ -1047,7 +1050,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
     }
 
-    /// Banner action — reattach control mode on the live connection. `-CC
+    /// Banner action, reattach control mode on the live connection. `-CC
     /// new-session -A` attaches to the server-side session if it survived, else
     /// creates a fresh one.
     func reattachTmux() {
@@ -1060,8 +1063,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
     }
 
-    /// Banner action — start a fresh tmux. Same `-CC new-session -A` path; if the
-    /// old session somehow survived this reattaches to it (acceptable for v1 —
+    /// Banner action, start a fresh tmux. Same `-CC new-session -A` path; if the
+    /// old session somehow survived this reattaches to it (acceptable for v1,
     /// distinct fresh-session naming is a follow-up).
     func startNewTmux() {
         guard let conn = connection else {
@@ -1078,7 +1081,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
     }
 
-    /// Banner action — stay in degraded raw-shell mode for the rest of the session.
+    /// Banner action, stay in degraded raw-shell mode for the rest of the session.
     func dismissCrashBanner() { crashBanner = nil }
 
     // MARK: - Predictor
@@ -1087,7 +1090,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// safe to call repeatedly; a no-op when the predictor is disabled (incognito)
     /// or no learned store is attached. Called from `teardown()` and on
     /// app-background (`scenePhase`) so learning survives a backgrounded or killed
-    /// app — previously only a clean teardown flushed. The snapshot+save now runs on
+    /// app, previously only a clean teardown flushed. The snapshot+save now runs on
     /// a detached `Task` (the engine lives behind `PredictorActor`); the actor
     /// reference is captured before any subsequent `predictor = nil`, so the flush
     /// completes against the correct engine even as teardown proceeds.
@@ -1101,12 +1104,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     func forgetLastLine() {
         DebugLog.shared.log(.predictor, "predictor:forgetLastLine")
         Task { [predictor] in await predictor?.forgetLastLine() }
-        // Ephemeral drop — nothing to persist; suggestions refresh on next input.
+        // Ephemeral drop, nothing to persist; suggestions refresh on next input.
     }
 
     /// `PredictorPurgeable`: reset the running engine to empty (seed preserved).
     /// Called by `AppStores.purgePredictorLearned()` when THIS session is the active
-    /// one, so a panic-purge triggered from Settings — even mid-session — clears the
+    /// one, so a panic-purge triggered from Settings, even mid-session, clears the
     /// in-memory learned state before the on-disk store is deleted. No-op when the
     /// predictor is off (incognito).
     func purgeLearnedEngine() {
@@ -1191,7 +1194,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // L4a: the tracker latches the just-committed line's opt-out at its Enter,
         // so this is correct even when a leading-space line and its Enter arrive in
         // ONE chunk (paste). (Per-chunk coarseness matches L1's: a chunk with two
-        // full lines of mixed opt-out applies the last line's verdict — a known v1
+        // full lines of mixed opt-out applies the last line's verdict, a known v1
         // limit, not a realistic paste-a-secret case.)
         let optedOut = tracker.lastCommittedLineOptedOut
         let deadline = DispatchTime.now() + .milliseconds(40)
@@ -1206,7 +1209,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // 1) settle echo against the grid (L1), THEN
                 self.passwordDetector.settleLine(scalars: scalars, from: anchor)
                 // 2) recompute suggestions in the same main-actor hop, in program order,
-                //    so the refresh always reflects post-settle state (findings C/D — no
+                //    so the refresh always reflects post-settle state (findings C/D, no
                 //    fragile inter-hop wall-clock offsets). Trailing-debounce preserved:
                 //    only recompute if no newer keystroke arrived.
                 if self.refreshCoalescer.isDue(at: Date().timeIntervalSinceReferenceDate) {
@@ -1217,7 +1220,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         for b in bytes where b == 0x0d || b == 0x0a {
             predictorVM.setSuggestions([])   // line committed → clear stale chips immediately
             // This closure runs on the main queue and touches @MainActor state (passwordDetector,
-            // pendingLineTokens) and the @MainActor DebugLog directly — legal via the closure's
+            // pendingLineTokens) and the @MainActor DebugLog directly, legal via the closure's
             // inferred main-actor isolation. If ever extracted to a @Sendable/non-capturing form,
             // the DebugLog + self accesses need an explicit MainActor.assumeIsolated/await.
             DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(10)) { [weak self] in
@@ -1248,7 +1251,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let prefix = tracker.current, prev = tracker.previous
         // Mirror the engine's conditional min-prefix floor so a short from-scratch prefix
         // clears chips instead of leaving stale ones up. The bigram path (a usable
-        // `prev`) is exempt — next-token suggestions are valid with an empty prefix.
+        // `prev`) is exempt, next-token suggestions are valid with an empty prefix.
         // NOTE: literal `2` must stay in sync with SuggestionConfig.minPrefix (currently 2).
         // A future task can plumb the config value through; out of scope here.
         let hasUsablePrevious = (prev?.isEmpty == false)
@@ -1283,7 +1286,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// field cannot be resolved.
     func connect(savedHost: Host, password: String) {
         if state == .connecting || state == .shell {
-            DebugLog.shared.log(.connect, "connect(saved): IGNORED — already \(state == .connecting ? "connecting" : "in shell")")
+            DebugLog.shared.log(.connect, "connect(saved): IGNORED, already \(state == .connecting ? "connecting" : "in shell")")
             return
         }
         lastSavedHost = savedHost
@@ -1359,7 +1362,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 state = .failed("Host key not trusted")
             } catch ConnectError.Timeout {
                 DebugLog.shared.log(.connect, "connect(saved): Timeout → .failed")
-                state = .failed("Couldn't reach host — connection timed out")
+                state = .failed("Couldn't reach host, connection timed out")
             } catch {
                 DebugLog.shared.log(.connect, "connect(saved): THREW \(String(describing: error)) → .failed")
                 state = .failed(String(describing: error))
@@ -1371,7 +1374,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     func connect(host: String, port: String, user: String, password: String) {
         if state == .connecting || state == .shell {
-            DebugLog.shared.log(.connect, "connect(adhoc): IGNORED — already \(state == .connecting ? "connecting" : "in shell")")
+            DebugLog.shared.log(.connect, "connect(adhoc): IGNORED, already \(state == .connecting ? "connecting" : "in shell")")
             return
         }
         teardown()
@@ -1434,7 +1437,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 state = .failed("Host key not trusted")
             } catch ConnectError.Timeout {
                 DebugLog.shared.log(.connect, "connect(adhoc): Timeout → .failed")
-                state = .failed("Couldn't reach host — connection timed out")
+                state = .failed("Couldn't reach host, connection timed out")
             } catch {
                 DebugLog.shared.log(.connect, "connect(adhoc): THREW \(String(describing: error)) → .failed")
                 state = .failed(String(describing: error))

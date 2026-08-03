@@ -49,4 +49,42 @@ final class TapRowMappingTests: XCTestCase {
         XCTAssertEqual(TapRowMapping.row(contentY: 100, contentOffsetY: 0, cellHeight: 0, rows: 33), 0)
         XCTAssertEqual(TapRowMapping.row(contentY: 100, contentOffsetY: 0, cellHeight: 10, rows: 0), 0)
     }
+
+    // absoluteRow: content y maps directly to a content/buffer row (NO offset subtraction);
+    // this is the row space SwiftTerm's iOS draw loop + selection use (Int(contentY/cellHeight)).
+    // EP: top of content (unscrolled viewport).
+    func testAbsoluteRowAtTop() {
+        XCTAssertEqual(
+            TapRowMapping.absoluteRow(contentY: 105, cellHeight: 10, totalRows: 1000),
+            10)
+    }
+
+    // EP: deep in the scrollback / alt-screen (yDisp>0 case): a large content y -> a large
+    // absolute row, WITHOUT the offset subtraction the viewport mapping does.
+    func testAbsoluteRowDeepInContent() {
+        XCTAssertEqual(
+            TapRowMapping.absoluteRow(contentY: 5255, cellHeight: 10, totalRows: 1000),
+            525)
+    }
+
+    // BVA: exactly on a row top.
+    func testAbsoluteRowBoundary() {
+        XCTAssertEqual(
+            TapRowMapping.absoluteRow(contentY: 320, cellHeight: 10, totalRows: 1000),
+            32)
+    }
+
+    // BVA: past the last content row clamps to totalRows-1.
+    func testAbsoluteRowClampsToLast() {
+        XCTAssertEqual(
+            TapRowMapping.absoluteRow(contentY: 999999, cellHeight: 10, totalRows: 33),
+            32)
+    }
+
+    // Negative: non-positive cellHeight -> 0 (defensive, no divide-by-zero).
+    func testAbsoluteRowZeroCellHeight() {
+        XCTAssertEqual(
+            TapRowMapping.absoluteRow(contentY: 105, cellHeight: 0, totalRows: 1000),
+            0)
+    }
 }

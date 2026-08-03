@@ -3,6 +3,26 @@
 
 # Status & TODO
 
+## Resume here (2026-08-03)
+
+**Selection UI + terminal/keybar geometry: SHIPPED. PR #114 open vs `main`, CI green, device-confirmed. Awaiting review + squash-merge.**
+
+- **PR:** [#114](https://github.com/ds7n/semicolyn/pull/114) `feat: custom terminal selection UI + keybar/tap geometry fixes`, branch `feat/gesture-diagnostics`, head `655b31a`, all CI jobs green (macos/linux-swift/linux-rust/lint). **#113 CLOSED as superseded.** Full Kit suite 1387/0.
+- **Device-confirmed on TestFlight** (4 rounds): visible highlight on alt-screen, sub-word double-tap (full word), draggable handles, loupe offset-above-finger, reverse-video colors, last character included, keybar gap gone on first-connect AND post-app-switch.
+- **What shipped:** the whole Topic 3 selection UI (yDisp absolute-row highlight fix, `subWordBounds`, focus-on-select, bracketed paste, handles, custom loupe, copy-menu re-summon, reverse-video colors, exclusive-end last-column fix) + geometry (tap-location via `caretFrame` true cell size; keybar overlap fixed by laying panes to `keyboardLayoutGuide` top). Design/plans: `docs/superpowers/specs|plans/2026-08-0{1,2}-*`.
+
+**EXACT NEXT ACTION:** none blocking. When ready, review + squash-merge #114 to `main`. Then two queued follow-ups (each needs its own brainstorm):
+1. **Predictor prose-vocab** (user-requested 2026-08-02): seed regular/prose text into the DEFAULT prediction DB so prompting Claude yields suggestions; CLI vocab stays PREFERRED, prose is the fallback. Touch SeedKit + predictor ranking; keep the 8-layer secret-exclusion intact. Memory `predictor-add-regular-text-todo-2026-08-01`.
+2. **Pad pane-management (Topic 6):** the arrow-cluster is arrows-only for now; the double-tap-zoom / long-press-split+menu slice is deliberately deferred (it would remove the only current long-press-zoom trigger before its replacement exists).
+
+**Known contingency (device-passed, but watch):** if `keyboardLayoutGuide` ever reports a constant ~kbH residual in the `geo:layout` `gapToKeybar` field, the guide is excluding the inputAccessoryView; the one-line fix is `top - firstResponderKeybarHeight()`. Read the number, don't guess (memory `keybar-gap-post-switch-2026-08-02`).
+
+**Session lessons:** SwiftTerm resolves to **v1.15.0** (the repo's `swiftterm-150/` clone is MIS-TAGGED 1.5.0 = wrong version; clone `v1.15.0` for truth); SwiftTerm rows = `frame.height/cellHeight`, no inset input; `setSelectionRange` end.col is EXCLUSIVE; the true cell size is `view.caretFrame` (not `bounds/rows`); TestFlight upload can hit transient network -1009 (rerun clears it).
+
+Stray untracked (NOT part of the branch, leave or clean at will): `swiftterm-150/` (mis-tagged clone), `extern/eternaltermlib`, `extern/swift-sodium`, `mockups/drafts/*`, `docs/superpowers/topics/2026-07-20-four-device-issues-resume.md`.
+
+---
+
 The canonical status + pending-work list. Architecture and the spec/plan map live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the full decision log (incl. per-spec "out of scope") in [docs/brainstorming-decisions.md](docs/brainstorming-decisions.md).
 
 **Headline:** design complete; a connect-and-get-a-shell MVP builds for the iOS Simulator. The protocol + logic tiers are built and Linux-tested; the app shell is built and validated by macOS CI. Not yet device-installable (needs Apple Developer signing).
