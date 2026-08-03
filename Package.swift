@@ -11,7 +11,7 @@ var targets: [Target] = [
         ]
     ),
     .testTarget(name: "SemicolynKitTests", dependencies: ["SemicolynKit"]),
-    // Build-time seed-ingestion tooling — never part of the shipped app product.
+    // Build-time seed-ingestion tooling, never part of the shipped app product.
     .target(name: "SeedKit", dependencies: ["SemicolynKit"]),
     .executableTarget(name: "semicolyn-seedbuild", dependencies: ["SeedKit"]),
     .testTarget(name: "SeedKitTests", dependencies: ["SeedKit"]),
@@ -22,7 +22,7 @@ var products: [Product] = [.library(name: "SemicolynKit", targets: ["SemicolynKi
 // The UniFFI XCFramework exists only on Apple platforms; never reference it on Linux.
 #if os(macOS)
 targets += [
-    .target(name: "SemicolynSSHCoreFFI", dependencies: ["SemicolynSSHCore", "Mosh"],
+    .target(name: "SemicolynSSHCoreFFI", dependencies: ["SemicolynSSHCore", "Mosh", "ETerminal"],
             // The UniFFI-generated bindings aren't Swift 6 strict-concurrency
             // clean (sending-closure diagnostics on the foreign-trait callbacks).
             // It's vendored generated code we don't edit, so compile it in Swift 5
@@ -30,6 +30,7 @@ targets += [
             swiftSettings: [.swiftLanguageMode(.v5)]),
     .binaryTarget(name: "SemicolynSSHCore", path: "SemicolynSSHCore.xcframework"),
     .binaryTarget(name: "Mosh", path: "Mosh.xcframework"),
+    .binaryTarget(name: "ETerminal", path: "ETerminal.xcframework"),
     .testTarget(name: "BridgeTests", dependencies: ["SemicolynSSHCoreFFI"]),
 ]
 // Expose the UniFFI bridge module as a product so the iOS app target can link it.
