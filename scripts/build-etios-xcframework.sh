@@ -22,8 +22,10 @@
 #      cross-dep), pointing at the prebuilt libsodium slice and the host protoc.
 #      Produces libet_base.a + libeternaltermlib.a per slice.
 #   4. Explode-and-combine those two + libprotobuf-lite.a into one self-contained
-#      libETerminal-<slice>.a. libsodium stays SEPARATE (linked at app-link time).
-#   5. xcodebuild -create-xcframework (device slice + fat sim slice).
+#      per-slice lib. libsodium stays SEPARATE (linked at app-link time). Slices are
+#      single-arch: `ar x` refuses a fat archive, so we never explode a multi-arch one.
+#   5. lipo the two simulator slices into one fat sim archive; xcodebuild
+#      -create-xcframework (device slice + fat sim slice).
 #   6. SUCCESS GATE: nm the device slice for the `et_connect` C-ABI symbol.
 #
 # WHY NOT the Mosh autotools cross-flags: eternaltermlib is CMake and calls
@@ -62,17 +64,22 @@ GATE_SYMBOL="et_connect"                                        # success-gate s
 
 # --------------------------------------------------------------------------- #
 # Slice table. Each entry: NAME|PLATFORM|ARCHS|SODIUM_SLICE                    #
-#   NAME          logical slice id (build subdir + xcframework library)        #
+#   NAME          logical slice id (build subdir + per-slice library)          #
 #   PLATFORM      leetal/ios-cmake 4.5.0 PLATFORM value                        #
-#   ARCHS         leetal ARCHS (semicolon-joined); SIMULATOR is fat here       #
+#   ARCHS         leetal ARCHS, a SINGLE arch per slice (see why below)       #
 #   SODIUM_SLICE  the prebuilt Clibsodium.xcframework slice dir for this target #
-# Two slices only: leetal builds the fat simulator (arm64+x86_64) in one shot  #
-# from ARCHS="arm64;x86_64", so no separate x86_64 slice + manual lipo needed. #
-# Device and simulator are NEVER combined into one library.                    #
+# THREE THIN slices, NOT a fat sim in one shot. The explode-and-combine step    #
+# runs `ar x` per source archive, and `ar x` REFUSES a fat (multi-arch) archive #
+# ("is a fat file ... Inappropriate file type or format"). So each slice must   #
+# be single-arch; the two simulator slices are lipo'd into one fat sim archive  #
+# AFTER they are each combined. Device and simulator are NEVER lipo'd together. #
+# (The prebuilt libsodium slice IS fat, but it is linked separately, never      #
+# exploded, so its fatness is fine.)                                            #
 # --------------------------------------------------------------------------- #
 SLICES=(
   "ios-arm64|OS|arm64|ios-arm64_arm64e"
-  "ios-sim|SIMULATOR|arm64;x86_64|ios-arm64_arm64e_x86_64-simulator"
+  "ios-arm64-sim|SIMULATOR|arm64|ios-arm64_arm64e_x86_64-simulator"
+  "ios-x86_64-sim|SIMULATOR|x86_64|ios-arm64_arm64e_x86_64-simulator"
 )
 
 # --------------------------------------------------------------------------- #
@@ -297,15 +304,27 @@ main() {
     build_slice "$name" "$platform" "$archs" "$sodium_slice"
   done
 
+  # lipo the two thin simulator combos (arm64-sim + x86_64-sim) into ONE fat sim
+  # archive. An xcframework static-lib slice is one arch per platform-variant:
+  #   device = arm64 single; simulator = arm64+x86_64 fat.
+  # Device and simulator are NEVER lipo'd together. (Each sim combo is already the
+  # exploded+merged ET lib for its single arch, so lipo just fuses the two.)
+  local sim_fat="$BUILD_ROOT/ios-sim-fat/$LIB_NAME"
+  mkdir -p "$(dirname "$sim_fat")"
+  lipo -create \
+    "$BUILD_ROOT/ios-arm64-sim/$LIB_NAME" \
+    "$BUILD_ROOT/ios-x86_64-sim/$LIB_NAME" \
+    -output "$sim_fat"
+
   # Headers dir for the xcframework (the single public C ABI header).
   local hdrs="$BUILD_ROOT/Headers"
   rm -rf "$hdrs"; mkdir -p "$hdrs"
   cp "$ET_INCLUDE/eternaltermlib.h" "$hdrs/"
 
-  # Assemble: device slice + fat simulator slice (leetal already made the sim fat).
+  # Assemble: device slice + fat simulator slice.
   xcodebuild -create-xcframework \
     -library "$BUILD_ROOT/ios-arm64/$LIB_NAME" -headers "$hdrs" \
-    -library "$BUILD_ROOT/ios-sim/$LIB_NAME"   -headers "$hdrs" \
+    -library "$sim_fat"                        -headers "$hdrs" \
     -output "$OUT"
 
   # ----------------------------------------------------------------------- #
