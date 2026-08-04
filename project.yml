@@ -20,6 +20,13 @@ packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
     from: "1.0.0"
+  # The vendored swift-sodium package (extern/swift-sodium), prebuilt
+  # Clibsodium.xcframework. ET's libETerminal.a calls crypto_secretbox_* /
+  # sodium_init / sodium_memzero directly; link the product at app-link time
+  # per docs/et-ios-build-notes.md (libsodium stays a separate slice, not
+  # merged into ETerminal.xcframework).
+  Sodium:
+    path: extern/swift-sodium
 
 targets:
   Semicolyn:
@@ -43,13 +50,17 @@ targets:
       - package: SemicolynPackage
         product: SemicolynKit
       - package: SwiftTerm
+      - package: Sodium
+        product: Clibsodium
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
         # Mosh's Network::Compressor uses zlib (_compress/_uncompress). The Mosh
         # xcframework provides the Mosh objects but not zlib; link the iOS SDK's
         # libz here (Mosh's own build gets it via a system -lz).
-        OTHER_LDFLAGS: -lz
+        # ET's TcpSocketHandler::connect uses res_9_init from the resolver;
+        # link the iOS SDK's libresolv here (libETerminal.a doesn't bundle it).
+        OTHER_LDFLAGS: "-lz -lresolv"
         PRODUCT_BUNDLE_IDENTIFIER: com.truepositive.semicolyn
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "0.1.0"
