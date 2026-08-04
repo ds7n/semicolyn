@@ -44,3 +44,11 @@ public func validateETConfig(_ cfg: ETConfig) throws -> ETConfig {
     guard let term = cfg.env["TERM"], !term.isEmpty else { throw ETConfigError.missingTERM }
     return cfg
 }
+
+/// Flatten an env map into the two parallel arrays the C ABI wants
+/// (`env_keys`/`env_vals`). Sorted by key so the output is deterministic
+/// (stable tests, stable handshake payload); `keys[i]` pairs with `vals[i]`.
+public func etEnvArrays(_ env: [String: String]) -> (keys: [String], vals: [String]) {
+    let sorted = env.sorted { $0.key < $1.key }
+    return (sorted.map(\.key), sorted.map(\.value))
+}

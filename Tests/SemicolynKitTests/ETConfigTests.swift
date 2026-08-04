@@ -55,4 +55,26 @@ final class ETConfigTests: XCTestCase {
     func testPortZeroIsAccepted() throws {
         XCTAssertEqual(try validateETConfig(valid()).port, 0)
     }
+
+    func testEnvArraysEmpty() {
+        let (keys, vals) = etEnvArrays([:])
+        XCTAssertEqual(keys, [])
+        XCTAssertEqual(vals, [])
+    }
+
+    func testEnvArraysSingle() {
+        let (keys, vals) = etEnvArrays(["TERM": "xterm-256color"])
+        XCTAssertEqual(keys, ["TERM"])
+        XCTAssertEqual(vals, ["xterm-256color"])
+    }
+
+    // Deterministic sorted-by-key order, and keys[i] pairs with vals[i].
+    func testEnvArraysMultiIsSortedAndIndexAligned() {
+        let (keys, vals) = etEnvArrays(["TERM": "xterm", "LANG": "en_US.UTF-8", "COLORTERM": "truecolor"])
+        XCTAssertEqual(keys, ["COLORTERM", "LANG", "TERM"])
+        XCTAssertEqual(vals, ["truecolor", "en_US.UTF-8", "xterm"])
+        for (i, k) in keys.enumerated() {
+            XCTAssertEqual(vals[i], ["COLORTERM": "truecolor", "LANG": "en_US.UTF-8", "TERM": "xterm"][k])
+        }
+    }
 }
