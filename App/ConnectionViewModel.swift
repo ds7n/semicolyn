@@ -144,6 +144,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// UDP handshake completed). Gates `onEnd`: a pre-first-frame exit falls back to
     /// SSH on the retained connection; a post-first-frame exit is a mid-session crash.
     private var moshFirstFrameSeen = false
+    /// Non-nil while an ET (Eternal Terminal) session is driving the terminal.
+    /// Retained so it outlives `attachET` and teardown can close it. TEMPORARY:
+    /// `attachET` has no routing entry point yet (Transport picker is a later
+    /// slice), so this is unused outside that dev-only call for now.
+    private var etSession: ETSession?
     /// First-frame watchdog: fires an SSH fallback if the Mosh loop signals no life
     /// (no onFirstFrame, no onEnd) within the window. Cancelled by either callback.
     private var moshWatchdog: Task<Void, Never>?
@@ -490,6 +495,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         moshSession = nil
         moshFirstFrameSeen = false
         moshFallback = nil
+        etSession?.close()
+        etSession = nil
         tmux?.stop()
         tmux = nil
         paneContexts = [:]
@@ -864,6 +871,103 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             moshFallback = reason   // pre-handoff banner; caller runs the SSH/tmux path
             return false
         }
+    }
+
+    // MARK: - ET path
+
+    /// Run the ET bootstrap over a one-shot exec and return its stdout, or nil if
+    /// the exec channel could not be opened. Resolves when the exec closes or a 2s
+    /// guard fires (same race as `captureMoshBootstrap`). SECURITY: the command
+    /// contains the passkey; never log `command` verbatim.
+    private func captureETBootstrap(conn: Connection, command: String) async -> String? {
+        let sink = TerminalShellOutput()
+        var captured: [UInt8] = []
+        sink.onBytes = { captured.append(contentsOf: $0) }
+        let done = AsyncStream<Void> { cont in
+            sink.onExit = { _ in cont.yield(); cont.finish() }
+        }
+        guard let sess = try? await conn.openExec(command: command, term: "xterm-256color",
+                                                   cols: 80, rows: 24, output: sink) else {
+            DebugLog.shared.log(.connect, "et: bootstrap exec FAILED to open (openExec returned nil)")
+            return nil
+        }
+        defer { Task { try? await sess.close() } }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { for await _ in done { break } }
+            group.addTask { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+            await group.next(); group.cancelAll()
+        }
+        return String(decoding: captured, as: UTF8.self)
+    }
+
+    /// Bootstrap + attach an ET session on the authenticated connection. Returns
+    /// `.success` when the `ETSession` started; `.failure(ETBootstrapError)`
+    /// otherwise. Does NOT fall back to SSH (per the ET-bootstrap design: the
+    /// fallback/UI slice renders the error). TEMPORARY: reached only via a
+    /// dev-only entry point until the Transport picker (§5) wires real routing;
+    /// the existing Mosh-silently-wins routing in `attachMoshIfPossible` is
+    /// untouched. SECURITY: never log the passkey, the bootstrap `command`
+    /// string, or the raw IDPASSKEY line, only lengths / parsed-ok-or-failed.
+    private func attachET(conn: Connection, host: Host, defaults: Defaults) async -> Result<Void, ETBootstrapError> {
+        let cred = etGenerateCredential()
+        let term = "xterm-256color"
+        let command = etBootstrapCommand(id: cred.id, passkey: cred.passkey, term: term)
+        DebugLog.shared.log(.connect, "et: bootstrap exec (idLen=\(cred.id.count) keyLen=\(cred.passkey.count))")
+
+        guard let stdout = await captureETBootstrap(conn: conn, command: command) else {
+            return .failure(.execFailed)
+        }
+        let serverCred: ETCredential
+        switch parseETIDPASSKEY(stdout) {
+        case .success(let cred):
+            serverCred = cred
+        case .failure(let e):
+            DebugLog.shared.log(.connect, "et: IDPASSKEY parse FAILED (\(String(describing: e)))")
+            return .failure(e)
+        }
+        DebugLog.shared.log(.connect, "et: IDPASSKEY parsed ok")
+
+        // Seeded at 80×24 like the Mosh path (see attachMoshIfPossible): the
+        // terminal view hasn't laid out yet at connect time, so the real grid
+        // isn't known here.
+        let cols: UInt16 = 80, rows: UInt16 = 24
+        let config: ETConfig
+        do {
+            config = try etConnectConfig(host: host.hostName, id: serverCred.id,
+                                         passkey: serverCred.passkey, term: term,
+                                         cols: cols, rows: rows)
+        } catch let e as ETConfigError {
+            DebugLog.shared.log(.connect, "et: config invalid (\(String(describing: e)))")
+            return .failure(.invalidConfig(e))
+        } catch {
+            DebugLog.shared.log(.connect, "et: config build threw unexpected error → malformedIDPASSKEY")
+            return .failure(.malformedIDPASSKEY)
+        }
+
+        let sess = ETSession(host: config.host, port: config.port, id: config.id,
+                             passkey: config.passkey, env: config.env,
+                             cols: config.cols, rows: config.rows,
+                             width: config.width, height: config.height,
+                             keepaliveSecs: config.keepaliveSecs)
+        // Route ET output through the SAME buffered entry point the Mosh path
+        // uses (`output.onOutput`, not the stored `onBytes` sink directly): see
+        // the long comment in `attachMoshIfPossible` above `sess.onOutput =`.
+        // The `PendingOutputBuffer` behind `onOutput` replays on sink-install,
+        // so an early frame (before SwiftUI's `makeUIView` installs the render
+        // sink) isn't silently dropped.
+        sess.onOutput = { [weak self] data in
+            self?.output.onOutput(data: data)
+        }
+        sess.onEnd = { [weak self] reason in
+            let safe = sanitizeEndReason(reason)
+            DebugLog.shared.log(.connect, "et: session ended (\(safe))")
+            self?.etSession = nil
+        }
+        DebugLog.shared.log(.connect, "et: sess.start()")
+        sess.start()
+        etSession = sess
+        connection = conn
+        return .success(())
     }
 
     /// Whether a Mosh session is currently driving the terminal. The view uses
