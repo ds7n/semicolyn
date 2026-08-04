@@ -3,7 +3,7 @@
 import SwiftUI
 import SemicolynKit
 
-/// Standalone Defaults editor — the singleton `Defaults` record.
+/// Standalone Defaults editor, the singleton `Defaults` record.
 ///
 /// Same section shell as `HostEditorView` but without `label`/`hostName`/Delete.
 /// All sections are collapsed by default. Each row shows:
@@ -11,7 +11,7 @@ import SemicolynKit
 /// - The explicit value when the field is `.explicit`
 ///
 /// Swipe-left on any `.explicit` row resets it to `.inherit` ("Clear override").
-/// Save is always enabled — no required fields.
+/// Save is always enabled, no required fields.
 ///
 /// NOTE: This is a completely standalone view, NOT an extension of `HostEditorView`.
 /// It reuses the pure mapper functions from `InheritedBinding.swift` (only).
@@ -20,7 +20,7 @@ struct DefaultsEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) private var theme
 
-    // Section expansion state — all collapsed by default (spec: §Defaults editor)
+    // Section expansion state, all collapsed by default (spec: §Defaults editor)
     @State private var basicsExpanded = false
     @State private var connectionExpanded = false
     @State private var jumpChainExpanded = false
@@ -80,7 +80,7 @@ struct DefaultsEditorView: View {
     private var basicsSection: some View {
         DisclosureGroup(isExpanded: $basicsExpanded) {
 
-            // user — Inherited<String>; no built-in fallback → "(unset)"
+            // user, Inherited<String>; no built-in fallback → "(unset)"
             LabeledContent {
                 TextField(
                     "inherit · (unset)",
@@ -107,7 +107,7 @@ struct DefaultsEditorView: View {
                 }
             }
 
-            // port — Inherited<Int>; built-in fallback: 22
+            // port, Inherited<Int>; built-in fallback: 22
             LabeledContent {
                 TextField(
                     "inherit · 22",
@@ -145,7 +145,10 @@ struct DefaultsEditorView: View {
     private var connectionSection: some View {
         DisclosureGroup(isExpanded: $connectionExpanded) {
 
-            // serverAliveInterval — Inherited<Int>; built-in fallback: 30
+            // transport, Inherited<Transport>: four-state Picker; built-in fallback: SSH
+            transportRow
+
+            // serverAliveInterval, Inherited<Int>; built-in fallback: 30
             LabeledContent {
                 TextField(
                     "inherit · 30",
@@ -171,7 +174,7 @@ struct DefaultsEditorView: View {
                 }
             }
 
-            // serverAliveCountMax — Inherited<Int>; built-in fallback: 3
+            // serverAliveCountMax, Inherited<Int>; built-in fallback: 3
             LabeledContent {
                 TextField(
                     "inherit · 3",
@@ -197,24 +200,53 @@ struct DefaultsEditorView: View {
                 }
             }
 
-            // compression — Inherited<Bool>: three-state Picker; built-in fallback: false
+            // compression, Inherited<Bool>: three-state Picker; built-in fallback: false
             // "inherit · false" label shown in-row; swipe row is the Picker row itself.
             compressionRow
 
-            // forwardAgent — Inherited<Bool>: three-state Picker; built-in fallback: false
+            // forwardAgent, Inherited<Bool>: three-state Picker; built-in fallback: false
             forwardAgentRow
 
-            // strictHostKeyChecking — Inherited<StrictHostKeyChecking>: Picker
+            // strictHostKeyChecking, Inherited<StrictHostKeyChecking>: Picker
             // built-in fallback: accept-new
             shkRow
 
-            // preferredAuthentications — Inherited<[AuthMethod]>: per-method toggles
+            // preferredAuthentications, Inherited<[AuthMethod]>: per-method toggles
             preferredAuthSection
 
         } label: {
             Text("Connection")
                 .font(.headline)
                 .foregroundStyle(Color(theme.text.primary))
+        }
+    }
+
+    // Transport row as a named var so swipeActions can be applied cleanly.
+    private var transportRow: some View {
+        Picker(selection: Binding(
+            get: {
+                switch vm.defaults.transport {
+                case .inherit: return "default"
+                case .explicit(let t): return t?.rawValue ?? "default"
+                }
+            },
+            set: { (sel: String) in
+                vm.defaults.transport = (sel == "default") ? .inherit : .explicit(Transport(rawValue: sel))
+            }
+        )) {
+            Text("inherit · SSH").tag("default")
+            ForEach(Transport.allCases, id: \.rawValue) { t in
+                Text(t.displayName).tag(t.rawValue)
+            }
+        } label: {
+            Text("Transport")
+                .foregroundStyle(Color(theme.text.primary))
+        }
+        .swipeActions {
+            if case .explicit = vm.defaults.transport {
+                Button("Clear override") { vm.defaults.transport = .inherit }
+                    .tint(Color(theme.accent.primary))
+            }
         }
     }
 
@@ -343,7 +375,7 @@ struct DefaultsEditorView: View {
     /// available via HostEditorView. See Task 7 report for rationale.
     private var jumpChainSection: some View {
         DisclosureGroup(isExpanded: $jumpChainExpanded) {
-            Text("Set per-host — no global default")
+            Text("Set per-host, no global default")
                 .font(.subheadline)
                 .foregroundStyle(Color(theme.text.secondary))
                 .italic()
@@ -364,7 +396,7 @@ struct DefaultsEditorView: View {
     /// See Task 7 report for rationale.
     private var portForwardingSection: some View {
         DisclosureGroup(isExpanded: $portForwardingExpanded) {
-            Text("Set per-host — no global default")
+            Text("Set per-host, no global default")
                 .font(.subheadline)
                 .foregroundStyle(Color(theme.text.secondary))
                 .italic()
@@ -444,7 +476,7 @@ struct DefaultsEditorView: View {
                         .keyboardType(.numberPad)
                         .frame(maxWidth: .infinity)
 
-                        Text("–")
+                        Text("-")
                             .foregroundStyle(Color(theme.text.secondary))
 
                         TextField(
@@ -530,7 +562,7 @@ struct DefaultsEditorView: View {
                 }
             }
 
-            // Tailnet — only visible when required is on
+            // Tailnet, only visible when required is on
             if vm.defaults.tailscale.value?.required == true {
                 LabeledContent {
                     TextField(
@@ -570,7 +602,7 @@ struct DefaultsEditorView: View {
     private var semicolynSection: some View {
         DisclosureGroup(isExpanded: $semicolynExpanded) {
 
-            // Predictor incognito — built-in fallback: false
+            // Predictor incognito, built-in fallback: false
             Toggle(isOn: Binding(
                 get: { vm.defaults.semicolyn.value?.predictor?.incognito ?? false },
                 set: { newIncognito in
@@ -596,7 +628,7 @@ struct DefaultsEditorView: View {
                 }
             }
 
-            // Tmux control mode — built-in fallback: true (attempt)
+            // Tmux control mode, built-in fallback: true (attempt)
             Toggle(isOn: Binding(
                 get: { vm.defaults.semicolyn.value?.tmux?.attemptControlMode ?? true },
                 set: { newAttempt in
@@ -622,7 +654,7 @@ struct DefaultsEditorView: View {
                 }
             }
 
-            // Tmux session name — built-in fallback: inherit (semicolyn)
+            // Tmux session name, built-in fallback: inherit (semicolyn)
             LabeledContent {
                 TextField(
                     "inherit · semicolyn",

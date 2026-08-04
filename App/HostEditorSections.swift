@@ -8,7 +8,7 @@ import SemicolynKit
 extension HostEditorView {
 
     /// True when mosh is explicitly enabled on this host (`.explicit` with enabled == true).
-    /// Uses the leaf value directly — no resolution against Defaults — because the editor
+    /// Uses the leaf value directly, no resolution against Defaults, because the editor
     /// works with the draft host's explicit state, not the resolved runtime value.
     var moshEnabled: Bool {
         vm.host.mosh.value?.enabled == true
@@ -17,7 +17,35 @@ extension HostEditorView {
     /// Connection section: Tier-2 SSH options, all `Inherited<T>`, collapsed by default.
     var connectionSection: some View {
         DisclosureGroup(isExpanded: $connectionExpanded) {
-            // serverAliveInterval — Inherited<Int>
+            // transport, Inherited<Transport>: four-state Picker (Default / SSH / Mosh / ET)
+            Picker(selection: Binding(
+                get: {
+                    switch vm.host.transport {
+                    case .inherit: return "default"
+                    case .explicit(let t): return t?.rawValue ?? "default"
+                    }
+                },
+                set: { (sel: String) in
+                    vm.host.transport = (sel == "default") ? .inherit : .explicit(Transport(rawValue: sel))
+                    vm.revalidate()
+                }
+            )) {
+                Text("Default").tag("default")
+                ForEach(Transport.allCases, id: \.rawValue) { t in
+                    Text(t.displayName).tag(t.rawValue)
+                }
+            } label: {
+                Text("Transport")
+                    .foregroundStyle(Color(theme.text.primary))
+            }
+
+            if case .explicit(let t?) = vm.host.transport {
+                Text(t.summary)
+                    .font(.footnote)
+                    .foregroundStyle(Color(theme.text.secondary))
+            }
+
+            // serverAliveInterval, Inherited<Int>
             // Disabled when mosh is enabled (mosh has its own keepalive).
             LabeledContent {
                 TextField(
@@ -41,7 +69,7 @@ extension HostEditorView {
                     .foregroundStyle(Color(theme.text.secondary))
             }
 
-            // serverAliveCountMax — Inherited<Int>
+            // serverAliveCountMax, Inherited<Int>
             // Disabled when mosh is enabled (mosh has its own keepalive).
             LabeledContent {
                 TextField(
@@ -65,7 +93,7 @@ extension HostEditorView {
                     .foregroundStyle(Color(theme.text.secondary))
             }
 
-            // compression — Inherited<Bool>: three-state Picker (Default / On / Off)
+            // compression, Inherited<Bool>: three-state Picker (Default / On / Off)
             Picker(selection: Binding(
                 get: { inheritedBoolToSelection(vm.host.compression) },
                 set: { vm.host.compression = selectionToInheritedBool($0); vm.revalidate() }
@@ -78,7 +106,7 @@ extension HostEditorView {
                     .foregroundStyle(Color(theme.text.primary))
             }
 
-            // forwardAgent — Inherited<Bool>: three-state Picker (Default / On / Off)
+            // forwardAgent, Inherited<Bool>: three-state Picker (Default / On / Off)
             Picker(selection: Binding(
                 get: { inheritedBoolToSelection(vm.host.forwardAgent) },
                 set: { vm.host.forwardAgent = selectionToInheritedBool($0); vm.revalidate() }
@@ -91,7 +119,7 @@ extension HostEditorView {
                     .foregroundStyle(Color(theme.text.primary))
             }
 
-            // strictHostKeyChecking — Inherited<StrictHostKeyChecking>: Picker
+            // strictHostKeyChecking, Inherited<StrictHostKeyChecking>: Picker
             Picker(selection: Binding(
                 get: { inheritedSHKCToSelection(vm.host.strictHostKeyChecking) },
                 set: { vm.host.strictHostKeyChecking = selectionToInheritedSHKC($0); vm.revalidate() }
@@ -106,7 +134,7 @@ extension HostEditorView {
                     .foregroundStyle(Color(theme.text.primary))
             }
 
-            // preferredAuthentications — Inherited<[AuthMethod]>: toggles per method
+            // preferredAuthentications, Inherited<[AuthMethod]>: toggles per method
             VStack(alignment: .leading, spacing: 6) {
                 Text("Preferred auth")
                     .foregroundStyle(Color(theme.text.primary))
@@ -180,7 +208,7 @@ extension HostEditorView {
     /// Jump chain section: `proxyJump[]` list with per-hop mode toggle.
     var jumpChainSection: some View {
         DisclosureGroup(isExpanded: $jumpChainExpanded) {
-            // Cycle banner — section-level hard issue
+            // Cycle banner, section-level hard issue
             if hasIssue(.jumpChainCycle) {
                 IssueBanner(
                     message: "Jump chain contains a cycle.",
@@ -391,7 +419,7 @@ extension HostEditorView {
 
             if vm.host.mosh.value?.enabled == true {
 
-                // Server path — optional text
+                // Server path, optional text
                 LabeledContent {
                     TextField(
                         "e.g. /usr/local/bin/mosh-server",
@@ -412,7 +440,7 @@ extension HostEditorView {
                         .foregroundStyle(Color(theme.text.primary))
                 }
 
-                // UDP port range — lo / hi pair
+                // UDP port range, lo / hi pair
                 LabeledContent {
                     HStack(spacing: 8) {
                         TextField(
@@ -438,7 +466,7 @@ extension HostEditorView {
                         .keyboardType(.numberPad)
                         .frame(maxWidth: .infinity)
 
-                        Text("–")
+                        Text("-")
                             .foregroundStyle(Color(theme.text.secondary))
 
                         TextField(
@@ -469,7 +497,7 @@ extension HostEditorView {
                         .foregroundStyle(Color(theme.text.primary))
                 }
 
-                // Prediction mode — Picker over 4 cases (nil = inherit/default)
+                // Prediction mode, Picker over 4 cases (nil = inherit/default)
                 Picker(selection: Binding(
                     get: { vm.host.mosh.value?.predictionMode },
                     set: { newMode in
@@ -530,7 +558,7 @@ extension HostEditorView {
             }
             .onChange(of: vm.host.tailscale) { _, _ in vm.revalidate() }
 
-            // Tailnet — only visible when required is on
+            // Tailnet, only visible when required is on
             if vm.host.tailscale.value?.required == true {
                 LabeledContent {
                     TextField(
@@ -570,7 +598,7 @@ extension HostEditorView {
     var semicolynSection: some View {
         DisclosureGroup(isExpanded: $semicolynExpanded) {
 
-            // Predictor incognito — default false per resolution
+            // Predictor incognito, default false per resolution
             Toggle(isOn: Binding(
                 get: { vm.host.semicolyn.value?.predictor?.incognito ?? false },
                 set: { newIncognito in
@@ -592,7 +620,7 @@ extension HostEditorView {
             }
             .onChange(of: vm.host.semicolyn) { _, _ in vm.revalidate() }
 
-            // Tmux control mode — default true per resolution
+            // Tmux control mode, default true per resolution
             Toggle(isOn: Binding(
                 get: { vm.host.semicolyn.value?.tmux?.attemptControlMode ?? true },
                 set: { newAttempt in
@@ -613,7 +641,7 @@ extension HostEditorView {
                 }
             }
 
-            // tmux session name — Inherited via the nested leaf. Blank = inherit
+            // tmux session name, Inherited via the nested leaf. Blank = inherit
             // (→ Defaults → "semicolyn"). Disabled when control mode is off.
             let controlModeOn = (vm.host.semicolyn.value?.tmux?.attemptControlMode ?? true)
             LabeledContent {
@@ -645,7 +673,7 @@ extension HostEditorView {
                     .foregroundStyle(Color(theme.state.broken))
             }
 
-            // OSC 52 clipboard — default true per resolution
+            // OSC 52 clipboard, default true per resolution
             Toggle(isOn: Binding(
                 get: { vm.host.semicolyn.value?.osc52?.allow ?? true },
                 set: { newAllow in
@@ -676,7 +704,7 @@ extension HostEditorView {
 
 extension HostEditorView {
 
-    /// Delete host row — edit mode only. Destructive styling; tapping opens the
+    /// Delete host row, edit mode only. Destructive styling; tapping opens the
     /// confirmation sheet managed in `HostEditorView.body`.
     var deleteSection: some View {
         Section {
