@@ -38,7 +38,8 @@ NS_ASSUME_NONNULL_BEGIN
                     width:(uint16_t)width height:(uint16_t)height;
 
 /// Tear down: serialized et_close (joins the transport thread), idempotent. After
-/// close no closure fires.
+/// close no closure fires. Callers should call -close for teardown; -dealloc tears
+/// the handle down as a safety net if the session is released without it.
 - (void)close;
 
 /// Decrypted output bytes (main queue). Wire to `terminalView.feed(byteArray:)`.

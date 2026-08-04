@@ -124,4 +124,16 @@ static void et_on_end(void *ctx, const char *reason) {
     });
 }
 
+- (void)dealloc {
+    // Safety net: if the owner released us without calling -close, the ET
+    // transport thread may still be live and about to call back into this
+    // (now-deallocating) object via the __bridge ctx pointer. et_close joins
+    // that thread, so tear the handle down synchronously here as a last resort.
+    // (Normal teardown is -close; this only covers a caller that forgot.)
+    if (_handle != NULL) {
+        et_close(_handle);   // joins the transport thread; no callback fires after
+        _handle = NULL;
+    }
+}
+
 @end
