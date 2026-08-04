@@ -48,3 +48,15 @@ public func parseETIDPASSKEY(_ stdout: String) -> Result<ETCredential, ETBootstr
     }
     return .success(ETCredential(id: String(parts[0]), passkey: String(parts[1])))
 }
+
+/// Assemble the live `ETConfig` for `et_connect` from the resolved credential
+/// and the terminal geometry, then validate it. Port defaults to ET's 2022.
+/// `term` becomes the sole env entry (`TERM`), which `validateETConfig` requires.
+/// Throws the specific `ETConfigError` on invalid input.
+public func etConnectConfig(host: String, port: UInt16 = 2022, id: String, passkey: String,
+                            term: String, cols: UInt16, rows: UInt16) throws -> ETConfig {
+    let cfg = ETConfig(host: host, port: port, id: id, passkey: passkey,
+                       env: ["TERM": term], cols: cols, rows: rows,
+                       width: 0, height: 0, keepaliveSecs: 0)
+    return try validateETConfig(cfg)
+}
