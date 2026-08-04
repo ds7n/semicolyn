@@ -20,6 +20,13 @@ packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
     from: "1.0.0"
+  # The vendored swift-sodium package (extern/swift-sodium), prebuilt
+  # Clibsodium.xcframework. ET's libETerminal.a calls crypto_secretbox_* /
+  # sodium_init / sodium_memzero directly; link the product at app-link time
+  # per docs/et-ios-build-notes.md (libsodium stays a separate slice, not
+  # merged into ETerminal.xcframework).
+  Sodium:
+    path: extern/swift-sodium
 
 targets:
   Semicolyn:
@@ -43,13 +50,17 @@ targets:
       - package: SemicolynPackage
         product: SemicolynKit
       - package: SwiftTerm
+      - package: Sodium
+        product: Clibsodium
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
         # Mosh's Network::Compressor uses zlib (_compress/_uncompress). The Mosh
         # xcframework provides the Mosh objects but not zlib; link the iOS SDK's
         # libz here (Mosh's own build gets it via a system -lz).
-        OTHER_LDFLAGS: -lz
+        # ET's TcpSocketHandler::connect uses res_9_init from the resolver;
+        # link the iOS SDK's libresolv here (libETerminal.a doesn't bundle it).
+        OTHER_LDFLAGS: "-lz -lresolv"
         PRODUCT_BUNDLE_IDENTIFIER: com.truepositive.semicolyn
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "0.1.0"
@@ -57,7 +68,7 @@ targets:
         # App icon lives in App/Assets.xcassets/AppIcon.appiconset (single 1024²
         # universal slot). Art is owed before the first TestFlight upload; until
         # then the slot is empty and the asset compiler emits a missing-icon
-        # warning on the macOS CI job (non-fatal — simulator builds don't require it).
+        # warning on the macOS CI job (non-fatal, simulator builds don't require it).
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # MVP: Swift 5 language mode for the app target. The UniFFI callback
         # bridges + SwiftTerm aren't Swift-6 strict-concurrency clean; tighten later.
@@ -72,11 +83,11 @@ targets:
         # A terminal is comfortable in any orientation; iPhone omits upside-down per norm.
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        # Export compliance — see docs/export-compliance.md for the full basis.
+        # Export compliance, see docs/export-compliance.md for the full basis.
         # semicolyn uses ONLY standard, published crypto (AES, ChaCha20-Poly1305,
         # curve25519, ed25519): Mosh via Apple CommonCrypto, SSH via russh
         # (aws-lc-rs). This is the mass-market case (ECCN 5D992.c) for a terminal
-        # client — standard algorithms, publicly available, used to secure the
+        # client, standard algorithms, publicly available, used to secure the
         # user's own connections. NOT proprietary/non-standard crypto. We answer
         # NO here (no ITSEncryptionExportComplianceCode; a "YES" without a matching
         # code 409s the TestFlight upload). True Positive LLC self-classifies under
@@ -85,7 +96,7 @@ targets:
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: "NO"
         # SSH/mosh to hosts on the LAN (192.168.x, *.local) triggers iOS's Local
         # Network permission prompt; without this string the connection silently
-        # fails. Not an App ID capability — a privacy usage string.
+        # fails. Not an App ID capability, a privacy usage string.
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "semicolyn connects to the SSH and Mosh servers you specify."
         # No signing in CI; the simulator build is the gate.
         CODE_SIGNING_ALLOWED: NO
@@ -94,7 +105,7 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: App/Mosh/Semicolyn-Bridging-Header.h
         CLANG_CXX_LANGUAGE_STANDARD: gnu++17
 
-  # macOS-CI-only unit tests for the Obj-C++ MoshSession bridge. STANDALONE — it
+  # macOS-CI-only unit tests for the Obj-C++ MoshSession bridge. STANDALONE, it
   # compiles the real bridge (App/Mosh/MoshSession.mm) + a loopback fake mosh_main
   # (Tests/AppTests/fake_mosh_main.mm) and deliberately does NOT link Mosh.xcframework
   # or the app. The fake is therefore the ONLY `mosh_main` definition (no duplicate-
@@ -107,14 +118,16 @@ targets:
     sources:
       - Tests/AppTests
       - path: App/Mosh/MoshSession.mm
+      - path: App/ET/ETSession.mm
     settings:
       base:
         CLANG_CXX_LANGUAGE_STANDARD: gnu++17
         CODE_SIGNING_ALLOWED: NO
-        # MoshSession.mm's `#if __has_include(<Mosh/moshiosbridge.h>)` falls back to
-        # the bare "moshiosbridge.h"; point the compiler at the vendored copy so the
-        # declaration resolves without linking the framework binary.
-        HEADER_SEARCH_PATHS: $(SRCROOT)/extern/mosh/src/frontend
+        # Mosh: resolve moshiosbridge.h without linking the framework.
+        # ET: resolve eternaltermlib.h (the <eternaltermlib.h> angle include) the same way.
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/extern/mosh/src/frontend
+          - $(SRCROOT)/extern/eternaltermlib/include
         # Host-less logic-test bundle: `bundle.unit-test` defaults to no TEST_HOST,
         # so we deliberately do NOT set TEST_HOST (an empty-string value can be
         # misread as "hosted but empty"). The explicit scheme below makes the test
