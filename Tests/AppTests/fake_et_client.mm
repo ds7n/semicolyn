@@ -19,6 +19,17 @@ struct et_client {
     bool closed;
 };
 
+// Test-controlled override for the reason et_close reports via on_end. Lets a
+// test exercise a raw, potentially hostile reason string (e.g. an injection
+// payload) without teaching the fake a whole config surface. NULL-safe: a
+// NULL/unset value falls back to the fixed "closed by client" string below.
+// Reset to NULL when a test is done so later tests aren't affected.
+static const char *g_fake_et_end_reason = NULL;
+
+extern "C" void fake_et_set_end_reason(const char *r) {
+    g_fake_et_end_reason = r;
+}
+
 extern "C" et_client *et_connect(const et_config *cfg, const et_callbacks *cbs, void *ctx) {
     if (!cfg || !cfg->host || !cfg->id || !cfg->passkey) return NULL;   // sync arg failure
     et_client *c = new et_client();
@@ -49,6 +60,7 @@ extern "C" int et_set_window_size(et_client *c, uint16_t cols, uint16_t rows,
 extern "C" void et_close(et_client *c) {
     if (!c || c->closed) return;
     c->closed = true;
-    dispatch_sync(c->work, ^{ if (c->on_end) c->on_end(c->ctx, "closed by client"); });
+    const char *reason = g_fake_et_end_reason ? g_fake_et_end_reason : "closed by client";
+    dispatch_sync(c->work, ^{ if (c->on_end) c->on_end(c->ctx, reason); });
     delete c;
 }
