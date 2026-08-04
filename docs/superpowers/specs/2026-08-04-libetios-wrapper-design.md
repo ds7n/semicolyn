@@ -49,7 +49,7 @@ ETSession(config: ETConfig,
           onOutput: (Data) -> Void,
           onState:  (ETConnectionState) -> Void,
           onFirstFrame: () -> Void,
-          onEnd:    (String) -> Void)     // reason already sanitized
+          onEnd:    (String) -> Void)     // reason RAW/untrusted; caller sanitizes
   .start()                                       // et_connect, spawn transport thread
   .send(_ bytes: Data)                           // serialized on et.api
   .setWindowSize(cols:rows:width:height:)        // serialized on et.api
@@ -189,9 +189,9 @@ that rule is what keeps the `.mm` thin and keeps every wrong-able branch under L
 |---|---|
 | Bad config (empty host/id/passkey, missing TERM) | `validateETConfig` throws the specific `ETConfigError` **before** `et_connect` |
 | `et_connect` returns NULL (synchronous arg failure) | `start()` surfaces a typed `ETStartError`; no thread spawned |
-| Async handshake failure (e.g. wrong passkey) | arrives via `on_end(reason)` → sanitize → `onEnd` |
+| Async handshake failure (e.g. wrong passkey) | arrives via `on_end(reason)` → `onEnd(reason)` RAW; the .mm does not sanitize |
 | `et_send`/`et_set_window_size` returns negative `et_err` | logged (file-verbose), non-fatal; the caller's keystroke is dropped |
-| Untrusted `on_end(reason)` | `sanitizeEndReason` before any log or banner |
+| Untrusted `on_end(reason)` | the .mm forwards raw; the Swift consumer sanitizes via `sanitizeEndReason` (unit-tested) before any log or banner |
 | Callback after `close()` | dropped by the `isClosed` guard before touching Swift |
 
 ### Lifecycle / roaming
@@ -226,7 +226,9 @@ Every negative test asserts the specific failure/output, no "it didn't crash" ta
   1. bytes sent via `send()` echo back through `onOutput`;
   2. `onFirstFrame` fires **exactly once** across all output bytes;
   3. `close()` is idempotent and **no callback fires after it**;
-  4. a callback delivering a raw injection string reaches `onEnd` **sanitized**.
+  4. a callback delivering a raw injection string reaches `onEnd` **RAW/verbatim**, the wrapper
+     does not sanitize; `sanitizeEndReason` is unit-tested separately (see the Linux table above)
+     and applied by the consumer.
 - This is the only place the queue-hop + buffer-copy + `isClosed` guard get exercised.
 
 ### Honest gaps (not covered here)

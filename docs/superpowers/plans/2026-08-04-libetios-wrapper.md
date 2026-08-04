@@ -389,8 +389,16 @@ public func sanitizeEndReason(_ reason: String?) -> String {
                 continue
             }
         }
-        // Drop angle-bracket markup delimiters (keep inner text).
-        if s == "<" || s == ">" { i += 1; continue }
+        // Drop angle-bracket markup entirely (the whole <...> span). An
+        // unterminated '<' drops to end-of-string so trailing markup text
+        // cannot leak; a stray '>' with no opening tag is dropped alone.
+        if s == "<" {
+            i += 1
+            while i < scalars.count, scalars[i] != ">" { i += 1 }
+            if i < scalars.count { i += 1 }   // consume the closing '>'
+            continue
+        }
+        if s == ">" { i += 1; continue }
         // Collapse any whitespace (incl. newlines) to a single space.
         if s.properties.isWhitespace {
             if out.last != " " { out.append(" ") }
