@@ -1,18 +1,18 @@
 # SPDX-FileCopyrightText: 2026 True Positive LLC
 # SPDX-License-Identifier: GPL-3.0-only
 
-# Build, sign, and upload Semicolyn to TestFlight entirely on the GitHub macOS runner —
+# Build, sign, and upload Semicolyn to TestFlight entirely on the GitHub macOS runner,
 # NO personal Mac required. Dormant until you opt in: the job only runs when the repo
 # variable TESTFLIGHT_ENABLED == 'true' AND it is triggered manually. Setup (paid Apple
 # Developer Program + App Store Connect API key + the four secrets + the variable) is in
 # docs/testflight-setup.md.
 #
 # Signing uses an App Store Connect API key (.p8) with -allowProvisioningUpdates, so Xcode
-# manages the certificate + provisioning profile in the cloud — nothing to generate locally.
+# manages the certificate + provisioning profile in the cloud, nothing to generate locally.
 name: Release to TestFlight
 
 on:
-  workflow_dispatch:   # manual only — never runs on push / PR
+  workflow_dispatch:   # manual only, never runs on push / PR
 
 permissions:
   contents: read
@@ -36,11 +36,23 @@ jobs:
       - name: Add iOS Rust targets
         run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 
-      - name: Build Mosh.xcframework (cross-compile vendored blinksh/mosh — M1)
+      - name: Build Mosh.xcframework (cross-compile vendored blinksh/mosh, M1)
         # The macOS package manifest references Mosh.xcframework as a binaryTarget,
         # so `xcodebuild archive` fails package resolution until it exists. Mirrors
         # the ci.yml macos job (which is why plain CI is green but this lane was not).
         run: bash scripts/build-mosh-xcframework.sh
+
+      - name: Install CMake + Ninja (eternaltermlib cross-build)
+        # ET drives cmake directly via the leetal/ios-cmake toolchain. macos ships
+        # cmake, but pin it defensively. Mirrors the ci.yml macos job.
+        run: brew list cmake >/dev/null 2>&1 || brew install cmake ninja
+
+      - name: Build ETerminal.xcframework (cross-compile vendored eternaltermlib, ET)
+        # Package.swift references ETerminal.xcframework as a macOS-only binaryTarget,
+        # so `xcodebuild archive` fails package resolution until it exists. This lane
+        # was missing this step (added to ci.yml with PR #115 but not here), which is
+        # why plain CI is green but the TestFlight archive failed at package resolution.
+        run: bash scripts/build-etios-xcframework.sh
 
       - name: Build UniFFI XCFramework (device + simulator slices)
         run: bash scripts/build-xcframework.sh
@@ -63,7 +75,7 @@ jobs:
       # profile (which embeds device UDIDs → fails with "team has no devices"), and a
       # manual distribution identity conflicts with the SPM/framework targets' automatic
       # signing. TestFlight only needs *distribution* signing, which we apply at export.
-      - name: Archive (unsigned — signed at export)
+      - name: Archive (unsigned, signed at export)
         run: |
           xcodebuild archive \
             -project Semicolyn.xcodeproj -scheme Semicolyn \
@@ -99,7 +111,7 @@ jobs:
             -authenticationKeyIssuerID "$ISSUER" \
             -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_"$KEY_ID".p8
 
-      # Keep the signed build downloadable even if the upload step needs a tweak —
+      # Keep the signed build downloadable even if the upload step needs a tweak,
       # you can hand it to Transporter as a fallback.
       - name: Upload .ipa artifact (fallback)
         uses: actions/upload-artifact@v4
@@ -118,7 +130,7 @@ jobs:
           # altool exits 0 even when App Store Connect REJECTS the upload (e.g. a 409
           # export-compliance validation error), so its exit code alone is not trustworthy.
           # Capture output, tee it for the log, and fail the job if the tell-tale failure
-          # markers appear — otherwise a rejected build silently reports the lane green.
+          # markers appear, otherwise a rejected build silently reports the lane green.
           set +e
           OUT="$(xcrun altool --upload-app -f "$IPA" -t ios \
             --apiKey "$KEY_ID" --apiIssuer "$ISSUER" 2>&1)"
@@ -126,6 +138,6 @@ jobs:
           set -e
           printf '%s\n' "$OUT"
           if [ "$RC" -ne 0 ] || printf '%s' "$OUT" | grep -qiE 'UPLOAD FAILED|Failed to upload|VALIDATION_ERROR|ERROR:'; then
-            echo "::error::altool upload to TestFlight failed — see log above."
+            echo "::error::altool upload to TestFlight failed, see log above."
             exit 1
           fi
