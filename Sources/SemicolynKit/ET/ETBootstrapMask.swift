@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
+import Foundation
+
 /// Mask a raw transport bootstrap payload for the `transport` diagnostics log:
 /// the credential VALUES are replaced with <id:N>/<key:M>, but the structure
 /// (marker, lengths, slash) and any surrounding/trailing content stay visible so
