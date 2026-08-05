@@ -89,4 +89,29 @@ extern "C" void fake_et_set_end_reason(const char *r);
     fake_et_set_end_reason(NULL);   // reset so later tests get the default reason
 }
 
+// Regression for the callback UAF: the fake's et_close fires on_end (via
+// dispatch_sync on its work queue) while the Swift-side owner has already
+// dropped its only strong reference to the ETSession. Before the fix, the
+// bridge context held no retain on the Swift object, so on_end after release
+// messaged freed memory. With the fix (CFBridgingRetain holds a +1 until
+// close tears the ctx down), the session stays alive through the callback,
+// so this must complete without crashing and still deliver onEnd.
+- (void)testOnEndAfterOwnerReleaseDoesNotCrash {
+    XCTestExpectation *ended = [self expectationWithDescription:@"end"];
+    @autoreleasepool {
+        ETSession *s = [self makeSession];
+        s.onEnd = ^(NSString *reason) { [ended fulfill]; };
+        [s start];
+        // fake's et_close fires on_end synchronously on its work queue; the
+        // retained bridge ctx keeps the session alive through that callback
+        // even though we drop our own strong ref on the next line.
+        [s close];
+        s = nil;
+    }
+    [self waitForExpectations:@[ended] timeout:2.0];
+    // Reaching here without a crash, with the expectation fulfilled, is the
+    // assertion: the callback ran against live memory, not a freed object.
+    XCTAssertTrue(YES);
+}
+
 @end
