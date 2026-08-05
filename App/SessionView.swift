@@ -132,9 +132,11 @@ struct SessionView: View {
                                    // that brief initial reflow we could plumb the real grid size
                                    // into attachMoshIfPossible before creating the session, a
                                    // future refinement, see item #5 Q2(b).)
-                                   onResize: vm.isMoshActive
-                                       ? { [weak vm] cols, rows in vm?.setMoshClientSize(cols: cols, rows: rows) }
-                                       : nil,
+                                   onResize: vm.isETActive
+                                       ? { [weak vm] cols, rows in vm?.setETClientSize(cols: cols, rows: rows) }
+                                       : (vm.isMoshActive
+                                           ? { [weak vm] cols, rows in vm?.setMoshClientSize(cols: cols, rows: rows) }
+                                           : nil),
                                    settings: terminalSettings.settings,
                                    theme: theme,
                                    osc52Allowed: vm.osc52Allowed,
