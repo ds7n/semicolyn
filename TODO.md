@@ -3,9 +3,16 @@
 
 # Status & TODO
 
-## Resume here (2026-08-05)
+## Resume here (2026-08-05, end of session, context cleared)
 
-**Eternal Terminal on-device retest is the NEXT ACTION. Two device-round-2 bugs FIXED and bundled in PR [#120](https://github.com/ds7n/semicolyn/pull/120) (CI-green run `31019077723`, TestFlight build going up, run `31023666304`). #119 CLOSED as superseded by #120.** Merged through the Transport picker (`87edea3`); 1a+1b merged; Selection UI merged (PR #114 `0d80804`).
+**STATE: ET crash + spin + malformed-credential + "ET"-label all FIXED and DEVICE-CONFIRMED (build off PR [#120](https://github.com/ds7n/semicolyn/pull/120), CI-green run `31019077723`). ET connects + typing works. PR #120 is NOT merged (chose hold-until-device-confirmed; now confirmed = MERGEABLE). #119 superseded by #120.**
+
+**EXACT NEXT ACTIONS (in order):**
+1. **Merge PR #120** to `main` (lands the parse fix + UAF crash fix + 15s watchdog + Eternal Terminal label; both slices bundled). Squash-merge per convention. It's on branch `fix/et-callback-uaf-watchdog` (contains BOTH the parse-fix commits and the crash-fix commits, forked from the un-merged parse-fix, so main is 13 commits behind).
+2. **THEN fix the `onEnd` clean-exit bug** (device-found this session, own slice): a clean `exit` shows a `.failed` error banner AND the terminal keeps accepting input, instead of gracefully ending. Root cause: ET `onEnd` in `attachET` (`App/ConnectionViewModel.swift`) sets `state = .failed(etFailureMessage(.handshakeFailed))` for EVERY end. FIX = mirror Mosh: a pure `etExitDecision` (Linux-tested, in `Sources/SemicolynKit/ET/`) distinguishing clean-end (onFirstFrame was seen -> graceful dismiss to connection list, NOT `.failed`) from pre-first-frame failure (-> the error path). Also: terminal must stop accepting input on end. See memory `et-onend-clean-exit-bug-2026-08-05` + `Sources/SemicolynKit/Mosh/MoshExitDecision.swift` + the Mosh onEnd (~ConnectionViewModel.swift:800-830). Keep the watchdog/resolve-once/ctx-release logic (correct); only change WHICH state onEnd sets.
+3. Then: on-connect-command feature (memory `on-connect-command-todo-2026-08-05`), ET-over-tmux-`-CC` (native panes), predictor prose-vocab.
+
+Prior context: 1a+1b merged; Transport picker merged (`87edea3`); Selection UI merged (PR #114 `0d80804`). Dev-host ET server is UP (sshd :22 + etserver v7.0.0 :2022). Syslog sink diagnostics: read via `docker exec <syslog container> sh -c "grep ... /var/log/semicolyn/semicolyn.log"` (host file root-owned, sudo blocked in-session).
 
 **Device round 2 (build 110/112) surfaced TWO bugs, both fixed in #120:**
 1. **"Malformed credential" (parse):** `parseETIDPASSKEY` demanded the WHOLE IDPASSKEY line be exactly `<16>/<32>`; a trailing CR (SSH PTY) tripped it. Fixed to upstream's fixed 49-char window. Plus an opt-in `transport` LogCategory (default off) logging the MASKED bootstrap payload (credential hidden, trailing junk visible).
