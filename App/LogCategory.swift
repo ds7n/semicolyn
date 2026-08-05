@@ -16,6 +16,7 @@ enum LogCategory: String, CaseIterable, Sendable {
     case keybar      // accessory sizing, macro resolution, live-edit apply
     case seed        // tmux history seeding
     case geometry    // container bounds/cell/grid/pane-frame + view identity across connects
+    case transport   // raw transport handshake structure (masked credential)
 
     /// UserDefaults key backing the per-category toggle.
     var storageKey: String { "diagnostics.logcat.\(rawValue)" }
@@ -37,6 +38,7 @@ enum LogCategory: String, CaseIterable, Sendable {
         case .keybar:    return "Accessory sizing, macro resolution, live-edit apply. Verbose."
         case .seed:      return "tmux scrollback history seeding."
         case .geometry:  return "Container bounds, cell metrics, grid, pane frames, and view identity across connects."
+        case .transport: return "Raw transport handshake structure (Eternal Terminal IDPASSKEY, Mosh connect). Credential values are masked. Verbose, off by default."
         }
     }
 

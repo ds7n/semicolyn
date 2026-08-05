@@ -3,9 +3,22 @@
 
 # Status & TODO
 
-## Resume here (2026-08-05)
+## Resume here (2026-08-05, end of session, context cleared)
 
-**ET is now testable on device. Slices 1a + 1b MERGED to `main`; the Transport picker + ET-interactive slice is CI-green with a TestFlight build going up. NEXT ACTION = the first on-device ET test (see below).** Prior: Selection UI + terminal/keybar geometry MERGED (PR #114 `0d80804`, device-confirmed).
+**STATE: ET crash + spin + malformed-credential + "ET"-label all FIXED and DEVICE-CONFIRMED (build off PR [#120](https://github.com/ds7n/semicolyn/pull/120), CI-green run `31019077723`). ET connects + typing works. PR #120 is NOT merged (chose hold-until-device-confirmed; now confirmed = MERGEABLE). #119 superseded by #120.**
+
+**EXACT NEXT ACTIONS (in order):**
+1. **Merge PR #120** to `main` (lands the parse fix + UAF crash fix + 15s watchdog + Eternal Terminal label; both slices bundled). Squash-merge per convention. It's on branch `fix/et-callback-uaf-watchdog` (contains BOTH the parse-fix commits and the crash-fix commits, forked from the un-merged parse-fix, so main is 13 commits behind).
+2. **THEN fix the `onEnd` clean-exit bug** (device-found this session, own slice): a clean `exit` shows a `.failed` error banner AND the terminal keeps accepting input, instead of gracefully ending. Root cause: ET `onEnd` in `attachET` (`App/ConnectionViewModel.swift`) sets `state = .failed(etFailureMessage(.handshakeFailed))` for EVERY end. FIX = mirror Mosh: a pure `etExitDecision` (Linux-tested, in `Sources/SemicolynKit/ET/`) distinguishing clean-end (onFirstFrame was seen -> graceful dismiss to connection list, NOT `.failed`) from pre-first-frame failure (-> the error path). Also: terminal must stop accepting input on end. See memory `et-onend-clean-exit-bug-2026-08-05` + `Sources/SemicolynKit/Mosh/MoshExitDecision.swift` + the Mosh onEnd (~ConnectionViewModel.swift:800-830). Keep the watchdog/resolve-once/ctx-release logic (correct); only change WHICH state onEnd sets.
+3. Then: on-connect-command feature (memory `on-connect-command-todo-2026-08-05`), ET-over-tmux-`-CC` (native panes), predictor prose-vocab.
+
+Prior context: 1a+1b merged; Transport picker merged (`87edea3`); Selection UI merged (PR #114 `0d80804`). Dev-host ET server is UP (sshd :22 + etserver v7.0.0 :2022). Syslog sink diagnostics: read via `docker exec <syslog container> sh -c "grep ... /var/log/semicolyn/semicolyn.log"` (host file root-owned, sudo blocked in-session).
+
+**Device round 2 (build 110/112) surfaced TWO bugs, both fixed in #120:**
+1. **"Malformed credential" (parse):** `parseETIDPASSKEY` demanded the WHOLE IDPASSKEY line be exactly `<16>/<32>`; a trailing CR (SSH PTY) tripped it. Fixed to upstream's fixed 49-char window. Plus an opt-in `transport` LogCategory (default off) logging the MASKED bootstrap payload (credential hidden, trailing junk visible).
+2. **CRASH + infinite spin:** the device crash report (EXC_BAD_ACCESS at `ETSession.mm:62`) root-caused to a use-after-free: the 3 ET callback trampolines passed `(__bridge void *)self` UNRETAINED to `et_connect`, so a callback during a failed/blocked connect messaged freed memory. Fixed by `CFBridgingRetain`ing the ctx for the connection lifetime (mirrors `MoshSession.mm`), released exactly once after `et_close` joins the thread (opus-verified across all orderings). Also added a 15s connect watchdog (mirror `moshWatchdog`, resolve-once guard) so a blocked port-2022 handshake fails to a clean timeout instead of spinning. Picker now says "Eternal Terminal" (was "ET"). Two review-caught spec defects fixed in-loop (a leak the retain introduced; onEnd skipping cleanup).
+
+**Eternal Terminal on-device retest (build off #120):** set a host Transport = Eternal Terminal, connect to the dev box (sshd :22 + etserver v7.0.0 :2022 up). EXPECT: it CONNECTS (parse fix) and does NOT crash (UAF fix); if port 2022 is blocked or the protocol mismatches, a clean "Eternal Terminal timed out: no response on port 2022 ..." after 15s (NOT a spin, NOT a crash). WATCH-ITEM: protocol-6-client vs 7.0.0-server, a mismatch now surfaces as a `.failed` (via watchdog/onEnd), not a hang; if that's what happens, the next fix is re-pinning the vendored ET client or a matching server. To diagnose any transport failure: flip Settings > Diagnostics > `transport` ON, reproduce, read the masked payload from the syslog sink (docker service: `docker exec <syslog container> sh -c "grep ... /var/log/semicolyn/semicolyn.log"`; host file is root-owned + this session's sudo is blocked). AFTER a green device test: merge #120 (lands both slices).
 
 **Selection UI + terminal/keybar geometry: MERGED to `main`. PR #114 squash-merged, CI green, device-confirmed.**
 
