@@ -983,14 +983,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             DebugLog.shared.log(.transport, "et: state=\(mapETState(Int32(raw)))")
         }
         sess.onEnd = { [weak self] reason in
-            guard let self, !self.etResolved else { return }
-            self.etResolved = true
-            self.etWatchdog?.cancel(); self.etWatchdog = nil
+            guard let self else { return }
             let safe = sanitizeEndReason(reason)
             DebugLog.shared.log(.transport, "et: session ended (\(safe))")
-            self.etSession?.close()
-            self.etSession = nil
-            self.state = .failed(etFailureMessage(.handshakeFailed(reason: safe)))
+            self.etWatchdog?.cancel(); self.etWatchdog = nil
+            self.etSession?.close()      // ALWAYS release the retained ctx + tear down
+            self.etSession = nil         // ALWAYS drop the ref
+            // Only the outcome transition is resolve-once: if the connect already
+            // resolved (success .shell, or the watchdog timeout), a natural/late end
+            // must NOT clobber that state.
+            if !self.etResolved {
+                self.etResolved = true
+                self.state = .failed(etFailureMessage(.handshakeFailed(reason: safe)))
+            }
         }
         DebugLog.shared.log(.connect, "et: sess.start()")
         sess.start()
