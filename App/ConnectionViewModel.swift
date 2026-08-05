@@ -899,7 +899,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             group.addTask { try? await Task.sleep(nanoseconds: 2_000_000_000) }
             await group.next(); group.cancelAll()
         }
-        return String(decoding: captured, as: UTF8.self)
+        let out = String(decoding: captured, as: UTF8.self)
+        DebugLog.shared.log(.transport, "et: bootstrap payload " + maskBootstrapPayload(out))
+        return out
     }
 
     /// Bootstrap + attach an ET session on the authenticated connection. Returns
@@ -919,6 +921,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         guard let stdout = await captureETBootstrap(conn: conn, command: command) else {
             return .failure(.execFailed)
         }
+        DebugLog.shared.log(.transport, "et: parse input " + maskBootstrapPayload(stdout))
         let serverCred: ETCredential
         switch parseETIDPASSKEY(stdout) {
         case .success(let cred):
