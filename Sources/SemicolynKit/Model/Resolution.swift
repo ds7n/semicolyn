@@ -7,7 +7,7 @@ private let builtInPort = 22
 
 /// Errors raised while resolving a host field that has no built-in fallback.
 public enum ResolutionError: Error, Equatable {
-    /// `user` is unset on both the host and Defaults — iOS has no OS-level
+    /// `user` is unset on both the host and Defaults, iOS has no OS-level
     /// "current user" to fall back to, so the connection must be refused.
     case userUnset
 }
@@ -41,7 +41,7 @@ public func resolvePort(host: Host, defaults: Defaults) -> Int {
     resolve(host.port, defaults.port, fallback: builtInPort)
 }
 
-/// Resolves `user`. **No built-in fallback** — throws `.userUnset` if absent on
+/// Resolves `user`. **No built-in fallback**, throws `.userUnset` if absent on
 /// both host and Defaults, or explicitly cleared on the host (the connection
 /// should be refused with a clear error).
 public func resolveUser(host: Host, defaults: Defaults) throws -> String {
@@ -67,7 +67,7 @@ public enum CredentialResolution: Equatable, Sendable {
 /// Decide `CredentialResolution` from the two facts the app tier can cheaply
 /// establish: whether the host resolves to an identity with an available private
 /// key, and whether a non-empty password secret is stored. Key precedence matches
-/// `authenticate` — publickey is preferred whenever a usable key exists.
+/// `authenticate`, publickey is preferred whenever a usable key exists.
 public func credentialResolution(hasUsableKey: Bool, hasStoredPassword: Bool) -> CredentialResolution {
     if hasUsableKey { return .connectWithKey }
     if hasStoredPassword { return .connectWithStoredPassword }
@@ -130,7 +130,7 @@ public func resolvePreferredAuthentications(host: Host, defaults: Defaults) -> [
 /// leaves does NOT shadow the Defaults values of the leaves it leaves unset.
 ///
 /// `.explicit(nil)` at the container level (a "cleared" container) carries no
-/// per-leaf intent and simply falls through here — matching `.inherit`. That
+/// per-leaf intent and simply falls through here, matching `.inherit`. That
 /// state is not reachable through the current editors (they write either a
 /// populated `.explicit(cfg)` or `.inherit`), so the choice is moot in practice.
 private func resolveLeaf<Container, Leaf>(
@@ -184,4 +184,18 @@ public func hasCycle(savingHostId: UUID, chain: [JumpHop],
         if let next = hosts[hostId] { frontier.append(contentsOf: next.resolvedJumpChain) }
     }
     return false
+}
+
+/// Resolve the effective transport for a host, the single explicit decision that
+/// replaces the old "Mosh silently wins" inference. Precedence:
+/// 1. explicit host.transport
+/// 2. explicit defaults.transport
+/// 3. LEGACY MIGRATION: a host/defaults with mosh enabled but no transport set
+///    resolves to .mosh (so existing Mosh hosts keep working with no stored field)
+/// 4. .ssh (the universally-available default)
+public func resolveTransport(host: Host, defaults: Defaults) -> Transport {
+    if let t = host.transport.value { return t }
+    if let t = defaults.transport.value { return t }
+    if resolveMoshEnabled(host: host, defaults: defaults) { return .mosh }
+    return .ssh
 }

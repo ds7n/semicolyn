@@ -236,7 +236,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // The transport write is the FIRST thing that happens, nothing (not even a
         // string interpolation) runs ahead of it. Do NOT add work above this block.
         let signpost = PerfSignposts.input.beginInterval("send")
-        if let moshSession {
+        if let etSession {
+            etSession.send(Data(bytes))
+        } else if let moshSession {
             moshSession.writeInput(Data(bytes))
         } else if let tmux {
             tmux.sendInput(bytes)
@@ -248,7 +250,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // `log` is an @autoclosure that is a no-op unless diagnostics is enabled, so
         // this string is not even built in normal use. Structure only (byte count),
         // never content: this line sees every keystroke including secrets.
-        let transport = moshSession != nil ? "MOSH" : (tmux != nil ? "TMUX" : "RAW")
+        let transport = etSession != nil ? "ET" : (moshSession != nil ? "MOSH" : (tmux != nil ? "TMUX" : "RAW"))
         DebugLog.shared.log(.input, decisionLine(
             "input:dispatch",
             inputs: [("bytes", "\(bytes.count)")],
@@ -979,6 +981,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Push a new terminal size to the running Mosh session. No-op outside Mosh mode.
     func setMoshClientSize(cols: Int, rows: Int) { moshSession?.resizeCols(Int32(cols), rows: Int32(rows)) }
 
+    /// Whether an ET session is currently driving the terminal. The view uses this to
+    /// route its debounced resize to `setETClientSize` (ET, like Mosh, has no
+    /// `ShellSession`, so `TerminalScreen`'s default `session?.resize` is a no-op).
+    var isETActive: Bool { etSession != nil }
+
+    /// Route a debounced client-size change to the ET session. ET (like Mosh) has no
+    /// `ShellSession`, so `TerminalScreen`'s default `session?.resize` is a no-op.
+    func setETClientSize(cols: Int, rows: Int) {
+        etSession?.setWindowSizeCols(UInt16(cols), rows: UInt16(rows), width: 0, height: 0)
+    }
+
     /// Reconcile Fn auto-engage with the active pane's foreground process.
     private func refreshFnAutoEngage() {
         let process: String? = {
@@ -1454,13 +1467,29 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     outputs: [("osc52Allowed", "\(osc52Allowed)")],
                     reason: nil))
                 startPredictor(host: savedHost, defaults: defaults2)
-                // Mosh takes precedence over tmux when enabled + bootstrappable.
-                if await attachMoshIfPossible(conn: conn, host: savedHost, defaults: defaults2) {
-                    DebugLog.shared.log(.connect, "connect(saved): went MOSH path")
+                switch resolveTransport(host: savedHost, defaults: defaults2) {
+                case .et:
+                    switch await attachET(conn: conn, host: savedHost, defaults: defaults2) {
+                    case .success:
+                        DebugLog.shared.log(.connect, "connect(saved): went ET path")
+                        return
+                    case .failure(let e):
+                        DebugLog.shared.log(.connect, "connect(saved): ET FAILED (\(e))")
+                        state = .failed(etFailureMessage(e))
+                        return
+                    }
+                case .mosh:
+                    if await attachMoshIfPossible(conn: conn, host: savedHost, defaults: defaults2) {
+                        DebugLog.shared.log(.connect, "connect(saved): went MOSH path")
+                        return
+                    }
+                    DebugLog.shared.log(.connect, "connect(saved): MOSH explicit but bootstrap failed → .failed")
+                    state = .failed("Mosh could not connect to this host.")
                     return
+                case .ssh:
+                    DebugLog.shared.log(.lifecycle, "connect(saved): → attachSSHShell (tmux/raw)")
+                    try await attachSSHShell(conn: conn, host: savedHost, defaults: defaults2)
                 }
-                DebugLog.shared.log(.lifecycle, "connect(saved): → attachSSHShell (tmux/raw)")
-                try await attachSSHShell(conn: conn, host: savedHost, defaults: defaults2)
             } catch ConnectError.HostKeyRejected {
                 DebugLog.shared.log(.connect, "connect(saved): HostKeyRejected → .failed")
                 state = .failed("Host key not trusted")
@@ -1529,13 +1558,29 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     outputs: [("osc52Allowed", "\(osc52Allowed)")],
                     reason: nil))
                 startPredictor(host: hostRecord, defaults: defaults2)
-                // Mosh takes precedence over tmux when enabled + bootstrappable.
-                if await attachMoshIfPossible(conn: conn, host: hostRecord, defaults: defaults2) {
-                    DebugLog.shared.log(.connect, "connect(adhoc): went MOSH path")
+                switch resolveTransport(host: hostRecord, defaults: defaults2) {
+                case .et:
+                    switch await attachET(conn: conn, host: hostRecord, defaults: defaults2) {
+                    case .success:
+                        DebugLog.shared.log(.connect, "connect(adhoc): went ET path")
+                        return
+                    case .failure(let e):
+                        DebugLog.shared.log(.connect, "connect(adhoc): ET FAILED (\(e))")
+                        state = .failed(etFailureMessage(e))
+                        return
+                    }
+                case .mosh:
+                    if await attachMoshIfPossible(conn: conn, host: hostRecord, defaults: defaults2) {
+                        DebugLog.shared.log(.connect, "connect(adhoc): went MOSH path")
+                        return
+                    }
+                    DebugLog.shared.log(.connect, "connect(adhoc): MOSH explicit but bootstrap failed → .failed")
+                    state = .failed("Mosh could not connect to this host.")
                     return
+                case .ssh:
+                    DebugLog.shared.log(.lifecycle, "connect(adhoc): → attachSSHShell (tmux/raw)")
+                    try await attachSSHShell(conn: conn, host: hostRecord, defaults: defaults2)
                 }
-                DebugLog.shared.log(.lifecycle, "connect(adhoc): → attachSSHShell (tmux/raw)")
-                try await attachSSHShell(conn: conn, host: hostRecord, defaults: defaults2)
             } catch ConnectError.HostKeyRejected {
                 DebugLog.shared.log(.connect, "connect(adhoc): HostKeyRejected → .failed")
                 state = .failed("Host key not trusted")

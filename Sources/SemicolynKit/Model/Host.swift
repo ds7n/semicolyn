@@ -52,7 +52,7 @@ public struct Host: Codable, Equatable, Sendable {
     public var label: String
     public var hostName: String
 
-    // OpenSSH Tier 1 — all optional, inherit from Defaults if undefined.
+    // OpenSSH Tier 1, all optional, inherit from Defaults if undefined.
     public var user: Inherited<String>
     public var port: Inherited<Int>
     public var identities: Inherited<[IdentityRef]>
@@ -62,7 +62,7 @@ public struct Host: Codable, Equatable, Sendable {
     public var remoteForwards: Inherited<[RemoteForward]>
     public var dynamicForwards: Inherited<[DynamicForward]>
 
-    // OpenSSH Tier 2 — all optional.
+    // OpenSSH Tier 2, all optional.
     public var serverAliveInterval: Inherited<Int>
     public var serverAliveCountMax: Inherited<Int>
     public var compression: Inherited<Bool>
@@ -70,10 +70,11 @@ public struct Host: Codable, Equatable, Sendable {
     public var forwardAgent: Inherited<Bool>
     public var preferredAuthentications: Inherited<[AuthMethod]>
 
-    // Semicolyn extensions — all optional, namespaced.
+    // Semicolyn extensions, all optional, namespaced.
     public var mosh: Inherited<MoshConfig>
     public var tailscale: Inherited<TailscaleConfig>
     public var semicolyn: Inherited<SemicolynConfig>
+    public var transport: Inherited<Transport>
 
     public init(id: UUID, label: String, hostName: String,
                 user: Inherited<String> = .inherit,
@@ -92,7 +93,8 @@ public struct Host: Codable, Equatable, Sendable {
                 preferredAuthentications: Inherited<[AuthMethod]> = .inherit,
                 mosh: Inherited<MoshConfig> = .inherit,
                 tailscale: Inherited<TailscaleConfig> = .inherit,
-                semicolyn: Inherited<SemicolynConfig> = .inherit) {
+                semicolyn: Inherited<SemicolynConfig> = .inherit,
+                transport: Inherited<Transport> = .inherit) {
         self.id = id; self.label = label; self.hostName = hostName
         self.user = user; self.port = port
         self.identities = identities; self.proxyJump = proxyJump
@@ -106,10 +108,46 @@ public struct Host: Codable, Equatable, Sendable {
         self.forwardAgent = forwardAgent
         self.preferredAuthentications = preferredAuthentications
         self.mosh = mosh; self.tailscale = tailscale; self.semicolyn = semicolyn
+        self.transport = transport
     }
 
     /// The resolved jump chain (empty when inherited/unset for cycle-checking).
     public var resolvedJumpChain: [JumpHop] { proxyJump.value ?? [] }
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, hostName
+        case user, port, identities, passwordRef, proxyJump
+        case localForwards, remoteForwards, dynamicForwards
+        case serverAliveInterval, serverAliveCountMax, compression
+        case strictHostKeyChecking, forwardAgent, preferredAuthentications
+        case mosh, tailscale, semicolyn
+        case transport
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        label = try c.decode(String.self, forKey: .label)
+        hostName = try c.decode(String.self, forKey: .hostName)
+        user = try c.decode(Inherited<String>.self, forKey: .user)
+        port = try c.decode(Inherited<Int>.self, forKey: .port)
+        identities = try c.decode(Inherited<[IdentityRef]>.self, forKey: .identities)
+        passwordRef = try c.decode(Inherited<UUID>.self, forKey: .passwordRef)
+        proxyJump = try c.decode(Inherited<[JumpHop]>.self, forKey: .proxyJump)
+        localForwards = try c.decode(Inherited<[LocalForward]>.self, forKey: .localForwards)
+        remoteForwards = try c.decode(Inherited<[RemoteForward]>.self, forKey: .remoteForwards)
+        dynamicForwards = try c.decode(Inherited<[DynamicForward]>.self, forKey: .dynamicForwards)
+        serverAliveInterval = try c.decode(Inherited<Int>.self, forKey: .serverAliveInterval)
+        serverAliveCountMax = try c.decode(Inherited<Int>.self, forKey: .serverAliveCountMax)
+        compression = try c.decode(Inherited<Bool>.self, forKey: .compression)
+        strictHostKeyChecking = try c.decode(Inherited<StrictHostKeyChecking>.self, forKey: .strictHostKeyChecking)
+        forwardAgent = try c.decode(Inherited<Bool>.self, forKey: .forwardAgent)
+        preferredAuthentications = try c.decode(Inherited<[AuthMethod]>.self, forKey: .preferredAuthentications)
+        mosh = try c.decode(Inherited<MoshConfig>.self, forKey: .mosh)
+        tailscale = try c.decode(Inherited<TailscaleConfig>.self, forKey: .tailscale)
+        semicolyn = try c.decode(Inherited<SemicolynConfig>.self, forKey: .semicolyn)
+        transport = try c.decodeIfPresent(Inherited<Transport>.self, forKey: .transport) ?? .inherit
+    }
 }
 
 /// Singleton defaults record: same optional fields as Host (it is `Partial<Host>`),
@@ -132,6 +170,7 @@ public struct Defaults: Codable, Equatable, Sendable {
     public var mosh: Inherited<MoshConfig>
     public var tailscale: Inherited<TailscaleConfig>
     public var semicolyn: Inherited<SemicolynConfig>
+    public var transport: Inherited<Transport>
 
     public init(user: Inherited<String> = .inherit,
                 port: Inherited<Int> = .inherit,
@@ -149,7 +188,8 @@ public struct Defaults: Codable, Equatable, Sendable {
                 preferredAuthentications: Inherited<[AuthMethod]> = .inherit,
                 mosh: Inherited<MoshConfig> = .inherit,
                 tailscale: Inherited<TailscaleConfig> = .inherit,
-                semicolyn: Inherited<SemicolynConfig> = .inherit) {
+                semicolyn: Inherited<SemicolynConfig> = .inherit,
+                transport: Inherited<Transport> = .inherit) {
         self.user = user; self.port = port
         self.identities = identities; self.passwordRef = passwordRef
         self.proxyJump = proxyJump
@@ -162,5 +202,37 @@ public struct Defaults: Codable, Equatable, Sendable {
         self.forwardAgent = forwardAgent
         self.preferredAuthentications = preferredAuthentications
         self.mosh = mosh; self.tailscale = tailscale; self.semicolyn = semicolyn
+        self.transport = transport
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case user, port, identities, passwordRef, proxyJump
+        case localForwards, remoteForwards, dynamicForwards
+        case serverAliveInterval, serverAliveCountMax, compression
+        case strictHostKeyChecking, forwardAgent, preferredAuthentications
+        case mosh, tailscale, semicolyn
+        case transport
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        user = try c.decode(Inherited<String>.self, forKey: .user)
+        port = try c.decode(Inherited<Int>.self, forKey: .port)
+        identities = try c.decode(Inherited<[IdentityRef]>.self, forKey: .identities)
+        passwordRef = try c.decode(Inherited<UUID>.self, forKey: .passwordRef)
+        proxyJump = try c.decode(Inherited<[JumpHop]>.self, forKey: .proxyJump)
+        localForwards = try c.decode(Inherited<[LocalForward]>.self, forKey: .localForwards)
+        remoteForwards = try c.decode(Inherited<[RemoteForward]>.self, forKey: .remoteForwards)
+        dynamicForwards = try c.decode(Inherited<[DynamicForward]>.self, forKey: .dynamicForwards)
+        serverAliveInterval = try c.decode(Inherited<Int>.self, forKey: .serverAliveInterval)
+        serverAliveCountMax = try c.decode(Inherited<Int>.self, forKey: .serverAliveCountMax)
+        compression = try c.decode(Inherited<Bool>.self, forKey: .compression)
+        strictHostKeyChecking = try c.decode(Inherited<StrictHostKeyChecking>.self, forKey: .strictHostKeyChecking)
+        forwardAgent = try c.decode(Inherited<Bool>.self, forKey: .forwardAgent)
+        preferredAuthentications = try c.decode(Inherited<[AuthMethod]>.self, forKey: .preferredAuthentications)
+        mosh = try c.decode(Inherited<MoshConfig>.self, forKey: .mosh)
+        tailscale = try c.decode(Inherited<TailscaleConfig>.self, forKey: .tailscale)
+        semicolyn = try c.decode(Inherited<SemicolynConfig>.self, forKey: .semicolyn)
+        transport = try c.decodeIfPresent(Inherited<Transport>.self, forKey: .transport) ?? .inherit
     }
 }
