@@ -158,6 +158,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// e.g. the watchdog attaches SSH, then a queued `onEnd` would otherwise clobber
     /// it with a spurious crash banner. Reset in `teardown()` with the rest of Mosh state.
     private var moshResolved = false
+    /// ET connect watchdog: fails the connect if the session shows no life (no
+    /// onFirstFrame, no onEnd) within the window. Cancelled by either callback.
+    private var etWatchdog: Task<Void, Never>?
+    /// True once a terminal ET handler (watchdog timeout OR onFirstFrame OR onEnd)
+    /// has resolved this session. Guards against double-resolution.
+    private var etResolved = false
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -497,6 +503,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         moshSession = nil
         moshFirstFrameSeen = false
         moshFallback = nil
+        etWatchdog?.cancel(); etWatchdog = nil
+        etResolved = false
         etSession?.close()
         etSession = nil
         tmux?.stop()
@@ -960,19 +968,43 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // The `PendingOutputBuffer` behind `onOutput` replays on sink-install,
         // so an early frame (before SwiftUI's `makeUIView` installs the render
         // sink) isn't silently dropped.
+        etResolved = false
         sess.onOutput = { [weak self] data in
             self?.output.onOutput(data: data)
         }
+        sess.onFirstFrame = { [weak self] in
+            guard let self, !self.etResolved else { return }
+            self.etResolved = true
+            self.etWatchdog?.cancel(); self.etWatchdog = nil
+            DebugLog.shared.log(.transport, "et: onFirstFrame, stream up; watchdog cancelled")
+            self.state = .shell
+        }
+        sess.onState = { raw in
+            DebugLog.shared.log(.transport, "et: state=\(mapETState(Int32(raw)))")
+        }
         sess.onEnd = { [weak self] reason in
+            guard let self, !self.etResolved else { return }
+            self.etResolved = true
+            self.etWatchdog?.cancel(); self.etWatchdog = nil
             let safe = sanitizeEndReason(reason)
-            DebugLog.shared.log(.connect, "et: session ended (\(safe))")
-            self?.etSession?.close()
-            self?.etSession = nil
+            DebugLog.shared.log(.transport, "et: session ended (\(safe))")
+            self.etSession?.close()
+            self.etSession = nil
+            self.state = .failed(etFailureMessage(.handshakeFailed(reason: safe)))
         }
         DebugLog.shared.log(.connect, "et: sess.start()")
         sess.start()
         etSession = sess
         connection = conn
+        etWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)   // 15s
+            guard !Task.isCancelled, let self, !self.etResolved else { return }
+            self.etResolved = true
+            DebugLog.shared.log(.transport, "et: watchdog fired (no first-frame/end in 15s) → .failed(timeout)")
+            self.etSession?.close()
+            self.etSession = nil
+            self.state = .failed("Eternal Terminal timed out: no response on port 2022. Check that etserver is running and TCP 2022 is reachable (firewall).")
+        }
         return .success(())
     }
 
