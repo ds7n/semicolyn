@@ -966,6 +966,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onEnd = { [weak self] reason in
             let safe = sanitizeEndReason(reason)
             DebugLog.shared.log(.connect, "et: session ended (\(safe))")
+            self?.etSession?.close()
             self?.etSession = nil
         }
         DebugLog.shared.log(.connect, "et: sess.start()")

@@ -34,7 +34,7 @@
 }
 
 // ---- C trampolines: ctx is the ETSession* (unretained cast, but ctx itself holds
-// a +1 CFBridgingRetain for the whole connection — see -start/-close/-dealloc — so
+// a +1 CFBridgingRetain for the whole connection, see -start/-close/-dealloc, so
 // self cannot be freed while a callback is in flight). ----
 
 static void et_on_bytes(void *ctx, const uint8_t *buf, size_t len) {
