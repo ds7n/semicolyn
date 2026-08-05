@@ -5,7 +5,9 @@
 
 ## Resume here (2026-08-05)
 
-**ET is now testable on device. Slices 1a + 1b MERGED to `main`; the Transport picker + ET-interactive slice is CI-green with a TestFlight build going up. NEXT ACTION = the first on-device ET test (see below).** Prior: Selection UI + terminal/keybar geometry MERGED (PR #114 `0d80804`, device-confirmed).
+**Eternal Terminal on-device retest is the NEXT ACTION. The "malformed credential" bug is FIXED (PR #119, CI-green, TestFlight build going up).** Device round 1 (build 110) failed with "the server sent a malformed credential"; root-caused from the syslog sink + real etserver v7.0.0 output + upstream source: `parseETIDPASSKEY` demanded the WHOLE IDPASSKEY line be exactly `<16>/<32>`, but a trailing CR (SSH PTY) tripped it; upstream takes a fixed 49-char window. Fixed to match upstream + added an opt-in `transport` LogCategory (default off) that logs the masked bootstrap payload (credential values hidden, trailing junk visible) so transport handshakes are diagnosable. Transport picker + ET-interactive: MERGED (`87edea3`, PR #118). Slices 1a+1b MERGED. Prior: Selection UI MERGED (PR #114 `0d80804`).
+
+**Eternal Terminal on-device retest (next build):** set a host Transport=ET, connect to the dev box (sshd :22 + etserver v7.0.0 :2022 up). EXPECT: it now CONNECTS (parse fix). If it fails at the NEXT stage with a DIFFERENT error, that's the separate protocol-6-client-vs-7.0.0-server watch-item (would surface as `.handshakeFailed`, not `malformedIDPASSKEY`). If anything transport-related fails, flip Settings > Diagnostics > `transport` ON, reproduce, read the masked payload from the syslog sink (sink runs as a docker service: read via `docker exec <syslog container> sh -c "grep ... /var/log/semicolyn/semicolyn.log"` since the host file is root-owned + this session's sudo is blocked).
 
 **Selection UI + terminal/keybar geometry: MERGED to `main`. PR #114 squash-merged, CI green, device-confirmed.**
 
