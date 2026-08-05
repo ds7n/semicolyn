@@ -12,7 +12,7 @@ public enum Transport: String, Codable, Sendable, CaseIterable, Equatable {
         switch self {
         case .ssh: return "SSH"
         case .mosh: return "Mosh"
-        case .et: return "ET"
+        case .et: return "Eternal Terminal"
         }
     }
 

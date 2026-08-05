@@ -67,4 +67,54 @@ final class ETIDPASSKEYParseTests: XCTestCase {
         }
         XCTAssertEqual(err, .noIDPASSKEY(serverOutput: "evil"))
     }
+
+    private let id16b = "abcdef0123456789"                     // 16
+    private let key32b = "0123456789abcdef0123456789abcdef"    // 32
+
+    // The credential is followed by trailing content on the same line (a CR from the
+    // SSH PTY, or a status token). Upstream takes a fixed 49-char window and ignores
+    // this; we must too. THIS is the device bug.
+    func testTrailingCarriageReturnAfterCredentialSucceeds() {
+        let out = "IDPASSKEY:\(id16b)/\(key32b)\r\n"
+        guard case .success(let cred) = parseETIDPASSKEY(out) else { return XCTFail("expected success") }
+        XCTAssertEqual(cred.id, id16b)
+        XCTAssertEqual(cred.passkey, key32b)
+    }
+
+    func testTrailingJunkOnCredentialLineSucceeds() {
+        let out = "IDPASSKEY:\(id16b)/\(key32b) extra=1 more junk\n"
+        guard case .success(let cred) = parseETIDPASSKEY(out) else { return XCTFail("expected success") }
+        XCTAssertEqual(cred.id, id16b)
+        XCTAssertEqual(cred.passkey, key32b)
+    }
+
+    // A shell banner printed before the marker must not break extraction.
+    func testLeadingBannerBeforeMarkerSucceeds() {
+        let out = "bash: cannot set terminal process group\nIDPASSKEY:\(id16b)/\(key32b)\n"
+        guard case .success(let cred) = parseETIDPASSKEY(out) else { return XCTFail("expected success") }
+        XCTAssertEqual(cred.id, id16b)
+        XCTAssertEqual(cred.passkey, key32b)
+    }
+
+    // Boundary: fewer than 49 chars after the marker -> malformed.
+    func testTruncatedWindowIsMalformed() {
+        let out = "IDPASSKEY:\(id16b)/short"
+        guard case .failure(let e) = parseETIDPASSKEY(out) else { return XCTFail("expected failure") }
+        XCTAssertEqual(e, .malformedIDPASSKEY)
+    }
+
+    // Slash not at index 16 (window landed on wrong content) -> malformed.
+    func testSlashNotAtIndex16IsMalformed() {
+        let out = "IDPASSKEY:abcd/efghijklmnopqrstuvwxyz0123456789ABCDEF\n"   // slash at 4
+        guard case .failure(let e) = parseETIDPASSKEY(out) else { return XCTFail("expected failure") }
+        XCTAssertEqual(e, .malformedIDPASSKEY)
+    }
+
+    // Non-alphanumeric inside the id/passkey window -> malformed (garbage rejected).
+    func testNonAlphanumericWindowIsMalformed() {
+        // 16 chars, slash, then 32 chars but with a space inside the passkey window.
+        let out = "IDPASSKEY:\(id16b)/0123456789abcdef 123456789abcdef\n"
+        guard case .failure(let e) = parseETIDPASSKEY(out) else { return XCTFail("expected failure") }
+        XCTAssertEqual(e, .malformedIDPASSKEY)
+    }
 }

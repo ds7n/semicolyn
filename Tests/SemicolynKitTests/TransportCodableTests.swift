@@ -24,7 +24,7 @@ final class TransportCodableTests: XCTestCase {
     func testDisplayNames() {
         XCTAssertEqual(Transport.ssh.displayName, "SSH")
         XCTAssertEqual(Transport.mosh.displayName, "Mosh")
-        XCTAssertEqual(Transport.et.displayName, "ET")
+        XCTAssertEqual(Transport.et.displayName, "Eternal Terminal")
     }
 
     // Summaries are non-empty and mention the defining tradeoff (observable content check).
