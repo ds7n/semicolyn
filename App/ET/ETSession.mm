@@ -16,6 +16,7 @@
     et_client *_handle;         // touched only on _api
     BOOL _closed;               // touched only on _api
     BOOL _firstFrameSent;       // touched only on main (set before onOutput)
+    void *_ctx;   // CFBridgingRetain'd self handed to et_connect; released on teardown
 }
 
 - (instancetype)initWithHost:(NSString *)host port:(uint16_t)port id:(NSString *)clientID
@@ -32,10 +33,12 @@
     return self;
 }
 
-// ---- C trampolines: ctx is the ETSession* (unretained; the object outlives the
-// handle because -close joins the transport thread before dealloc). ----
+// ---- C trampolines: ctx is the ETSession* (unretained cast, but ctx itself holds
+// a +1 CFBridgingRetain for the whole connection — see -start/-close/-dealloc — so
+// self cannot be freed while a callback is in flight). ----
 
 static void et_on_bytes(void *ctx, const uint8_t *buf, size_t len) {
+    // ctx holds a +1 (CFBridgingRetain'd in -start); the unretained cast is safe.
     ETSession *self = (__bridge ETSession *)ctx;
     NSData *data = [NSData dataWithBytes:buf length:len];   // COPY inside the callback
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -48,6 +51,7 @@ static void et_on_bytes(void *ctx, const uint8_t *buf, size_t len) {
 }
 
 static void et_on_state(void *ctx, et_state state) {
+    // ctx holds a +1 (CFBridgingRetain'd in -start); the unretained cast is safe.
     ETSession *self = (__bridge ETSession *)ctx;
     NSInteger raw = (NSInteger)state;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -56,6 +60,7 @@ static void et_on_state(void *ctx, et_state state) {
 }
 
 static void et_on_end(void *ctx, const char *reason) {
+    // ctx holds a +1 (CFBridgingRetain'd in -start); the unretained cast is safe.
     ETSession *self = (__bridge ETSession *)ctx;
     NSString *r = reason ? [NSString stringWithUTF8String:reason] : nil;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -88,14 +93,19 @@ static void et_on_end(void *ctx, const char *reason) {
         cfg.keepalive_secs = self->_keepalive;
 
         et_callbacks cbs = { et_on_bytes, et_on_state, et_on_end };
-        self->_handle = et_connect(&cfg, &cbs, (__bridge void *)self);
+        void *ctx = (void *)CFBridgingRetain(self);   // +1: keep self alive for the connection
+        self->_handle = et_connect(&cfg, &cbs, ctx);
         free(ck); free(cv);
 
         if (self->_handle == NULL) {
-            // Synchronous arg failure. Report as a teardown so the caller sees it.
+            // Synchronous arg failure: no transport thread, release the +1 now.
+            CFBridgingRelease(ctx);
+            // Report as a teardown so the caller sees it.
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (self.onEnd) self.onEnd(@"et_connect failed");
             });
+        } else {
+            self->_ctx = ctx;   // released in -close / -dealloc after et_close joins the thread
         }
     });
 }
@@ -121,6 +131,10 @@ static void et_on_end(void *ctx, const char *reason) {
         if (self->_closed) return;
         self->_closed = YES;
         if (self->_handle) { et_close(self->_handle); self->_handle = NULL; }
+        // Release the +1 only AFTER et_close has joined the transport thread, so no
+        // callback can fire on a freed self. Guarded + niled so a subsequent -dealloc
+        // sweep (belt-and-suspenders) never double-releases.
+        if (self->_ctx) { CFBridgingRelease(self->_ctx); self->_ctx = NULL; }
     });
 }
 
@@ -134,6 +148,8 @@ static void et_on_end(void *ctx, const char *reason) {
         et_close(_handle);   // joins the transport thread; no callback fires after
         _handle = NULL;
     }
+    // Same balance as -close: release the +1 exactly once, after et_close joins.
+    if (_ctx) { CFBridgingRelease(_ctx); _ctx = NULL; }
 }
 
 @end
