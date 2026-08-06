@@ -14,6 +14,14 @@ extension HostEditorView {
         vm.host.mosh.value?.enabled == true
     }
 
+    /// Effective transport for menu gating (tmux-toggle visibility, Mosh section visibility).
+    /// Prefers an explicit selection; falls back to the built-in default (.ssh) so the
+    /// tmux toggle shows by default. Uses the leaf value directly, no resolution against
+    /// Defaults, because the editor works with the draft host's explicit state.
+    var selectedTransport: Transport {
+        vm.host.transport.value ?? .ssh
+    }
+
     /// Connection section: Tier-2 SSH options, all `Inherited<T>`, collapsed by default.
     var connectionSection: some View {
         DisclosureGroup(isExpanded: $connectionExpanded) {
@@ -396,126 +404,110 @@ extension HostEditorView {
 
 extension HostEditorView {
 
-    /// Mosh section: master enabled toggle, server path, UDP port range, prediction mode.
+    /// Mosh section: server path, UDP port range, prediction mode.
+    /// Only composed (in `HostEditorView.body`) when the selected transport is Mosh;
+    /// selecting Transport=Mosh in the Connection section's picker is the enable signal,
+    /// so there is no separate master toggle here.
     /// Collapsed by default; auto-expands on edit when `mosh` is explicitly configured.
     var moshSection: some View {
         DisclosureGroup(isExpanded: $moshExpanded) {
 
-            // Master enabled toggle
-            Toggle(isOn: Binding(
-                get: { vm.host.mosh.value?.enabled ?? false },
-                set: { newEnabled in
-                    // Preserve any already-set leaf values; wrap into .explicit.
-                    var cfg = vm.host.mosh.value ?? MoshConfig(enabled: false)
-                    cfg.enabled = newEnabled
-                    vm.host.mosh = .explicit(cfg)
-                    vm.revalidate()
-                }
-            )) {
-                Text("Enable Mosh")
+            // Server path, optional text
+            LabeledContent {
+                TextField(
+                    "e.g. /usr/local/bin/mosh-server",
+                    text: Binding(
+                        get: { vm.host.mosh.value?.serverPath ?? "" },
+                        set: { newPath in
+                            var cfg = vm.host.mosh.value ?? MoshConfig(enabled: true)
+                            cfg.serverPath = newPath.isEmpty ? nil : newPath
+                            vm.host.mosh = .explicit(cfg)
+                            vm.revalidate()
+                        }
+                    )
+                )
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            } label: {
+                Text("Server path")
                     .foregroundStyle(Color(theme.text.primary))
             }
-            .onChange(of: vm.host.mosh) { _, _ in vm.revalidate() }
 
-            if vm.host.mosh.value?.enabled == true {
-
-                // Server path, optional text
-                LabeledContent {
+            // UDP port range, lo / hi pair
+            LabeledContent {
+                HStack(spacing: 8) {
                     TextField(
-                        "e.g. /usr/local/bin/mosh-server",
+                        "lo",
                         text: Binding(
-                            get: { vm.host.mosh.value?.serverPath ?? "" },
-                            set: { newPath in
+                            get: {
+                                if let range = vm.host.mosh.value?.udpPortRange, range.count >= 2 {
+                                    return String(range[0])
+                                }
+                                return ""
+                            },
+                            set: { newLo in
                                 var cfg = vm.host.mosh.value ?? MoshConfig(enabled: true)
-                                cfg.serverPath = newPath.isEmpty ? nil : newPath
+                                let lo = Int(newLo) ?? 0
+                                let existingRange = cfg.udpPortRange
+                                let hi = (existingRange != nil && existingRange!.count >= 2) ? existingRange![1] : 0
+                                cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
                                 vm.host.mosh = .explicit(cfg)
                                 vm.revalidate()
                             }
                         )
                     )
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                } label: {
-                    Text("Server path")
-                        .foregroundStyle(Color(theme.text.primary))
-                }
+                    .keyboardType(.numberPad)
+                    .frame(maxWidth: .infinity)
 
-                // UDP port range, lo / hi pair
-                LabeledContent {
-                    HStack(spacing: 8) {
-                        TextField(
-                            "lo",
-                            text: Binding(
-                                get: {
-                                    if let range = vm.host.mosh.value?.udpPortRange, range.count >= 2 {
-                                        return String(range[0])
-                                    }
-                                    return ""
-                                },
-                                set: { newLo in
-                                    var cfg = vm.host.mosh.value ?? MoshConfig(enabled: true)
-                                    let lo = Int(newLo) ?? 0
-                                    let existingRange = cfg.udpPortRange
-                                    let hi = (existingRange != nil && existingRange!.count >= 2) ? existingRange![1] : 0
-                                    cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
-                                    vm.host.mosh = .explicit(cfg)
-                                    vm.revalidate()
+                    Text("-")
+                        .foregroundStyle(Color(theme.text.secondary))
+
+                    TextField(
+                        "hi",
+                        text: Binding(
+                            get: {
+                                if let range = vm.host.mosh.value?.udpPortRange, range.count >= 2 {
+                                    return String(range[1])
                                 }
-                            )
+                                return ""
+                            },
+                            set: { newHi in
+                                var cfg = vm.host.mosh.value ?? MoshConfig(enabled: true)
+                                let existingRange = cfg.udpPortRange
+                                let lo = (existingRange != nil && existingRange!.count >= 2) ? existingRange![0] : 0
+                                let hi = Int(newHi) ?? 0
+                                cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
+                                vm.host.mosh = .explicit(cfg)
+                                vm.revalidate()
+                            }
                         )
-                        .keyboardType(.numberPad)
-                        .frame(maxWidth: .infinity)
-
-                        Text("-")
-                            .foregroundStyle(Color(theme.text.secondary))
-
-                        TextField(
-                            "hi",
-                            text: Binding(
-                                get: {
-                                    if let range = vm.host.mosh.value?.udpPortRange, range.count >= 2 {
-                                        return String(range[1])
-                                    }
-                                    return ""
-                                },
-                                set: { newHi in
-                                    var cfg = vm.host.mosh.value ?? MoshConfig(enabled: true)
-                                    let existingRange = cfg.udpPortRange
-                                    let lo = (existingRange != nil && existingRange!.count >= 2) ? existingRange![0] : 0
-                                    let hi = Int(newHi) ?? 0
-                                    cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
-                                    vm.host.mosh = .explicit(cfg)
-                                    vm.revalidate()
-                                }
-                            )
-                        )
-                        .keyboardType(.numberPad)
-                        .frame(maxWidth: .infinity)
-                    }
-                } label: {
-                    Text("UDP port range")
-                        .foregroundStyle(Color(theme.text.primary))
+                    )
+                    .keyboardType(.numberPad)
+                    .frame(maxWidth: .infinity)
                 }
+            } label: {
+                Text("UDP port range")
+                    .foregroundStyle(Color(theme.text.primary))
+            }
 
-                // Prediction mode, Picker over 4 cases (nil = inherit/default)
-                Picker(selection: Binding(
-                    get: { vm.host.mosh.value?.predictionMode },
-                    set: { newMode in
-                        var cfg = vm.host.mosh.value ?? MoshConfig(enabled: true)
-                        cfg.predictionMode = newMode
-                        vm.host.mosh = .explicit(cfg)
-                        vm.revalidate()
-                    }
-                )) {
-                    Text("Default").tag(MoshPredictionMode?.none)
-                    Text("Adaptive").tag(MoshPredictionMode?.some(.adaptive))
-                    Text("Always").tag(MoshPredictionMode?.some(.always))
-                    Text("Never").tag(MoshPredictionMode?.some(.never))
-                    Text("Experimental").tag(MoshPredictionMode?.some(.experimental))
-                } label: {
-                    Text("Prediction mode")
-                        .foregroundStyle(Color(theme.text.primary))
+            // Prediction mode, Picker over 4 cases (nil = inherit/default)
+            Picker(selection: Binding(
+                get: { vm.host.mosh.value?.predictionMode },
+                set: { newMode in
+                    var cfg = vm.host.mosh.value ?? MoshConfig(enabled: true)
+                    cfg.predictionMode = newMode
+                    vm.host.mosh = .explicit(cfg)
+                    vm.revalidate()
                 }
+            )) {
+                Text("Default").tag(MoshPredictionMode?.none)
+                Text("Adaptive").tag(MoshPredictionMode?.some(.adaptive))
+                Text("Always").tag(MoshPredictionMode?.some(.always))
+                Text("Never").tag(MoshPredictionMode?.some(.never))
+                Text("Experimental").tag(MoshPredictionMode?.some(.experimental))
+            } label: {
+                Text("Prediction mode")
+                    .foregroundStyle(Color(theme.text.primary))
             }
 
         } label: {
@@ -621,23 +613,28 @@ extension HostEditorView {
             .onChange(of: vm.host.semicolyn) { _, _ in vm.revalidate() }
 
             // Tmux control mode, default true per resolution
-            Toggle(isOn: Binding(
-                get: { vm.host.semicolyn.value?.tmux?.attemptControlMode ?? true },
-                set: { newAttempt in
-                    var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
-                    var tmux = cfg.tmux ?? TmuxConfig()
-                    tmux.attemptControlMode = newAttempt
-                    cfg.tmux = tmux
-                    vm.host.semicolyn = .explicit(cfg)
-                    vm.revalidate()
-                }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Attempt tmux control mode")
-                        .foregroundStyle(Color(theme.text.primary))
-                    Text("Automatically use tmux -CC if tmux is running (default on).")
-                        .font(.caption)
-                        .foregroundStyle(Color(theme.text.secondary))
+            // Gated: shown for SSH/ET, hidden for Mosh (tmux -CC cannot run over Mosh).
+            if showsTmuxControlToggle(transport: selectedTransport) {
+                Toggle(isOn: Binding(
+                    get: { vm.host.semicolyn.value?.tmux?.attemptControlMode ?? true },
+                    set: { newAttempt in
+                        var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
+                        var tmux = cfg.tmux ?? TmuxConfig()
+                        tmux.attemptControlMode = newAttempt
+                        cfg.tmux = tmux
+                        vm.host.semicolyn = .explicit(cfg)
+                        vm.revalidate()
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("tmux control mode (native panes)")
+                            .foregroundStyle(Color(theme.text.primary))
+                        Text(selectedTransport == .et
+                             ? "Runs tmux -CC for native panes. ET support is coming soon."
+                             : "Automatically use tmux -CC if tmux is running (default on).")
+                            .font(.caption)
+                            .foregroundStyle(Color(theme.text.secondary))
+                    }
                 }
             }
 

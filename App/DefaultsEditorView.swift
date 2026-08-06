@@ -629,28 +629,33 @@ struct DefaultsEditorView: View {
             }
 
             // Tmux control mode, built-in fallback: true (attempt)
-            Toggle(isOn: Binding(
-                get: { vm.defaults.semicolyn.value?.tmux?.attemptControlMode ?? true },
-                set: { newAttempt in
-                    var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
-                    var tmux = cfg.tmux ?? TmuxConfig()
-                    tmux.attemptControlMode = newAttempt
-                    cfg.tmux = tmux
-                    vm.defaults.semicolyn = .explicit(cfg)
+            // Gated: shown for SSH/ET, hidden for Mosh (tmux -CC cannot run over Mosh).
+            if showsTmuxControlToggle(transport: vm.defaults.transport.value ?? .ssh) {
+                Toggle(isOn: Binding(
+                    get: { vm.defaults.semicolyn.value?.tmux?.attemptControlMode ?? true },
+                    set: { newAttempt in
+                        var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
+                        var tmux = cfg.tmux ?? TmuxConfig()
+                        tmux.attemptControlMode = newAttempt
+                        cfg.tmux = tmux
+                        vm.defaults.semicolyn = .explicit(cfg)
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("tmux control mode (native panes)")
+                            .foregroundStyle(Color(theme.text.primary))
+                        Text(vm.defaults.transport.value == .et
+                             ? "Runs tmux -CC for native panes. ET support is coming soon."
+                             : "Automatically use tmux -CC if tmux is running (default on).")
+                            .font(.caption)
+                            .foregroundStyle(Color(theme.text.secondary))
+                    }
                 }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Attempt tmux control mode")
-                        .foregroundStyle(Color(theme.text.primary))
-                    Text("Automatically use tmux -CC if tmux is running (default on).")
-                        .font(.caption)
-                        .foregroundStyle(Color(theme.text.secondary))
-                }
-            }
-            .swipeActions {
-                if case .explicit = vm.defaults.semicolyn {
-                    Button("Clear override") { vm.defaults.semicolyn = .inherit }
-                        .tint(Color(theme.accent.primary))
+                .swipeActions {
+                    if case .explicit = vm.defaults.semicolyn {
+                        Button("Clear override") { vm.defaults.semicolyn = .inherit }
+                            .tint(Color(theme.accent.primary))
+                    }
                 }
             }
 
