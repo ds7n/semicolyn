@@ -312,6 +312,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // never reaches `handleSwitchPan` still logs which recognizer won.
         observeStrayRecognizers(on: view)
 
+        // Issue 3 scroll diagnosis: also observe the native scroll pan's FULL state
+        // machine (observeStrayRecognizers' observer only fires on began/changed). This
+        // lets a device swipe reveal a pan that .failed/.cancelled without ever beginning.
+        view.panGestureRecognizer.addTarget(self, action: #selector(observeScrollPanAllStates(_:)))
+
         // Tap snappiness: UIScrollView delays content-touch delivery (~150ms) to first
         // decide whether a touch is the start of a scroll, which made single-tap cursor
         // placement feel sluggish. Deliver touches immediately, our tap recognizers no
@@ -425,6 +430,21 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         else { kind = String(describing: type(of: g)) }
         DebugLog.shared.log(.gesture,
             "gr-observe \(kind) state=\(g.state.rawValue) mode=\(callbacks.currentMode())")
+    }
+
+    /// Issue 3 scroll diagnosis (device 2026-08-06): the native scroll pan never begins on
+    /// a swipe (zero gr-observe, nothing scrolls) despite scroll range + an enabled pan.
+    /// `observeRecognizerState` only logs `.began`/`.changed`, so a pan that reaches
+    /// `.failed`/`.cancelled` WITHOUT ever beginning is invisible. This logs EVERY state
+    /// transition of the native scroll pan (incl. .possible/.failed/.cancelled) with the
+    /// translation + touch count, so a device swipe shows whether the pan begins, fails, or
+    /// stays possible. Diagnostic only: attached as an extra target, changes no behavior.
+    @objc private func observeScrollPanAllStates(_ g: UIGestureRecognizer) {
+        guard let view = terminalView else { return }
+        let t = (g as? UIPanGestureRecognizer)?.translation(in: view) ?? .zero
+        DebugLog.shared.log(.gesture,
+            "scroll-trace pan=nativePan state=\(g.state.rawValue) mode=\(callbacks.currentMode()) "
+            + "touches=\(g.numberOfTouches) tx=\(Int(t.x)) ty=\(Int(t.y))")
     }
 
     /// Attach `observeRecognizerState` as an extra target on every recognizer on the
