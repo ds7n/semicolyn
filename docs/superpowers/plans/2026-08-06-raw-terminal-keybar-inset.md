@@ -215,13 +215,66 @@ Claude-Session: https://claude.ai/code/session_01DzjcESNW7qzfnTpp698udt"
 
 ---
 
-### Task 3: Push to CI, build, and gate Issue 3 on the device retest
+### Task 3: Instrument recognizer arbitration at mount (Issue 3 diagnosis, NOT a fix)
+
+**Files:**
+- Modify: `App/TerminalGestureController.swift` (`installOurRecognizers`, called once from `init`).
+
+**Interfaces:**
+- Consumes: the existing `observeRecognizerState(_:)` (@objc target, logs `gr-observe <kind> state=<n> mode=<m>` where `kind` is `scrollPan` / `strayPan` / a class name) and `observeStrayRecognizers(on:)` (attaches that target to every non-ours recognizer + the native `panGestureRecognizer`).
+- Produces: nothing consumed downstream; this is diagnostic-only.
+
+**Note:** App-tier, Linux-invisible. This is instrumentation, NOT a scroll fix. Rationale (spec Issue 3): the recognizer observer is currently attached lazily only inside `beginDrag`, which never runs for a plain `.localScroll` vertical scroll, so an ET swipe (pure `.localScroll`, only typed + swiped) is never observed and the log cannot say which recognizer wins the touch. Attaching the observer at mount makes the FIRST ET swipe emit the decisive `gr-observe` line. Do NOT add a scroll behavior change here.
+
+- [ ] **Step 1: Attach the recognizer observer once at mount**
+
+In `App/TerminalGestureController.swift`, `installOurRecognizers(on view:)` (called from `init` at line ~162), add a call to `observeStrayRecognizers(on: view)` at the END of the method (after our recognizers are installed), so the native scroll pan and any pre-existing stray pans get the `observeRecognizerState` target from the very first touch:
+
+```swift
+        // Issue 3 diagnosis (device 2026-08-06): attach the recognizer-state observer at
+        // MOUNT, not only lazily in beginDrag. A plain .localScroll vertical scroll rides
+        // SwiftTerm's native scroll pan and never enters beginDrag, so an ET swipe (pure
+        // .localScroll) was previously unobserved and the log could not name which
+        // recognizer won the touch. This makes the FIRST swipe emit `gr-observe <kind>`.
+        // Diagnostic only: observeRecognizerState just logs; it changes no behavior.
+        observeStrayRecognizers(on: view)
+```
+
+(Place this as the last statement in `installOurRecognizers`, after `editMenu` / the tap-failure wiring. `observeStrayRecognizers` is idempotent, UIKit ignores a duplicate identical target/action, so the later lazy calls in `beginDrag` remain harmless no-ops.)
+
+- [ ] **Step 2: Local grep sanity check**
+
+Run:
+```bash
+grep -n "observeStrayRecognizers(on:" App/TerminalGestureController.swift
+```
+Expected: at least TWO call sites now, the existing one in `beginDrag` (~line 472) AND the new one at the end of `installOurRecognizers`. Confirm the new call is inside `installOurRecognizers` (search upward for `func installOurRecognizers`).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add App/TerminalGestureController.swift
+git commit -m "diag(term): observe recognizer arbitration from mount (Issue 3 scroll)
+
+The recognizer-state observer was attached lazily only in beginDrag, which
+never runs for a plain .localScroll vertical scroll. So an ET swipe (pure
+.localScroll, never tapped) produced zero gr-observe logs and the trace
+could not name which recognizer eats the touch. Attach observeStrayRecognizers
+at mount (installOurRecognizers) so the FIRST swipe emits gr-observe <kind>.
+Diagnostic only; no scroll behavior change. Root-cause fix follows the trace.
+
+Claude-Session: https://claude.ai/code/session_01DzjcESNW7qzfnTpp698udt"
+```
+
+---
+
+### Task 4: Push to CI, build, and gate Issue 3 on the device retest
 
 **Files:** none (CI + device gate only).
 
 **Interfaces:** none.
 
-**Note:** This task does NOT fix Issue 3 (scroll). Per the spec, Issue 3 is gated on the post-Issue-2 device re-test: fixing the usable-height mismatch may resolve scroll, so a speculative scroll fix now would be guessing. This task lands Issues 1+2, cuts a build, and defines the exact device retest whose result decides whether an Issue 3 task is needed.
+**Note:** This task does NOT fix Issue 3 (scroll). Issue 2's inset may change scroll behavior, and Task 3's instrumentation captures which recognizer wins the ET swipe. This task lands Issues 1+2 + the Issue 3 instrumentation, cuts a build, and defines the device retest whose trace decides the Issue 3 fix (a later build).
 
 - [ ] **Step 1: Push and let CI run (do NOT merge; user gates on device)**
 
@@ -251,19 +304,22 @@ gh run view --repo ds7n/semicolyn "$RID" --log | grep -iE "UPLOAD SUCCEEDED|No e
 Report to the user that the build is ready and to run, with ALL diagnostic categories enabled:
 1. **Issue 2 (rows):** connect ET to the dev box. The shell prompt must sit on the last VISIBLE row; no rows behind the keybar. Show/hide the keyboard and app-switch; `rows == visible rows` in every state. Verify in the log: `geo:pane` frame height should now equal `usableH` (not full bounds), and `sizing:raw` grid rows should equal `usableH/cellH`.
 2. **Issue 1 (exit):** type `exit`; a clean cut to the connection list, NO "Connecting…" spinner flash.
-3. **Issue 3 (scroll):** swipe to scroll. Capture `gesture:*` / native-scroll events.
-   - If scroll now works: Issue 3 was downstream of Issue 2, done, merge #121 batch.
-   - If scroll still dead: DO NOT merge; open an Issue 3 task with the fresh capture (the `handlePan` / native-scroll-pan arbitration that never logged) and root-cause the recognizer arbitration in `TerminalScreen`/`TerminalGestureController` (cf. `PaneTerminalView` 61-78 `editingInteractionConfiguration=.none`, `disableStraySwiftTermPans`, `subordinateSelectionPan`).
+3. **Issue 3 (scroll), the decisive trace:** swipe vertically to scroll on the ET shell. Task 3's mount-time observer now logs which recognizer wins the touch. In the syslog capture, look for **`gr-observe <kind> state=<n> mode=localScroll`** on the FIRST swipe:
+   - `kind=scrollPan` firing (and content moving): the native scroll pan won, scroll works, likely because Issue 2's inset corrected it. Done.
+   - `kind=scrollPan` firing but NO movement: the native pan begins but is pinned, a contentOffset/contentSize problem, next fix targets that.
+   - `kind=strayPan` (or a system class like `UITextInteraction*`) firing INSTEAD of `scrollPan`: SwiftTerm's lazy selection/mouse pan or the system text-interaction stack pre-empts the scroll pan, next fix subordinates/disables that recognizer for the fresh-pane-first-scroll case.
+   - NO `gr-observe` at all on a swipe: the touch never reached any observed recognizer (touch swallowed upstream / view not hit-testable), a different class of fix.
+   Record which case fired; that names the Issue 3 root cause. DO NOT merge on a dead scroll; the Issue 3 code fix is a follow-up build from this trace.
 4. **A/B path proof:** set dev host `attemptControlMode = false`, connect over plain (raw) SSH; it must show the SAME corrected behavior as ET (proves the fix is in the shared raw path, not ET-specific).
 
 - [ ] **Step 4: Record the device result in the ledger / TODO before deciding next step**
 
-After the user reports: if Issues 1+2 pass and Issue 3 is resolved, the batch is device-confirmed, merge PR #121 (which now carries all of it). If Issue 3 remains, add the Issue 3 root-cause task and keep the branch open.
+After the user reports: if Issues 1+2 pass and the Issue 3 trace is captured, record the `gr-observe` case in TODO/memory and open the targeted Issue 3 fix task (or, if scroll now works, mark it resolved). Merge PR #121 (which now carries Issues 1+2 + the instrumentation) only once the user is satisfied with the device result.
 
 ---
 
 ## Self-review checklist (run after writing, fix inline)
 
-- Spec coverage: Issue 1 -> Task 1; Issue 2 -> Task 2; Issue 3 -> Task 3 gate (deliberately not a code task yet, per spec). A/B path proof -> Task 3 Step 3.4.
+- Spec coverage: Issue 1 -> Task 1; Issue 2 -> Task 2; Issue 3 instrumentation -> Task 3 (diagnosis, deliberately not a code fix yet, per spec); build + device retest + A/B proof -> Task 4.
 - No placeholders: all code blocks are literal; no "add handling"/"TBD".
-- Type consistency: `appliesOwnKeybarInset` (Bool), `usableHeightFromKeyboardTop(rawHeight:keyboardTopY:)`, `visibleTerminalHeight(rawHeight:keybarHeight:)`, `keyboardLayoutGuide.layoutFrame` used consistently across tasks.
+- Type consistency: `appliesOwnKeybarInset` (Bool), `usableHeightFromKeyboardTop(rawHeight:keyboardTopY:)`, `visibleTerminalHeight(rawHeight:keybarHeight:)`, `keyboardLayoutGuide.layoutFrame`, `observeStrayRecognizers(on:)` / `observeRecognizerState(_:)` (`gr-observe <kind>`) used consistently across tasks.

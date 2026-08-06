@@ -126,30 +126,44 @@ events and no scroll movement. In `.localScroll` (normal shell), vertical scroll
 by SwiftTerm's NATIVE scroll pan (not our `handlePan`), so the drag should ride the native
 pan, and it did not move.
 
-**Likely relationship to Issue 2:** the height/grid mismatch (SwiftTerm thinks it has 45
-rows in a frame whose bottom 5 rows are occluded) means its scroll region / `contentSize`
-math is computed against the wrong usable height, which can leave the native scroll inert
-or pinned. Fixing Issue 2 (correct usable height) may resolve Issue 3, or at least change
-its symptom. Therefore:
+**Root-cause status (comparative log analysis done, cause NOT yet pinpointed).** Applying
+the same "same terminal, what differs in ET" logic to the actual logs: the one real
+raw-SSH-via-`TerminalScreen` session in the log (a `DEGRADE(optedOut)` host) DID scroll,
+`drag-begin`/`drag-move`/`fling` ×11/56/118, `mode -> appOwnsInput`, `selectionPan
+subordinated`. The ET session had ZERO of those. So the same `TerminalScreen` scrolls
+under raw SSH and produces no gesture activity under ET. Emulator state was NOT the
+difference: the ET session stayed `.localScroll`, `isScrollEnabled=true`, with no
+mouse-reporting or alt-screen (`?1049`) sequences, so the terminal was in the plain
+scrollable state, exactly like a raw shell.
 
-**Approach:** implement Issue 2 first, then RE-TEST scroll on device with all categories
-on BEFORE writing an Issue 3 code fix. Two outcomes:
-- If scroll works after the inset: Issue 3 was a downstream symptom of Issue 2; done.
-- If scroll still dead: root-cause with the fresh capture (the `handlePan`/native-scroll
-  arbitration decision that never logged), likely a recognizer-arbitration issue where
-  the system text-interaction stack or a stray pan eats the vertical drag before SwiftTerm's
-  native scroll pan begins (cf. `PaneTerminalView` lines 61-78, the
-  `editingInteractionConfiguration = .none` history, and `disableStraySwiftTermPans` /
-  `subordinateSelectionPan`). Fix in `TerminalScreen` / `TerminalGestureController`.
+**Why the current logs cannot name the culprit.** The instrumentation that identifies which
+recognizer wins a touch (`observeRecognizerState` -> `gr-observe <kind>`, and the native-pan
+target) is attached **lazily, only from inside `beginDrag`** (`TerminalGestureController`
+~line 435/441). `beginDrag` runs only when OUR pan or an alt-screen drag fires, never for a
+plain `.localScroll` vertical scroll. On ET (pure `.localScroll`, only typed + swiped),
+that path never ran, so we were never listening to the native scroll pan. Zero
+`gr:scrollPan`/`gr-observe` logs therefore means "not observed," not "did not fire." This
+is the exact failure class the code comments flag (`TerminalGestureController` 187-204,
+469-471): SwiftTerm's LAZILY-created selection/mouse pan (or the system text-interaction
+stack) can pre-empt the native scroll pan on a fresh pane whose FIRST gesture is a scroll,
+before any selection/tap has run the subordination.
 
-Do NOT write a speculative Issue 3 fix before the post-Issue-2 device re-test. This spec
-commits to the diagnosis + the gate, not a specific Issue 3 code change.
+**Decision: ship an INSTRUMENTATION task (Task 3), not a speculative fix.** Attach
+`observeRecognizerState` to the native scroll pan (and all non-ours recognizers) ONCE at
+mount (in `installOurRecognizers`), so the very first ET swipe is observed. Then one device
+swipe yields the decisive `gr-observe <kind>` line telling us exactly which recognizer eats
+the touch. The Issue 3 code fix follows from that trace, in a later build, with certainty.
+Issue 2's inset may ALSO change scroll behavior; the same retest captures both. Do NOT write
+an Issue 3 code fix before that trace exists.
 
 ## Scope and ordering
 
-1. **Issue 2** (raw keybar inset) first, it is the highest-impact and likely subsumes 3.
-2. **Issue 3** re-test after Issue 2; fix only if still broken (own task, own root-cause).
-3. **Issue 1** (exit flash) folded in, small and independent.
+1. **Issue 1** (exit flash) folded in, small and independent.
+2. **Issue 2** (raw keybar inset), the highest-impact geometry fix.
+3. **Issue 3 instrumentation** (attach the recognizer observer at mount), NOT a fix, so the
+   next device swipe pinpoints which recognizer eats the touch. The Issue 3 code fix is a
+   later build, gated on that trace.
+4. The device retest captures all three; the trace from #3 decides the follow-up.
 
 All three land in one next-build branch; PR #121's ET-exit fix remains its own commit
 history but the exit-flash fix (Issue 1) can be committed on the same branch since it is a
