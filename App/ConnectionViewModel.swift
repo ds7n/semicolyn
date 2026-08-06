@@ -1591,6 +1591,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             return
         }
         teardown()
+        etUserDisconnecting = false   // fresh connection: clear any prior user-disconnect guard
         state = .connecting
         degraded = nil
         let addr = "\(host):\(port.isEmpty ? "22" : port)"
