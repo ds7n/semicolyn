@@ -445,7 +445,14 @@ struct SessionView: View {
         NavigationStack {
             VStack(spacing: 20) {
                 switch vm.state {
-                case .idle, .connecting:
+                case .idle:
+                    // Transient state on the way OUT (a clean exit / disconnect sets
+                    // .idle, then .onChange fires dismiss()). Render nothing so the
+                    // connecting spinner does not flash for a frame before the view
+                    // dismisses to the connection list. A fresh pre-connect session is
+                    // .resolving or .connecting, never .idle here, so blank is correct.
+                    Color.clear
+                case .connecting:
                     ProgressView()
                         .scaleEffect(1.5)
                     Text("Connecting to \(host.label)…")
