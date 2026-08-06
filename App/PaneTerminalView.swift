@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import UIKit
 import SwiftTerm
+import SemicolynKit
 
 /// SwiftTerm delivers `bufferActivated` / `mouseModeChanged` (the alt-screen and
 /// mouse-mode transition events) to the `TerminalView` INSTANCE via the emulator
@@ -22,6 +23,15 @@ final class PaneTerminalView: TerminalView {
     /// mouse-mode transition with this view's emulator terminal.
     var onModeRelevantChange: ((ModeRelevantEvent, Terminal) -> Void)?
 
+    /// True ONLY on the raw single-terminal path (`TerminalScreen`), where SwiftUI
+    /// sizes this view to the full slot and the keybar (`inputAccessoryView`) floats
+    /// over the bottom rows. When set, `layoutSubviews` insets the view's frame height
+    /// to the visible area above the keybar so SwiftTerm's row count (frame.height /
+    /// cellHeight) equals the VISIBLE rows and no row renders behind the keybar. Left
+    /// false on the -CC path (`TmuxPaneContainer`), which already sizes each pane frame
+    /// to the usable height externally, so this view must NOT double-inset there.
+    var appliesOwnKeybarInset = false
+
     /// Full geometry on EVERY layout, in BOTH the raw-SSH (`TerminalScreen`) and tmux -CC
     /// (`TmuxPaneContainer`) paths, this is the shared pane view for both. The `.geometry`
     /// diagnostic previously only fired in the -CC container's `layoutSubviews`, so the WORKING
@@ -32,6 +42,36 @@ final class PaneTerminalView: TerminalView {
     /// the surrounding `transport=RAW` vs `geo:layout` lines to know which mode produced it.
     override func layoutSubviews() {
         super.layoutSubviews()
+        // Raw-path keybar inset (device 2026-08-06): SwiftTerm derives its row count
+        // from frame.height / cellHeight (AppleTerminalView v1.15.0), so a full-bounds
+        // frame renders ~kbH/cellH bottom rows behind the floating keybar. Reduce the
+        // frame height to the visible area above the keybar. Mirror TmuxPaneContainer's
+        // usableH: prefer the real keybar top from keyboardLayoutGuide (re-lays-out post
+        // app-switch), else the measured keybar-height reduction. Gated to the raw path;
+        // the -CC path insets its panes externally and must not be double-inset.
+        if appliesOwnKeybarInset {
+            let raw = Double(bounds.height)
+            let guideTop: Double? = {
+                let f = keyboardLayoutGuide.layoutFrame
+                guard f.height > 0, f.width > 0, f.minY.isFinite, f.minY > 0 else { return nil }
+                return Double(f.minY)
+            }()
+            let usableH: Double = {
+                if let guideTop {
+                    return usableHeightFromKeyboardTop(rawHeight: raw, keyboardTopY: guideTop)
+                }
+                let kbH = isFirstResponder
+                    ? Double((inputAccessoryView as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1)
+                    : -1
+                return visibleTerminalHeight(rawHeight: raw, keybarHeight: kbH)
+            }()
+            // Only mutate when it actually differs (a re-entrant pass with height already
+            // == usableH must be a no-op, or layoutSubviews loops). Keep origin/width from
+            // the SwiftUI slot; shrink height only. The keybar floats over the freed region.
+            if usableH > 0, abs(usableH - Double(frame.height)) > 0.5 {
+                frame.size.height = CGFloat(usableH)
+            }
+        }
         guard DebugLog.shared.isEnabled(.geometry) else { return }
         let f = frame, co = contentOffset, cs = contentSize
         let ci = contentInset, ai = adjustedContentInset
