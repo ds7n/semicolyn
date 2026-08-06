@@ -187,7 +187,7 @@ Equivalence partitioning + boundary values + a wiring assertion:
 | Adversarial reason, first-frame seen | `true` | `"\u{1B}[31mboom\u{1B}[0m"` | `.dismiss` (reason ignored on dismiss path) |
 | Pre-connect failure, nil reason | `false` | `nil` | `.handshakeFailed("connection ended")` (sanitize default) |
 | Pre-connect failure, plain reason | `false` | `"handshake rejected"` | `.handshakeFailed("handshake rejected")` |
-| Pre-connect failure, ANSI/control reason | `false` | `"\u{1B}[1mfail\u{1B}[0m\r\n"` | `.handshakeFailed("fail")` (exact sanitized value) |
+| Pre-connect failure, ANSI/control reason | `false` | `"\u{1B}[1mfail\u{1B}[0m\r\n"` | `.handshakeFailed("fail ")` (exact sanitized value; trailing space is the collapsed CRLF) |
 
 The ANSI/control case asserts the **exact** sanitized string to prove sanitization is
 actually wired through the decider (anti-tautology: the test fails if the decider forgets

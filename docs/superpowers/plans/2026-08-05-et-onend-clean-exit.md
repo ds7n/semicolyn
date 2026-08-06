@@ -83,10 +83,11 @@ final class ETExitDecisionTests: XCTestCase {
 
     func testNoFirstFrame_ansiControlReason_failsWithSanitizedValue() {
         // Proves sanitization is wired through the decider: ANSI SGR + trailing
-        // CRLF are stripped, leaving exactly "fail". If the decider forgot to call
-        // sanitizeEndReason, this asserts the wrong (raw) string and fails.
+        // CRLF is collapsed to a single trailing space, leaving exactly "fail ".
+        // If the decider forgot to call sanitizeEndReason, this asserts the wrong
+        // (raw) string and fails.
         XCTAssertEqual(etExitDecision(reason: "\u{1B}[1mfail\u{1B}[0m\r\n", sawFirstFrame: false),
-                       .handshakeFailed("fail"))
+                       .handshakeFailed("fail "))
     }
 }
 ```
