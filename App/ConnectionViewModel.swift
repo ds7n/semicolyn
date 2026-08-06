@@ -169,6 +169,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// graceful dismiss; one that never did is a pre-connect handshake failure.
     /// Reset in `teardown()`.
     private var etFirstFrameSeen = false
+    /// True from the moment the user initiates a disconnect ("x" button -> `disconnect()`)
+    /// until the next connect attempt. ET's `onEnd` is asynchronous and fires AFTER
+    /// `teardown()` has closed the session; without this guard it reads the already-reset
+    /// `etFirstFrameSeen == false` and misroutes a user disconnect to
+    /// `.failed("could not connect: closed")`. `onEnd` checks this FIRST and, when set,
+    /// cleans up silently (no `.failed`, no banner). Reset at connect-start (NOT in
+    /// `teardown()`, which runs before the async `onEnd` and would clear it too early).
+    private var etUserDisconnecting = false
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -495,6 +503,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// survives an explicit disconnect just like a backgrounded one.
     func disconnect() {
         DebugLog.shared.log(.lifecycle, "disconnect: user-initiated teardown → .idle")
+        etUserDisconnecting = true   // ET onEnd (async) must not misfire a .failed
         teardown()
         state = .idle
     }
@@ -992,6 +1001,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onEnd = { [weak self] reason in
             guard let self else { return }
             self.etWatchdog?.cancel(); self.etWatchdog = nil
+            // User-initiated disconnect (the "x" button): `disconnect()` already tore the
+            // session down and drove state to .idle. This async onEnd must NOT run the
+            // failure path (teardown() reset etFirstFrameSeen, so etExitDecision would
+            // wrongly return .handshakeFailed). Clean up silently and return.
+            if self.etUserDisconnecting {
+                DebugLog.shared.log(.transport, "et: onEnd during user disconnect → silent, no banner")
+                self.etSession?.close()
+                self.etSession = nil
+                return
+            }
             switch etExitDecision(reason: reason, sawFirstFrame: self.etFirstFrameSeen) {
             case .dismiss:
                 // A real session ran (first-frame seen) and then ended (clean exit
@@ -1469,6 +1488,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         lastSavedHost = savedHost
         lastPassword = password
         teardown()
+        etUserDisconnecting = false   // fresh connection: clear any prior user-disconnect guard
         state = .connecting
         degraded = nil
         let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
