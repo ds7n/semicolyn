@@ -39,7 +39,9 @@ struct DefaultsEditorView: View {
                 connectionSection
                 jumpChainSection
                 portForwardingSection
-                moshSection
+                if vm.defaults.transport.value == .mosh {
+                    moshSection
+                }
                 tailscaleSection
                 semicolynSection
             }
@@ -412,116 +414,93 @@ struct DefaultsEditorView: View {
     private var moshSection: some View {
         DisclosureGroup(isExpanded: $moshExpanded) {
 
-            // mosh.enabled master toggle
-            Toggle(isOn: Binding(
-                get: { vm.defaults.mosh.value?.enabled ?? false },
-                set: { newEnabled in
-                    var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: false)
-                    cfg.enabled = newEnabled
-                    vm.defaults.mosh = .explicit(cfg)
-                }
-            )) {
-                Text("Enable Mosh by default")
+            LabeledContent {
+                TextField(
+                    "e.g. /usr/local/bin/mosh-server",
+                    text: Binding(
+                        get: { vm.defaults.mosh.value?.serverPath ?? "" },
+                        set: { newPath in
+                            var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: true)
+                            cfg.serverPath = newPath.isEmpty ? nil : newPath
+                            vm.defaults.mosh = .explicit(cfg)
+                        }
+                    )
+                )
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            } label: {
+                Text("Server path")
                     .foregroundStyle(Color(theme.text.primary))
             }
-            .swipeActions {
-                if case .explicit = vm.defaults.mosh {
-                    Button("Clear override") { vm.defaults.mosh = .inherit }
-                        .tint(Color(theme.accent.primary))
-                }
-            }
 
-            // Leaf fields when mosh is explicitly enabled
-            if vm.defaults.mosh.value?.enabled == true {
-
-                LabeledContent {
+            LabeledContent {
+                HStack(spacing: 8) {
                     TextField(
-                        "e.g. /usr/local/bin/mosh-server",
+                        "lo",
                         text: Binding(
-                            get: { vm.defaults.mosh.value?.serverPath ?? "" },
-                            set: { newPath in
+                            get: {
+                                if let range = vm.defaults.mosh.value?.udpPortRange,
+                                   range.count >= 2 { return String(range[0]) }
+                                return ""
+                            },
+                            set: { newLo in
                                 var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: true)
-                                cfg.serverPath = newPath.isEmpty ? nil : newPath
+                                let lo = Int(newLo) ?? 0
+                                let hi = (cfg.udpPortRange?.count ?? 0) >= 2
+                                    ? cfg.udpPortRange![1] : 0
+                                cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
                                 vm.defaults.mosh = .explicit(cfg)
                             }
                         )
                     )
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                } label: {
-                    Text("Server path")
-                        .foregroundStyle(Color(theme.text.primary))
-                }
+                    .keyboardType(.numberPad)
+                    .frame(maxWidth: .infinity)
 
-                LabeledContent {
-                    HStack(spacing: 8) {
-                        TextField(
-                            "lo",
-                            text: Binding(
-                                get: {
-                                    if let range = vm.defaults.mosh.value?.udpPortRange,
-                                       range.count >= 2 { return String(range[0]) }
-                                    return ""
-                                },
-                                set: { newLo in
-                                    var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: true)
-                                    let lo = Int(newLo) ?? 0
-                                    let hi = (cfg.udpPortRange?.count ?? 0) >= 2
-                                        ? cfg.udpPortRange![1] : 0
-                                    cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
-                                    vm.defaults.mosh = .explicit(cfg)
-                                }
-                            )
+                    Text("-")
+                        .foregroundStyle(Color(theme.text.secondary))
+
+                    TextField(
+                        "hi",
+                        text: Binding(
+                            get: {
+                                if let range = vm.defaults.mosh.value?.udpPortRange,
+                                   range.count >= 2 { return String(range[1]) }
+                                return ""
+                            },
+                            set: { newHi in
+                                var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: true)
+                                let lo = (cfg.udpPortRange?.count ?? 0) >= 2
+                                    ? cfg.udpPortRange![0] : 0
+                                let hi = Int(newHi) ?? 0
+                                cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
+                                vm.defaults.mosh = .explicit(cfg)
+                            }
                         )
-                        .keyboardType(.numberPad)
-                        .frame(maxWidth: .infinity)
-
-                        Text("-")
-                            .foregroundStyle(Color(theme.text.secondary))
-
-                        TextField(
-                            "hi",
-                            text: Binding(
-                                get: {
-                                    if let range = vm.defaults.mosh.value?.udpPortRange,
-                                       range.count >= 2 { return String(range[1]) }
-                                    return ""
-                                },
-                                set: { newHi in
-                                    var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: true)
-                                    let lo = (cfg.udpPortRange?.count ?? 0) >= 2
-                                        ? cfg.udpPortRange![0] : 0
-                                    let hi = Int(newHi) ?? 0
-                                    cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
-                                    vm.defaults.mosh = .explicit(cfg)
-                                }
-                            )
-                        )
-                        .keyboardType(.numberPad)
-                        .frame(maxWidth: .infinity)
-                    }
-                } label: {
-                    Text("UDP port range")
-                        .foregroundStyle(Color(theme.text.primary))
+                    )
+                    .keyboardType(.numberPad)
+                    .frame(maxWidth: .infinity)
                 }
+            } label: {
+                Text("UDP port range")
+                    .foregroundStyle(Color(theme.text.primary))
+            }
 
-                Picker(selection: Binding(
-                    get: { vm.defaults.mosh.value?.predictionMode },
-                    set: { newMode in
-                        var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: true)
-                        cfg.predictionMode = newMode
-                        vm.defaults.mosh = .explicit(cfg)
-                    }
-                )) {
-                    Text("Default").tag(MoshPredictionMode?.none)
-                    Text("Adaptive").tag(MoshPredictionMode?.some(.adaptive))
-                    Text("Always").tag(MoshPredictionMode?.some(.always))
-                    Text("Never").tag(MoshPredictionMode?.some(.never))
-                    Text("Experimental").tag(MoshPredictionMode?.some(.experimental))
-                } label: {
-                    Text("Prediction mode")
-                        .foregroundStyle(Color(theme.text.primary))
+            Picker(selection: Binding(
+                get: { vm.defaults.mosh.value?.predictionMode },
+                set: { newMode in
+                    var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: true)
+                    cfg.predictionMode = newMode
+                    vm.defaults.mosh = .explicit(cfg)
                 }
+            )) {
+                Text("Default").tag(MoshPredictionMode?.none)
+                Text("Adaptive").tag(MoshPredictionMode?.some(.adaptive))
+                Text("Always").tag(MoshPredictionMode?.some(.always))
+                Text("Never").tag(MoshPredictionMode?.some(.never))
+                Text("Experimental").tag(MoshPredictionMode?.some(.experimental))
+            } label: {
+                Text("Prediction mode")
+                    .foregroundStyle(Color(theme.text.primary))
             }
 
             // When mosh is inherit (not explicitly configured), show hint
