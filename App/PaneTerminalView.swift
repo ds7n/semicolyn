@@ -50,7 +50,12 @@ final class PaneTerminalView: TerminalView {
         // app-switch), else the measured keybar-height reduction. Gated to the raw path;
         // the -CC path insets its panes externally and must not be double-inset.
         if appliesOwnKeybarInset {
-            let raw = Double(bounds.height)
+            // Read the full slot height from the SwiftUI host (superview), NOT self.bounds:
+            // SwiftTerm's frame setter runs processSizeChange synchronously, so reading the
+            // height we then mutate on the SAME view would ratchet down each pass on the
+            // fallback branch. The superview is SwiftUI-sized and never mutated here, so it
+            // is a stable `raw` (mirrors TmuxPaneContainer reading the container, not the pane).
+            let raw = Double(superview?.bounds.height ?? bounds.height)
             let guideTop: Double? = {
                 let f = keyboardLayoutGuide.layoutFrame
                 guard f.height > 0, f.width > 0, f.minY.isFinite, f.minY > 0 else { return nil }
