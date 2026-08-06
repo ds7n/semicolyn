@@ -94,6 +94,29 @@ final class PaneTerminalView: TerminalView {
             + "accFrameH=\(inputAccessoryView.map { Int($0.frame.height) } ?? -1)")
     }
 
+    /// Issue 3 diagnosis (device 2026-08-06): scrolling is dead on the raw path (ET) but
+    /// works on raw SSH. The mount-time recognizer observer showed ZERO gr-observe on an
+    /// ET swipe, so the native scroll pan never began, the touch is swallowed before any
+    /// observed recognizer sees it, and SwiftTerm's LAZILY-created selection/mouse pans are
+    /// not observed (they don't exist at mount). Log the FULL live recognizer roster and the
+    /// scroll-relevant state at the instant a touch lands, so a device swipe names exactly
+    /// which recognizers are present and enabled (incl. lazy pans) and whether native scroll
+    /// is even eligible. Diagnostic only: calls super, changes no behavior; gated on .gesture.
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        guard DebugLog.shared.isEnabled(.gesture) else { return }
+        let grs = gestureRecognizers ?? []
+        let roster = grs.map { gr -> String in
+            let kind = gr === panGestureRecognizer ? "nativePan"
+                : (gr is UIPanGestureRecognizer ? "pan(\(type(of: gr)))" : "\(type(of: gr))")
+            return "\(kind):en=\(gr.isEnabled ? 1 : 0)/st=\(gr.state.rawValue)"
+        }.joined(separator: " ")
+        DebugLog.shared.log(.gesture,
+            "touch:begin n=\(touches.count) scrollEnabled=\(isScrollEnabled) delaysContent=\(delaysContentTouches) "
+            + "fr=\(isFirstResponder) panEnabled=\(panGestureRecognizer.isEnabled) "
+            + "contentSize=\(Int(contentSize.height)) frameH=\(Int(frame.height)) grCount=\(grs.count) [\(roster)]")
+    }
+
     override func bufferActivated(source: Terminal) {
         super.bufferActivated(source: source)
         onModeRelevantChange?(.bufferChanged, source)

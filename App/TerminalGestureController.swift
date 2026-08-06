@@ -308,20 +308,16 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap, altScreenPan, switchPan, handlePan]
         for gr in ours { view.addGestureRecognizer(gr) }
 
+        // Bug B diagnosis: observe every non-ours recognizer's state so a drag that
+        // never reaches `handleSwitchPan` still logs which recognizer won.
+        observeStrayRecognizers(on: view)
+
         // Tap snappiness: UIScrollView delays content-touch delivery (~150ms) to first
         // decide whether a touch is the start of a scroll, which made single-tap cursor
         // placement feel sluggish. Deliver touches immediately, our tap recognizers no
         // longer wait on the scroll-detection window. (The pan still recognizes a drag
         // fine; only the initial delivery delay is removed.)
         view.delaysContentTouches = false
-
-        // Issue 3 diagnosis (device 2026-08-06): attach the recognizer-state observer at
-        // MOUNT, not only lazily in beginDrag. A plain .localScroll vertical scroll rides
-        // SwiftTerm's native scroll pan and never enters beginDrag, so an ET swipe (pure
-        // .localScroll) was previously unobserved and the log could not name which
-        // recognizer won the touch. This makes the FIRST swipe emit `gr-observe <kind>`.
-        // Diagnostic only: observeRecognizerState just logs; it changes no behavior.
-        observeStrayRecognizers(on: view)
     }
 
     func detach() {
