@@ -7,19 +7,13 @@ import SemicolynKit
 
 extension HostEditorView {
 
-    /// True when mosh is explicitly enabled on this host (`.explicit` with enabled == true).
-    /// Uses the leaf value directly, no resolution against Defaults, because the editor
-    /// works with the draft host's explicit state, not the resolved runtime value.
-    var moshEnabled: Bool {
-        vm.host.mosh.value?.enabled == true
-    }
-
     /// Effective transport for menu gating (tmux-toggle visibility, Mosh section visibility).
-    /// Prefers an explicit selection; falls back to the built-in default (.ssh) so the
-    /// tmux toggle shows by default. Uses the leaf value directly, no resolution against
-    /// Defaults, because the editor works with the draft host's explicit state.
+    /// Resolves against `vm.defaults` (`resolveTransport`) rather than reading the host's
+    /// explicit leaf directly, so a legacy host with `mosh.enabled=true` but no explicit
+    /// `transport` (which still resolves to `.mosh` at connect time via `resolveTransport`'s
+    /// legacy migration) shows the Mosh section instead of silently hiding it.
     var selectedTransport: Transport {
-        vm.host.transport.value ?? .ssh
+        resolveTransport(host: vm.host, defaults: vm.defaults)
     }
 
     /// Connection section: Tier-2 SSH options, all `Inherited<T>`, collapsed by default.
@@ -54,7 +48,7 @@ extension HostEditorView {
             }
 
             // serverAliveInterval, Inherited<Int>
-            // Disabled when mosh is enabled (mosh has its own keepalive).
+            // Disabled when the selected transport is Mosh (mosh has its own keepalive).
             LabeledContent {
                 TextField(
                     serverAliveIntervalPlaceholder,
@@ -69,16 +63,16 @@ extension HostEditorView {
                 Text("Keep-alive interval (s)")
                     .foregroundStyle(Color(theme.text.primary))
             }
-            .disabled(moshEnabled)
+            .disabled(selectedTransport == .mosh)
 
-            if moshEnabled {
+            if selectedTransport == .mosh {
                 Text("Mosh has its own keepalive.")
                     .font(.caption)
                     .foregroundStyle(Color(theme.text.secondary))
             }
 
             // serverAliveCountMax, Inherited<Int>
-            // Disabled when mosh is enabled (mosh has its own keepalive).
+            // Disabled when the selected transport is Mosh (mosh has its own keepalive).
             LabeledContent {
                 TextField(
                     serverAliveCountMaxPlaceholder,
@@ -93,9 +87,9 @@ extension HostEditorView {
                 Text("Keep-alive retries")
                     .foregroundStyle(Color(theme.text.primary))
             }
-            .disabled(moshEnabled)
+            .disabled(selectedTransport == .mosh)
 
-            if moshEnabled {
+            if selectedTransport == .mosh {
                 Text("Mosh has its own keepalive.")
                     .font(.caption)
                     .foregroundStyle(Color(theme.text.secondary))

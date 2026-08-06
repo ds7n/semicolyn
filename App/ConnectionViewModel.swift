@@ -732,29 +732,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// with a banner. Returns true if a Mosh session was attached; false if it fell
     /// back (the caller then runs the existing tmux/raw branch).
     private func attachMoshIfPossible(conn: Connection, host: Host, defaults: Defaults) async -> Bool {
-        // resolveMoshEnabled reads the leaf-independent `mosh.enabled` (host
-        // container's leaf, else Defaults container's leaf, else false: see
-        // `resolveLeaf`). Log both containers' explicit-vs-inherit state so a
-        // device trace shows which one actually drove the decision.
-        let hostMoshExplicit: Bool
-        if case .explicit = host.mosh { hostMoshExplicit = true } else { hostMoshExplicit = false }
-        let defaultsMoshExplicit: Bool
-        if case .explicit = defaults.mosh { defaultsMoshExplicit = true } else { defaultsMoshExplicit = false }
-        guard resolveMoshEnabled(host: host, defaults: defaults) else {
-            DebugLog.shared.log(.connect, decisionLine(
-                "connect:mosh-decision",
-                inputs: [("hostMoshExplicit", "\(hostMoshExplicit)"),
-                         ("defaultsMoshExplicit", "\(defaultsMoshExplicit)")],
-                outputs: [("enabled", "false")],
-                reason: hostMoshExplicit ? "host-explicit-off" : "defaults-off-or-unset"))
-            return false
-        }
-        DebugLog.shared.log(.connect, decisionLine(
-            "connect:mosh-decision",
-            inputs: [("hostMoshExplicit", "\(hostMoshExplicit)"),
-                     ("defaultsMoshExplicit", "\(defaultsMoshExplicit)")],
-            outputs: [("enabled", "true")],
-            reason: hostMoshExplicit ? "host-explicit-on" : "defaults-on"))
+        // Both call sites are already inside `case .mosh:` of a `switch
+        // resolveTransport(host:defaults:)`, so the transport picker (or its
+        // legacy mosh.enabled migration) already decided Mosh is the transport
+        // for this connection. No separate `resolveMoshEnabled` gate here.
+        DebugLog.shared.log(.connect, "connect:mosh chosen by transport picker (resolveTransport==.mosh)")
         // Effective config for the argv (port range, server path, prediction mode).
         // resolveOptional honors Inherited three-state (NOT host.mosh.value).
         let cfg = resolveOptional(host.mosh, defaults.mosh) ?? MoshConfig(enabled: true)
