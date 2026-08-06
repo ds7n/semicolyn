@@ -164,6 +164,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// True once a terminal ET handler (watchdog timeout OR onFirstFrame OR onEnd)
     /// has resolved this session. Guards against double-resolution.
     private var etResolved = false
+    /// True once ET's `onFirstFrame` fired for the current session. Drives
+    /// `etExitDecision`: a session that reached first-frame and then ended is a
+    /// graceful dismiss; one that never did is a pre-connect handshake failure.
+    /// Reset in `teardown()`.
+    private var etFirstFrameSeen = false
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -505,6 +510,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         moshFallback = nil
         etWatchdog?.cancel(); etWatchdog = nil
         etResolved = false
+        etFirstFrameSeen = false
         etSession?.close()
         etSession = nil
         tmux?.stop()
@@ -975,6 +981,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onFirstFrame = { [weak self] in
             guard let self, !self.etResolved else { return }
             self.etResolved = true
+            self.etFirstFrameSeen = true
             self.etWatchdog?.cancel(); self.etWatchdog = nil
             DebugLog.shared.log(.transport, "et: onFirstFrame, stream up; watchdog cancelled")
             self.state = .shell
@@ -984,16 +991,28 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         sess.onEnd = { [weak self] reason in
             guard let self else { return }
-            let safe = sanitizeEndReason(reason)
-            DebugLog.shared.log(.transport, "et: session ended (\(safe))")
             self.etWatchdog?.cancel(); self.etWatchdog = nil
-            self.etSession?.close()      // ALWAYS release the retained ctx + tear down
-            self.etSession = nil         // ALWAYS drop the ref
-            // Only the outcome transition is resolve-once: if the connect already
-            // resolved (success .shell, or the watchdog timeout), a natural/late end
-            // must NOT clobber that state.
-            if !self.etResolved {
+            switch etExitDecision(reason: reason, sawFirstFrame: self.etFirstFrameSeen) {
+            case .dismiss:
+                // A real session ran (first-frame seen) and then ended (clean exit
+                // or mid-session drop). Return to the connection list gracefully:
+                // teardown() closes+nils etSession, cancels the watchdog, and resets
+                // every flag; .idle dismisses the view. No error banner.
+                DebugLog.shared.log(.transport, "et: session ended (first-frame seen) → dismiss to list")
+                self.teardown()
+                self.state = .idle
+            case .handshakeFailed(let safe):
+                // First-frame never fired: a pre-connect failure. If the watchdog
+                // already resolved this session to a timeout .failed, a late onEnd
+                // (enqueued before the callback was niled) must NOT clobber it.
+                if self.etResolved {
+                    DebugLog.shared.log(.transport, "et: onEnd after watchdog already resolved → ignored")
+                    return
+                }
                 self.etResolved = true
+                DebugLog.shared.log(.transport, "et: session ended pre-first-frame (\(safe)) → .failed")
+                self.etSession?.close()   // release the retained ctx + tear down
+                self.etSession = nil
                 self.state = .failed(etFailureMessage(.handshakeFailed(reason: safe)))
             }
         }
