@@ -538,9 +538,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         flushPredictor()
         // Drop the render + harvest closures so late bytes from the old session
         // can't feed a torn-down terminal view or a cleared predictor. Both are
-        // re-installed when the next shell opens.
+        // re-installed when the next shell opens. `onExit` goes too: a user
+        // disconnect closes the PTY, whose async exit callback would otherwise
+        // fire `output.onExit → .failed("Session closed")` right after `state`
+        // flips to `.idle`, flashing a bogus failure banner on the way out. It
+        // is re-installed at every connect entry point, so clearing it here is
+        // safe. (Mirrors the ET path's `etUserDisconnecting` guard for the raw/
+        // SSH transport, which routes exits through this closure instead.)
         output.onBytes = nil
         output.onHarvestBytes = nil
+        output.onExit = nil
         predictor = nil
         // Deregister from the active-purge slot (the VM may be reused on reconnect
         // without deallocating, so the weak ref alone isn't enough).
