@@ -177,11 +177,31 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // `syncYDispFromContentOffset` (gated on `isTracking`) never updates scrollback.
         // We keep native scroll enabled; the window-switch decision is driven by our own
         // `switchPan` recognizer instead (see `handleSwitchPan`).
+        //
+        // EQUALLY CRUCIAL (device build 116, 2026-08-07): keeping ONLY `panGestureRecognizer`
+        // is not enough. `UIScrollView` drives scrolling through a *cluster* of internal
+        // recognizers, not the pan alone, chiefly `UIScrollViewDelayedTouchesBeganGesture-
+        // Recognizer`, which promotes a settled touch into scroll tracking. Disabling it
+        // left `nativePan` enabled but STUCK at `.possible` (state 0): every swipe logged a
+        // `touch:begin` yet ZERO `scroll-trace`, the pan never `.began`, nothing scrolled.
+        // So preserve every recognizer the scroll view owns (class prefixed `UIScrollView`),
+        // not just the pan. These are SwiftTerm-external UIKit machinery; ours and
+        // SwiftTerm's own tap/selection recognizers do not carry that prefix.
         for gr in view.gestureRecognizers ?? []
-        where !ours.contains(gr) && gr !== view.panGestureRecognizer {
+        where !ours.contains(gr) && gr !== view.panGestureRecognizer && !Self.isScrollViewInternal(gr) {
             gr.isEnabled = false
         }
         DebugLog.shared.log(.gesture, "sweep: disabled \(view.gestureRecognizers?.filter { !$0.isEnabled }.count ?? 0) recognizers; nativePan kept=\(view.panGestureRecognizer.isEnabled)")
+    }
+
+    /// True when `gr` is one of `UIScrollView`'s own internal support recognizers
+    /// (class name prefixed `UIScrollView`, e.g. `UIScrollViewDelayedTouchesBegan-
+    /// GestureRecognizer`, `UIScrollViewKnobLongPressGestureRecognizer`). The scroll
+    /// view needs the whole cluster, not just `panGestureRecognizer`, to route a drag
+    /// into scroll tracking, so the sweep must leave every one of them enabled. Matched
+    /// by class-name prefix because these types are private (no public symbol to compare).
+    static func isScrollViewInternal(_ gr: UIGestureRecognizer) -> Bool {
+        String(describing: type(of: gr)).hasPrefix("UIScrollView")
     }
 
     /// Disable SwiftTerm's LAZILY-created selection/mouse pan recognizers.
