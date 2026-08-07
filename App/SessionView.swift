@@ -180,6 +180,15 @@ struct SessionView: View {
                         // Keybar + predictor now mount as the terminal's inputAccessoryView
                         // (see TerminalScreen); no .safeAreaInset keybar here anymore.
                 }
+            } else if case .idle = vm.state {
+                // Teardown in progress: a clean disconnect/exit sets `.idle`, and the
+                // `.onChange` below fires `dismiss()`. Render a BARE `Color.clear` (NOT
+                // `statusView`, which wraps a NavigationStack + toolbar) so no second
+                // "screen" paints for the frame(s) between `.idle` and the cover
+                // finishing its dismiss animation. Device build 118: users saw a blank
+                // nav-bar screen flash on ET/raw exit; `statusView`'s own `.idle` ->
+                // `Color.clear` case still painted the surrounding NavigationStack chrome.
+                Color.clear
             } else if resolving {
                 // Resolution not yet run, show a neutral spinner with no label
                 // so the "Connecting to <host>…" text never flashes before we

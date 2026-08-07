@@ -317,22 +317,20 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // The mount then toggles it on mode transitions via `setSwitchPanEnabled`.
         switchPan.isEnabled = true
 
-        // OUR selection-handle drag pan. Always enabled (like the taps): `.began` hit-tests
-        // the handle circles and CANCELS immediately when the touch isn't on one (see
-        // `handleHandlePan`), so a plain content drag is unaffected and falls through to
-        // whichever of `scrollPan`/`switchPan` would otherwise have won. Mutual exclusion
-        // with both is the MIRROR IMAGE of how `subordinateSelectionPan` subordinates
-        // SwiftTerm's own (unwanted) selection pan: there the scroll pan must win, so the
-        // selection pan is required to fail first; here `handlePan` is the one we WANT to
-        // win when a handle is grabbed, so `scrollPan`/`switchPan` are required to fail
-        // against IT instead (see `gestureRecognizer(_:shouldRequireFailureOf:)` below).
-        // `shouldRecognizeSimultaneouslyWith` also excludes the pairing so they never
-        // co-recognize (same non-simultaneity guarantee `.selectionPan` gets from the Kit
-        // policy, applied here directly since `handlePan` has no Kit `GestureRole` case,
-        // deviation noted in the task report).
+        // OUR selection-handle drag pan. DISABLED at rest, enabled ONLY while a selection is
+        // active (see `setHandlePanEnabled`, driven by `applyInclusiveSelection` /
+        // clear-selection). Device build 118 proved why "always enabled + self-cancel" was
+        // wrong: with no selection, handlePan still RECOGNIZED the swipe (`scroll-trace
+        // pan=handlePan state=1 .began -> state=4 .ended`), so it OWNED the drag and the
+        // native scroll pan never fired at all. The `.began` self-cancel (isEnabled bounce)
+        // couldn't help because by then handlePan had already won the touch. Keeping it out
+        // of the recognizer graph entirely when there's nothing to grab lets the native pan
+        // own every content drag cleanly. When a selection IS active it is enabled and its
+        // `.began` hit-tests the handle circles; a non-handle touch still self-cancels so a
+        // drag off the handles falls through to scroll.
         handlePan = UIPanGestureRecognizer(target: self, action: #selector(handleHandlePan(_:)))
         handlePan.delegate = self
-        handlePan.isEnabled = true
+        handlePan.isEnabled = false
 
         ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap, altScreenPan, switchPan, handlePan]
         for gr in ours { view.addGestureRecognizer(gr) }
@@ -872,6 +870,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         case .active(.clearSelection):
             callbacks.clearSelection()
             storedStart = nil; storedEnd = nil
+            setHandlePanDisabled()   // no selection left → handle pan must not eat content drags
             DebugLog.shared.log(.gesture, "gesture:singleTap action=clear")
         case .active(.placeCursor):
             let target = cell(at: p, in: view)
@@ -959,6 +958,16 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                                end: Position(col: end.col + 1, row: end.row))
         storedStart = start
         storedEnd = end
+        // A selection now exists → arm the handle-drag pan so its circles can be grabbed.
+        // It stays disabled otherwise so it never competes with the native scroll pan.
+        handlePan?.isEnabled = true
+    }
+
+    /// Disable the handle-drag pan when no selection remains, so it drops out of the
+    /// recognizer graph and the native scroll pan owns every content drag. Called wherever
+    /// the selection is cleared. Idempotent.
+    private func setHandlePanDisabled() {
+        handlePan?.isEnabled = false
     }
 
     private func presentEditMenu(at point: CGPoint, in view: TerminalView) {
