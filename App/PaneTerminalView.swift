@@ -56,19 +56,34 @@ final class PaneTerminalView: TerminalView {
             // fallback branch. The superview is SwiftUI-sized and never mutated here, so it
             // is a stable `raw` (mirrors TmuxPaneContainer reading the container, not the pane).
             let raw = Double(superview?.bounds.height ?? bounds.height)
+            // `keyboardLayoutGuide.layoutFrame` is in THIS view's coordinate space, but on
+            // the raw path this scroll view is the SwiftUI representable's leaf and its
+            // coordinate space extends into the full window, so the guide top comes back in
+            // window space (device build 117: guideTop=1001 while raw=499). That out-of-range
+            // value tripped `usableHeightFromKeyboardTop`'s fail-open guard (1001 > 499),
+            // so the inset was NEVER applied and ~5 rows rendered behind the keybar. Only
+            // trust the guide when it is a valid interior value of THIS slot (<= raw); its
+            // real use is the post-app-switch re-layout the measured height misses.
             let guideTop: Double? = {
                 let f = keyboardLayoutGuide.layoutFrame
-                guard f.height > 0, f.width > 0, f.minY.isFinite, f.minY > 0 else { return nil }
+                guard f.height > 0, f.width > 0, f.minY.isFinite, f.minY > 0, Double(f.minY) <= raw else { return nil }
                 return Double(f.minY)
             }()
+            // The measured keybar height (`accH`) is reliable and already in the right units;
+            // prefer it whenever the pane is first responder (the keybar is showing). Fall
+            // back to the in-range guide top only when there is no measured height. This
+            // inverts the old guide-first priority, which lost to the bogus window-space top.
             let usableH: Double = {
-                if let guideTop {
-                    return usableHeightFromKeyboardTop(rawHeight: raw, keyboardTopY: guideTop)
-                }
                 let kbH = isFirstResponder
                     ? Double((inputAccessoryView as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1)
                     : -1
-                return visibleTerminalHeight(rawHeight: raw, keybarHeight: kbH)
+                if kbH > 0 {
+                    return visibleTerminalHeight(rawHeight: raw, keybarHeight: kbH)
+                }
+                if let guideTop {
+                    return usableHeightFromKeyboardTop(rawHeight: raw, keyboardTopY: guideTop)
+                }
+                return raw
             }()
             // Only mutate when it actually differs (a re-entrant pass with height already
             // == usableH must be a no-op, or layoutSubviews loops). Keep origin/width from
@@ -83,10 +98,11 @@ final class PaneTerminalView: TerminalView {
             // ran and the values, to name why the reduction is not taken.
             if DebugLog.shared.isEnabled(.geometry) {
                 let accH = (inputAccessoryView as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1
+                let branch = (isFirstResponder && accH > 0) ? "accH" : (guideTop != nil ? "guide" : "none")
                 DebugLog.shared.log(.geometry,
                     "keybar-inset raw=\(String(format: "%.0f", raw)) "
                     + "guideTop=\(guideTop.map { String(format: "%.0f", $0) } ?? "nil") "
-                    + "branch=\(guideTop != nil ? "guide" : "accH") "
+                    + "branch=\(branch) "
                     + "fr=\(isFirstResponder) accH=\(String(format: "%.0f", accH)) "
                     + "usableH=\(String(format: "%.0f", usableH)) frameH=\(String(format: "%.0f", Double(frame.height))) "
                     + "applied=\(willApply)")
