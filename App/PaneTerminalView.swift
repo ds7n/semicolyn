@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import UIKit
 import SwiftTerm
+import SemicolynKit
 
 /// SwiftTerm delivers `bufferActivated` / `mouseModeChanged` (the alt-screen and
 /// mouse-mode transition events) to the `TerminalView` INSTANCE via the emulator
@@ -22,6 +23,15 @@ final class PaneTerminalView: TerminalView {
     /// mouse-mode transition with this view's emulator terminal.
     var onModeRelevantChange: ((ModeRelevantEvent, Terminal) -> Void)?
 
+    /// True ONLY on the raw single-terminal path (`TerminalScreen`), where SwiftUI
+    /// sizes this view to the full slot and the keybar (`inputAccessoryView`) floats
+    /// over the bottom rows. When set, `layoutSubviews` insets the view's frame height
+    /// to the visible area above the keybar so SwiftTerm's row count (frame.height /
+    /// cellHeight) equals the VISIBLE rows and no row renders behind the keybar. Left
+    /// false on the -CC path (`TmuxPaneContainer`), which already sizes each pane frame
+    /// to the usable height externally, so this view must NOT double-inset there.
+    var appliesOwnKeybarInset = false
+
     /// Full geometry on EVERY layout, in BOTH the raw-SSH (`TerminalScreen`) and tmux -CC
     /// (`TmuxPaneContainer`) paths, this is the shared pane view for both. The `.geometry`
     /// diagnostic previously only fired in the -CC container's `layoutSubviews`, so the WORKING
@@ -32,6 +42,72 @@ final class PaneTerminalView: TerminalView {
     /// the surrounding `transport=RAW` vs `geo:layout` lines to know which mode produced it.
     override func layoutSubviews() {
         super.layoutSubviews()
+        // Raw-path keybar inset (device 2026-08-06): SwiftTerm derives its row count
+        // from frame.height / cellHeight (AppleTerminalView v1.15.0), so a full-bounds
+        // frame renders ~kbH/cellH bottom rows behind the floating keybar. Reduce the
+        // frame height to the visible area above the keybar. Mirror TmuxPaneContainer's
+        // usableH: prefer the real keybar top from keyboardLayoutGuide (re-lays-out post
+        // app-switch), else the measured keybar-height reduction. Gated to the raw path;
+        // the -CC path insets its panes externally and must not be double-inset.
+        if appliesOwnKeybarInset {
+            // Read the full slot height from the SwiftUI host (superview), NOT self.bounds:
+            // SwiftTerm's frame setter runs processSizeChange synchronously, so reading the
+            // height we then mutate on the SAME view would ratchet down each pass on the
+            // fallback branch. The superview is SwiftUI-sized and never mutated here, so it
+            // is a stable `raw` (mirrors TmuxPaneContainer reading the container, not the pane).
+            let raw = Double(superview?.bounds.height ?? bounds.height)
+            // `keyboardLayoutGuide.layoutFrame` is in THIS view's coordinate space, but on
+            // the raw path this scroll view is the SwiftUI representable's leaf and its
+            // coordinate space extends into the full window, so the guide top comes back in
+            // window space (device build 117: guideTop=1001 while raw=499). That out-of-range
+            // value tripped `usableHeightFromKeyboardTop`'s fail-open guard (1001 > 499),
+            // so the inset was NEVER applied and ~5 rows rendered behind the keybar. Only
+            // trust the guide when it is a valid interior value of THIS slot (<= raw); its
+            // real use is the post-app-switch re-layout the measured height misses.
+            let guideTop: Double? = {
+                let f = keyboardLayoutGuide.layoutFrame
+                guard f.height > 0, f.width > 0, f.minY.isFinite, f.minY > 0, Double(f.minY) <= raw else { return nil }
+                return Double(f.minY)
+            }()
+            // The measured keybar height (`accH`) is reliable and already in the right units;
+            // prefer it whenever the pane is first responder (the keybar is showing). Fall
+            // back to the in-range guide top only when there is no measured height. This
+            // inverts the old guide-first priority, which lost to the bogus window-space top.
+            let usableH: Double = {
+                let kbH = isFirstResponder
+                    ? Double((inputAccessoryView as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1)
+                    : -1
+                if kbH > 0 {
+                    return visibleTerminalHeight(rawHeight: raw, keybarHeight: kbH)
+                }
+                if let guideTop {
+                    return usableHeightFromKeyboardTop(rawHeight: raw, keyboardTopY: guideTop)
+                }
+                return raw
+            }()
+            // Only mutate when it actually differs (a re-entrant pass with height already
+            // == usableH must be a no-op, or layoutSubviews loops). Keep origin/width from
+            // the SwiftUI slot; shrink height only. The keybar floats over the freed region.
+            let willApply = usableH > 0 && abs(usableH - Double(frame.height)) > 0.5
+            if willApply {
+                frame.size.height = CGFloat(usableH)
+            }
+            // Diagnostic (device 2026-08-07): settled raw panes render full-height (grid
+            // fills the whole slot, ~5 rows hide behind the keybar), so `usableH` is
+            // coming back == raw and the inset is skipped. Record exactly which branch
+            // ran and the values, to name why the reduction is not taken.
+            if DebugLog.shared.isEnabled(.geometry) {
+                let accH = (inputAccessoryView as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1
+                let branch = (isFirstResponder && accH > 0) ? "accH" : (guideTop != nil ? "guide" : "none")
+                DebugLog.shared.log(.geometry,
+                    "keybar-inset raw=\(String(format: "%.0f", raw)) "
+                    + "guideTop=\(guideTop.map { String(format: "%.0f", $0) } ?? "nil") "
+                    + "branch=\(branch) "
+                    + "fr=\(isFirstResponder) accH=\(String(format: "%.0f", accH)) "
+                    + "usableH=\(String(format: "%.0f", usableH)) frameH=\(String(format: "%.0f", Double(frame.height))) "
+                    + "applied=\(willApply)")
+            }
+        }
         guard DebugLog.shared.isEnabled(.geometry) else { return }
         let f = frame, co = contentOffset, cs = contentSize
         let ci = contentInset, ai = adjustedContentInset
@@ -47,6 +123,29 @@ final class PaneTerminalView: TerminalView {
             + "fr=\(isFirstResponder) clip=\(clipsToBounds) "
             + "accH=\(String(format: "%.0f", (inputAccessoryView as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1)) "
             + "accFrameH=\(inputAccessoryView.map { Int($0.frame.height) } ?? -1)")
+    }
+
+    /// Issue 3 diagnosis (device 2026-08-06): scrolling is dead on the raw path (ET) but
+    /// works on raw SSH. The mount-time recognizer observer showed ZERO gr-observe on an
+    /// ET swipe, so the native scroll pan never began, the touch is swallowed before any
+    /// observed recognizer sees it, and SwiftTerm's LAZILY-created selection/mouse pans are
+    /// not observed (they don't exist at mount). Log the FULL live recognizer roster and the
+    /// scroll-relevant state at the instant a touch lands, so a device swipe names exactly
+    /// which recognizers are present and enabled (incl. lazy pans) and whether native scroll
+    /// is even eligible. Diagnostic only: calls super, changes no behavior; gated on .gesture.
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        guard DebugLog.shared.isEnabled(.gesture) else { return }
+        let grs = gestureRecognizers ?? []
+        let roster = grs.map { gr -> String in
+            let kind = gr === panGestureRecognizer ? "nativePan"
+                : (gr is UIPanGestureRecognizer ? "pan(\(type(of: gr)))" : "\(type(of: gr))")
+            return "\(kind):en=\(gr.isEnabled ? 1 : 0)/st=\(gr.state.rawValue)"
+        }.joined(separator: " ")
+        DebugLog.shared.log(.gesture,
+            "touch:begin n=\(touches.count) scrollEnabled=\(isScrollEnabled) delaysContent=\(delaysContentTouches) "
+            + "fr=\(isFirstResponder) panEnabled=\(panGestureRecognizer.isEnabled) "
+            + "contentSize=\(Int(contentSize.height)) frameH=\(Int(frame.height)) grCount=\(grs.count) [\(roster)]")
     }
 
     override func bufferActivated(source: Terminal) {
