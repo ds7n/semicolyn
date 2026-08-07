@@ -3,16 +3,16 @@
 import SwiftUI
 import SemicolynKit
 
-/// Single-scrollable host editor — handles both create and edit.
+/// Single-scrollable host editor, handles both create and edit.
 ///
 /// Sections always expanded for v1: Basics (label, hostName, user, port) and
-/// Auth (identities pill row + password toggle). Sections 3–9 are deferred to
+/// Auth (identities pill row + password toggle). Sections 3-9 are deferred to
 /// later tasks. Validation spine is wired to `HostFormValidation` via
 /// `HostEditorViewModel`; soft-block issues render as non-blocking inline banners.
 struct HostEditorView: View {
     // `vm`/`theme` are accessed from the section extensions in
     // HostEditorView+Sections (a separate file), so they must be at least
-    // `internal` — Swift `private` is file-scoped and would not compile there.
+    // `internal`, Swift `private` is file-scoped and would not compile there.
     @StateObject var vm: HostEditorViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) var theme
@@ -25,17 +25,17 @@ struct HostEditorView: View {
     /// Tracks whether the user has changed anything since the form opened.
     private let originalHost: Host
 
-    // Fix 2 — subtitle tracking state
+    // Fix 2, subtitle tracking state
     /// True after the first successful save in this editing session.
     @State private var savedOnce = false
 
-    // Fix 4 — touched tracking (gate required-field banners)
+    // Fix 4, touched tracking (gate required-field banners)
     /// True once the user has interacted with the Label field.
     @State private var labelTouched = false
     /// True once the user has interacted with the Hostname field.
     @State private var hostNameTouched = false
 
-    // Task 4 — collapsible section expansion state
+    // Task 4, collapsible section expansion state
     /// Whether the Connection section is expanded.
     @State var connectionExpanded = false
     /// Whether the Jump chain section is expanded.
@@ -43,7 +43,7 @@ struct HostEditorView: View {
     /// Whether the Port forwarding section is expanded.
     @State var portForwardingExpanded = false
 
-    // Task 5 — collapsible section expansion state
+    // Task 5, collapsible section expansion state
     /// Whether the Mosh section is expanded.
     @State var moshExpanded = false
     /// Whether the Tailscale section is expanded.
@@ -51,11 +51,11 @@ struct HostEditorView: View {
     /// Whether the Semicolyn behavior section is expanded.
     @State var semicolynExpanded = false
 
-    // Task 6 — identity picker state
+    // Task 6, identity picker state
     /// Whether the inline identity picker half-sheet is presented.
     @State private var showingIdentityPicker = false
 
-    // Task 5 — delete flow state
+    // Task 5, delete flow state
     /// Whether the delete confirmation sheet is presented.
     @State var showingDeleteConfirm = false
     /// Non-nil when a delete was refused because the host is a referenced jumphost.
@@ -87,7 +87,7 @@ struct HostEditorView: View {
         vm.isNew ? "New host" : vm.host.label.isEmpty ? "Edit host" : vm.host.label
     }
 
-    // Fix 2 — subtitle derived from savedOnce + hasChanges
+    // Fix 2, subtitle derived from savedOnce + hasChanges
     private var subtitle: String {
         if !savedOnce { return "unsaved" }
         if hasChanges { return "unsaved changes" }
@@ -104,14 +104,16 @@ struct HostEditorView: View {
                 connectionSection
                 jumpChainSection
                 portForwardingSection
-                moshSection
+                if selectedTransport == .mosh {
+                    moshSection
+                }
                 tailscaleSection
                 semicolynSection
                 if !vm.isNew {
                     deleteSection
                 }
             }
-            // Fix 2 — principal toolbar item replaces .navigationTitle for
+            // Fix 2, principal toolbar item replaces .navigationTitle for
             // reliable iOS subtitle rendering (NavigationStack on iOS 16+).
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
@@ -124,7 +126,7 @@ struct HostEditorView: View {
                 syncSectionAutoExpand()
             }
         }
-        // Task 6 — inline identity picker half-sheet
+        // Task 6, inline identity picker half-sheet
         .sheet(isPresented: $showingIdentityPicker) {
             IdentityPickerSheet { identity in
                 var ids = vm.host.identities.value ?? []
@@ -144,7 +146,7 @@ struct HostEditorView: View {
             Button("Discard changes", role: .destructive) { InputClickFeedback.play(); dismiss() }
             Button("Keep editing", role: .cancel) {}
         }
-        // Task 5 — delete confirmation sheet
+        // Task 5, delete confirmation sheet
         .confirmationDialog(
             "Delete '\(vm.host.label)'?",
             isPresented: $showingDeleteConfirm,
@@ -155,7 +157,7 @@ struct HostEditorView: View {
         } message: {
             Text("This removes the host config from your library. The action cannot be undone.")
         }
-        // Task 5 — delete refusal alert (host is referenced as jumphost)
+        // Task 5, delete refusal alert (host is referenced as jumphost)
         .alert(
             "Cannot delete '\(vm.host.label)'.",
             isPresented: Binding(
@@ -171,7 +173,7 @@ struct HostEditorView: View {
                 Text("Used as jumphost by: \(names). Remove these references first.")
             }
         }
-        // Fix 1 — duplicate-label soft warning alert (save already succeeded)
+        // Fix 1, duplicate-label soft warning alert (save already succeeded)
         .alert(
             "Saved",
             isPresented: Binding(
@@ -189,7 +191,7 @@ struct HostEditorView: View {
                 Text(warning)
             }
         }
-        // Generic error alert — unexpected save or delete failures
+        // Generic error alert, unexpected save or delete failures
         .alert("Error", isPresented: Binding(
             get: { genericError != nil },
             set: { if !$0 { genericError = nil } }
@@ -214,7 +216,7 @@ struct HostEditorView: View {
                 }
             }
         }
-        // Fix 2 — principal VStack title + subtitle (iOS-reliable approach)
+        // Fix 2, principal VStack title + subtitle (iOS-reliable approach)
         ToolbarItem(placement: .principal) {
             VStack(spacing: 2) {
                 Text(title)
@@ -235,7 +237,7 @@ struct HostEditorView: View {
             .foregroundStyle(
                 vm.canSave
                     ? Color(theme.accent.primary)
-                    : Color(theme.text.secondary)  // Fix 5 — was theme.text.muted
+                    : Color(theme.text.secondary)  // Fix 5, was theme.text.muted
             )
         }
     }
@@ -250,7 +252,7 @@ struct HostEditorView: View {
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .onChange(of: vm.host.label) { _, _ in
-                        labelTouched = true  // Fix 4 — mark touched on first edit
+                        labelTouched = true  // Fix 4, mark touched on first edit
                         vm.revalidate()
                     }
             } label: {
@@ -273,7 +275,7 @@ struct HostEditorView: View {
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
                     .onChange(of: vm.host.hostName) { _, _ in
-                        hostNameTouched = true  // Fix 4 — mark touched on first edit
+                        hostNameTouched = true  // Fix 4, mark touched on first edit
                         vm.revalidate()
                     }
             } label: {
@@ -289,7 +291,7 @@ struct HostEditorView: View {
                 }
             }
 
-            // User (optional — inheritable)
+            // User (optional, inheritable)
             LabeledContent {
                 TextField(
                     userPlaceholder,
@@ -306,7 +308,7 @@ struct HostEditorView: View {
                     .foregroundStyle(Color(theme.text.primary))
             }
 
-            // Port (optional — inheritable)
+            // Port (optional, inheritable)
             LabeledContent {
                 TextField(
                     portPlaceholder,
@@ -323,7 +325,7 @@ struct HostEditorView: View {
             }
 
             // Inline validation banners for Basics fields
-            // Fix 4 — gate required-field banners on touched state
+            // Fix 4, gate required-field banners on touched state
             if labelTouched && hasIssue(.missingLabel) {
                 IssueBanner(message: "Label is required to save.", severity: .hardBlock)
             }
@@ -335,11 +337,11 @@ struct HostEditorView: View {
                     severity: .softBlock
                 )
             }
-            // Fix 4 — gate required-field banners on touched state
+            // Fix 4, gate required-field banners on touched state
             if hostNameTouched && hasIssue(.missingHostName) {
                 IssueBanner(message: "Hostname is required to save.", severity: .hardBlock)
             }
-            // Fix 2 — gate no-user banner: suppress on a fresh untouched new-host form
+            // Fix 2, gate no-user banner: suppress on a fresh untouched new-host form
             if hasNoUserIssue && ((!vm.isNew) || labelTouched || hostNameTouched) {
                 IssueBanner(
                     message: "No user set here or in Defaults. Connecting will require setting a user.",
@@ -392,7 +394,7 @@ struct HostEditorView: View {
                 vm.revalidate()
             }
 
-            // Password row — only visible when toggle is on
+            // Password row, only visible when toggle is on
             if vm.usePassword {
                 LabeledContent {
                     SecureField("Password", text: $vm.passwordText)
@@ -443,7 +445,7 @@ struct HostEditorView: View {
     }
 
     private var portPlaceholder: String {
-        // Fix 3 — only claim Defaults value when one is actually set
+        // Fix 3, only claim Defaults value when one is actually set
         if let defaultPort = defaults.port.value {
             return "Defaults · \(defaultPort)"
         }
@@ -452,7 +454,7 @@ struct HostEditorView: View {
 
     // MARK: - Expansion logic
 
-    /// Sets initial expansion for sections 3–8 per the spec's rules:
+    /// Sets initial expansion for sections 3-8 per the spec's rules:
     /// new host → all collapsed; edit → expand iff the section has a non-default value.
     /// Also applies auto-expand for any hard issue whose section should be visible.
     private func applyInitialExpansion() {
@@ -514,7 +516,7 @@ struct HostEditorView: View {
 
     /// Routes the confirmed delete through `HostStore`. On success, dismisses the
     /// editor (the list reloads via its sheet `onDismiss`). On
-    /// `StoreError.jumpHostInUse`, sets `deleteRefusalReferrers` — the refusal
+    /// `StoreError.jumpHostInUse`, sets `deleteRefusalReferrers`, the refusal
     /// alert is presented by the `.alert` modifier above.
     func performDelete() {
         do {
@@ -523,7 +525,7 @@ struct HostEditorView: View {
         } catch StoreError.jumpHostInUse(let referrers) {
             deleteRefusalReferrers = referrers
         } catch {
-            // Unexpected store error — surface via the generic error alert.
+            // Unexpected store error, surface via the generic error alert.
             genericError = "Couldn't delete this host. \(error.localizedDescription)"
         }
     }
@@ -533,14 +535,14 @@ struct HostEditorView: View {
     private func performSave() {
         do {
             let outcome = try vm.save()
-            // Fix 1 — if duplicateLabels is non-empty, saveWarning is set on vm;
+            // Fix 1, if duplicateLabels is non-empty, saveWarning is set on vm;
             // the .alert modifier above will present it before dismissing.
             // If no warning, dismiss immediately.
             if outcome.duplicateLabels.isEmpty {
-                savedOnce = true  // Fix 2 — mark as saved before dismissing
+                savedOnce = true  // Fix 2, mark as saved before dismissing
                 dismiss()
             } else {
-                savedOnce = true  // Fix 2 — save succeeded even with dup warning
+                savedOnce = true  // Fix 2, save succeeded even with dup warning
                 // vm.saveWarning is now set; the alert will dismiss after OK.
             }
         } catch EditorSaveError.hardBlocksPresent {
@@ -548,7 +550,7 @@ struct HostEditorView: View {
             // The Save button is disabled when hard blocks exist, so this branch
             // should not be reached in practice; it guards against race conditions.
         } catch {
-            // Unexpected storage error — surface via the generic error alert.
+            // Unexpected storage error, surface via the generic error alert.
             genericError = "Couldn't save this host. \(error.localizedDescription)"
         }
     }

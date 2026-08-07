@@ -54,6 +54,10 @@ struct TerminalScreen: UIViewRepresentable {
 
     func makeUIView(context: Context) -> TerminalView {
         let terminal = PaneTerminalView(frame: .zero)
+        // Raw single-terminal path: this view owns its keybar inset (see
+        // PaneTerminalView.appliesOwnKeybarInset). The -CC container path leaves this
+        // false and insets its panes itself.
+        terminal.appliesOwnKeybarInset = true
         terminal.terminalDelegate = context.coordinator
         // Event-driven InteractionMode: recompute on every alt-screen / mouse-mode
         // transition (single-pane mount → nil key), then refresh the dot immediately.

@@ -177,11 +177,31 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // `syncYDispFromContentOffset` (gated on `isTracking`) never updates scrollback.
         // We keep native scroll enabled; the window-switch decision is driven by our own
         // `switchPan` recognizer instead (see `handleSwitchPan`).
+        //
+        // EQUALLY CRUCIAL (device build 116, 2026-08-07): keeping ONLY `panGestureRecognizer`
+        // is not enough. `UIScrollView` drives scrolling through a *cluster* of internal
+        // recognizers, not the pan alone, chiefly `UIScrollViewDelayedTouchesBeganGesture-
+        // Recognizer`, which promotes a settled touch into scroll tracking. Disabling it
+        // left `nativePan` enabled but STUCK at `.possible` (state 0): every swipe logged a
+        // `touch:begin` yet ZERO `scroll-trace`, the pan never `.began`, nothing scrolled.
+        // So preserve every recognizer the scroll view owns (class prefixed `UIScrollView`),
+        // not just the pan. These are SwiftTerm-external UIKit machinery; ours and
+        // SwiftTerm's own tap/selection recognizers do not carry that prefix.
         for gr in view.gestureRecognizers ?? []
-        where !ours.contains(gr) && gr !== view.panGestureRecognizer {
+        where !ours.contains(gr) && gr !== view.panGestureRecognizer && !Self.isScrollViewInternal(gr) {
             gr.isEnabled = false
         }
         DebugLog.shared.log(.gesture, "sweep: disabled \(view.gestureRecognizers?.filter { !$0.isEnabled }.count ?? 0) recognizers; nativePan kept=\(view.panGestureRecognizer.isEnabled)")
+    }
+
+    /// True when `gr` is one of `UIScrollView`'s own internal support recognizers
+    /// (class name prefixed `UIScrollView`, e.g. `UIScrollViewDelayedTouchesBegan-
+    /// GestureRecognizer`, `UIScrollViewKnobLongPressGestureRecognizer`). The scroll
+    /// view needs the whole cluster, not just `panGestureRecognizer`, to route a drag
+    /// into scroll tracking, so the sweep must leave every one of them enabled. Matched
+    /// by class-name prefix because these types are private (no public symbol to compare).
+    static func isScrollViewInternal(_ gr: UIGestureRecognizer) -> Bool {
+        String(describing: type(of: gr)).hasPrefix("UIScrollView")
     }
 
     /// Disable SwiftTerm's LAZILY-created selection/mouse pan recognizers.
@@ -263,12 +283,21 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         twoFingerTap.numberOfTouchesRequired = 2
         twoFingerTap.delegate = self
 
-        // Tap disambiguation: single waits for double to fail, double waits for triple.
-        // single-tap deliberately requires ONLY double (not triple), so cursor
-        // placement resolves after a single failed-double window, not the full
-        // single→double→triple chain. Keeps all three gestures.
+        // Tap disambiguation. single-tap waits for double to fail (one tap-timeout
+        // window, ~0.3s), matching native iOS single-vs-double cost.
+        //
+        // We deliberately do NOT chain `doubleTap.require(toFail: tripleTap)`. Device
+        // measurement (build 116, 2026-08-07) showed that chain made EVERY double-tap
+        // wait out BOTH the double AND the triple window: touch-up -> word-select ran
+        // a consistent ~0.63s later (two stacked windows) vs native's ~0.3s (one). That
+        // is the "sluggish tap" the user hit; native/Blink don't stack the windows.
+        //
+        // Instead double-tap fires at its own window and a third tap UPGRADES the
+        // selection: tap-tap -> word-select + menu; a third tap -> tripleTap fires ->
+        // line-select + menu re-present. `applyInclusiveSelection` just replaces the
+        // range and `presentEditMenu` re-presents, so the upgrade is idempotent and the
+        // brief word->line change is imperceptible (the third tap lands within ~150ms).
         singleTap.require(toFail: doubleTap)
-        doubleTap.require(toFail: tripleTap)
 
         editMenu = UIEditMenuInteraction(delegate: self)
         view.addInteraction(editMenu)
@@ -288,22 +317,20 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // The mount then toggles it on mode transitions via `setSwitchPanEnabled`.
         switchPan.isEnabled = true
 
-        // OUR selection-handle drag pan. Always enabled (like the taps): `.began` hit-tests
-        // the handle circles and CANCELS immediately when the touch isn't on one (see
-        // `handleHandlePan`), so a plain content drag is unaffected and falls through to
-        // whichever of `scrollPan`/`switchPan` would otherwise have won. Mutual exclusion
-        // with both is the MIRROR IMAGE of how `subordinateSelectionPan` subordinates
-        // SwiftTerm's own (unwanted) selection pan: there the scroll pan must win, so the
-        // selection pan is required to fail first; here `handlePan` is the one we WANT to
-        // win when a handle is grabbed, so `scrollPan`/`switchPan` are required to fail
-        // against IT instead (see `gestureRecognizer(_:shouldRequireFailureOf:)` below).
-        // `shouldRecognizeSimultaneouslyWith` also excludes the pairing so they never
-        // co-recognize (same non-simultaneity guarantee `.selectionPan` gets from the Kit
-        // policy, applied here directly since `handlePan` has no Kit `GestureRole` case,
-        // deviation noted in the task report).
+        // OUR selection-handle drag pan. DISABLED at rest, enabled ONLY while a selection is
+        // active (see `setHandlePanEnabled`, driven by `applyInclusiveSelection` /
+        // clear-selection). Device build 118 proved why "always enabled + self-cancel" was
+        // wrong: with no selection, handlePan still RECOGNIZED the swipe (`scroll-trace
+        // pan=handlePan state=1 .began -> state=4 .ended`), so it OWNED the drag and the
+        // native scroll pan never fired at all. The `.began` self-cancel (isEnabled bounce)
+        // couldn't help because by then handlePan had already won the touch. Keeping it out
+        // of the recognizer graph entirely when there's nothing to grab lets the native pan
+        // own every content drag cleanly. When a selection IS active it is enabled and its
+        // `.began` hit-tests the handle circles; a non-handle touch still self-cancels so a
+        // drag off the handles falls through to scroll.
         handlePan = UIPanGestureRecognizer(target: self, action: #selector(handleHandlePan(_:)))
         handlePan.delegate = self
-        handlePan.isEnabled = true
+        handlePan.isEnabled = false
 
         ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap, altScreenPan, switchPan, handlePan]
         for gr in ours { view.addGestureRecognizer(gr) }
@@ -311,6 +338,16 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // Bug B diagnosis: observe every non-ours recognizer's state so a drag that
         // never reaches `handleSwitchPan` still logs which recognizer won.
         observeStrayRecognizers(on: view)
+
+        // Issue 3 scroll diagnosis: also observe the native scroll pan's FULL state
+        // machine (observeStrayRecognizers' observer only fires on began/changed). This
+        // lets a device swipe reveal a pan that .failed/.cancelled without ever beginning.
+        view.panGestureRecognizer.addTarget(self, action: #selector(observeScrollPanAllStates(_:)))
+        // Also observe OUR handlePan's full state machine: it is the scroll pan's
+        // require(toFail:) dependency, so a swipe that logs handlePan stuck at .possible
+        // while nativePan never begins confirms the require-to-fail stall (vs a geometry
+        // block, where handlePan reaches .failed yet nativePan still won't begin).
+        handlePan.addTarget(self, action: #selector(observeScrollPanAllStates(_:)))
 
         // Tap snappiness: UIScrollView delays content-touch delivery (~150ms) to first
         // decide whether a touch is the start of a scroll, which made single-tap cursor
@@ -425,6 +462,23 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         else { kind = String(describing: type(of: g)) }
         DebugLog.shared.log(.gesture,
             "gr-observe \(kind) state=\(g.state.rawValue) mode=\(callbacks.currentMode())")
+    }
+
+    /// Issue 3 scroll diagnosis (device 2026-08-06): the native scroll pan never begins on
+    /// a swipe (zero gr-observe, nothing scrolls) despite scroll range + an enabled pan.
+    /// `observeRecognizerState` only logs `.began`/`.changed`, so a pan that reaches
+    /// `.failed`/`.cancelled` WITHOUT ever beginning is invisible. This logs EVERY state
+    /// transition of the native scroll pan (incl. .possible/.failed/.cancelled) with the
+    /// translation + touch count, so a device swipe shows whether the pan begins, fails, or
+    /// stays possible. Diagnostic only: attached as an extra target, changes no behavior.
+    @objc private func observeScrollPanAllStates(_ g: UIGestureRecognizer) {
+        guard let view = terminalView else { return }
+        let t = (g as? UIPanGestureRecognizer)?.translation(in: view) ?? .zero
+        let which = g === view.panGestureRecognizer ? "nativePan"
+            : (g === handlePan ? "handlePan" : "otherPan")
+        DebugLog.shared.log(.gesture,
+            "scroll-trace pan=\(which) state=\(g.state.rawValue) mode=\(callbacks.currentMode()) "
+            + "touches=\(g.numberOfTouches) tx=\(Int(t.x)) ty=\(Int(t.y))")
     }
 
     /// Attach `observeRecognizerState` as an extra target on every recognizer on the
@@ -816,6 +870,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         case .active(.clearSelection):
             callbacks.clearSelection()
             storedStart = nil; storedEnd = nil
+            setHandlePanDisabled()   // no selection left → handle pan must not eat content drags
             DebugLog.shared.log(.gesture, "gesture:singleTap action=clear")
         case .active(.placeCursor):
             let target = cell(at: p, in: view)
@@ -903,6 +958,16 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                                end: Position(col: end.col + 1, row: end.row))
         storedStart = start
         storedEnd = end
+        // A selection now exists → arm the handle-drag pan so its circles can be grabbed.
+        // It stays disabled otherwise so it never competes with the native scroll pan.
+        handlePan?.isEnabled = true
+    }
+
+    /// Disable the handle-drag pan when no selection remains, so it drops out of the
+    /// recognizer graph and the native scroll pan owns every content drag. Called wherever
+    /// the selection is cleared. Idempotent.
+    private func setHandlePanDisabled() {
+        handlePan?.isEnabled = false
     }
 
     private func presentEditMenu(at point: CGPoint, in view: TerminalView) {
@@ -967,10 +1032,20 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// fail here instead, delivered to them (`g` = scrollPan/switchPan, `other` = handlePan).
     /// `handlePan.began` hit-tests and self-cancels on a non-handle touch, so requiring the
     /// content pans to wait on it only costs the recognition-delay window, not a broken drag.
+    ///
+    /// GATED ON `hasActiveSelection` (device build 117, 2026-08-07): the self-cancel in
+    /// `handleHandlePan` runs only AFTER `handlePan` reaches `.began`, which a stock
+    /// UIPanGestureRecognizer only does after ~10pt of movement. With NO active selection
+    /// there are no handles to grab, yet requiring scrollPan/switchPan to fail against
+    /// `handlePan` pinned the scroll pan at `.possible` waiting for a `.failed` that never
+    /// came on a short/slow swipe: the scroll view's `DelayedTouchesBegan` recognizer then
+    /// timed out (device: st=5 .failed) and native scrolling was DEAD. Only impose the
+    /// dependency when a selection actually exists (handles are on screen and can be
+    /// grabbed); otherwise `handlePan` is dead weight and must not block the pan.
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRequireFailureOf other: UIGestureRecognizer) -> Bool {
         if other === handlePan, role(of: g) == .scrollPan || role(of: g) == .switchPan {
-            return true
+            return terminalView?.hasActiveSelection == true
         }
         guard role(of: g) == .selectionPan else { return false }
         return role(of: other) == .scrollPan || role(of: other) == .switchPan
