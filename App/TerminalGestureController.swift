@@ -345,6 +345,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // machine (observeStrayRecognizers' observer only fires on began/changed). This
         // lets a device swipe reveal a pan that .failed/.cancelled without ever beginning.
         view.panGestureRecognizer.addTarget(self, action: #selector(observeScrollPanAllStates(_:)))
+        // Also observe OUR handlePan's full state machine: it is the scroll pan's
+        // require(toFail:) dependency, so a swipe that logs handlePan stuck at .possible
+        // while nativePan never begins confirms the require-to-fail stall (vs a geometry
+        // block, where handlePan reaches .failed yet nativePan still won't begin).
+        handlePan.addTarget(self, action: #selector(observeScrollPanAllStates(_:)))
 
         // Tap snappiness: UIScrollView delays content-touch delivery (~150ms) to first
         // decide whether a touch is the start of a scroll, which made single-tap cursor
@@ -471,8 +476,10 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     @objc private func observeScrollPanAllStates(_ g: UIGestureRecognizer) {
         guard let view = terminalView else { return }
         let t = (g as? UIPanGestureRecognizer)?.translation(in: view) ?? .zero
+        let which = g === view.panGestureRecognizer ? "nativePan"
+            : (g === handlePan ? "handlePan" : "otherPan")
         DebugLog.shared.log(.gesture,
-            "scroll-trace pan=nativePan state=\(g.state.rawValue) mode=\(callbacks.currentMode()) "
+            "scroll-trace pan=\(which) state=\(g.state.rawValue) mode=\(callbacks.currentMode()) "
             + "touches=\(g.numberOfTouches) tx=\(Int(t.x)) ty=\(Int(t.y))")
     }
 
@@ -1016,10 +1023,20 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// fail here instead, delivered to them (`g` = scrollPan/switchPan, `other` = handlePan).
     /// `handlePan.began` hit-tests and self-cancels on a non-handle touch, so requiring the
     /// content pans to wait on it only costs the recognition-delay window, not a broken drag.
+    ///
+    /// GATED ON `hasActiveSelection` (device build 117, 2026-08-07): the self-cancel in
+    /// `handleHandlePan` runs only AFTER `handlePan` reaches `.began`, which a stock
+    /// UIPanGestureRecognizer only does after ~10pt of movement. With NO active selection
+    /// there are no handles to grab, yet requiring scrollPan/switchPan to fail against
+    /// `handlePan` pinned the scroll pan at `.possible` waiting for a `.failed` that never
+    /// came on a short/slow swipe: the scroll view's `DelayedTouchesBegan` recognizer then
+    /// timed out (device: st=5 .failed) and native scrolling was DEAD. Only impose the
+    /// dependency when a selection actually exists (handles are on screen and can be
+    /// grabbed); otherwise `handlePan` is dead weight and must not block the pan.
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRequireFailureOf other: UIGestureRecognizer) -> Bool {
         if other === handlePan, role(of: g) == .scrollPan || role(of: g) == .switchPan {
-            return true
+            return terminalView?.hasActiveSelection == true
         }
         guard role(of: g) == .selectionPan else { return false }
         return role(of: other) == .scrollPan || role(of: other) == .switchPan
