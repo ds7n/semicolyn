@@ -23,6 +23,13 @@ final class HostEditorViewModel: ObservableObject {
     /// field changes and on every Save attempt.
     @Published var issues: [ValidationIssue] = []
 
+    /// The resolved `Defaults` record, loaded once at init. Used by the view to
+    /// resolve the effective transport (`resolveTransport(host:defaults:)`) so
+    /// menu gating (e.g. `moshSection` visibility) matches the same legacy
+    /// mosh.enabled migration that connection routing uses, not just the
+    /// explicit `host.transport` leaf.
+    let defaults: Defaults
+
     /// `true` when the editor is creating a new host; `false` when editing an
     /// existing one (controls the sheet title and Delete-row visibility).
     let isNew: Bool
@@ -44,12 +51,14 @@ final class HostEditorViewModel: ObservableObject {
     init(creating: Bool) {
         self.isNew = creating
         self.host = Host(id: UUID(), label: "", hostName: "")
+        self.defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
     }
 
     /// Opens the editor for an existing host.
     init(editing host: Host) {
         self.isNew = false
         self.host = host
+        self.defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
         // Restore toggle state from stored passwordRef.
         if host.passwordRef.value != nil {
             self.usePassword = true

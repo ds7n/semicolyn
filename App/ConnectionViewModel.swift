@@ -164,6 +164,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// True once a terminal ET handler (watchdog timeout OR onFirstFrame OR onEnd)
     /// has resolved this session. Guards against double-resolution.
     private var etResolved = false
+    /// True once ET's `onFirstFrame` fired for the current session. Drives
+    /// `etExitDecision`: a session that reached first-frame and then ended is a
+    /// graceful dismiss; one that never did is a pre-connect handshake failure.
+    /// Reset in `teardown()`.
+    private var etFirstFrameSeen = false
+    /// True from the moment the user initiates a disconnect ("x" button -> `disconnect()`)
+    /// until the next connect attempt. ET's `onEnd` is asynchronous and fires AFTER
+    /// `teardown()` has closed the session; without this guard it reads the already-reset
+    /// `etFirstFrameSeen == false` and misroutes a user disconnect to
+    /// `.failed("could not connect: closed")`. `onEnd` checks this FIRST and, when set,
+    /// cleans up silently (no `.failed`, no banner). Reset at connect-start (NOT in
+    /// `teardown()`, which runs before the async `onEnd` and would clear it too early).
+    private var etUserDisconnecting = false
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -490,6 +503,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// survives an explicit disconnect just like a backgrounded one.
     func disconnect() {
         DebugLog.shared.log(.lifecycle, "disconnect: user-initiated teardown → .idle")
+        etUserDisconnecting = true   // ET onEnd (async) must not misfire a .failed
         teardown()
         state = .idle
     }
@@ -505,6 +519,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         moshFallback = nil
         etWatchdog?.cancel(); etWatchdog = nil
         etResolved = false
+        etFirstFrameSeen = false
         etSession?.close()
         etSession = nil
         tmux?.stop()
@@ -523,9 +538,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         flushPredictor()
         // Drop the render + harvest closures so late bytes from the old session
         // can't feed a torn-down terminal view or a cleared predictor. Both are
-        // re-installed when the next shell opens.
+        // re-installed when the next shell opens. `onExit` goes too: a user
+        // disconnect closes the PTY, whose async exit callback would otherwise
+        // fire `output.onExit → .failed("Session closed")` right after `state`
+        // flips to `.idle`, flashing a bogus failure banner on the way out. It
+        // is re-installed at every connect entry point, so clearing it here is
+        // safe. (Mirrors the ET path's `etUserDisconnecting` guard for the raw/
+        // SSH transport, which routes exits through this closure instead.)
         output.onBytes = nil
         output.onHarvestBytes = nil
+        output.onExit = nil
         predictor = nil
         // Deregister from the active-purge slot (the VM may be reused on reconnect
         // without deallocating, so the weak ref alone isn't enough).
@@ -717,29 +739,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// with a banner. Returns true if a Mosh session was attached; false if it fell
     /// back (the caller then runs the existing tmux/raw branch).
     private func attachMoshIfPossible(conn: Connection, host: Host, defaults: Defaults) async -> Bool {
-        // resolveMoshEnabled reads the leaf-independent `mosh.enabled` (host
-        // container's leaf, else Defaults container's leaf, else false: see
-        // `resolveLeaf`). Log both containers' explicit-vs-inherit state so a
-        // device trace shows which one actually drove the decision.
-        let hostMoshExplicit: Bool
-        if case .explicit = host.mosh { hostMoshExplicit = true } else { hostMoshExplicit = false }
-        let defaultsMoshExplicit: Bool
-        if case .explicit = defaults.mosh { defaultsMoshExplicit = true } else { defaultsMoshExplicit = false }
-        guard resolveMoshEnabled(host: host, defaults: defaults) else {
-            DebugLog.shared.log(.connect, decisionLine(
-                "connect:mosh-decision",
-                inputs: [("hostMoshExplicit", "\(hostMoshExplicit)"),
-                         ("defaultsMoshExplicit", "\(defaultsMoshExplicit)")],
-                outputs: [("enabled", "false")],
-                reason: hostMoshExplicit ? "host-explicit-off" : "defaults-off-or-unset"))
-            return false
-        }
-        DebugLog.shared.log(.connect, decisionLine(
-            "connect:mosh-decision",
-            inputs: [("hostMoshExplicit", "\(hostMoshExplicit)"),
-                     ("defaultsMoshExplicit", "\(defaultsMoshExplicit)")],
-            outputs: [("enabled", "true")],
-            reason: hostMoshExplicit ? "host-explicit-on" : "defaults-on"))
+        // Both call sites are already inside `case .mosh:` of a `switch
+        // resolveTransport(host:defaults:)`, so the transport picker (or its
+        // legacy mosh.enabled migration) already decided Mosh is the transport
+        // for this connection. No separate `resolveMoshEnabled` gate here.
+        DebugLog.shared.log(.connect, "connect:mosh chosen by transport picker (resolveTransport==.mosh)")
         // Effective config for the argv (port range, server path, prediction mode).
         // resolveOptional honors Inherited three-state (NOT host.mosh.value).
         let cfg = resolveOptional(host.mosh, defaults.mosh) ?? MoshConfig(enabled: true)
@@ -975,6 +979,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onFirstFrame = { [weak self] in
             guard let self, !self.etResolved else { return }
             self.etResolved = true
+            self.etFirstFrameSeen = true
             self.etWatchdog?.cancel(); self.etWatchdog = nil
             DebugLog.shared.log(.transport, "et: onFirstFrame, stream up; watchdog cancelled")
             self.state = .shell
@@ -984,16 +989,38 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         sess.onEnd = { [weak self] reason in
             guard let self else { return }
-            let safe = sanitizeEndReason(reason)
-            DebugLog.shared.log(.transport, "et: session ended (\(safe))")
             self.etWatchdog?.cancel(); self.etWatchdog = nil
-            self.etSession?.close()      // ALWAYS release the retained ctx + tear down
-            self.etSession = nil         // ALWAYS drop the ref
-            // Only the outcome transition is resolve-once: if the connect already
-            // resolved (success .shell, or the watchdog timeout), a natural/late end
-            // must NOT clobber that state.
-            if !self.etResolved {
+            // User-initiated disconnect (the "x" button): `disconnect()` already tore the
+            // session down and drove state to .idle. This async onEnd must NOT run the
+            // failure path (teardown() reset etFirstFrameSeen, so etExitDecision would
+            // wrongly return .handshakeFailed). Clean up silently and return.
+            if self.etUserDisconnecting {
+                DebugLog.shared.log(.transport, "et: onEnd during user disconnect → silent, no banner")
+                self.etSession?.close()
+                self.etSession = nil
+                return
+            }
+            switch etExitDecision(reason: reason, sawFirstFrame: self.etFirstFrameSeen) {
+            case .dismiss:
+                // A real session ran (first-frame seen) and then ended (clean exit
+                // or mid-session drop). Return to the connection list gracefully:
+                // teardown() closes+nils etSession, cancels the watchdog, and resets
+                // every flag; .idle dismisses the view. No error banner.
+                DebugLog.shared.log(.transport, "et: session ended (first-frame seen) → dismiss to list")
+                self.teardown()
+                self.state = .idle
+            case .handshakeFailed(let safe):
+                // First-frame never fired: a pre-connect failure. If the watchdog
+                // already resolved this session to a timeout .failed, a late onEnd
+                // (enqueued before the callback was niled) must NOT clobber it.
+                if self.etResolved {
+                    DebugLog.shared.log(.transport, "et: onEnd after watchdog already resolved → ignored")
+                    return
+                }
                 self.etResolved = true
+                DebugLog.shared.log(.transport, "et: session ended pre-first-frame (\(safe)) → .failed")
+                self.etSession?.close()   // release the retained ctx + tear down
+                self.etSession = nil
                 self.state = .failed(etFailureMessage(.handshakeFailed(reason: safe)))
             }
         }
@@ -1450,6 +1477,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         lastSavedHost = savedHost
         lastPassword = password
         teardown()
+        etUserDisconnecting = false   // fresh connection: clear any prior user-disconnect guard
         state = .connecting
         degraded = nil
         let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
@@ -1552,6 +1580,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             return
         }
         teardown()
+        etUserDisconnecting = false   // fresh connection: clear any prior user-disconnect guard
         state = .connecting
         degraded = nil
         let addr = "\(host):\(port.isEmpty ? "22" : port)"
