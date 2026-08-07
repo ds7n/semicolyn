@@ -283,12 +283,21 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         twoFingerTap.numberOfTouchesRequired = 2
         twoFingerTap.delegate = self
 
-        // Tap disambiguation: single waits for double to fail, double waits for triple.
-        // single-tap deliberately requires ONLY double (not triple), so cursor
-        // placement resolves after a single failed-double window, not the full
-        // single→double→triple chain. Keeps all three gestures.
+        // Tap disambiguation. single-tap waits for double to fail (one tap-timeout
+        // window, ~0.3s), matching native iOS single-vs-double cost.
+        //
+        // We deliberately do NOT chain `doubleTap.require(toFail: tripleTap)`. Device
+        // measurement (build 116, 2026-08-07) showed that chain made EVERY double-tap
+        // wait out BOTH the double AND the triple window: touch-up -> word-select ran
+        // a consistent ~0.63s later (two stacked windows) vs native's ~0.3s (one). That
+        // is the "sluggish tap" the user hit; native/Blink don't stack the windows.
+        //
+        // Instead double-tap fires at its own window and a third tap UPGRADES the
+        // selection: tap-tap -> word-select + menu; a third tap -> tripleTap fires ->
+        // line-select + menu re-present. `applyInclusiveSelection` just replaces the
+        // range and `presentEditMenu` re-presents, so the upgrade is idempotent and the
+        // brief word->line change is imperceptible (the third tap lands within ~150ms).
         singleTap.require(toFail: doubleTap)
-        doubleTap.require(toFail: tripleTap)
 
         editMenu = UIEditMenuInteraction(delegate: self)
         view.addInteraction(editMenu)
