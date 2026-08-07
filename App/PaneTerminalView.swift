@@ -73,8 +73,23 @@ final class PaneTerminalView: TerminalView {
             // Only mutate when it actually differs (a re-entrant pass with height already
             // == usableH must be a no-op, or layoutSubviews loops). Keep origin/width from
             // the SwiftUI slot; shrink height only. The keybar floats over the freed region.
-            if usableH > 0, abs(usableH - Double(frame.height)) > 0.5 {
+            let willApply = usableH > 0 && abs(usableH - Double(frame.height)) > 0.5
+            if willApply {
                 frame.size.height = CGFloat(usableH)
+            }
+            // Diagnostic (device 2026-08-07): settled raw panes render full-height (grid
+            // fills the whole slot, ~5 rows hide behind the keybar), so `usableH` is
+            // coming back == raw and the inset is skipped. Record exactly which branch
+            // ran and the values, to name why the reduction is not taken.
+            if DebugLog.shared.isEnabled(.geometry) {
+                let accH = (inputAccessoryView as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1
+                DebugLog.shared.log(.geometry,
+                    "keybar-inset raw=\(String(format: "%.0f", raw)) "
+                    + "guideTop=\(guideTop.map { String(format: "%.0f", $0) } ?? "nil") "
+                    + "branch=\(guideTop != nil ? "guide" : "accH") "
+                    + "fr=\(isFirstResponder) accH=\(String(format: "%.0f", accH)) "
+                    + "usableH=\(String(format: "%.0f", usableH)) frameH=\(String(format: "%.0f", Double(frame.height))) "
+                    + "applied=\(willApply)")
             }
         }
         guard DebugLog.shared.isEnabled(.geometry) else { return }
