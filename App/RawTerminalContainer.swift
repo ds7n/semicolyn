@@ -51,7 +51,8 @@ final class RawTerminalContainer: UIView {
         let accH = Double(firstResponderKeybarHeight())
         let reservation = CGFloat(keybarSafeAreaReservation(accessoryHeight: accH,
                                                             isFirstResponder: terminal.isFirstResponder))
-        if abs(reservation - lastReservation) > 0.5 {
+        let reservationChanged = abs(reservation - lastReservation) > 0.5
+        if reservationChanged {
             lastReservation = reservation
             additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: reservation, right: 0)
             // Setting the inset invalidates layout; the next pass reads the settled child frame.
@@ -61,13 +62,19 @@ final class RawTerminalContainer: UIView {
         // truth, bounds.height - safeAreaInsets.bottom (safeAreaInsets already reflects our
         // additional inset). If the child's bottom extends past it, rows would render in the reserved
         // band = the bug. Log it loud (default-on category) instead of silently hiding a row.
-        let reservedTop = Double(bounds.height) - Double(safeAreaInsets.bottom)
-        let childBottom = Double(terminal.frame.maxY)
-        if childBottom > reservedTop + 1.0 {
-            DebugLog.shared.log(.tmux,
-                "keybar-inset VIOLATION reservedTop=\(String(format: "%.0f", reservedTop)) "
-                + "childBottom=\(String(format: "%.0f", childBottom)) "
-                + "over=\(String(format: "%.0f", childBottom - reservedTop))")
+        // Skip on a pass that just changed the reservation: the child frame has not been
+        // re-solved against the new inset yet this pass, so childBottom would still reflect the
+        // pre-change frame and could spuriously exceed reservedTop for one frame; the check runs
+        // on the next, settled pass instead.
+        if !reservationChanged {
+            let reservedTop = Double(bounds.height) - Double(safeAreaInsets.bottom)
+            let childBottom = Double(terminal.frame.maxY)
+            if childBottom > reservedTop + 1.0 {
+                DebugLog.shared.log(.tmux,
+                    "keybar-inset VIOLATION reservedTop=\(String(format: "%.0f", reservedTop)) "
+                    + "childBottom=\(String(format: "%.0f", childBottom)) "
+                    + "over=\(String(format: "%.0f", childBottom - reservedTop))")
+            }
         }
 
         guard DebugLog.shared.isEnabled(.geometry) else { return }
