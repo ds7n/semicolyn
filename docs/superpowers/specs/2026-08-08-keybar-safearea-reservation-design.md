@@ -48,7 +48,9 @@ The shared, transport-independent primitive is the **reservation policy**, not a
 reservation (bottom) = firstResponder && accH > 0 ? accH : 0
 ```
 
-Both containers apply the SAME reservation via `additionalSafeAreaInsets.bottom`, then each lays out into its own `safeAreaLayoutGuide` in the way that fits its structure.
+Both containers apply the SAME reservation (from the shared helper), then each consumes it in the way that fits its structure.
+
+> **Mechanism correction (2026-08-08, caught by macOS CI):** the first draft applied the reservation via `additionalSafeAreaInsets.bottom`. That property is **`UIViewController`-only**; our containers are plain `UIView`s with no view controller we own between them and SwiftUI (`RawTerminalContainer.swift:57: error: cannot find 'additionalSafeAreaInsets' in scope`). The corrected, UIView-native mechanism keeps the exact same stable-signal reservation policy but consumes it via **Auto Layout on the raw path** and **the existing manual pane framing on the `-CC` path** (see Stage A / Stage B below). `safeAreaLayoutGuide` as a *reservation driver* is therefore also dropped; the raw child pins to the container's own edges with a reservation-driven bottom constant instead.
 
 ### Shared helper (Kit, pure, tested)
 
@@ -65,19 +67,22 @@ public func keybarSafeAreaReservation(accessoryHeight: Double, isFirstResponder:
 
 (A deliberately thin function: the value it returns is the whole policy, and locking it in a Kit test with the exact device numbers is the regression guard that was missing every prior round.)
 
-### Stage A: `RawTerminalContainer` (single child, Auto Layout)
+### Stage A: `RawTerminalContainer` (single child, Auto Layout, reservation-driven bottom constant)
 
-- In `init`, set `terminal.translatesAutoresizingMaskIntoConstraints = false` and pin it to the container's `safeAreaLayoutGuide` (leading/trailing/top/bottom). The child is no longer manually framed.
-- In `layoutSubviews` (or a small `updateKeybarReservation()` called from it), compute `accH` from `terminal.inputAccessoryView`, set `additionalSafeAreaInsets.bottom = keybarSafeAreaReservation(accessoryHeight: accH, isFirstResponder: terminal.isFirstResponder)`, guarded so an unchanged value does not re-trigger layout. UIKit shrinks `safeAreaLayoutGuide` by the reservation, and the pinned child's frame follows.
-- DELETE the `usableH` computation, the `terminal.frame = CGRect(...)` manual frame, and the now-unused `keyboardTopInContainer()` / `keybarTopInContainerViaFrame()` diagnostic helpers. Keep a slimmed `geo:raw-container` line (bounds, safeAreaInsets.bottom, accH, child frame) for device confirmation.
+- In `init`, set `terminal.translatesAutoresizingMaskIntoConstraints = false` and pin the child to the container's OWN edges: leading/trailing/top to `leadingAnchor`/`trailingAnchor`/`topAnchor`, and BOTTOM to `bottomAnchor` with a STORED constraint whose `constant` starts at 0. Keep a reference to that bottom constraint (`private var bottomConstraint: NSLayoutConstraint!`).
+- In `layoutSubviews`, compute `accH` from `terminal.inputAccessoryView`, and set `bottomConstraint.constant = -CGFloat(keybarSafeAreaReservation(accessoryHeight: accH, isFirstResponder: terminal.isFirstResponder))` (negative: it lifts the child's bottom up by the reservation). Guard on change (compare against the last-set constant) so an unchanged value does not churn layout. Auto Layout re-solves the child frame; no manual `terminal.frame = ...`.
+- The child's height is thus `containerHeight - reservation`, exactly the keybar-reduced area, driven only by the stable `accH`. No `safeAreaLayoutGuide`, no `additionalSafeAreaInsets`, no proxy.
+- DELETE the old `usableH` computation, the `terminal.frame = CGRect(...)` manual frame, and the now-unused `keyboardTopInContainer()` / `keybarTopInContainerViaFrame()` diagnostic helpers. Keep a slimmed `geo:raw-container` line (bounds, reservation, accH, child frame) for device confirmation.
+- Runtime invariant tripwire: `reservedTop = bounds.height - reservation`; if `terminal.frame.maxY > reservedTop + epsilon` on a settled pass (reservation unchanged this pass), log `keybar-inset VIOLATION`.
 
 ### Stage B: `TmuxPaneContainer` (grid of absolute-framed panes)
 
-`-CC` tiles multiple panes as absolute frames, so it cannot pin one child to the safe area. It adopts the SAME reservation and sources its usable height from the reserved safe area:
+`-CC` tiles multiple panes as absolute frames (`view.frame = CGRect(...)` from `fittedPaneRects(usableHeight:)`), so it keeps manual framing and simply sources its `usableH` from the SAME reservation helper instead of the unreliable proxies:
 
-- Set `additionalSafeAreaInsets.bottom = keybarSafeAreaReservation(accessoryHeight: firstResponderKeybarHeight(), isFirstResponder: <any pane is first responder>)`.
-- Replace the `usableH` computation (currently `keyboardTopInContainer()` guide, else `visibleTerminalHeight`) with `usableH = Double(safeAreaLayoutGuide.layoutFrame.height)`. UIKit has already subtracted the reservation, so this is the single reliable source; the existing `fittedPaneRects(usableHeight:)` grid math is unchanged, only its input changes.
-- Remove the now-dead `keyboardTopInContainer()` proxy path.
+- Compute `reservation = keybarSafeAreaReservation(accessoryHeight: Double(firstResponderKeybarHeight()), isFirstResponder: <any pane is first responder>)`.
+- Replace the `usableH` computation (currently `keyboardTopInContainer()` guide, else `visibleTerminalHeight`) with `usableH = Double(bounds.height) - reservation`. This is the same stable-signal reduction the raw path uses; the existing `fittedPaneRects(usableHeight:)` grid math is unchanged, only its input source changes (from the guide proxy to the shared reservation helper).
+- Remove the now-dead `keyboardTopInContainer()` proxy path from the layout computation (a diagnostic-only read may remain in `logGeometry`).
+- Update the render-storm early-out `LayoutInputs` key: replace the `keyboardTop` field with `reservation` (or keep `keybarH`, whichever the code already threads) so a keybar show/hide still invalidates the early-out.
 
 Stage B lands in the SAME PR but only AFTER Stage A is device-confirmed (the `-CC` path works today; changing it before the mechanism is proven risks regressing a working path).
 
@@ -85,19 +90,19 @@ Stage B lands in the SAME PR but only AFTER Stage A is device-confirmed (the `-C
 
 1. **Primary:** UIKit-owned safe-area reservation (above). No signal to prefer.
 2. **Stable signal only:** the reservation is driven solely by `accH` (the frame/window-immune measurement); the guide and converted-frame proxies are no longer consulted for layout.
-3. **Runtime invariant assertion:** after layout, compute the reserved keybar top as UIKit's own reserved value: `reservedTop = bounds.height - safeAreaInsets.bottom` (NOT a recomputed proxy: `safeAreaInsets.bottom` already reflects the `additionalSafeAreaInsets.bottom` we set, plus any system bottom inset). Compare the terminal's on-screen bottom against `reservedTop`. If the terminal bottom extends past `reservedTop` by more than a small epsilon (rows would render in the reserved band), log `keybar-inset VIOLATION reservedTop=.. childBottom=.. over=..` at the terminal category (default-on). This is the tripwire that was missing every prior round; a silent hidden row becomes a loud log line. Reads only UIKit's post-layout truth, so the tripwire itself has no proxy to be wrong about.
+3. **Runtime invariant assertion:** after layout, compute the reserved keybar top from the reservation we applied: `reservedTop = bounds.height - reservation` (the `reservation` value we just set the bottom constraint from; NOT a recomputed proxy). Compare the terminal's on-screen bottom (`terminal.frame.maxY`) against `reservedTop`. If the terminal bottom extends past `reservedTop` by more than a small epsilon (rows would render in the reserved band), log `keybar-inset VIOLATION reservedTop=.. childBottom=.. over=..` at the terminal category (default-on), but ONLY on a pass where the reservation did not just change (the child frame is not re-solved against the new constant within the same pass, so a just-changed pass would false-positive for one frame). This is the tripwire that was missing every prior round; a silent hidden row becomes a loud log line.
 4. **Kit regression test:** `keybarSafeAreaReservation` is unit-tested with the build-121 device numbers (accH 56 + firstResponder → 56; accH 56 + not-first-responder → 0; accH -1 → 0; accH 0 → 0), so this specific recurrence cannot pass CI again.
 
 ## Data flow
 
-- **Reservation:** `layoutSubviews` → read `accH` → `keybarSafeAreaReservation` → `additionalSafeAreaInsets.bottom` → UIKit shrinks `safeAreaLayoutGuide`.
-- **Raw child height:** `safeAreaLayoutGuide` (shrunk) → pinned child frame → SwiftTerm grid (`frame.height / cellHeight`) excludes the reserved band. One-directional, UIKit-driven.
-- **-CC pane height:** `safeAreaLayoutGuide.layoutFrame.height` → `usableH` → `fittedPaneRects` → pane frames. Same reservation source.
+- **Reservation:** `layoutSubviews` → read `accH` → `keybarSafeAreaReservation` → the `reservation` value.
+- **Raw child height:** `reservation` → `bottomConstraint.constant = -reservation` → Auto Layout re-solves the pinned child frame (`containerHeight - reservation`) → SwiftTerm grid (`frame.height / cellHeight`) excludes the reserved band. One-directional, Auto-Layout-driven.
+- **-CC pane height:** `reservation` → `usableH = bounds.height - reservation` → `fittedPaneRects(usableHeight:)` → pane frames. Same reservation source, existing manual framing.
 
 ## Error handling
 
 - `accH <= 0` (keyboard down / accessory not yet measured / seed transient) → reservation 0 → full height. Matches the `firstResponder` guard; identical to the current `-1` sentinel behavior.
-- `accH` transiently reads the seed (51) before self-sizing corrects to 56 (documented `KeybarInputAccessory.contentHeight` width-0 fallback): the reservation updates on the next layout pass when `accH` settles; `additionalSafeAreaInsets` is idempotent and re-resolved each pass, so a one-frame-early seed self-corrects without a manual frame ratchet. The invariant assertion (prong 3) would catch it if it ever stuck.
+- `accH` transiently reads the seed (51) before self-sizing corrects to 56 (documented `KeybarInputAccessory.contentHeight` width-0 fallback): the reservation updates on the next layout pass when `accH` settles; the bottom-constraint constant is idempotent and re-set each pass (guarded on change), so a one-frame-early seed self-corrects without a manual frame ratchet. The invariant assertion (prong 3) would catch it if it ever stuck.
 
 ## Testing
 
