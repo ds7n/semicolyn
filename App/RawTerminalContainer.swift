@@ -88,13 +88,41 @@ final class RawTerminalContainer: UIView {
             }
         }
 
+        // Comprehensive container-level geometry diagnostic (2026-08-08). The recurring
+        // behind-keybar / gap-above-keybar bug (~7 fixes) is driven by the container's `bounds`
+        // being UNSTABLE: after an app-switch SwiftUI hands a keybar-EXCLUDED bounds (e.g. 431),
+        // on first connect a keybar-INCLUDED bounds (e.g. 499), and `safeAreaInsets` stays (0,0)
+        // in both, so nothing at the UIView layer distinguishes the two regimes. This line logs
+        // EVERY signal that could disambiguate them so any recurrence is diagnosable from one
+        // capture: self bounds + safeAreaInsets, the window bounds + its safeAreaInsets, the full
+        // superview chain heights (which SwiftUI host resized), the keyboardLayoutGuide frame, and
+        // the child frame. Keep this even after the fix lands; it is the standing layout-forensics
+        // line for the raw path.
         guard DebugLog.shared.isEnabled(.geometry) else { return }
         let cf = terminal.frame
+        let sa = safeAreaInsets
+        let win = window
+        let winB = win?.bounds ?? .zero
+        let winSA = win?.safeAreaInsets ?? .zero
+        // Superview chain heights (which ancestor SwiftUI actually resized on the app-switch).
+        var chain: [String] = []
+        var v: UIView? = superview
+        var depth = 0
+        while let cur = v, depth < 6 {
+            chain.append("\(String(describing: type(of: cur))):\(Int(cur.bounds.height))")
+            v = cur.superview
+            depth += 1
+        }
+        let klg = keyboardLayoutGuide.layoutFrame
         DebugLog.shared.log(.geometry,
             "geo:raw-container bounds=\(Int(bounds.width))x\(Int(bounds.height)) "
+            + "selfSA=(t\(Int(sa.top)),b\(Int(sa.bottom))) "
+            + "win=\(Int(winB.width))x\(Int(winB.height)) winSA=(t\(Int(winSA.top)),b\(Int(winSA.bottom))) "
             + "fr=\(terminal.isFirstResponder) accH=\(String(format: "%.0f", accH)) "
             + "reservation=\(String(format: "%.0f", Double(reservation))) "
-            + "childFrame=\(Int(cf.minX)),\(Int(cf.minY)),\(Int(cf.width))x\(Int(cf.height))")
+            + "klgTop=\(Int(klg.minY)) klgH=\(Int(klg.height)) "
+            + "childFrame=\(Int(cf.minX)),\(Int(cf.minY)),\(Int(cf.width))x\(Int(cf.height)) "
+            + "chain=[\(chain.joined(separator: ">"))]")
     }
 
     /// The keybar (`inputAccessoryView`) height of the child terminal when it is first responder
