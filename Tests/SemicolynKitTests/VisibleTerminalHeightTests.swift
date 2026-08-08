@@ -84,4 +84,35 @@ final class VisibleTerminalHeightTests: XCTestCase {
         let usable = usableHeightFromKeyboardTop(rawHeight: 417, keyboardTopY: 361)
         XCTAssertEqual(terminalGrid(width: 402, height: usable, cellWidth: 5.66, cellHeight: 11.15)?.rows, 32)
     }
+
+    // MARK: keybarSafeAreaReservation (2026-08-08 root-cause fix)
+    // The bottom safe-area reservation for the keybar accessory. The build-121 diagnostic
+    // proved accH (the accessory's off-screen content measurement) is the one stable signal;
+    // this helper is the whole reservation policy that both containers apply.
+
+    // First responder + measured accH -> reserve exactly accH (device: accH 56 -> 56).
+    func testReservationFirstResponderReservesAccH() {
+        XCTAssertEqual(keybarSafeAreaReservation(accessoryHeight: 56, isFirstResponder: true), 56, accuracy: 1e-9)
+    }
+    // Not first responder (keyboard down, no accessory shown) -> reserve nothing, even if a
+    // stale accH is passed. This is the state where guideTop==bounds; reservation must be 0.
+    func testReservationNotFirstResponderReservesZero() {
+        XCTAssertEqual(keybarSafeAreaReservation(accessoryHeight: 56, isFirstResponder: false), 0, accuracy: 1e-9)
+    }
+    // accH sentinel -1 (firstResponderKeybarHeight() when no accessory) -> 0.
+    func testReservationSentinelNegativeReservesZero() {
+        XCTAssertEqual(keybarSafeAreaReservation(accessoryHeight: -1, isFirstResponder: true), 0, accuracy: 1e-9)
+    }
+    // BVA at 0: accH exactly 0 -> 0 (no negative, no spurious reservation).
+    func testReservationZeroAccHReservesZero() {
+        XCTAssertEqual(keybarSafeAreaReservation(accessoryHeight: 0, isFirstResponder: true), 0, accuracy: 1e-9)
+    }
+    // The three build-121 device samples: bounds - reservation must equal the correct keybar top.
+    // (bounds 453/499/431, accH 56 -> reserved band 56 -> usable 397/443/375.)
+    func testReservationDeviceSamplesComposeToCorrectUsable() {
+        for (bounds, expectedUsable) in [(453.0, 397.0), (499.0, 443.0), (431.0, 375.0)] {
+            let reserved = keybarSafeAreaReservation(accessoryHeight: 56, isFirstResponder: true)
+            XCTAssertEqual(bounds - reserved, expectedUsable, accuracy: 1e-9)
+        }
+    }
 }

@@ -45,3 +45,20 @@ public func usableHeightFromKeyboardTop(rawHeight: Double, keyboardTopY: Double?
     guard let top = keyboardTopY, top > 0, top <= rawHeight else { return rawHeight }
     return top
 }
+
+/// The bottom safe-area reservation (in points) for the keybar accessory, to be applied as
+/// `additionalSafeAreaInsets.bottom` on the terminal container. `accessoryHeight` is
+/// `KeybarInputAccessory.intrinsicContentSize.height`, the accessory's off-screen content
+/// measurement, which the 2026-08-08 build-121 device diagnostic proved to be the ONE signal
+/// stable across frame/window/animation state (unlike `keyboardLayoutGuide.layoutFrame.minY`,
+/// which reports the container's own bottom edge when the on-screen keyboard is dismissed but the
+/// keybar is still shown, and unlike the accessory's converted window frame, which is
+/// animation-transient garbage). Reserves nothing when the terminal is not first responder
+/// (keyboard down -> no accessory) or when `accessoryHeight` is the `-1` sentinel / non-positive.
+/// Floors at 0. This is the whole reservation policy; both the raw and tmux -CC containers apply
+/// it, then lay out into their (UIKit-shrunk) `safeAreaLayoutGuide`, so no unreliable keybar-top
+/// proxy drives layout. Pure; unit-tested with the build-121 device numbers.
+public func keybarSafeAreaReservation(accessoryHeight: Double, isFirstResponder: Bool) -> Double {
+    guard isFirstResponder, accessoryHeight > 0 else { return 0 }
+    return max(0, accessoryHeight)
+}
