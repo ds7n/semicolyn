@@ -114,12 +114,36 @@ final class RawTerminalContainer: UIView {
             depth += 1
         }
         let klg = keyboardLayoutGuide.layoutFrame
+        // WINDOW-SPACE PROBE (2026-08-08, post-adversarial-refutation): the fix under test is
+        // child height = keybarTopInWindow - containerTopInWindow, which ignores what `bounds`
+        // "means" (the unstable value) and measures absolute window positions instead.
+        //  - containerTopY = this container's origin converted into window space.
+        //  - keybarTopY-via-accH = window.height - accH (keybar floats at the window bottom).
+        //  - the accessory's OWN converted top (if reachable) as a cross-check on keybarTopY.
+        //  - predictedChild = keybarTopY(accH) - containerTopY = what the window-space formula
+        //    would frame the child to. VERIFY: predictedChild must be 443 when bounds=499 AND
+        //    431 when bounds=431 (the two known good/bad points). If it does, the formula is
+        //    proven and the fix drives the child height from it (no bounds subtraction).
+        let containerTopY = win.map { Double(convert(CGPoint.zero, to: $0).y) }
+        let keybarTopYviaAccH = (win != nil && accH > 0) ? Double(winB.height) - accH : nil
+        let accTopY: Double? = {
+            guard terminal.isFirstResponder, let acc = terminal.inputAccessoryView,
+                  let accSuper = acc.superview, let w = win else { return nil }
+            let p = w.convert(CGPoint(x: acc.frame.minX, y: acc.frame.minY), from: accSuper).y
+            return p.isFinite ? Double(p) : nil
+        }()
+        let predictedChild: Double? = (keybarTopYviaAccH != nil && containerTopY != nil)
+            ? keybarTopYviaAccH! - containerTopY! : nil
         DebugLog.shared.log(.geometry,
             "geo:raw-container bounds=\(Int(bounds.width))x\(Int(bounds.height)) "
             + "selfSA=(t\(Int(sa.top)),b\(Int(sa.bottom))) "
             + "win=\(Int(winB.width))x\(Int(winB.height)) winSA=(t\(Int(winSA.top)),b\(Int(winSA.bottom))) "
             + "fr=\(terminal.isFirstResponder) accH=\(String(format: "%.0f", accH)) "
             + "reservation=\(String(format: "%.0f", Double(reservation))) "
+            + "containerTopY=\(containerTopY.map { String(format: "%.0f", $0) } ?? "nil") "
+            + "keybarTopY=\(keybarTopYviaAccH.map { String(format: "%.0f", $0) } ?? "nil") "
+            + "accTopY=\(accTopY.map { String(format: "%.0f", $0) } ?? "nil") "
+            + "predictedChild=\(predictedChild.map { String(format: "%.0f", $0) } ?? "nil") "
             + "klgTop=\(Int(klg.minY)) klgH=\(Int(klg.height)) "
             + "childFrame=\(Int(cf.minX)),\(Int(cf.minY)),\(Int(cf.width))x\(Int(cf.height)) "
             + "chain=[\(chain.joined(separator: ">"))]")
