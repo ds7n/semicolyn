@@ -47,15 +47,28 @@ final class RawTerminalContainer: UIView {
         }()
         terminal.frame = CGRect(x: 0, y: 0, width: bounds.width, height: usableH)
 
-        // Container-space geometry diagnostic. The direct proof the root cause is gone:
-        // `guideTop` should now read ~499 (the slot), not ~1001 (the window).
+        // Container-space geometry diagnostic. DIAGNOSTIC-ONLY probe (2026-08-08, build 120
+        // showed the keybar hiding rows AGAIN): device build 120 logged guideTop=499 on a
+        // 499-tall container while a 56pt keybar was up, so `keyboardLayoutGuide` reports the
+        // container's OWN bottom edge (zero keyboard reservation) whenever the on-screen
+        // keyboard is dismissed but our `inputAccessoryView` keybar is still shown. That is the
+        // recurring root cause: the guide (and the measured accH) are both PROXIES for the keybar
+        // position, each wrong in a different state, and every prior fix just traded one for the
+        // other. `kbTopViaFrame` is the HYPOTHESIS under test: the accessory's REAL frame top,
+        // converted into this container's space (the same computation the -CC path already does
+        // for its `kbTopY` log). If on device `kbTopViaFrame` reads ~443 while `guideTop`=499,
+        // the converted frame is the always-correct signal and the real fix drives layout from
+        // it. LAYOUT IS UNCHANGED by this probe: `usableH` above still uses guideTop/accH as
+        // shipped; we only OBSERVE kbTopViaFrame to prove the hypothesis before the fix.
         guard DebugLog.shared.isEnabled(.geometry) else { return }
         let guideTop = keyboardTopInContainer()
         let accH = (terminal.inputAccessoryView as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1
+        let kbTopViaFrame = keybarTopInContainerViaFrame()
         let cf = terminal.frame
         DebugLog.shared.log(.geometry,
             "geo:raw-container bounds=\(Int(bounds.width))x\(Int(bounds.height)) "
             + "guideTop=\(guideTop.map { String(format: "%.0f", $0) } ?? "nil") "
+            + "kbTopViaFrame=\(kbTopViaFrame.map { String(format: "%.0f", $0) } ?? "nil") "
             + "fr=\(terminal.isFirstResponder) accH=\(String(format: "%.0f", accH)) "
             + "usableH=\(String(format: "%.0f", usableH)) "
             + "childFrame=\(Int(cf.minX)),\(Int(cf.minY)),\(Int(cf.width))x\(Int(cf.height))")
@@ -80,5 +93,25 @@ final class RawTerminalContainer: UIView {
         guard terminal.isFirstResponder,
               let acc = terminal.inputAccessoryView as? KeybarInputAccessory else { return -1 }
         return acc.intrinsicContentSize.height
+    }
+
+    /// DIAGNOSTIC-ONLY (2026-08-08): the keybar accessory's REAL top edge, converted from its own
+    /// UIKit window into THIS container's coordinate space. The `inputAccessoryView` is hosted in a
+    /// separate window (not a subview of this container), so its raw `frame.minY` is in that window's
+    /// space and is not directly comparable to `bounds`. `self.convert(_:from: acc.superview)` maps it
+    /// into container space, exactly as `TmuxPaneContainer.logGeometry` computes its `kbTopY`. This is
+    /// the hypothesis under test for the root-cause fix: unlike `keyboardLayoutGuide` (which reports
+    /// bounds-bottom when the on-screen keyboard is down but our keybar is up) and unlike the measured
+    /// `accH` (valid only while first responder + self-sized), the converted frame top should be the
+    /// keybar's true position in EVERY state. Returns nil when there is no shown accessory. NOT YET
+    /// used to drive layout; the fix adopts it once a device capture confirms it reads ~443 when the
+    /// guide reads 499.
+    private func keybarTopInContainerViaFrame() -> Double? {
+        guard terminal.isFirstResponder,
+              let acc = terminal.inputAccessoryView,
+              let accSuper = acc.superview else { return nil }
+        let topInContainer = convert(CGPoint(x: acc.frame.minX, y: acc.frame.minY), from: accSuper).y
+        guard topInContainer.isFinite, topInContainer > 0 else { return nil }
+        return Double(topInContainer)
     }
 }
