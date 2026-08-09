@@ -729,7 +729,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // those gapped after an app-switch. The window-space measurement below (PR #122,
             // ported from RawTerminalContainer) uses the accessory's REAL window-space top and
             // is correct in both regimes.
-            let usableH = usableTerminalHeight()
+            let usableH = Double(usableTerminalHeight())
             guard let grid = terminalGrid(width: Double(bounds.width), height: usableH,
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
             // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15). Log the
@@ -960,34 +960,35 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// the keybar is gone, panes fill the container), and HOLDS `lastUsableH` when the
         /// window-space geometry is untrustworthy (accessory mid-animation / unreachable),
         /// rather than filling `bounds` (which would hide the alt-screen's bottom rows).
-        private func usableTerminalHeight() -> Double {
+        /// Returns `CGFloat` (UIKit view-geometry height, matching
+        /// `firstResponderKeybarHeight() -> CGFloat` and `RawTerminalContainer`), NOT a
+        /// bare `Double`: the value IS view geometry read from `window`/`convert`/`bounds`,
+        /// not pure logic (the pure part, `rawTerminalChildHeight`, lives in Kit).
+        private func usableTerminalHeight() -> CGFloat {
             // The first-responder pane and its keybar accessory (iOS shows exactly that
             // pane's accessory). No first responder → keyboard down → full height.
             let frPane = panes.values.first(where: { $0.isFirstResponder })
-            guard let frPane else { return Double(bounds.height) }
+            guard let frPane, let win = window else { return bounds.height }
 
             let accH = Double((frPane.inputAccessoryView as? KeybarInputAccessory)?
                 .intrinsicContentSize.height ?? -1)
-            let win = window
-            let containerTopY = win.map { Double(convert(CGPoint.zero, to: $0).y) }
+            let containerTopY = Double(convert(CGPoint.zero, to: win).y)
             let accessoryTopY: Double? = {
-                guard let acc = frPane.inputAccessoryView, let accSuper = acc.superview,
-                      let w = win else { return nil }
-                let y = w.convert(CGPoint(x: acc.frame.minX, y: acc.frame.minY), from: accSuper).y
+                guard let acc = frPane.inputAccessoryView, let accSuper = acc.superview else { return nil }
+                let y = win.convert(CGPoint(x: acc.frame.minX, y: acc.frame.minY), from: accSuper).y
                 return y.isFinite ? Double(y) : nil
             }()
 
-            let computed: Double? = containerTopY.flatMap { top in
-                rawTerminalChildHeight(accessoryTopY: accessoryTopY, containerTopY: top,
-                                       containerHeight: Double(bounds.height),
-                                       accessoryHeight: accH, isFirstResponder: true)
-            }
+            let computed = rawTerminalChildHeight(accessoryTopY: accessoryTopY,
+                                                  containerTopY: containerTopY,
+                                                  containerHeight: Double(bounds.height),
+                                                  accessoryHeight: accH, isFirstResponder: true)
             if let computed {
                 lastUsableH = computed
-                return computed
+                return CGFloat(computed)
             }
-            if lastUsableH > 0 { return lastUsableH }   // hold last-known-good
-            return Double(bounds.height)                // no trusted value yet
+            if lastUsableH > 0 { return CGFloat(lastUsableH) }   // hold last-known-good
+            return bounds.height                                 // no trusted value yet
         }
 
         /// Cell metrics (monospace → uniform cell), used both to compute the container
@@ -1073,7 +1074,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Same window-space usable height `layoutSubviews` computes (PR #122 port),
             // recomputed here so a pane framed by an `apply` that lands between layout
             // passes agrees with the grid tmux was just told, not a stale full-height frame.
-            let usableH = usableTerminalHeight()
+            let usableH = Double(usableTerminalHeight())
             let rects = fittedPaneRects(layout: layout, cell: cell, usableHeight: usableH)   // fill usable area, not tmux's lagging layout
             let live = Set(rects.map(\.pane))
 
