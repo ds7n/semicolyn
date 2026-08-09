@@ -45,3 +45,38 @@ public func usableHeightFromKeyboardTop(rawHeight: Double, keyboardTopY: Double?
     guard let top = keyboardTopY, top > 0, top <= rawHeight else { return rawHeight }
     return top
 }
+
+/// The terminal child's height on the raw path, derived from WINDOW-SPACE keybar geometry rather
+/// than from the container's own `bounds` (2026-08-09, after ~7 fixes that all subtracted from an
+/// unstable `bounds`). The device forensics proved `bounds` is ambiguous, sometimes it already
+/// excludes the keybar band (~431 after an app-switch), sometimes it includes it (~499 on first
+/// connect), and NO same-window height signal (bounds / keyboardLayoutGuide / safeAreaInsets)
+/// distinguishes the two. The ONE signal that does is the keybar accessory's REAL top edge in
+/// window space (`accessoryTopY`, from `window.convert(accessory.frame, from: accessory.superview)`)
+/// relative to the container's own top in window space (`containerTopY`, from
+/// `container.convert(.zero, to: window)`): the child must reach exactly the keybar's top, so its
+/// height is `accessoryTopY - containerTopY`, regardless of what `bounds` "means".
+///
+/// The accessory is hosted in a SEPARATE UIKit window and lays out on its own cycle, so a value
+/// read during the keybar/keyboard animation can be transient garbage (device: `accessoryTopY`
+/// briefly == the window height). This returns `nil` (caller must hold its last-known-good height)
+/// unless the inputs are a trustworthy INTERIOR value: first responder, a positive accessory
+/// height, and a keybar top that lies within the container's own vertical extent
+/// (`containerTopY < accessoryTopY <= containerTopY + containerHeight`). The upper bound rejects
+/// the mid-animation "accessory at the window bottom" transient; the lower bound rejects a keybar
+/// top above the container (nonsensical). Pure; unit-tested with the build-124 device numbers.
+///
+/// - Returns: the child height in points, or `nil` when the geometry is not trustworthy this pass.
+public func rawTerminalChildHeight(accessoryTopY: Double?,
+                                   containerTopY: Double,
+                                   containerHeight: Double,
+                                   accessoryHeight: Double,
+                                   isFirstResponder: Bool) -> Double? {
+    guard isFirstResponder, accessoryHeight > 0, let accTop = accessoryTopY else { return nil }
+    // The keybar top must sit strictly below the container top and no lower than the container's
+    // own bottom edge. Outside that interval the converted frame is a cross-window animation
+    // transient (or a stale/degenerate value) and must not drive layout.
+    guard accTop > containerTopY, accTop <= containerTopY + containerHeight else { return nil }
+    let h = accTop - containerTopY
+    return h > 0 ? h : nil
+}

@@ -52,12 +52,16 @@ struct TerminalScreen: UIViewRepresentable {
         return c
     }
 
-    func makeUIView(context: Context) -> TerminalView {
+    func makeUIView(context: Context) -> RawTerminalContainer {
         let terminal = PaneTerminalView(frame: .zero)
         // Raw single-terminal path: this view owns its keybar inset (see
         // PaneTerminalView.appliesOwnKeybarInset). The -CC container path leaves this
         // false and insets its panes itself.
-        terminal.appliesOwnKeybarInset = true
+        // Container-wrap (2026-08-08): RawTerminalContainer now owns the child's frame
+        // height, so the child must NOT also self-inset (double-fight). Left false; the
+        // self-inset code stays resident in PaneTerminalView (deletable in the follow-up
+        // cleanup PR). Flip back to true + drop the container to fully revert.
+        terminal.appliesOwnKeybarInset = false
         terminal.terminalDelegate = context.coordinator
         // Event-driven InteractionMode: recompute on every alt-screen / mouse-mode
         // transition (single-pane mount → nil key), then refresh the dot immediately.
@@ -193,35 +197,42 @@ struct TerminalScreen: UIViewRepresentable {
         output.onBytes = { [weak terminal] bytes in
             terminal?.feed(byteArray: bytes[...])
         }
-        return terminal
+        // Wrap the terminal in a plain-UIView container so IT (not the scroll view) is the
+        // SwiftUI representable leaf. The container owns the child's frame from the correct
+        // coordinate space; see RawTerminalContainer + the 2026-08-08 design spec. All the
+        // wiring above stays attached to `terminal` (the child); only the returned leaf changes.
+        let container = RawTerminalContainer(terminal: terminal)
+        container.coordinator = context.coordinator
+        return container
     }
 
-    func updateUIView(_ uiView: TerminalView, context: Context) {
+    func updateUIView(_ uiView: RawTerminalContainer, context: Context) {
+        let terminal = uiView.terminal
         // Claim keyboard focus ONCE when the view first lands in a window (so the
         // on-screen keyboard + keybar accessory appear). We don't re-claim on later
-        // passes, a user who dismisses the keyboard is not fought here. Re-showing it
+        // passes; a user who dismisses the keyboard is not fought here. Re-showing it
         // after dismissal is the job of `handleRestoreTap` (tap the terminal).
-        if !context.coordinator.didInitialFocus, uiView.window != nil {
+        if !context.coordinator.didInitialFocus, terminal.window != nil {
             context.coordinator.didInitialFocus = true
-            uiView.becomeFirstResponder()
+            terminal.becomeFirstResponder()
         }
         // Refresh halo color when theme changes.
         context.coordinator.halo.configure(color: UIColor(Color(theme.bell.edge)))
         // Recolor the live terminal when the theme changes.
-        applyPalette(theme.terminalPalette(), to: uiView)
+        applyPalette(theme.terminalPalette(), to: terminal)
         // Re-apply the font live when the user changes face/size in the settings
         // picker. Compare against the last SETTINGS-applied values (not the pinch
         // baseSize) so an in-progress pinch isn't clobbered on every SwiftUI pass;
         // a deliberate settings change resets the pinch baseline to the new size.
         let coord = context.coordinator
         if settings.fontFace != coord.lastAppliedFace || settings.fontSize != coord.lastAppliedFontSize {
-            uiView.font = TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(settings.fontSize))
+            terminal.font = TerminalFontProvider.shared.font(for: settings.fontFace, size: CGFloat(settings.fontSize))
             coord.lastAppliedFace = settings.fontFace
             coord.lastAppliedFontSize = settings.fontSize
             coord.baseSize = settings.fontSize
         }
         // Update mouse-active dot visibility and selection gesture state.
-        context.coordinator.updateMouseDot(from: uiView)
+        context.coordinator.updateMouseDot(from: terminal)
     }
 
     /// Bridges SwiftTerm's delegate callbacks to the SSH session.
