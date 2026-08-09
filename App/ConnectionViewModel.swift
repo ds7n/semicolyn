@@ -181,6 +181,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// current session (idempotency guard: `onFirstFrame` is once-only but ET can
     /// re-fire across a roam). Reset in `teardown()`.
     private var etControlLaunchSent = false
+    /// The `tmux -CC new-session …` command to send in-band once the ET stream is
+    /// up. Built ONCE at attach (`makeStartCommand()` is stateful and one-shot) and
+    /// stashed here for `onFirstFrame` to send. Nil on the raw ET path / after
+    /// `teardown()`.
+    private var etControlStartCommand: String?
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -540,6 +545,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         etResolved = false
         etFirstFrameSeen = false
         etControlLaunchSent = false
+        etControlStartCommand = nil
         etSession?.close()
         etSession = nil
         tmux?.stop()
@@ -999,14 +1005,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         if etControlMode {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
             let rt = makeConfiguredTmuxRuntime(conn: conn)
-            // Validate the launch command up front: a bad resolved session name
-            // (a Defaults value can be invalid) means we can't launch `-CC` at all,
-            // so degrade to a raw ET shell before wiring any control-mode routing.
-            if rt.makeStartCommand() == nil {
-                DebugLog.shared.log(.lifecycle, "et: makeStartCommand nil (bad session name) → raw ET shell")
-                self.historySeeder = nil
-                tmuxRuntime = nil
-            } else {
+            // Build the launch command ONCE and stash it. `makeStartCommand()` is
+            // STATEFUL: it flips the controller lifecycle .idle → .attaching and
+            // returns nil on every later call, so it MUST be called exactly once (the
+            // SSH path calls it once too). Calling it a second time in `onFirstFrame`
+            // was the "single cursor, no panes" bug: the second call returned nil, so
+            // the in-band launch never fired and the ET shell sat at a raw prompt.
+            // A nil result here means a bad resolved session name (a Defaults value can
+            // be invalid) → degrade to a raw ET shell. The stashed command is sent
+            // in-band from `onFirstFrame`.
+            if let startCmd = rt.makeStartCommand() {
+                self.etControlStartCommand = startCmd
                 rt.session = nil                               // ET retains its own session
                 rt.setWriteSink(ETSessionSink(session: sess))  // control-mode writes ride ET
                 tmuxRuntime = rt
@@ -1018,6 +1027,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // `sendInput` drops (no activePane) until tmux emits its first state.
                 self.tmux = rt
                 DebugLog.shared.log(.lifecycle, "et: control-mode ON → tmux -CC in-band, session=\(tmuxSessionNameForConnection)")
+            } else {
+                DebugLog.shared.log(.lifecycle, "et: makeStartCommand nil (bad session name) → raw ET shell")
+                self.historySeeder = nil
+                tmuxRuntime = nil
             }
         }
 
@@ -1056,7 +1069,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // already published to `self.tmux` at attach so input (`send-keys`) and
             // resize (`refresh-client`) route through control mode.
             guard etIsControlMode, let tmux = self.tmux, !self.etControlLaunchSent,
-                  let startCmd = tmux.makeStartCommand() else { return }
+                  let startCmd = self.etControlStartCommand else { return }
             self.etControlLaunchSent = true
             DebugLog.shared.log(.tmux, "et: in-band launch \(startCmd.prefix(60))")
             tmux.sendRawLaunch(Array((startCmd + "\n").utf8))
