@@ -4,30 +4,36 @@ import UIKit
 import SemicolynKit
 
 /// Plain-UIView leaf for the raw single-terminal path (`TerminalScreen`). The `PaneTerminalView`
-/// (a `UIScrollView`) is an Auto-Layout-pinned SUBVIEW; this container is what SwiftUI sizes.
-/// The container reserves the keybar band via a stored bottom-constraint constant: the child is
-/// pinned to the container's own leading/trailing/top/bottom edges, and the bottom constraint's
-/// constant is set to `-reservation` each layout pass, lifting the child's bottom edge above the
-/// keybar in every state (rotation, keyboard show/hide, app-switch). No keybar-top proxy signal
-/// drives layout, and no `safeAreaLayoutGuide` / `additionalSafeAreaInsets` are used (the latter
-/// is UIViewController-only and out of scope on a UIView).
+/// (a `UIScrollView`) is an Auto-Layout-pinned SUBVIEW; this container is what SwiftUI sizes. The
+/// child is pinned to the container's own leading/trailing/top edges, and its bottom-constraint
+/// constant is driven each layout pass so the child's bottom edge lands exactly at the keybar's
+/// top, derived from WINDOW-SPACE geometry (the keybar accessory's real top in window space minus
+/// this container's top in window space, `rawTerminalChildHeight`).
 ///
-/// This replaces the manual `usableH` computation + `terminal.frame = ...` framing that recurred as
-/// the "rows behind the keybar" bug (~6 prior fixes): every one drove a hand-computed frame from a
-/// proxy (`keyboardLayoutGuide` / converted accessory frame) that was wrong in some state. The
-/// build-121 diagnostic proved the accessory's measured height (`accH`) is the one stable signal;
-/// here it feeds the bottom-constraint constant and Auto Layout owns the rest.
+/// Why window-space and not a subtraction from `bounds`: device forensics (2026-08-09) proved the
+/// container's `bounds` is AMBIGUOUS, after an app-switch SwiftUI hands a keybar-EXCLUDED bounds
+/// (~431), on first connect a keybar-INCLUDED bounds (~499), and NO same-window height signal
+/// (`bounds`, `keyboardLayoutGuide.layoutFrame.minY` which equals `bounds`, `safeAreaInsets` which
+/// is zero) distinguishes the two. So every prior fix that subtracted a keybar height from `bounds`
+/// (~7 of them) was correct in one regime and wrong in the other (gap or hidden rows). The keybar
+/// accessory's real converted top is the one signal correct in BOTH regimes. When that geometry is
+/// untrustworthy (the accessory is hosted in a separate window and can be mid-animation), the pass
+/// HOLDS the last-known-good height rather than fill `bounds` (which would hide rows in the
+/// keybar-included regime). A bidirectional invariant tripwire logs any residual gap/hidden-rows.
 /// See `docs/superpowers/specs/2026-08-08-keybar-safearea-reservation-design.md`.
 final class RawTerminalContainer: UIView {
     /// The single terminal child, pinned to the container's own edges (Auto Layout frames it).
     let terminal: PaneTerminalView
     /// The SwiftUI coordinator, retained weakly (mirrors `TmuxPaneContainer.ContainerView`).
     weak var coordinator: TerminalScreen.Coordinator?
-    /// Last reservation set, so we only mutate `bottomConstraint.constant` (which triggers a layout
-    /// pass) when it actually changes, avoiding a layout feedback loop.
-    private var lastReservation: CGFloat = -1
-    /// The child's bottom pin, whose `constant` is driven to `-reservation` each layout pass to
-    /// lift the child above the keybar band.
+    /// The child height last applied via `bottomConstraint`, so we only mutate the constant (which
+    /// triggers a layout pass) when it actually changes, avoiding a layout feedback loop. Also the
+    /// LAST-KNOWN-GOOD height: when a layout pass cannot trust the window-space geometry (the keybar
+    /// accessory is mid-animation / not yet reachable), we HOLD this value rather than fall back to
+    /// filling `bounds` (which hides rows in the keybar-included regime). `-1` = never set yet.
+    private var lastChildHeight: CGFloat = -1
+    /// The child's bottom pin, whose `constant` is driven so the child's bottom edge lands exactly
+    /// at the keybar's top (from window-space geometry), lifting it above the keybar band.
     private var bottomConstraint: NSLayoutConstraint!
 
     init(terminal: PaneTerminalView) {
@@ -36,8 +42,8 @@ final class RawTerminalContainer: UIView {
         terminal.translatesAutoresizingMaskIntoConstraints = false
         addSubview(terminal)
         // Pin the child to self's own edges (NOT safeAreaLayoutGuide): the bottom constraint's
-        // constant is driven by the keybar reservation set in layoutSubviews, so the child's
-        // frame automatically excludes the keybar band in every state.
+        // constant is driven from window-space keybar geometry in layoutSubviews, so the child's
+        // bottom edge lands exactly at the keybar's top in every state.
         bottomConstraint = terminal.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 0)
         NSLayoutConstraint.activate([
             terminal.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -52,59 +58,80 @@ final class RawTerminalContainer: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // Reserve the keybar band via the bottom-constraint constant, sized by the one stable
-        // signal (accH). Auto Layout then re-solves the child's frame against the new constant.
-        // Update only on change so setting the constant (which itself re-triggers layout) does
-        // not spin.
+        // Derive the child height from WINDOW-SPACE keybar geometry, NOT from `bounds` (which is
+        // ambiguous: sometimes it already excludes the keybar band, sometimes it includes it, and
+        // no same-window height signal distinguishes the two, device forensics 2026-08-09). The
+        // keybar accessory's REAL top in window space, relative to this container's top in window
+        // space, is the one signal that is correct in both regimes. `rawTerminalChildHeight`
+        // returns nil when that geometry is untrustworthy (accessory mid-animation / unreachable),
+        // in which case we HOLD the last-known-good height rather than fill bounds (which would
+        // hide rows in the keybar-included regime).
         let accH = Double(firstResponderKeybarHeight())
-        let reservation = CGFloat(keybarSafeAreaReservation(accessoryHeight: accH,
-                                                            isFirstResponder: terminal.isFirstResponder))
-        let reservationChanged = abs(reservation - lastReservation) > 0.5
-        if reservationChanged {
-            lastReservation = reservation
-            // Lift the child's bottom up by the keybar reservation via the stored bottom
-            // constraint (additionalSafeAreaInsets is UIViewController-only; this is the
-            // UIView-native equivalent). Auto Layout re-solves the child frame to
-            // containerHeight - reservation; no manual framing.
-            bottomConstraint.constant = -reservation
+        let win = window
+        let containerTopY = win.map { Double(convert(CGPoint.zero, to: $0).y) }
+        let accessoryTopY: Double? = {
+            guard terminal.isFirstResponder, let acc = terminal.inputAccessoryView,
+                  let accSuper = acc.superview, let w = win else { return nil }
+            let y = w.convert(CGPoint(x: acc.frame.minX, y: acc.frame.minY), from: accSuper).y
+            return y.isFinite ? Double(y) : nil
+        }()
+        // The trusted child height this pass, or nil to hold last-known-good.
+        let computed: CGFloat? = containerTopY.flatMap { top in
+            rawTerminalChildHeight(accessoryTopY: accessoryTopY, containerTopY: top,
+                                   containerHeight: Double(bounds.height),
+                                   accessoryHeight: accH,
+                                   isFirstResponder: terminal.isFirstResponder).map { CGFloat($0) }
+        }
+        // Keyboard-down (not first responder) is a distinct, trustworthy "full height" case: the
+        // keybar is gone, so the child fills the whole container. `rawTerminalChildHeight` returns
+        // nil there (no accessory), so handle it explicitly rather than holding a stale keybar-up
+        // height.
+        let targetHeight: CGFloat? = {
+            if !terminal.isFirstResponder { return bounds.height }   // keyboard down -> full
+            if let computed { return computed }                       // trusted window-space value
+            if lastChildHeight > 0 { return lastChildHeight }         // hold last-known-good
+            return nil                                                // no trusted value yet -> leave as-is
+        }()
+        var applied = false
+        if let targetHeight, abs(targetHeight - lastChildHeight) > 0.5 {
+            lastChildHeight = targetHeight
+            // The child is pinned top to the container top; its bottom constraint lifts it so its
+            // height equals targetHeight: constant = -(bounds.height - targetHeight).
+            bottomConstraint.constant = -(bounds.height - targetHeight)
+            applied = true
         }
 
-        // Prong 3 (runtime invariant tripwire): the reserved keybar top is bounds.height minus the
-        // reservation we just applied via the bottom constraint. If the child's bottom extends past
-        // it, rows would render in the reserved band = the bug. Log it loud (default-on category)
-        // instead of silently hiding a row.
-        // Skip on a pass that just changed the reservation: the child frame has not been
-        // re-solved against the new constraint constant yet this pass, so childBottom would still
-        // reflect the pre-change frame and could spuriously exceed reservedTop for one frame; the
-        // check runs on the next, settled pass instead.
-        if !reservationChanged {
-            let reservedTop = Double(bounds.height) - Double(reservation)
+        // Bidirectional runtime invariant tripwire (device forensics guardrail): on a SETTLED pass
+        // (we did not just change the constraint, so the child frame is re-solved), the child's
+        // bottom should meet the keybar top. Log LOUD if it is BELOW the keybar top (rows hidden)
+        // OR far ABOVE it (a gap), the two failure modes this whole arc fought. Uses the accessory's
+        // window-space top converted back to container space as the reference (no bounds proxy).
+        if !applied, let accTop = accessoryTopY, let top = containerTopY {
+            let keybarTopInContainer = accTop - top          // keybar top in this container's space
             let childBottom = Double(terminal.frame.maxY)
-            if childBottom > reservedTop + 1.0 {
+            let delta = childBottom - keybarTopInContainer   // >0 = hidden rows, <0 = gap
+            if abs(delta) > 2.0 {
                 DebugLog.shared.log(.tmux,
-                    "keybar-inset VIOLATION reservedTop=\(String(format: "%.0f", reservedTop)) "
+                    "keybar-inset VIOLATION \(delta > 0 ? "HIDDEN" : "GAP") "
+                    + "keybarTop=\(String(format: "%.0f", keybarTopInContainer)) "
                     + "childBottom=\(String(format: "%.0f", childBottom)) "
-                    + "over=\(String(format: "%.0f", childBottom - reservedTop))")
+                    + "delta=\(String(format: "%.0f", delta))")
             }
         }
 
-        // Comprehensive container-level geometry diagnostic (2026-08-08). The recurring
-        // behind-keybar / gap-above-keybar bug (~7 fixes) is driven by the container's `bounds`
-        // being UNSTABLE: after an app-switch SwiftUI hands a keybar-EXCLUDED bounds (e.g. 431),
-        // on first connect a keybar-INCLUDED bounds (e.g. 499), and `safeAreaInsets` stays (0,0)
-        // in both, so nothing at the UIView layer distinguishes the two regimes. This line logs
-        // EVERY signal that could disambiguate them so any recurrence is diagnosable from one
-        // capture: self bounds + safeAreaInsets, the window bounds + its safeAreaInsets, the full
-        // superview chain heights (which SwiftUI host resized), the keyboardLayoutGuide frame, and
-        // the child frame. Keep this even after the fix lands; it is the standing layout-forensics
-        // line for the raw path.
+        // Standing layout-forensics line for the raw path (keep after the fix lands). The recurring
+        // behind-keybar / gap-above-keybar bug (~7 fixes) came from the container's `bounds` being
+        // ambiguous (sometimes keybar-included, sometimes -excluded) with no same-window height
+        // signal to disambiguate; the fix instead drives the child from window-space geometry
+        // (accessoryTopY - containerTopY). This logs both the inputs (containerTopY, accTopY, accH)
+        // and the applied outcome (targetHeight, childFrame) so any recurrence is diagnosable from
+        // one capture. `targetHeight=hold` means the window-space geometry was untrusted this pass
+        // and the last-known-good height was held.
         guard DebugLog.shared.isEnabled(.geometry) else { return }
         let cf = terminal.frame
         let sa = safeAreaInsets
-        let win = window
         let winB = win?.bounds ?? .zero
         let winSA = win?.safeAreaInsets ?? .zero
-        // Superview chain heights (which ancestor SwiftUI actually resized on the app-switch).
         var chain: [String] = []
         var v: UIView? = superview
         var depth = 0
@@ -114,36 +141,15 @@ final class RawTerminalContainer: UIView {
             depth += 1
         }
         let klg = keyboardLayoutGuide.layoutFrame
-        // WINDOW-SPACE PROBE (2026-08-08, post-adversarial-refutation): the fix under test is
-        // child height = keybarTopInWindow - containerTopInWindow, which ignores what `bounds`
-        // "means" (the unstable value) and measures absolute window positions instead.
-        //  - containerTopY = this container's origin converted into window space.
-        //  - keybarTopY-via-accH = window.height - accH (keybar floats at the window bottom).
-        //  - the accessory's OWN converted top (if reachable) as a cross-check on keybarTopY.
-        //  - predictedChild = keybarTopY(accH) - containerTopY = what the window-space formula
-        //    would frame the child to. VERIFY: predictedChild must be 443 when bounds=499 AND
-        //    431 when bounds=431 (the two known good/bad points). If it does, the formula is
-        //    proven and the fix drives the child height from it (no bounds subtraction).
-        let containerTopY = win.map { Double(convert(CGPoint.zero, to: $0).y) }
-        let keybarTopYviaAccH = (win != nil && accH > 0) ? Double(winB.height) - accH : nil
-        let accTopY: Double? = {
-            guard terminal.isFirstResponder, let acc = terminal.inputAccessoryView,
-                  let accSuper = acc.superview, let w = win else { return nil }
-            let p = w.convert(CGPoint(x: acc.frame.minX, y: acc.frame.minY), from: accSuper).y
-            return p.isFinite ? Double(p) : nil
-        }()
-        let predictedChild: Double? = (keybarTopYviaAccH != nil && containerTopY != nil)
-            ? keybarTopYviaAccH! - containerTopY! : nil
         DebugLog.shared.log(.geometry,
             "geo:raw-container bounds=\(Int(bounds.width))x\(Int(bounds.height)) "
             + "selfSA=(t\(Int(sa.top)),b\(Int(sa.bottom))) "
             + "win=\(Int(winB.width))x\(Int(winB.height)) winSA=(t\(Int(winSA.top)),b\(Int(winSA.bottom))) "
             + "fr=\(terminal.isFirstResponder) accH=\(String(format: "%.0f", accH)) "
-            + "reservation=\(String(format: "%.0f", Double(reservation))) "
             + "containerTopY=\(containerTopY.map { String(format: "%.0f", $0) } ?? "nil") "
-            + "keybarTopY=\(keybarTopYviaAccH.map { String(format: "%.0f", $0) } ?? "nil") "
-            + "accTopY=\(accTopY.map { String(format: "%.0f", $0) } ?? "nil") "
-            + "predictedChild=\(predictedChild.map { String(format: "%.0f", $0) } ?? "nil") "
+            + "accTopY=\(accessoryTopY.map { String(format: "%.0f", $0) } ?? "nil") "
+            + "targetHeight=\(targetHeight.map { String(format: "%.0f", Double($0)) } ?? "hold") "
+            + "lastGood=\(String(format: "%.0f", Double(lastChildHeight))) applied=\(applied) "
             + "klgTop=\(Int(klg.minY)) klgH=\(Int(klg.height)) "
             + "childFrame=\(Int(cf.minX)),\(Int(cf.minY)),\(Int(cf.width))x\(Int(cf.height)) "
             + "chain=[\(chain.joined(separator: ">"))]")
@@ -151,7 +157,7 @@ final class RawTerminalContainer: UIView {
 
     /// The keybar (`inputAccessoryView`) height of the child terminal when it is first responder
     /// (iOS shows exactly that view's accessory). Returns -1 when the terminal is not first
-    /// responder (keyboard down, no accessory). Feeds the safe-area reservation.
+    /// responder (keyboard down, no accessory). Feeds the window-space child-height trust guard.
     private func firstResponderKeybarHeight() -> CGFloat {
         guard terminal.isFirstResponder,
               let acc = terminal.inputAccessoryView as? KeybarInputAccessory else { return -1 }

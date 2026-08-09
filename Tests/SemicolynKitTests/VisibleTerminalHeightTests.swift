@@ -115,4 +115,67 @@ final class VisibleTerminalHeightTests: XCTestCase {
             XCTAssertEqual(bounds - reserved, expectedUsable, accuracy: 1e-9)
         }
     }
+
+    // MARK: rawTerminalChildHeight (2026-08-09 window-space fix)
+    // After ~7 fixes that subtracted from an unstable `bounds`, the child height is derived from
+    // the keybar accessory's REAL top in window space (accessoryTopY) relative to the container
+    // top (containerTopY). Device (build 124): containerTopY=62 always; accessoryTopY 493 @ the
+    // app-switch/gap state and 510 @ first-connect; the transient mid-animation value is 874
+    // (== window height) and MUST be rejected.
+
+    // App-switch / gap state (the bug we are fixing): accessoryTopY 493, containerTopY 62,
+    // containerHeight 431 -> child 431. Filling this bounds is correct (no gap, no hidden rows).
+    func testChildHeightAppSwitchState() throws {
+        let h = try XCTUnwrap(rawTerminalChildHeight(accessoryTopY: 493, containerTopY: 62,
+                                                     containerHeight: 431, accessoryHeight: 56, isFirstResponder: true))
+        XCTAssertEqual(h, 431, accuracy: 1e-9)
+    }
+    // First-connect state: accessoryTopY 510, containerTopY 62, containerHeight 499 -> child 448.
+    // (The old accH-subtraction gave 443; 448 reaches the accessory's real frame top.)
+    func testChildHeightFirstConnectState() throws {
+        let h = try XCTUnwrap(rawTerminalChildHeight(accessoryTopY: 510, containerTopY: 62,
+                                                     containerHeight: 499, accessoryHeight: 56, isFirstResponder: true))
+        XCTAssertEqual(h, 448, accuracy: 1e-9)
+    }
+    // The mid-animation transient (accessoryTopY == window height, above the container's bottom
+    // edge at 62+431=493) MUST be rejected so the caller holds its last-known-good height.
+    func testChildHeightRejectsMidAnimationTransient() {
+        let h = rawTerminalChildHeight(accessoryTopY: 874, containerTopY: 62,
+                                       containerHeight: 431, accessoryHeight: 56, isFirstResponder: true)
+        XCTAssertNil(h)
+    }
+    // Not first responder (keyboard down, no accessory) -> nil (caller fills bounds / full height).
+    func testChildHeightNilWhenNotFirstResponder() {
+        XCTAssertNil(rawTerminalChildHeight(accessoryTopY: 493, containerTopY: 62,
+                                            containerHeight: 431, accessoryHeight: 56, isFirstResponder: false))
+    }
+    // Nil accessoryTopY (accessory not reachable this pass) -> nil (hold last-known-good).
+    func testChildHeightNilWhenNoAccessoryTop() {
+        XCTAssertNil(rawTerminalChildHeight(accessoryTopY: nil, containerTopY: 62,
+                                            containerHeight: 431, accessoryHeight: 56, isFirstResponder: true))
+    }
+    // accH sentinel -1 -> nil (no trustworthy accessory).
+    func testChildHeightNilWhenSentinelAccH() {
+        XCTAssertNil(rawTerminalChildHeight(accessoryTopY: 493, containerTopY: 62,
+                                            containerHeight: 431, accessoryHeight: -1, isFirstResponder: true))
+    }
+    // BVA: keybar top exactly at the container's bottom edge (accessoryTopY == containerTopY +
+    // containerHeight) is the interior boundary -> accepted, child == containerHeight (full).
+    func testChildHeightBoundaryAtContainerBottomAccepted() throws {
+        let h = try XCTUnwrap(rawTerminalChildHeight(accessoryTopY: 493, containerTopY: 62,
+                                                     containerHeight: 431, accessoryHeight: 56, isFirstResponder: true))
+        XCTAssertEqual(h, 431, accuracy: 1e-9)   // 62+431 == 493, boundary accepted
+    }
+    // BVA: keybar top one point BELOW the container bottom (494 > 62+431) -> rejected.
+    func testChildHeightBoundaryBelowContainerBottomRejected() {
+        XCTAssertNil(rawTerminalChildHeight(accessoryTopY: 494, containerTopY: 62,
+                                            containerHeight: 431, accessoryHeight: 56, isFirstResponder: true))
+    }
+    // BVA: keybar top at/above the container top -> rejected (nonsensical, no positive height).
+    func testChildHeightRejectsTopAtOrAboveContainerTop() {
+        XCTAssertNil(rawTerminalChildHeight(accessoryTopY: 62, containerTopY: 62,
+                                            containerHeight: 431, accessoryHeight: 56, isFirstResponder: true))
+        XCTAssertNil(rawTerminalChildHeight(accessoryTopY: 40, containerTopY: 62,
+                                            containerHeight: 431, accessoryHeight: 56, isFirstResponder: true))
+    }
 }
