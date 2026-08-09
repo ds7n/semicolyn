@@ -85,43 +85,16 @@ final class VisibleTerminalHeightTests: XCTestCase {
         XCTAssertEqual(terminalGrid(width: 402, height: usable, cellWidth: 5.66, cellHeight: 11.15)?.rows, 32)
     }
 
-    // MARK: keybarSafeAreaReservation (2026-08-08 root-cause fix)
-    // The bottom safe-area reservation for the keybar accessory. The build-121 diagnostic
-    // proved accH (the accessory's off-screen content measurement) is the one stable signal;
-    // this helper is the whole reservation policy that both containers apply.
-
-    // First responder + measured accH -> reserve exactly accH (device: accH 56 -> 56).
-    func testReservationFirstResponderReservesAccH() {
-        XCTAssertEqual(keybarSafeAreaReservation(accessoryHeight: 56, isFirstResponder: true), 56, accuracy: 1e-9)
-    }
-    // Not first responder (keyboard down, no accessory shown) -> reserve nothing, even if a
-    // stale accH is passed. This is the state where guideTop==bounds; reservation must be 0.
-    func testReservationNotFirstResponderReservesZero() {
-        XCTAssertEqual(keybarSafeAreaReservation(accessoryHeight: 56, isFirstResponder: false), 0, accuracy: 1e-9)
-    }
-    // accH sentinel -1 (firstResponderKeybarHeight() when no accessory) -> 0.
-    func testReservationSentinelNegativeReservesZero() {
-        XCTAssertEqual(keybarSafeAreaReservation(accessoryHeight: -1, isFirstResponder: true), 0, accuracy: 1e-9)
-    }
-    // BVA at 0: accH exactly 0 -> 0 (no negative, no spurious reservation).
-    func testReservationZeroAccHReservesZero() {
-        XCTAssertEqual(keybarSafeAreaReservation(accessoryHeight: 0, isFirstResponder: true), 0, accuracy: 1e-9)
-    }
-    // The three build-121 device samples: bounds - reservation must equal the correct keybar top.
-    // (bounds 453/499/431, accH 56 -> reserved band 56 -> usable 397/443/375.)
-    func testReservationDeviceSamplesComposeToCorrectUsable() {
-        for (bounds, expectedUsable) in [(453.0, 397.0), (499.0, 443.0), (431.0, 375.0)] {
-            let reserved = keybarSafeAreaReservation(accessoryHeight: 56, isFirstResponder: true)
-            XCTAssertEqual(bounds - reserved, expectedUsable, accuracy: 1e-9)
-        }
-    }
-
     // MARK: rawTerminalChildHeight (2026-08-09 window-space fix)
     // After ~7 fixes that subtracted from an unstable `bounds`, the child height is derived from
     // the keybar accessory's REAL top in window space (accessoryTopY) relative to the container
-    // top (containerTopY). Device (build 124): containerTopY=62 always; accessoryTopY 493 @ the
-    // app-switch/gap state and 510 @ first-connect; the transient mid-animation value is 874
-    // (== window height) and MUST be rejected.
+    // top (containerTopY). The function is PURELY the arithmetic `accessoryTopY - containerTopY`
+    // plus a validity guard: it is device-agnostic (no hardcoded phone/font dimensions in the
+    // logic, the container reads accessoryTopY/containerTopY/containerHeight/accessoryHeight live
+    // on whatever device it runs on). The concrete numbers below are SAMPLE inputs captured from
+    // one device (build 124: containerTopY=62, accessoryTopY 493 @ app-switch / 510 @ first-connect,
+    // the transient mid-animation value 874 == window height that MUST be rejected). They verify
+    // the arithmetic + guard, NOT any device-specific assumption baked into the function.
 
     // App-switch / gap state (the bug we are fixing): accessoryTopY 493, containerTopY 62,
     // containerHeight 431 -> child 431. Filling this bounds is correct (no gap, no hidden rows).
