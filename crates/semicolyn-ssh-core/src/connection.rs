@@ -3,8 +3,7 @@
 
 //! SSH connection: TCP + transport handshake using the Phase-1a allowlist,
 //! host-key trust via an injected delegate, and Tier-3 negotiated-algorithm
-//! detection. See docs/superpowers/specs/2026-06-17-host-key-trust-design.md
-//! and 2026-06-17-ssh-algorithms-design.md.
+//! detection, per the host-key-trust and SSH-algorithms specs.
 
 /// What the host-key trust delegate is shown when deciding whether to trust a
 /// server's offered host key. Mirrors the first-trust modal's content.
@@ -39,7 +38,7 @@ pub enum ConnectError {
     /// silent fallback to bare-key auth.
     #[error("certificate invalid: {message}")]
     CertificateInvalid { message: String },
-    /// The initial SSH handshake did not complete within the connect deadline —
+    /// The initial SSH handshake did not complete within the connect deadline,
     /// e.g. a host that accepts the TCP connection but never sends its banner.
     /// Distinct from `Transport` so the caller can report "couldn't reach host"
     /// rather than a raw protocol error, and distinct from the post-handshake
@@ -57,7 +56,7 @@ impl From<russh::Error> for ConnectError {
 }
 
 /// The result of an authentication attempt. A failed auth is a normal outcome,
-/// not a `ConnectError` — the caller decides what to do (retry, try another
+/// not a `ConnectError`, the caller decides what to do (retry, try another
 /// method, surface the connect-failed banner).
 #[derive(uniffi::Enum, Debug, PartialEq, Eq)]
 pub enum AuthOutcome {
@@ -83,7 +82,7 @@ fn outcome(result: russh::client::AuthResult) -> AuthOutcome {
 
 /// Sink for shell output and lifecycle. Swift implements it (forwarding into an
 /// AsyncStream); Linux tests use a Rust double. Methods are synchronous and MUST
-/// be fast/non-blocking — they run on the pump task.
+/// be fast/non-blocking, they run on the pump task.
 #[uniffi::export(with_foreign)]
 pub trait ShellOutput: Send + Sync {
     /// A chunk of merged stdout+stderr from the PTY. May be called many times.
@@ -282,7 +281,7 @@ impl Connection {
     /// OpenSSH certificate authentication: present `<cert> + <private key>`.
     /// Performs the three client-side checks from the cert-auth design (parse,
     /// key↔cert pair match, validity window) then lets the server decide CA
-    /// trust. An unusable cert is `CertificateInvalid` — never a fallback to
+    /// trust. An unusable cert is `CertificateInvalid`, never a fallback to
     /// the bare key.
     pub async fn authenticate_openssh_cert(
         &self,
@@ -337,7 +336,7 @@ impl Connection {
     /// so the reply count always matches the prompt count (SSH drops the
     /// connection on a mismatch). Two cases keep that invariant:
     /// - **Zero-prompt round** (e.g. PAM's final confirmation banner): answered
-    ///   with an empty batch — never a stray password.
+    ///   with an empty batch, never a stray password.
     /// - **Prompts remain but `responses` is exhausted** (the server is
     ///   re-prompting after a wrong password): we have no answer to give, so we
     ///   return a typed `AuthOutcome::Failure` rather than send blank replies
@@ -372,7 +371,7 @@ impl Connection {
                 Kir::InfoRequest { prompts, .. } => {
                     // Out of answers for a real (non-empty) prompt round → auth
                     // has failed; stop cleanly with a typed Failure. A zero-prompt
-                    // round is NOT exhaustion — answer it with an empty batch.
+                    // round is NOT exhaustion, answer it with an empty batch.
                     if !prompts.is_empty() && sent >= responses.len() {
                         return Ok(AuthOutcome::Failure);
                     }
@@ -512,7 +511,7 @@ impl Connection {
     /// to `target_host:target_port` and run a fresh SSH handshake over it,
     /// returning the target as a new `Connection`. The caller authenticates the
     /// returned connection with the usual `authenticate_*` methods, exactly as
-    /// for a direct connection — a `proxyJump` chain is built one hop at a time
+    /// for a direct connection, a `proxyJump` chain is built one hop at a time
     /// by calling `connect_jump` then authenticating, repeatedly. `allow_legacy`,
     /// `allow_deprecated`, and `verifier` apply to the *target* hop only; each
     /// hop verifies its own host key independently. The returned connection keeps
@@ -613,7 +612,7 @@ async fn pump(
     loop {
         tokio::select! {
             // `wait()` is cancel-safe (it awaits an mpsc recv): if the cmd arm
-            // wins this select, dropping this future loses no buffered message —
+            // wins this select, dropping this future loses no buffered message,
             // the next `wait()` re-reads it.
             msg = channel.wait() => match msg {
                 Some(M::Data { data }) | Some(M::ExtendedData { data, .. }) => {
@@ -739,7 +738,7 @@ const NO_KEEPALIVE_INACTIVITY: std::time::Duration = std::time::Duration::from_s
 ///
 /// The load-bearing invariant: when keepalives are enabled, the inactivity
 /// timeout MUST sit strictly above the keepalive-failure window so keepalive's
-/// own retry logic — not the inactivity timer — declares a dead connection.
+/// own retry logic, not the inactivity timer, declares a dead connection.
 /// russh disconnects when `alive_timeouts > keepalive_max`, i.e. on the
 /// `(count_max + 1)`-th probe tick, so the keepalive death point is
 /// `interval × (count_max + 1)`. We set the inactivity backstop two intervals
@@ -776,7 +775,7 @@ fn prepare(
     let forwards: ForwardMap =
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
 
-    // ext-info-c is a protocol marker, not a user-facing algorithm — appended
+    // ext-info-c is a protocol marker, not a user-facing algorithm, appended
     // here, not in the 1a allowlist.
     let mut preferred = build_preferred(allow_legacy, allow_deprecated);
     let mut kex = preferred.kex.into_owned();
@@ -788,7 +787,7 @@ fn prepare(
         preferred,
         keepalive_interval,
         keepalive_max,
-        // Backstop only — keepalive (above) is the primary liveness mechanism.
+        // Backstop only, keepalive (above) is the primary liveness mechanism.
         // Kept strictly above the keepalive-failure window by `derive_timers`.
         inactivity_timeout: Some(inactivity_timeout),
         ..Default::default()
@@ -899,7 +898,7 @@ mod tests {
     use std::sync::Arc;
 
     /// Trust double used as a fixture by the handshake-timeout test below. It is
-    /// NOT exercised as a system-under-test — the real trust/reject paths are
+    /// NOT exercised as a system-under-test, the real trust/reject paths are
     /// covered by `connect_integration.rs` (which asserts `HostKeyRejected` and
     /// the presented fingerprint). (The former `verifier_double_is_callable_*`
     /// test that asserted only this fake's hardcoded `true` was removed as a
@@ -964,7 +963,7 @@ mod tests {
     fn boundary_min_interval_and_zero_count_max_still_backstops_above_window() {
         // BVA: smallest enabling interval (1) and count_max 0.
         // russh treats keepalive_max == 0 as "unlimited retries", so the
-        // inactivity backstop is the ONLY liveness bound here — it must be > 0
+        // inactivity backstop is the ONLY liveness bound here, it must be > 0
         // and (trivially) above the degenerate 1×1 window.
         let (keepalive, max, inactivity) = derive_timers(KeepaliveConfig {
             interval_secs: 1,

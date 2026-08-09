@@ -177,6 +177,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// cleans up silently (no `.failed`, no banner). Reset at connect-start (NOT in
     /// `teardown()`, which runs before the async `onEnd` and would clear it too early).
     private var etUserDisconnecting = false
+    /// True once the ET `-CC` in-band `tmux -CC …` launch has been sent for the
+    /// current session (idempotency guard: `onFirstFrame` is once-only but ET can
+    /// re-fire across a roam). Reset in `teardown()`.
+    private var etControlLaunchSent = false
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -255,12 +259,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // The transport write is the FIRST thing that happens, nothing (not even a
         // string interpolation) runs ahead of it. Do NOT add work above this block.
         let signpost = PerfSignposts.input.beginInterval("send")
-        if let etSession {
+        // `tmux` is checked BEFORE `etSession`: on the ET `-CC` path BOTH are set,
+        // and control-mode input must go through tmux `send-keys` (routed to the
+        // active pane), NOT raw into the ET stream. Raw ET (no control mode) has
+        // `tmux == nil`, so it still falls through to `etSession.send`.
+        if let tmux {
+            tmux.sendInput(bytes)
+        } else if let etSession {
             etSession.send(Data(bytes))
         } else if let moshSession {
             moshSession.writeInput(Data(bytes))
-        } else if let tmux {
-            tmux.sendInput(bytes)
         } else {
             rawWriter?.enqueue(bytes)
         }
@@ -269,7 +277,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // `log` is an @autoclosure that is a no-op unless diagnostics is enabled, so
         // this string is not even built in normal use. Structure only (byte count),
         // never content: this line sees every keystroke including secrets.
-        let transport = etSession != nil ? "ET" : (moshSession != nil ? "MOSH" : (tmux != nil ? "TMUX" : "RAW"))
+        // Mirror the dispatch order above: tmux wins when present (ET `-CC` reads
+        // "TMUX/ET"), then raw ET, then Mosh, then raw PTY.
+        let transport = tmux != nil
+            ? (etSession != nil ? "TMUX/ET" : "TMUX")
+            : (etSession != nil ? "ET" : (moshSession != nil ? "MOSH" : "RAW"))
         DebugLog.shared.log(.input, decisionLine(
             "input:dispatch",
             inputs: [("bytes", "\(bytes.count)")],
@@ -470,7 +482,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     /// Push the tmux client size so it re-tiles. The grid is computed accurately by
     /// `TmuxPaneContainer` (container bounds ÷ measured cell), debounced there.
-    func setTmuxClientSize(cols: Int, rows: Int) { tmux?.setClientSize(cols: cols, rows: rows) }
+    func setTmuxClientSize(cols: Int, rows: Int) {
+        tmux?.setClientSize(cols: cols, rows: rows)
+        // ET `-CC`: tmux runs inside ET's outer PTY, so the PTY must be resized too,
+        // or tmux's client size (from `refresh-client -C`) fights the PTY's winsize.
+        // No-op on SSH `-CC` (etSession == nil) and on raw ET (tmux == nil, this
+        // isn't called). Mosh can't run `-CC`, so no Mosh case here.
+        etSession?.setWindowSizeCols(UInt16(cols), rows: UInt16(rows), width: 0, height: 0)
+    }
 
     /// The RAW foreground command for `pane` from the tmux context poll (the pane's
     /// `pane_current_command`), read from the runtime's COMPLETE map. Used by the
@@ -520,6 +539,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         etWatchdog?.cancel(); etWatchdog = nil
         etResolved = false
         etFirstFrameSeen = false
+        etControlLaunchSent = false
         etSession?.close()
         etSession = nil
         tmux?.stop()
@@ -966,15 +986,61 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                              cols: config.cols, rows: config.rows,
                              width: config.width, height: config.height,
                              keepaliveSecs: config.keepaliveSecs)
-        // Route ET output through the SAME buffered entry point the Mosh path
-        // uses (`output.onOutput`, not the stored `onBytes` sink directly): see
-        // the long comment in `attachMoshIfPossible` above `sess.onOutput =`.
-        // The `PendingOutputBuffer` behind `onOutput` replays on sink-install,
-        // so an early frame (before SwiftUI's `makeUIView` installs the render
-        // sink) isn't silently dropped.
+
+        // Native `tmux -CC` panes over ET: reuse the SAME per-host control-mode
+        // setting SSH uses. ET can't pre-probe `tmux -V` (etserver spawns the login
+        // shell; there is no pre-shell exec), so the decision is SETTING-ONLY, if
+        // control mode is opted in, launch `tmux -CC` IN-BAND (see the `onFirstFrame`
+        // handler) and route ET bytes into a `TmuxRuntime` instead of the raw view.
+        // If tmux is absent/fails remotely, no `%begin` ever arrives and the panes
+        // stay empty (degrade is a device follow-up; the raw ET path is unaffected).
+        let etControlMode = resolveTmuxAttemptControlMode(host: host, defaults: defaults)
+        var tmuxRuntime: TmuxRuntime?
+        if etControlMode {
+            self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
+            let rt = makeConfiguredTmuxRuntime(conn: conn)
+            // Validate the launch command up front: a bad resolved session name
+            // (a Defaults value can be invalid) means we can't launch `-CC` at all,
+            // so degrade to a raw ET shell before wiring any control-mode routing.
+            if rt.makeStartCommand() == nil {
+                DebugLog.shared.log(.lifecycle, "et: makeStartCommand nil (bad session name) → raw ET shell")
+                self.historySeeder = nil
+                tmuxRuntime = nil
+            } else {
+                rt.session = nil                               // ET retains its own session
+                rt.setWriteSink(ETSessionSink(session: sess))  // control-mode writes ride ET
+                tmuxRuntime = rt
+                // RETAIN the runtime NOW (not in onFirstFrame): the local `tmuxRuntime`
+                // goes out of scope when `attachET` returns. `self.tmux` is the only
+                // strong ref that keeps it alive until the first ET frame arrives, and
+                // it's also what the output/first-frame closures read to route bytes.
+                // Setting it early is safe: every `tmux?.…` read is guarded, and
+                // `sendInput` drops (no activePane) until tmux emits its first state.
+                self.tmux = rt
+                DebugLog.shared.log(.lifecycle, "et: control-mode ON → tmux -CC in-band, session=\(tmuxSessionNameForConnection)")
+            }
+        }
+
+        // Route ET output. On the `-CC` path, bytes go into the `TmuxRuntime`
+        // (control-mode parse → per-pane fan-out). On the raw path, through the SAME
+        // buffered entry point the Mosh path uses (`output.onOutput`): the
+        // `PendingOutputBuffer` behind `onOutput` replays on sink-install, so an
+        // early frame (before SwiftUI's `makeUIView` installs the render sink) isn't
+        // silently dropped.
         etResolved = false
+        etControlLaunchSent = false
+        // Fixed at attach: `-CC` routes ET bytes into the runtime (retained by
+        // `self.tmux`); raw ET routes to the buffered `output.onOutput`. Reading
+        // `self.tmux` inside the closure keeps a single source of truth (routing
+        // stops cleanly if the runtime is torn down mid-session).
+        let etIsControlMode = tmuxRuntime != nil
         sess.onOutput = { [weak self] data in
-            self?.output.onOutput(data: data)
+            guard let self else { return }
+            if etIsControlMode, let tmux = self.tmux {
+                tmux.ingest([UInt8](data))
+            } else {
+                self.output.onOutput(data: data)
+            }
         }
         sess.onFirstFrame = { [weak self] in
             guard let self, !self.etResolved else { return }
@@ -983,6 +1049,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.etWatchdog?.cancel(); self.etWatchdog = nil
             DebugLog.shared.log(.transport, "et: onFirstFrame, stream up; watchdog cancelled")
             self.state = .shell
+            // ET `-CC`: the stream is up (login shell ready), so NOW launch tmux
+            // control mode in-band by "typing" `tmux -CC new-session …\n`. Guarded
+            // to fire exactly once (onFirstFrame is already once-only, but ET may
+            // re-fire across a roam; the flag makes it idempotent). The runtime was
+            // already published to `self.tmux` at attach so input (`send-keys`) and
+            // resize (`refresh-client`) route through control mode.
+            guard etIsControlMode, let tmux = self.tmux, !self.etControlLaunchSent,
+                  let startCmd = tmux.makeStartCommand() else { return }
+            self.etControlLaunchSent = true
+            DebugLog.shared.log(.tmux, "et: in-band launch \(startCmd.prefix(60))")
+            tmux.sendRawLaunch(Array((startCmd + "\n").utf8))
+            tmux.startContextPolling()
         }
         sess.onState = { raw in
             DebugLog.shared.log(.transport, "et: state=\(mapETState(Int32(raw)))")
@@ -1074,34 +1152,20 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
     }
 
-    /// Attach tmux control mode: open the `-CC` exec, pump its bytes into a
-    /// `TmuxRuntime`, and route the active pane's output into the terminal view.
-    private func attachTmux(conn: Connection) async throws {
-        DebugLog.shared.log(.lifecycle, "attachTmux: ENTER session=\(tmuxSessionNameForConnection)")
-        // Self-narrating anchor for a device trace: build + session so a pasted log
-        // fragment is self-locating (paired with the per-drag decision lines).
-        // No clean transport symbol is in scope here (attachTmux runs for both
-        // SSH-from-start and post-mosh-fallback SSH; moshSession is already nil
-        // by the time this executes), so that field is intentionally omitted.
-        let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
-        DebugLog.shared.log(.lifecycle,
-            "=== session-start build=\(build) session=\(tmuxSessionNameForConnection) ===")
+    /// Build a `TmuxRuntime` for the current connection and wire ALL of its
+    /// transport-agnostic callbacks (pane output, structural state, contexts,
+    /// alt-screen reconcile, exit, diagnostic) + the history seeder. Everything
+    /// here is byte-level and identical whether the control stream rides SSH or ET,
+    /// so both `attachTmux` (SSH `-CC`) and `attachET`'s control-mode branch (ET
+    /// `-CC`) call this, then attach their own byte source + write sink. `conn` is
+    /// captured by the crash-recovery closure only.
+    private func makeConfiguredTmuxRuntime(conn: Connection) -> TmuxRuntime {
         let runtime = TmuxRuntime(sessionName: tmuxSessionNameForConnection)
         let seeder = PaneHistorySeeder(
             runtime: runtime,
             scrollbackLines: { AppStores.shared.terminalSettings.settings.scrollbackLines },
             viewForPane: { [weak self] pane in self?.paneViews[pane] })
         self.historySeeder = seeder
-        guard let startCmd = runtime.makeStartCommand() else {
-            // Controller couldn't build a start command (e.g. an invalid resolved
-            // session name, which a Defaults-level value can be, since the Defaults
-            // editor has no per-field validation). Surface it via the degraded
-            // banner instead of silently dropping to a raw shell everywhere.
-            DebugLog.shared.log(.lifecycle, "attachTmux: makeStartCommand nil (bad session name) → degraded raw shell")
-            degraded = .couldNotStart
-            try await openRawShell(conn: conn)
-            return
-        }
         runtime.onPaneBytes = { [weak self] pane, bytes in
             guard let self else { return }
             if let view = self.paneViews[pane] {
@@ -1190,6 +1254,30 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // DIAGNOSTIC (temporary): surface what the runtime sees on attach so a blank
         // pane grid on device is self-explaining. Remove with the rest of the diag.
         runtime.onDiagnostic = { [weak self] summary in self?.tmuxDiag = summary }
+        return runtime
+    }
+
+    private func attachTmux(conn: Connection) async throws {
+        DebugLog.shared.log(.lifecycle, "attachTmux: ENTER session=\(tmuxSessionNameForConnection)")
+        // Self-narrating anchor for a device trace: build + session so a pasted log
+        // fragment is self-locating (paired with the per-drag decision lines).
+        // No clean transport symbol is in scope here (attachTmux runs for both
+        // SSH-from-start and post-mosh-fallback SSH; moshSession is already nil
+        // by the time this executes), so that field is intentionally omitted.
+        let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
+        DebugLog.shared.log(.lifecycle,
+            "=== session-start build=\(build) session=\(tmuxSessionNameForConnection) ===")
+        let runtime = makeConfiguredTmuxRuntime(conn: conn)
+        guard let startCmd = runtime.makeStartCommand() else {
+            // Controller couldn't build a start command (e.g. an invalid resolved
+            // session name, which a Defaults-level value can be, since the Defaults
+            // editor has no per-field validation). Surface it via the degraded
+            // banner instead of silently dropping to a raw shell everywhere.
+            DebugLog.shared.log(.lifecycle, "attachTmux: makeStartCommand nil (bad session name) → degraded raw shell")
+            degraded = .couldNotStart
+            try await openRawShell(conn: conn)
+            return
+        }
         let sink = TerminalShellOutput()
         sink.onBytes = { [weak runtime] bytes in runtime?.ingest(bytes) }
         sink.onExit = { [weak self, weak runtime] exit in
@@ -1204,7 +1292,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         DebugLog.shared.log(.tmux, "attachTmux: openExec startCmd=\(startCmd.prefix(60))")
         let sess = try await conn.openExec(command: startCmd, term: "xterm-256color",
                                            cols: 80, rows: 24, output: sink)
-        runtime.session = sess
+        runtime.session = sess                                  // retain for lifecycle
+        runtime.setWriteSink(ShellSessionSink(session: sess))   // drive the writer over SSH
         connection = conn
         session = sess
         self.tmux = runtime   // retain to keep control mode alive

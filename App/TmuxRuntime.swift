@@ -12,16 +12,22 @@ final class TmuxRuntime {
     private let controller = TmuxSessionController()
     private let sessionName: String
 
-    /// The live control-mode channel; assigned after `open_exec`. Setting it
-    /// (re)builds the serial writer so command bytes are emitted in FIFO order.
-    var session: ShellSession? {
-        didSet {
-            writer?.finish()
-            writer = session.map { SerialByteWriter(sink: ShellSessionSink(session: $0)) }
-        }
+    /// The live SSH control-mode channel, retained for lifecycle only (its bytes
+    /// are written through `writer`, set via `setWriteSink`). Nil on the ET `-CC`
+    /// path, which retains its `ETSession` on the view model instead. Assigning it
+    /// does NOT build the writer, callers must call `setWriteSink` explicitly so
+    /// the same runtime drives SSH (`ShellSessionSink`) or ET (`ETSessionSink`).
+    var session: ShellSession?
+
+    /// Install the byte sink the control-mode writer drives, transport-agnostic
+    /// (SSH via `ShellSessionSink`, ET via `ETSessionSink`). Rebuilds the serial
+    /// writer so command bytes are emitted in FIFO order; pass nil to tear it down.
+    func setWriteSink(_ sink: (any AsyncByteSink)?) {
+        writer?.finish()
+        writer = sink.map { SerialByteWriter(sink: $0) }
     }
 
-    /// Serializes channel writes; nil until `session` is assigned.
+    /// Serializes channel writes; nil until `setWriteSink` installs a sink.
     private var writer: SerialByteWriter?
 
     /// Output bytes for a specific pane, keyed by `PaneID`. Fires for every chunk.
@@ -204,6 +210,20 @@ final class TmuxRuntime {
         guard let line = TmuxCommand.sendKeys(target: pane, bytes: bytes) else { return }
         write(line)
         DebugLog.shared.log(.tmux, "send-keys → \(line)")   // after write; @autoclosure no-op when disabled
+    }
+
+    /// Write RAW bytes straight to the channel, bypassing control-mode command
+    /// framing (`controller.submit`). Used ONLY to launch `tmux -CC` in-band on
+    /// the ET path: etserver spawns a login shell (no chosen remote command), so
+    /// the control session is started by "typing" `tmux -CC new-session …\n` as
+    /// the first shell input. After tmux is up, all further writes go through the
+    /// framed `write(_:)` path (`send-keys`, `refresh-client`, …).
+    func sendRawLaunch(_ bytes: [UInt8]) {
+        guard let writer else {
+            DebugLog.shared.log(.tmux, "sendRawLaunch: NO writer, dropping \(bytes.count)B")
+            return
+        }
+        writer.enqueue(bytes)
     }
 
     /// Make `id` the active window (tmux will emit the layout/active events).
