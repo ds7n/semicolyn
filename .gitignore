@@ -65,8 +65,10 @@
 /.code-review/
 /.security-review/
 
-# TODO.md is a committed project doc here — override the global
-# core.excludesFile (~/.config/git/ignore) that ignores it by default.
-# (CLAUDE.md is intentionally NOT overridden: it stays local-only per the
-# global ignore.)
-!/TODO.md
+# Internal development artifacts: this repo is PUBLIC and must not contain
+# internal working notes. TODO.md (status/resume notes) and docs/superpowers/
+# (implementation plans, design specs, session topics) stay LOCAL-ONLY, never
+# committed. Purged from history 2026-08-09. (CLAUDE.md is likewise local-only
+# per the global ignore and intentionally not overridden.)
+/TODO.md
+/docs/superpowers/
