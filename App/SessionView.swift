@@ -156,6 +156,21 @@ struct SessionView: View {
                             }
                         }
                         .animation(.easeInOut, value: vm.degraded)
+                        // Diagnostic-only (2026-08-08): a zero-size background GeometryReader probes
+                        // what SwiftUI believes the available height + safe-area is at the terminal's
+                        // mount point, WITHOUT changing layout. Logged alongside the UIView-side
+                        // geo:raw-container line so an app-switch capture shows BOTH what SwiftUI hands
+                        // down and what the UIView receives, disambiguating the unstable-bounds regimes
+                        // (keybar-included ~499 vs keybar-excluded ~431). No behavior change.
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear
+                                    .onAppear { logSwiftUIGeometry(proxy, phase: "appear") }
+                                    .onChange(of: proxy.size.height) { _, h in
+                                        logSwiftUIGeometry(proxy, phase: "change h=\(Int(h))")
+                                    }
+                            }
+                        )
                         .overlay(alignment: .top) {
                             if let reason = vm.moshFallback {
                                 MoshFallbackBanner(reason: reason) { vm.moshFallback = nil }
@@ -335,6 +350,20 @@ struct SessionView: View {
         case .background: "background"
         @unknown default: "unknown(\(String(describing: phase)))"
         }
+    }
+
+    /// Diagnostic-only (2026-08-08): logs SwiftUI's view of the terminal mount point's geometry
+    /// (available size + safe-area insets) so an app-switch capture pairs with the UIView-side
+    /// `geo:raw-container` line. This answers whether SwiftUI is the layer that hands down the
+    /// unstable bounds (keybar-included ~499 vs keybar-excluded ~431) and whether its
+    /// `safeAreaInsets.bottom` signals the keybar the UIView's own `safeAreaInsets` does not.
+    /// No layout effect (mounted in a zero-effect `.background(GeometryReader)`).
+    private func logSwiftUIGeometry(_ proxy: GeometryProxy, phase: String) {
+        let s = proxy.size
+        let sa = proxy.safeAreaInsets
+        DebugLog.shared.log(.geometry,
+            "geo:swiftui phase=\(phase) size=\(Int(s.width))x\(Int(s.height)) "
+            + "sa=(t\(Int(sa.top)),b\(Int(sa.bottom)),l\(Int(sa.leading)),tr\(Int(sa.trailing)))")
     }
 
     // MARK: - Credential resolution
