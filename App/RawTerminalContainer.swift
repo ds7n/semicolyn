@@ -20,7 +20,10 @@ import SemicolynKit
 /// untrustworthy (the accessory is hosted in a separate window and can be mid-animation), the pass
 /// HOLDS the last-known-good height rather than fill `bounds` (which would hide rows in the
 /// keybar-included regime). A bidirectional invariant tripwire logs any residual gap/hidden-rows.
-/// See `docs/superpowers/specs/2026-08-08-keybar-safearea-reservation-design.md`.
+/// See `docs/superpowers/specs/2026-08-08-keybar-safearea-reservation-design.md` (note: that spec's
+/// title describes an earlier safe-area-reservation mechanism that was superseded during the arc;
+/// the window-space approach documented here is the shipped one, per the spec's mechanism-correction
+/// section and the final commits on the arc).
 final class RawTerminalContainer: UIView {
     /// The single terminal child, pinned to the container's own edges (Auto Layout frames it).
     let terminal: PaneTerminalView
