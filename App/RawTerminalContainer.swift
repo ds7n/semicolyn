@@ -101,12 +101,15 @@ final class RawTerminalContainer: UIView {
             applied = true
         }
 
-        // Bidirectional runtime invariant tripwire (device forensics guardrail): on a SETTLED pass
-        // (we did not just change the constraint, so the child frame is re-solved), the child's
-        // bottom should meet the keybar top. Log LOUD if it is BELOW the keybar top (rows hidden)
-        // OR far ABOVE it (a gap), the two failure modes this whole arc fought. Uses the accessory's
-        // window-space top converted back to container space as the reference (no bounds proxy).
-        if !applied, let accTop = accessoryTopY, let top = containerTopY {
+        // Bidirectional runtime invariant tripwire (device forensics guardrail): the child's bottom
+        // should meet the keybar top. Log LOUD if it is BELOW the keybar top (rows hidden) OR far
+        // ABOVE it (a gap), the two failure modes this whole arc fought. Gated on `computed != nil`,
+        // this pass had TRUSTED window-space geometry (so `accessoryTopY` is a settled interior value,
+        // not the mid-animation cross-window transient the fix's validity guard rejects), AND on
+        // `!applied`, we did not just change the constraint, so the child frame is already re-solved.
+        // Without the `computed` gate the check fired a spurious one-frame GAP during the keyboard
+        // animation (device build 125: accTopY==window height while the child was still full-height).
+        if !applied, computed != nil, let accTop = accessoryTopY, let top = containerTopY {
             let keybarTopInContainer = accTop - top          // keybar top in this container's space
             let childBottom = Double(terminal.frame.maxY)
             let delta = childBottom - keybarTopInContainer   // >0 = hidden rows, <0 = gap
