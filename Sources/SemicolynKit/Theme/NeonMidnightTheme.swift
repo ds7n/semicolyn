@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 // Palette constants are file-private: only the semantic `Theme` is exported.
-// Values verbatim from docs/superpowers/specs/2026-06-25-neon-midnight-theme-design.md.
+// Values verbatim from the neon-midnight theme spec.
 // Story: neo → neon (neon gas glows orange-red) on a midnight blue-near-black
-// night; the prompt `~` is the lit sign. Glow is bell-only (see BellHaloView) —
+// night; the prompt `~` is the lit sign. Glow is bell-only (see BellHaloView),
 // no persistent bloom lives in these tokens.
 
 // Palette constants unchanged; the 16 ANSI colors are designed to sit on the

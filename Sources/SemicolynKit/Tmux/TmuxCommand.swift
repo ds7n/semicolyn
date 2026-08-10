@@ -18,12 +18,12 @@ public enum SplitDirection: Sendable {
     }
 }
 
-/// Pure encoder for outbound `tmux -CC` control-mode command lines — the inverse
+/// Pure encoder for outbound `tmux -CC` control-mode command lines, the inverse
 /// of ``ControlModeParser``. Each function returns one command line **without** a
 /// trailing newline (the transport appends exactly one `\n`); output is
 /// guaranteed free of `\n`/`\r` so newline framing can never be forged from an
 /// argument. Invalid input fails closed (`nil`) rather than emitting an unsafe or
-/// malformed command. Stateless: owns no I/O and no session state — the `-CC`
+/// malformed command. Stateless: owns no I/O and no session state, the `-CC`
 /// handshake and command sequencing are a separate controller slice.
 public enum TmuxCommand {
     /// Open a new window in the attached session.
@@ -57,7 +57,7 @@ public enum TmuxCommand {
         "select-pane -t \(target.targetToken)"
     }
 
-    /// Move to the next (`+`) or previous (`-`) pane in the active window — the
+    /// Move to the next (`+`) or previous (`-`) pane in the active window, the
     /// relative target tmux resolves without us tracking pane ids (Phase 4e
     /// `⌘[` / `⌘]`).
     public static func selectPaneRelative(next: Bool) -> String {
@@ -74,14 +74,26 @@ public enum TmuxCommand {
         "kill-window -t \(target.targetToken)"
     }
 
-    /// Send `bytes` as terminal input to `target`, hex-encoded via `send-keys -H`
-    /// so arbitrary bytes (control chars, UTF-8, the framing `\n`/`\r`) round-trip
-    /// exactly and can never escape their argument position. Returns nil for an
-    /// empty payload (a no-op send is a caller bug).
+    /// Send `bytes` as input to `target`, hex-encoded via `-H` so arbitrary bytes
+    /// (control chars, UTF-8, the framing `\n`/`\r`) round-trip exactly and can never
+    /// escape their argument position. Returns nil for an empty payload (a no-op send
+    /// is a caller bug).
+    ///
+    /// `-K` routes the bytes through the CONTROL CLIENT'S KEY-TABLE rather than
+    /// injecting them straight into the pane. This is what makes the user's tmux
+    /// prefix and their `~/.tmux.conf` bindings work in a native `-CC` client: a raw
+    /// `Ctrl-a` byte hits tmux's key-table, flips the client into the prefix table,
+    /// and the next byte dispatches the user's binding (e.g. `prefix c` → new-window).
+    /// Non-prefix keys fall through the root table straight to the pane's program
+    /// (shell / vim / htop, incl. the alternate screen), so normal typing is
+    /// unchanged. Verified on tmux 3.4: without `-K`, `-H` bytes go to the pane and
+    /// the prefix never fires; with `-K`, the prefix fires. Over a real `-CC` control
+    /// channel `-K` targets the sending client, so no `-c <client>` is needed.
+    /// `-K` composes with `-H`: raw bytes still, just routed through the key-table.
     public static func sendKeys(target: PaneID, bytes: [UInt8]) -> String? {
         guard !bytes.isEmpty else { return nil }
         let hex = bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
-        return "send-keys -t \(target.targetToken) -H \(hex)"
+        return "send-keys -t \(target.targetToken) -K -H \(hex)"
     }
 
     /// Tell tmux the control-client's size in cells so it re-tiles all windows.
@@ -112,7 +124,7 @@ public enum TmuxCommand {
     /// `list-windows` formatted for attach-time layout discovery: each row is
     /// `<window_id> <window_active> <window_layout> <window_name>`
     /// (e.g. `@0 1 abcd,80x24,0,0,0 editor`). `window_name` is LAST because it may
-    /// contain spaces — the layout string never does, so the free-form remainder
+    /// contain spaces, the layout string never does, so the free-form remainder
     /// after the layout is exactly the name. Parsed by ``parseWindowListing(_:)``
     /// when `-CC` attaches to a session that emitted no spontaneous
     /// `%window-add`/`%layout-change`/`%window-renamed`, so reattached tabs show
@@ -124,7 +136,7 @@ public enum TmuxCommand {
     /// Kill the session named `name`. Validates against the session-name charset
     /// `[A-Za-z0-9_-]` (`isValidTmuxSessionName`) and returns nil for anything else.
     /// Names are user-choosable (the configurable-session-name feature), so an
-    /// invalid name is a real possibility, not a bug — rejecting it keeps the name
+    /// invalid name is a real possibility, not a bug, rejecting it keeps the name
     /// safe to interpolate without shell-quoting.
     public static func killSession(name: String) -> String? {
         guard isValidTmuxSessionName(name) else { return nil }

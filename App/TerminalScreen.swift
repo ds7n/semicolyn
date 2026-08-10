@@ -54,14 +54,9 @@ struct TerminalScreen: UIViewRepresentable {
 
     func makeUIView(context: Context) -> RawTerminalContainer {
         let terminal = PaneTerminalView(frame: .zero)
-        // Raw single-terminal path: this view owns its keybar inset (see
-        // PaneTerminalView.appliesOwnKeybarInset). The -CC container path leaves this
-        // false and insets its panes itself.
-        // Container-wrap (2026-08-08): RawTerminalContainer now owns the child's frame
-        // height, so the child must NOT also self-inset (double-fight). Left false; the
-        // self-inset code stays resident in PaneTerminalView (deletable in the follow-up
-        // cleanup PR). Flip back to true + drop the container to fully revert.
-        terminal.appliesOwnKeybarInset = false
+        // Raw single-terminal path: `RawTerminalContainer` owns the child's frame height
+        // (window-space `rawTerminalChildHeight`, PR #122), so the child must NOT self-inset.
+        // The -CC path (`TmuxPaneContainer`) insets its panes itself.
         terminal.terminalDelegate = context.coordinator
         // Event-driven InteractionMode: recompute on every alt-screen / mouse-mode
         // transition (single-pane mount → nil key), then refresh the dot immediately.

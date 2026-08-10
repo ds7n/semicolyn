@@ -41,7 +41,7 @@ final class TmuxCommandTests: XCTestCase {
         XCTAssertEqual(TmuxCommand.zoomPane(target: PaneID(raw: 4)), "resize-pane -Z -t %4")
     }
 
-    // MARK: split-window — divider-naming → tmux flag
+    // MARK: split-window, divider-naming → tmux flag
 
     func testSplitSideBySideUsesHorizontalFlag() {
         // .sideBySide = vertical divider, new pane to the right = tmux -h
@@ -55,7 +55,7 @@ final class TmuxCommandTests: XCTestCase {
                        "split-window -v -t %2")
     }
 
-    // MARK: resize-pane — BVA on dimensions
+    // MARK: resize-pane, BVA on dimensions
 
     func testResizeValidDimensions() {
         XCTAssertEqual(TmuxCommand.resizePane(target: PaneID(raw: 1), width: 80, height: 24),
@@ -75,30 +75,35 @@ final class TmuxCommandTests: XCTestCase {
         XCTAssertNil(TmuxCommand.resizePane(target: PaneID(raw: 1), width: 80, height: -5))
     }
 
-    // MARK: send-keys — hex encoding (security-critical)
+    // MARK: send-keys, hex encoding (security-critical) + key-table routing (-K)
+
+    // `-K` routes the bytes through the control client's KEY-TABLE (so the user's
+    // tmux prefix + `.tmux.conf` binds fire) instead of injecting straight into the
+    // pane. Every expected string below carries `-K -H`; a dedicated test guards the
+    // presence + order of `-K` (dropping it silently breaks the prefix on device).
 
     func testSendKeysEncodesAsciiAsLowercaseHex() {
         // "rm" = 0x72 0x6d
         XCTAssertEqual(TmuxCommand.sendKeys(target: PaneID(raw: 0), bytes: Array("rm".utf8)),
-                       "send-keys -t %0 -H 72 6d")
+                       "send-keys -t %0 -K -H 72 6d")
     }
 
     func testSendKeysEncodesControlBytes() {
         // Esc (0x1b) then Ctrl-C (0x03)
         XCTAssertEqual(TmuxCommand.sendKeys(target: PaneID(raw: 5), bytes: [0x1b, 0x03]),
-                       "send-keys -t %5 -H 1b 03")
+                       "send-keys -t %5 -K -H 1b 03")
     }
 
     func testSendKeysZeroPadsSingleDigitBytes() {
-        // 0x00, 0x09, 0x0f must be 00 09 0f — not 0 9 f
+        // 0x00, 0x09, 0x0f must be 00 09 0f, not 0 9 f
         XCTAssertEqual(TmuxCommand.sendKeys(target: PaneID(raw: 1), bytes: [0x00, 0x09, 0x0f]),
-                       "send-keys -t %1 -H 00 09 0f")
+                       "send-keys -t %1 -K -H 00 09 0f")
     }
 
     func testSendKeysEncodesNewlineAndCarriageReturnAsHex() {
         // Adversarial: the two framing bytes must round-trip as hex, never appear literally.
         let cmd = TmuxCommand.sendKeys(target: PaneID(raw: 1), bytes: [0x0a, 0x0d])
-        XCTAssertEqual(cmd, "send-keys -t %1 -H 0a 0d")
+        XCTAssertEqual(cmd, "send-keys -t %1 -K -H 0a 0d")
         XCTAssertFalse(cmd!.contains("\n"), "framing newline must never appear in output")
         XCTAssertFalse(cmd!.contains("\r"))
     }
@@ -106,19 +111,33 @@ final class TmuxCommandTests: XCTestCase {
     func testSendKeysEncodesMultibyteUtf8() {
         // "é" = U+00E9 = 0xC3 0xA9 in UTF-8
         XCTAssertEqual(TmuxCommand.sendKeys(target: PaneID(raw: 2), bytes: Array("é".utf8)),
-                       "send-keys -t %2 -H c3 a9")
+                       "send-keys -t %2 -K -H c3 a9")
     }
 
     func testSendKeysHighByte() {
         XCTAssertEqual(TmuxCommand.sendKeys(target: PaneID(raw: 0), bytes: [0xff]),
-                       "send-keys -t %0 -H ff")
+                       "send-keys -t %0 -K -H ff")
+    }
+
+    func testSendKeysRoutesThroughKeyTableViaDashK() {
+        // Regression guard for the tmux prefix: `-K` MUST be present and MUST precede
+        // `-H` (the prefix stops working without it, verified on tmux 3.4). The prefix
+        // byte 0x01 (Ctrl-a) is the canonical case: with `-K` tmux runs it through the
+        // key-table; without, it's injected literally into the pane and the prefix dies.
+        let cmd = TmuxCommand.sendKeys(target: PaneID(raw: 3), bytes: [0x01])
+        XCTAssertEqual(cmd, "send-keys -t %3 -K -H 01")
+        let k = cmd!.range(of: "-K")
+        let h = cmd!.range(of: "-H")
+        XCTAssertNotNil(k, "-K must be present so keystrokes route through the key-table")
+        XCTAssertNotNil(h)
+        XCTAssertTrue(k!.lowerBound < h!.lowerBound, "-K must precede -H")
     }
 
     func testSendKeysEmptyBytesRejected() { // boundary: no-op send is a caller bug
         XCTAssertNil(TmuxCommand.sendKeys(target: PaneID(raw: 0), bytes: []))
     }
 
-    // MARK: kill-session — name charset validation (fail-closed)
+    // MARK: kill-session, name charset validation (fail-closed)
 
     func testKillSessionValidSemicolynName() {
         XCTAssertEqual(TmuxCommand.killSession(name: "semicolyn-a3f7c2e9"),
@@ -148,7 +167,7 @@ final class TmuxCommandTests: XCTestCase {
 
     func testKillSessionAcceptsUppercaseAndUnderscore() {
         // The session-name charset is [A-Za-z0-9_-] (widened when user-chosen
-        // names landed — see resolveTmuxSessionName): uppercase and underscore
+        // names landed, see resolveTmuxSessionName): uppercase and underscore
         // are legal tmux names and injection-safe, so they encode, not reject.
         XCTAssertEqual(TmuxCommand.killSession(name: "Semicolyn-ABCD"), "kill-session -t Semicolyn-ABCD")
         XCTAssertEqual(TmuxCommand.killSession(name: "my_session"), "kill-session -t my_session")
@@ -159,7 +178,7 @@ final class TmuxCommandTests: XCTestCase {
         XCTAssertNil(TmuxCommand.killSession(name: "a:b"))
     }
 
-    // MARK: refresh-client -C — control-mode resize (BVA on dimensions)
+    // MARK: refresh-client -C, control-mode resize (BVA on dimensions)
 
     func testRefreshClientSizeEncodesAndGuards() {
         XCTAssertEqual(TmuxCommand.refreshClientSize(width: 80, height: 24), "refresh-client -C 80x24")
@@ -179,7 +198,7 @@ final class TmuxCommandTests: XCTestCase {
 
     func testListWindowsForLayoutCommand() {
         // window_name is LAST so its (possibly space-containing) value is the free-form
-        // remainder — the layout string never contains spaces, so field 4 = the name.
+        // remainder, the layout string never contains spaces, so field 4 = the name.
         XCTAssertEqual(TmuxCommand.listWindowsForLayout(),
                        "list-windows -F \"#{window_id} #{window_active} #{window_layout} #{window_name}\"")
     }
