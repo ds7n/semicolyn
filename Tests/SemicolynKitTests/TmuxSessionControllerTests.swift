@@ -4,7 +4,7 @@ import XCTest
 @testable import SemicolynKit
 
 /// `TmuxSessionController` orchestration. Per
-/// `2026-06-20-tmux-session-controller-design`: pure state machine, no I/O —
+/// `2026-06-20-tmux-session-controller-design`: pure state machine, no I/O,
 /// `start` yields the exec string, `feed` folds bytes into state + resolves
 /// commands, `submit` frames a command for correlation.
 final class TmuxSessionControllerTests: XCTestCase {
@@ -164,12 +164,70 @@ final class TmuxSessionControllerTests: XCTestCase {
         XCTAssertFalse(out.lifecycleChanged)
     }
 
+    // MARK: post-attach window layout re-query (blank-new-window fix)
+
+    func testWindowAddAfterAttachFlagsWindowNeedingLayout() {
+        // A window created AFTER attach (the user's `prefix c`) arrives via
+        // %window-add with NO %layout-change, so it has no visibleLayout and would
+        // render blank. feed() must flag it so the runtime re-queries its layout.
+        let c = attachedController()
+        let out = c.feed(bytes("%window-add @3\n"))
+        XCTAssertEqual(out.windowsNeedingLayout, [WindowID(raw: 3)])
+        XCTAssertEqual(c.state.window(WindowID(raw: 3))?.visibleLayout, nil,
+                       "the added window must have no layout yet (that's the bug being fixed)")
+    }
+
+    func testLayoutChangeClearsTheNeedAndPopulatesVisibleLayout() {
+        let c = attachedController()
+        _ = c.feed(bytes("%window-add @3\n"))
+        // The layout arrives (or the re-query reply is applied): the window is now
+        // renderable and is NOT re-flagged.
+        let out = c.feed(bytes("%layout-change @3 bc62,80x24,0,0,1 bc62,80x24,0,0,1 *\n"))
+        XCTAssertTrue(out.windowsNeedingLayout.isEmpty,
+                      "a window that just got its layout must not be flagged as needing one")
+        XCTAssertNotNil(c.state.window(WindowID(raw: 3))?.visibleLayout,
+                        "%layout-change must populate visibleLayout so the window renders")
+    }
+
+    func testWindowNeedingLayoutIsReportedOnceNotEveryFeed() {
+        // Debounce: the layout-less window is reported on the feed it appears, then
+        // NOT again on a later unrelated feed (else the runtime spams list-windows).
+        let c = attachedController()
+        let first = c.feed(bytes("%window-add @3\n"))
+        XCTAssertEqual(first.windowsNeedingLayout, [WindowID(raw: 3)])
+        let second = c.feed(bytes("%output %3 hi\n"))   // unrelated feed; @3 still layout-less
+        XCTAssertTrue(second.windowsNeedingLayout.isEmpty,
+                      "an already-known layout-less window must not be re-flagged every feed")
+    }
+
+    func testAttachEdgeDoesNotFlagWindowsNeedingLayout() {
+        // On the attach edge the prime's own list-windows fetches every layout, so
+        // feed() must NOT also flag the just-discovered windows (double-query).
+        let c = TmuxSessionController()
+        _ = c.start(sessionName: "semicolyn-a3f7c2e9")
+        // A window becomes known in the SAME feed that crosses the attach edge.
+        let atEdge = c.feed(bytes("%window-add @3\n%session-changed $7 semicolyn-a3f7c2e9\n"))
+        XCTAssertFalse(atEdge.attachedPrimeCommands.isEmpty, "sanity: this feed is the attach edge")
+        XCTAssertTrue(atEdge.windowsNeedingLayout.isEmpty,
+                      "attach-edge windows are covered by the prime list-windows, not a re-query")
+    }
+
+    func testWindowsMissingLayoutReflectsState() {
+        let c = attachedController()
+        _ = c.feed(bytes("%window-add @3\n"))
+        _ = c.feed(bytes("%window-add @7\n"))
+        XCTAssertEqual(Set(c.state.windowsMissingLayout), [WindowID(raw: 3), WindowID(raw: 7)])
+        _ = c.feed(bytes("%layout-change @3 bc62,80x24,0,0,1 bc62,80x24,0,0,1 *\n"))
+        XCTAssertEqual(c.state.windowsMissingLayout, [WindowID(raw: 7)],
+                       "a window with a layout must drop out of windowsMissingLayout")
+    }
+
     // MARK: attach-prime commands
 
     func testFeedEmitsPrimeCommandsOnAttachEdgeOnce() {
         let c = TmuxSessionController()
         _ = c.start(sessionName: "semicolyn-a3f7c2e9")
-        // Before attach: a spontaneous result block arrives — no prime yet.
+        // Before attach: a spontaneous result block arrives, no prime yet.
         let pre = c.feed(bytes("%begin 1 0 1\n%end 1 0 1\n"))
         XCTAssertTrue(pre.attachedPrimeCommands.isEmpty)
         // The %session-changed that flips .attaching → .attached.
@@ -208,7 +266,7 @@ final class TmuxSessionControllerTests: XCTestCase {
     /// Reattach regression: the attach-time layout prime must set each window's
     /// ACTIVE PANE (from its layout), not just the layout. Without it `activePane`
     /// is nil, so `TmuxRuntime.sendInput` drops every keystroke (send-keys has no
-    /// target) — the "reattach, terminal renders, but typing does nothing" bug.
+    /// target), the "reattach, terminal renders, but typing does nothing" bug.
     /// Layout "abcd,80x24,0,0,0" → single leaf PaneID(raw: 0).
     func testApplyEventsSetsActivePaneFromLayout() {
         let c = TmuxSessionController()

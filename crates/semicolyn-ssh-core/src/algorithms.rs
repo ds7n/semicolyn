@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! SSH algorithm allowlist — the closed set of algorithms Semicolyn offers during
-//! negotiation, per docs/superpowers/specs/2026-06-17-ssh-algorithms-design.md.
+//! SSH algorithm allowlist, the closed set of algorithms Semicolyn offers during
+//! negotiation, per the SSH-algorithms spec.
 //!
 //! Three spec'd algorithms are absent from russh 0.61.2 and omitted from v1
 //! (they auto-enter when russh gains them):
-//!   - sntrup761x25519-sha512@openssh.com (Tier 1 KEX) — ML-KEM remains the PQC KEX.
+//!   - sntrup761x25519-sha512@openssh.com (Tier 1 KEX), ML-KEM remains the PQC KEX.
 //!   - umac-128-etm@openssh.com (Tier 1 MAC).
 //!   - hmac-sha1-96 (Tier 3 MAC).
 //!
@@ -14,7 +14,7 @@
 //! algorithm, but russh 0.61.2's *client* cannot verify a server host
 //! *certificate*: the client kex (`client/kex.rs`) decodes the server host key
 //! as a plain `PublicKey` (`parse_public_key`) and the trust delegate only ever
-//! sees a `PublicKey` — there is no CA-signature / principal / validity path.
+//! sees a `PublicKey`, there is no CA-signature / principal / validity path.
 //! Advertising the cert variant would therefore promise a capability we cannot
 //! honor, so the host-key list stays bare-key only and the
 //! `host_key_list_excludes_unverifiable_cert_variants` test guards against
@@ -26,9 +26,9 @@ use std::borrow::Cow;
 
 /// Builds the russh negotiation preference list from the two per-host toggles.
 /// Closed set: only algorithms on a permitted tier are offered. Tier order is
-/// preference order — strongest first.
+/// preference order, strongest first.
 pub(crate) fn build_preferred(allow_legacy: bool, allow_deprecated: bool) -> Preferred {
-    // Tier 1 — always offered. PQ-hybrid KEX leads.
+    // Tier 1, always offered. PQ-hybrid KEX leads.
     let mut kex_algs = vec![
         kex::MLKEM768X25519_SHA256,
         kex::CURVE25519,
@@ -73,7 +73,7 @@ pub(crate) fn build_preferred(allow_legacy: bool, allow_deprecated: bool) -> Pre
         },
     ];
 
-    // Tier 2 — legacy but allowed (per-host `semicolyn.allowLegacyAlgorithms`).
+    // Tier 2, legacy but allowed (per-host `semicolyn.allowLegacyAlgorithms`).
     if allow_legacy {
         kex_algs.push(kex::DH_G14_SHA256);
         kex_algs.push(kex::DH_GEX_SHA256);
@@ -82,7 +82,7 @@ pub(crate) fn build_preferred(allow_legacy: bool, allow_deprecated: bool) -> Pre
         cipher_algs.push(cipher::AES_128_CBC);
     }
 
-    // Tier 3 — legacy & risky (per-host `semicolyn.allowDeprecatedAlgorithms`).
+    // Tier 3, legacy & risky (per-host `semicolyn.allowDeprecatedAlgorithms`).
     // Every connection that negotiates one of these shows a warning (Phase 1b
     // uses `is_tier3` to detect it). hmac-sha1-96 is spec'd here but absent from
     // russh 0.61 (omitted).
@@ -144,7 +144,7 @@ mod tests {
 
     // Expected Tier-1 lists, in exact preference order (strongest first). The
     // exact-equality assertions below catch any drop, addition, reorder, or
-    // typo — far stronger than membership checks. Tier-4 dead algorithms are
+    // typo, far stronger than membership checks. Tier-4 dead algorithms are
     // proven absent by exact equality (they appear in no expected list).
     const T1_KEX: &[&str] = &[
         "mlkem768x25519-sha256",
@@ -253,7 +253,7 @@ mod tests {
         // parses the host key as a plain PublicKey; the trust delegate sees no
         // CA / principals / validity). Offering a `*-cert-v01@openssh.com`
         // host-key algorithm would advertise a capability we cannot honor, so no
-        // tier — not even with both toggles on — may include one. Asserting this
+        // tier, not even with both toggles on, may include one. Asserting this
         // across all four toggle combinations fails the moment a cert variant is
         // added before russh can back it.
         for (legacy, deprecated) in [(false, false), (true, false), (false, true), (true, true)] {
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn classifier_matches_what_the_deprecated_toggle_actually_adds() {
         // Every Tier-3 algorithm the builder appends must be classified Tier-3,
-        // and nothing the Tier-1 builder offers may be — keeps the warning hook
+        // and nothing the Tier-1 builder offers may be, keeps the warning hook
         // and the offered set from drifting apart.
         let tier1 = build_preferred(false, false);
         let offered: Vec<&str> = [

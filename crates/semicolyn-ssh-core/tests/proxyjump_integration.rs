@@ -3,8 +3,7 @@
 
 //! ProxyJump (jump-host chain) integration tests. A chain is built one hop at a
 //! time: connect + authenticate to the jump host, then `connect_jump` to the
-//! next hop and authenticate that, and so on. See
-//! docs/superpowers/plans/2026-06-19-phase-1f-proxyjump.md.
+//! next hop and authenticate that, and so on (Phase 1f: ProxyJump).
 //!
 //! Topology: the dev container reaches `sshd` directly; `sshd` and `sshd-legacy`
 //! share the compose network, so from a jump host the next hop (`sshd-legacy:22`
@@ -101,7 +100,7 @@ async fn connect_jump_host(addr: String) -> Connection {
 }
 
 // A two-hop chain: dev -> sshd (jump) -> sshd-legacy (target). The target hop is
-// the Tier-3-only server, so it requires allow_deprecated — this also exercises
+// the Tier-3-only server, so it requires allow_deprecated, this also exercises
 // per-hop algorithm policy. Opening a shell on the jumped connection and running
 // a command proves the full nested path carries channel traffic end to end.
 #[tokio::test]
@@ -135,7 +134,7 @@ async fn two_hop_chain_runs_shell_on_target() {
     assert_eq!(outcome, AuthOutcome::Success, "target auth must succeed");
 
     // The negotiation at the target hop must reflect that hop's algorithms, not
-    // the jump host's — the legacy target is Tier-3.
+    // the jump host's, the legacy target is Tier-3.
     assert!(
         target.tier3_in_use().contains(&"ssh-rsa".to_string()),
         "target hop should report its own Tier-3 algorithms, got {:?}",
@@ -210,8 +209,8 @@ async fn local_forward_works_over_a_jump() {
 }
 
 // The jumped connection must keep the jump host's transport alive on its own:
-// after the caller drops the intermediate `Connection`, the target — whose
-// transport rides inside a channel on the jump host — must still work. This is
+// after the caller drops the intermediate `Connection`, the target, whose
+// transport rides inside a channel on the jump host, must still work. This is
 // the whole point of the `parents` keep-alive; without it the jump transport
 // would close when `jump` drops and the target shell would fail.
 #[tokio::test]
@@ -263,7 +262,7 @@ async fn dropping_intermediate_connection_keeps_chain_alive() {
 
 // The target hop verifies its own host key. A rejecting verifier on the target
 // must surface the specific HostKeyRejected variant, not a generic transport
-// error — proving per-hop trust is enforced independently of the jump host.
+// error, proving per-hop trust is enforced independently of the jump host.
 #[tokio::test]
 async fn target_host_key_rejection_is_typed() {
     let Some(jump) = sshd_addr() else {

@@ -656,6 +656,13 @@ struct TmuxPaneContainer: UIViewRepresentable {
         }
         private var lastLayoutInputs: LayoutInputs?
 
+        /// Last trusted usable height (window-space keybar-inset). HELD when a layout pass
+        /// can't trust the window-space geometry (the keybar accessory is mid-animation /
+        /// unreachable), mirroring `RawTerminalContainer.lastChildHeight`, rather than
+        /// falling back to full `bounds` (which hides the alt-screen's bottom rows in the
+        /// keybar-included `bounds` regime). `-1` = never computed yet.
+        private var lastUsableH: Double = -1
+
         /// The active window as of the last `apply` that reached the change-detect at the
         /// end of the method. Compared against `state.activeWindow` there to decide whether
         /// to arm the keybar-grow resize-settle debounce (see `armResizeSettle`).
@@ -701,39 +708,28 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // them changed. Any real geometry change (rotation/split/switch → bounds; pinch →
             // cell via invalidateCachedCell; keyboard/predictor-strip → kbH; the keyboard
             // re-laying-out post-app-switch with bounds/kbH unchanged → keyboardTop) differs
-            // here and runs.
+            // here and runs. NOTE: `usableTerminalHeight()` (the window-space keybar inset)
+            // moves only when `bounds`, `kbH`, or the guide top move, all captured here, so
+            // this key is a valid superset of that fix's inputs. Do NOT drop `keyboardTop`
+            // from the key: the app-switch keybar-gap regime is distinguished only by the
+            // guide-top/bounds change, and skipping the pass would strand the stale inset.
             let inputs = LayoutInputs(bounds: bounds.size, cellW: cell.w, cellH: cell.h,
                                       keybarH: kbH, keyboardTop: kbTop)
             if inputs == lastLayoutInputs { return }
             lastLayoutInputs = inputs
 
-            // Fix (device 2026-07-27, the switched-window keybar gap): the FULL-container-height
-            // attempt below is HISTORICAL, kept for context, and was WRONG. It computed the grid
-            // from the full container height, matching the raw-SSH path (TerminalScreen), reasoning
-            // that the keybar (an `inputAccessoryView` in its own window) floats over the bottom
-            // rows without reserving space inside the ContainerView. That held for the GRID, but
-            // SwiftTerm pins its OWN row count to `frame.height / cellHeight` with no inset input,
-            // so once the pane frame was ALSO stretched to the full height (`fittedPaneRects`
-            // below, matching the grid), the terminal rendered rows all the way to the container's
-            // bottom edge, behind the keybar. On the alt-screen (Claude Code / vim), which cannot
-            // scroll, those bottom rows (prompt + status line) became permanently unreachable
-            // (device 2026-08-01/02, ref `docs/superpowers/specs/2026-08-02-keybar-inset-geometry-
-            // design.md`). The fix restores a SINGLE consistent inset: both the grid AND every pane
-            // frame (via `fittedPaneRects(usableHeight:)`) are computed from the SAME usable
-            // height. Prefer the REAL keyboard/keybar top from `keyboardLayoutGuide` (it
-            // re-lays-out correctly after an app-switch, which a measured keybar height did
-            // not: device 2026-08-02 gapToKeybar=56 post-switch). Fall back to the measured-
-            // height reduction, `visibleTerminalHeight(bounds.height, kbH)` (Kit-tested; kbH<=0
-            // = keyboard down = full height), only if the guide has no usable frame. The pane's
-            // bottom edge then lands exactly at the keybar's top, so the keybar floats over the
-            // region the pane no longer occupies, nothing renders behind it, and the alt-screen's
-            // bottom rows stay visible.
-            let usableH: Double = {
-                if let top = kbTop {
-                    return usableHeightFromKeyboardTop(rawHeight: Double(bounds.height), keyboardTopY: top)
-                }
-                return visibleTerminalHeight(rawHeight: Double(bounds.height), keybarHeight: Double(kbH))
-            }()
+            // Both the GRID (reported to tmux) and every pane frame (`fittedPaneRects`) are
+            // computed from the SAME usable height, so the reported grid and the actual pane
+            // frame agree and the pane's bottom edge lands exactly at the keybar's top: no
+            // dead band, no rows hidden behind the keybar (which the non-scrollable alt-screen
+            // can never recover). History: earlier fixes fit to the full `bounds.height`
+            // (rows behind the keybar) or subtracted a keybar height from `bounds`
+            // (`keyboardLayoutGuide`/`visibleTerminalHeight`), but `bounds` is ambiguous
+            // (keybar-included vs -excluded) with no same-window signal to disambiguate, so
+            // those gapped after an app-switch. The window-space measurement below (PR #122,
+            // ported from RawTerminalContainer) uses the accessory's REAL window-space top and
+            // is correct in both regimes.
+            let usableH = Double(usableTerminalHeight())
             guard let grid = terminalGrid(width: Double(bounds.width), height: usableH,
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
             // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15). Log the
@@ -764,6 +760,38 @@ struct TmuxPaneContainer: UIViewRepresentable {
             lastLaidOutBounds = bounds.size
             relayoutExistingPaneFrames(cell: cell, usableHeight: usableH)
             logGeometry(reason: "layout", cell: cell, kbH: kbH, usableH: usableH, grid: grid)
+            logKeybarInsetViolation()
+        }
+
+        /// Bidirectional runtime invariant tripwire (ported from `RawTerminalContainer`,
+        /// PR #122): the active pane's bottom should meet the keybar's top. Log LOUD (under
+        /// `.tmux`, default-on) if it is BELOW the keybar top (rows HIDDEN behind the keybar)
+        /// or far ABOVE it (a GAP), the two failure modes this arc fought. Only runs when the
+        /// window-space geometry is TRUSTED (the accessory top is a settled interior value,
+        /// not a mid-animation cross-window transient), so it doesn't fire spuriously during
+        /// the keyboard show/hide animation.
+        private func logKeybarInsetViolation() {
+            guard let frPane = panes.values.first(where: { $0.isFirstResponder }),
+                  let acc = frPane.inputAccessoryView, let accSuper = acc.superview,
+                  let win = window else { return }
+            let accH = Double((acc as? KeybarInputAccessory)?.intrinsicContentSize.height ?? -1)
+            let containerTopY = Double(convert(CGPoint.zero, to: win).y)
+            let accTopWin = Double(win.convert(CGPoint(x: acc.frame.minX, y: acc.frame.minY),
+                                               from: accSuper).y)
+            // Only trust an interior value (same guard as `rawTerminalChildHeight`): reject the
+            // mid-animation "accessory at the window bottom" transient.
+            guard accH > 0, accTopWin > containerTopY,
+                  accTopWin <= containerTopY + Double(bounds.height) else { return }
+            let keybarTopInContainer = accTopWin - containerTopY   // keybar top in this space
+            let maxBottom = panes.values.map { Double($0.frame.maxY) }.max() ?? 0
+            let delta = maxBottom - keybarTopInContainer           // >0 = hidden rows, <0 = gap
+            if abs(delta) > 2.0 {
+                DebugLog.shared.log(.tmux,
+                    "cc-keybar-inset VIOLATION \(delta > 0 ? "HIDDEN" : "GAP") "
+                    + "keybarTop=\(String(format: "%.0f", keybarTopInContainer)) "
+                    + "paneBottom=\(String(format: "%.0f", maxBottom)) "
+                    + "delta=\(String(format: "%.0f", delta))")
+            }
         }
 
         /// Comprehensive geometry snapshot (the `.geometry` diagnostic). Logged on-change from
@@ -877,8 +905,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// keybar is an `inputAccessoryView` floating over the bottom of the screen, not a view
         /// occupying the container, but SwiftTerm pins its rendered row count to the pane's OWN
         /// frame height with no inset input, so a full-height pane frame rendered rows all the way
-        /// behind the keybar, hiding the bottom rows on the (non-scrollable) alt-screen (2026-08-01/
-        /// 02 fix, ref `docs/superpowers/specs/2026-08-02-keybar-inset-geometry-design.md`).
+        /// behind the keybar, hiding the bottom rows on the (non-scrollable) alt-screen
+        /// (2026-08-01/02 keybar-inset-geometry fix).
         /// `usableHeight` is the keyboardLayoutGuide top (the real keybar top), or the
         /// `visibleTerminalHeight(bounds.height, kbH)` measured-height fallback when the guide has
         /// no usable frame, the SAME value the grid (`layoutSubviews`) uses, so the reported grid
@@ -914,6 +942,53 @@ struct TmuxPaneContainer: UIViewRepresentable {
             let f = keyboardLayoutGuide.layoutFrame
             guard f.height > 0, f.width > 0, f.minY.isFinite, f.minY > 0 else { return nil }
             return Double(f.minY)
+        }
+
+        /// The keybar-reduced usable terminal height, derived from WINDOW-SPACE keybar
+        /// geometry (the same fix `RawTerminalContainer` uses for the raw path, PR #122),
+        /// NOT from the container's own `bounds`. Device forensics (2026-08-09) proved
+        /// `bounds` is AMBIGUOUS, after an app-switch it excludes the keybar band (~431),
+        /// on first connect it includes it (~499), and no same-window signal (`bounds`,
+        /// `keyboardLayoutGuide`, `safeAreaInsets`) distinguishes them, so every prior
+        /// `bounds`-subtraction (`usableHeightFromKeyboardTop`/`visibleTerminalHeight`)
+        /// was right in one regime and wrong in the other. The one correct-in-both signal
+        /// is the first-responder pane's keybar accessory's REAL top in window space,
+        /// relative to this container's top in window space (`accessoryTopY - containerTopY`,
+        /// via the Kit-tested `rawTerminalChildHeight`).
+        ///
+        /// Returns the full `bounds.height` when no pane is first responder (keyboard down:
+        /// the keybar is gone, panes fill the container), and HOLDS `lastUsableH` when the
+        /// window-space geometry is untrustworthy (accessory mid-animation / unreachable),
+        /// rather than filling `bounds` (which would hide the alt-screen's bottom rows).
+        /// Returns `CGFloat` (UIKit view-geometry height, matching
+        /// `firstResponderKeybarHeight() -> CGFloat` and `RawTerminalContainer`), NOT a
+        /// bare `Double`: the value IS view geometry read from `window`/`convert`/`bounds`,
+        /// not pure logic (the pure part, `rawTerminalChildHeight`, lives in Kit).
+        private func usableTerminalHeight() -> CGFloat {
+            // The first-responder pane and its keybar accessory (iOS shows exactly that
+            // pane's accessory). No first responder → keyboard down → full height.
+            let frPane = panes.values.first(where: { $0.isFirstResponder })
+            guard let frPane, let win = window else { return bounds.height }
+
+            let accH = Double((frPane.inputAccessoryView as? KeybarInputAccessory)?
+                .intrinsicContentSize.height ?? -1)
+            let containerTopY = Double(convert(CGPoint.zero, to: win).y)
+            let accessoryTopY: Double? = {
+                guard let acc = frPane.inputAccessoryView, let accSuper = acc.superview else { return nil }
+                let y = win.convert(CGPoint(x: acc.frame.minX, y: acc.frame.minY), from: accSuper).y
+                return y.isFinite ? Double(y) : nil
+            }()
+
+            let computed = rawTerminalChildHeight(accessoryTopY: accessoryTopY,
+                                                  containerTopY: containerTopY,
+                                                  containerHeight: Double(bounds.height),
+                                                  accessoryHeight: accH, isFirstResponder: true)
+            if let computed {
+                lastUsableH = computed
+                return CGFloat(computed)
+            }
+            if lastUsableH > 0 { return CGFloat(lastUsableH) }   // hold last-known-good
+            return bounds.height                                 // no trusted value yet
         }
 
         /// Cell metrics (monospace → uniform cell), used both to compute the container
@@ -996,13 +1071,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // than a stale full-height frame that renders behind the keybar. Prefer the REAL
             // keyboard/keybar top from `keyboardLayoutGuide` (re-lays-out correctly post-app-switch);
             // fall back to the measured-height reduction only if the guide has no usable frame.
-            let usableH: Double = {
-                if let top = keyboardTopInContainer() {
-                    return usableHeightFromKeyboardTop(rawHeight: Double(bounds.height), keyboardTopY: top)
-                }
-                return visibleTerminalHeight(rawHeight: Double(bounds.height),
-                                             keybarHeight: Double(firstResponderKeybarHeight()))
-            }()
+            // Same window-space usable height `layoutSubviews` computes (PR #122 port),
+            // recomputed here so a pane framed by an `apply` that lands between layout
+            // passes agrees with the grid tmux was just told, not a stale full-height frame.
+            let usableH = Double(usableTerminalHeight())
             let rects = fittedPaneRects(layout: layout, cell: cell, usableHeight: usableH)   // fill usable area, not tmux's lagging layout
             let live = Set(rects.map(\.pane))
 

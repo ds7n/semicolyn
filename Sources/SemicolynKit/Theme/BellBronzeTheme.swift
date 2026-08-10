@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 // Palette constants are file-private: only the semantic `Theme` is exported.
-// Values verbatim from docs/superpowers/specs/2026-06-17-design-tokens-design.md.
+// Values verbatim from the design-tokens spec.
 private let bronze500       = ThemeColor("#D49A5C")
 private let bronze300       = ThemeColor("#F2C58A")
 private let coolDarkAnchor  = ThemeColor("#0E1116")

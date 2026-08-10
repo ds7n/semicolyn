@@ -42,6 +42,16 @@ public struct TmuxSessionState: Equatable, Sendable {
     /// The window with `id`, or nil if absent.
     public func window(_ id: WindowID) -> TmuxWindow? { windows.first { $0.id == id } }
 
+    /// Windows that exist but have no `visibleLayout` yet, so they render blank.
+    /// tmux emits `%window-add` (which creates the window here) WITHOUT a
+    /// `%layout-change`, and never spontaneously sends the layout for a window the
+    /// client hasn't been told about, so a window created after attach (e.g. the
+    /// user's `prefix c`) stays layout-less until the runtime fetches it with a
+    /// `list-windows` re-query. The runtime uses this to trigger that fetch.
+    public var windowsMissingLayout: [WindowID] {
+        windows.filter { $0.visibleLayout == nil }.map(\.id)
+    }
+
     private func index(of id: WindowID) -> Int? { windows.firstIndex { $0.id == id } }
 
     /// Apply one control-mode event, updating structural state. Non-structural
