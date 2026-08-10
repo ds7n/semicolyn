@@ -39,17 +39,26 @@ public struct TmuxControllerOutput: Equatable, Sendable {
     /// Pane output decoded during this feed, in arrival order. Empty when none.
     public var paneOutput: [PaneOutputChunk]
     /// Commands the runtime must send because this feed crossed
-    /// `.attaching → .attached`. Empty except on that one edge — fires once.
+    /// `.attaching → .attached`. Empty except on that one edge, fires once.
     /// See the attach-layout-prime design.
     public var attachedPrimeCommands: [String]
+    /// Windows that gained membership WITHOUT a layout during this feed (a
+    /// `%window-add`, chiefly the user's `prefix c`). tmux never sends their
+    /// `%layout-change` spontaneously, so the runtime must fetch it with a
+    /// `list-windows` re-query, else the new window renders blank. Only the NEWLY
+    /// layout-less windows are reported (not every layout-less window every feed),
+    /// so the runtime fires one bounded re-query per appearance.
+    public var windowsNeedingLayout: [WindowID]
     public init(lifecycleChanged: Bool, stateChanged: Bool,
                 resolved: [ResolvedCommand], paneOutput: [PaneOutputChunk],
-                attachedPrimeCommands: [String] = []) {
+                attachedPrimeCommands: [String] = [],
+                windowsNeedingLayout: [WindowID] = []) {
         self.lifecycleChanged = lifecycleChanged
         self.stateChanged = stateChanged
         self.resolved = resolved
         self.paneOutput = paneOutput
         self.attachedPrimeCommands = attachedPrimeCommands
+        self.windowsNeedingLayout = windowsNeedingLayout
     }
 }
 
@@ -81,9 +90,9 @@ public final class TmuxSessionController {
 
     public init() {}
 
-    /// Begin a session named `sessionName`. Returns the SSH exec command string —
+    /// Begin a session named `sessionName`. Returns the SSH exec command string,
     /// `tmux -CC new-session -A -s <name>` (atomic create-or-attach, shared per the
-    /// session-naming spec) — that the caller runs on the channel. Returns nil if
+    /// session-naming spec), that the caller runs on the channel. Returns nil if
     /// the name is invalid or the controller has already started.
     public func start(sessionName: String) -> String? {
         guard lifecycle == .idle, isValidTmuxSessionName(sessionName) else { return nil }
@@ -113,7 +122,7 @@ public final class TmuxSessionController {
         for event in parser.feed(bytes) {
             if case .commandResult(_, let outcome) = event {
                 // FIFO match. An empty queue means the spontaneous initial attach
-                // block (or a stray) — drop it, don't fabricate a resolution.
+                // block (or a stray), drop it, don't fabricate a resolution.
                 if !pending.isEmpty {
                     resolved.append(ResolvedCommand(id: pending.removeFirst(), outcome: outcome))
                 }
@@ -134,12 +143,24 @@ public final class TmuxSessionController {
                TmuxCommand.queryAlternateOn()]
             : []
 
+        // Windows that are layout-less NOW but were NOT already layout-less before
+        // this feed, i.e. newly-appeared layout-less windows (a `%window-add`, e.g.
+        // the user's `prefix c`). tmux sends no `%layout-change` for these, so the
+        // runtime must re-query their layout or they render blank. Suppressed on the
+        // attach edge (the prime's `list-windows` already fetches every layout), and
+        // debounced by construction: a window is reported once, on the feed it first
+        // appears without a layout, never on subsequent feeds.
+        let beforeMissing = Set(beforeState.windowsMissingLayout)
+        let windowsNeedingLayout: [WindowID] = justAttached ? [] :
+            state.windowsMissingLayout.filter { !beforeMissing.contains($0) }
+
         return TmuxControllerOutput(
             lifecycleChanged: lifecycle != beforeLifecycle,
             stateChanged: state != beforeState,
             resolved: resolved,
             paneOutput: paneOutput,
-            attachedPrimeCommands: prime
+            attachedPrimeCommands: prime,
+            windowsNeedingLayout: windowsNeedingLayout
         )
     }
 

@@ -114,6 +114,19 @@ final class TmuxRuntime {
             DebugLog.shared.log(.tmux, "tmux prime: attach edge → onResyncAll")
             onResyncAll?()
         }
+        // A window created AFTER attach (the user's `prefix c` → `%window-add`)
+        // arrives with no layout, and tmux never sends its `%layout-change`
+        // spontaneously, so it renders blank. Re-query `list-windows` (the SAME
+        // command + reply parse the attach-prime uses, routed through
+        // `primeWindowIDs`) to fetch the new window's layout. De-duped: skip while a
+        // layout list-windows is already in flight, its reply repopulates every
+        // window's layout anyway.
+        if !out.windowsNeedingLayout.isEmpty, primeWindowIDs.isEmpty {
+            if let id = writeTracked(TmuxCommand.listWindowsForLayout()) {
+                primeWindowIDs.insert(id)
+                DebugLog.shared.log(.tmux, "tmux relayout: window(s) \(out.windowsNeedingLayout.map { "@\($0.raw)" }.joined(separator: ",")) missing layout → sent list-windows (req \(id))")
+            }
+        }
         for cmd in out.attachedPrimeCommands {
             if cmd == TmuxCommand.listWindowsForLayout() {
                 if let id = writeTracked(cmd) { primeWindowIDs.insert(id); DebugLog.shared.log(.tmux, "tmux prime: sent list-windows (req \(id))") }
