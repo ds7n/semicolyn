@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-/// A token committed (completed) on the input line, with the token before it —
+/// A token committed (completed) on the input line, with the token before it,
 /// the unit the predictor learns (`record(token, after: previous)`).
 public struct CommittedToken: Equatable, Sendable {
     public let token: String
@@ -14,17 +14,21 @@ public struct CommittedToken: Equatable, Sendable {
 /// prefix is derived here by watching the outgoing stream. Pure and best-effort:
 /// control sequences (arrows, Ctrl-*) reset the line context rather than tracking
 /// cursor motion, and remote-side tab completion (whose result arrives as output)
-/// is not reflected — both are acceptable v1 limitations.
+/// is not reflected, both are acceptable v1 limitations.
 public struct InputTokenTracker: Equatable, Sendable {
     /// The token currently being typed (since the last delimiter).
     public private(set) var current: String = ""
-    /// The last committed (non-dropped) token on this line — the bigram predecessor
+    /// The full input line since the last line reset (for line-shape context).
+    public private(set) var line: String = ""
+    /// Cursor position within `line` (cursor is assumed at the end today).
+    public var cursorIndex: Int { line.count }
+    /// The last committed (non-dropped) token on this line, the bigram predecessor
     /// recorded in `CommittedToken.previous` and surfaced for prefix-suggestion.
     public private(set) var previous: String?
     /// The most-recently-seen token (including dropped secrets) used only for the
     /// `isSecretValueToken` predicate. Advancing this past a dropped secret prevents
     /// the token AFTER the secret from being cascadingly dropped. NOT advanced on
-    /// L3-paste drops (paste content is wholesale suppressed — reaching back over
+    /// L3-paste drops (paste content is wholesale suppressed, reaching back over
     /// the preceding real token is the desired behaviour there).
     private var secretCheckPrev: String?
     /// True while inside a bracketed paste (`ESC[200~`…`ESC[201~`): tokens are
@@ -39,7 +43,7 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// The opt-out verdict of the MOST-RECENTLY-COMMITTED line (latched at its
     /// Enter, before the per-line flags reset). The App reads this AFTER `observe`
     /// so a leading-space line + its Enter arriving in ONE chunk (paste) is still
-    /// correctly suppressed — reading the live `lineOptedOut` before `observe`
+    /// correctly suppressed, reading the live `lineOptedOut` before `observe`
     /// misses that case. Overwritten at each Enter; cleared by `reset()`.
     public private(set) var lastCommittedLineOptedOut = false
     /// Whether the first byte of the current line has been seen yet (to detect a
@@ -119,18 +123,22 @@ public struct InputTokenTracker: Equatable, Sendable {
         switch b {
         case 0x21...0x7e:               // printable, non-space → extend the token
             current.unicodeScalars.append(UnicodeScalar(b))
+            line.unicodeScalars.append(UnicodeScalar(b))
         case 0x20:                      // space → commit (unless within paste)
             commitCurrent(into: &committed)
+            line.unicodeScalars.append(UnicodeScalar(b))
         case 0x0d, 0x0a:                // enter → commit, latch the line's opt-out
             commitCurrent(into: &committed)
             lastCommittedLineOptedOut = lineOptedOut   // latch BEFORE the reset below
             current = ""
+            line = ""
             previous = nil
             secretCheckPrev = nil
             lineOptedOut = false
             sawLineStart = false
         case 0x7f, 0x08:                // backspace → pop one char
             if !current.isEmpty { current.removeLast() }
+            if !line.isEmpty { line.removeLast() }
         case 0x09:                      // tab → remote completion: drop the partial
             current = ""
         default:                        // other control → reset line context
@@ -138,7 +146,7 @@ public struct InputTokenTracker: Equatable, Sendable {
         }
     }
 
-    /// Commit `current` as a token — UNLESS we're inside a paste (L3) or the token
+    /// Commit `current` as a token, UNLESS we're inside a paste (L3) or the token
     /// is a denylisted secret value (L4b), in which case the token is dropped and
     /// does NOT advance `previous` (reach-back-over: the dropped token is invisible
     /// to the learned stream and bigram chain). L4b additionally advances
@@ -146,15 +154,15 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// cascadingly dropped by the flag→value rule.
     private mutating func commitCurrent(into committed: inout [CommittedToken]) {
         guard !current.isEmpty else { return }
-        // L3: inside a paste — drop; do NOT touch `previous` or `secretCheckPrev`.
+        // L3: inside a paste, drop; do NOT touch `previous` or `secretCheckPrev`.
         if withinPaste {
             current = ""
             droppedInPaste += 1   // privacy-safe tally (count, not text) for the App drop-gate log
             return
         }
-        // L4b: a denylisted secret value — drop, no `previous` advance (the next
+        // L4b: a denylisted secret value, drop, no `previous` advance (the next
         // real token reaches back over the secret to `previous` for bigrams). Clear
-        // `secretCheckPrev` — a dropped secret is never a flag/header, so nil
+        // `secretCheckPrev`, a dropped secret is never a flag/header, so nil
         // prevents the cascade without retaining the secret string in memory.
         if isSecretValueToken(current, precededBy: secretCheckPrev) {
             secretCheckPrev = nil
@@ -171,6 +179,7 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// ESC / unknown-control line reset (matches the pre-Phase-2 `default` case).
     private mutating func resetLineContext() {
         current = ""
+        line = ""
         previous = nil
         secretCheckPrev = nil
         lineOptedOut = false
@@ -179,7 +188,7 @@ public struct InputTokenTracker: Equatable, Sendable {
 
     /// Clear all context (e.g. a context/host switch).
     public mutating func reset() {
-        current = ""; previous = nil; secretCheckPrev = nil
+        current = ""; line = ""; previous = nil; secretCheckPrev = nil
         withinPaste = false
         escapeBuffer = []
         lineOptedOut = false
