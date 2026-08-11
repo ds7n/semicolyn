@@ -37,19 +37,31 @@ final class ProseBiasTests: XCTestCase {
     }
 
     // Line-shape: gated on >= 2 words AND first word not a known binary.
+    // NOTE: `line` alone does NOT satisfy the situational signals (foregroundProcess,
+    // isAlternateScreen) the blind prior keys on, so the base here is 0.15 (blind),
+    // not the 0.5 neutral base used when a situational signal is present. The
+    // line-shape nudge, when it applies, is added on top of that 0.15 base.
     func testSentenceShapedLineNudgesProse() {
-        // "how do i" -> 3 words, "how" is not a binary -> +0.15 on top of neutral 0.5
+        // "how do i" -> 3 words, "how" is not a binary -> +0.15 on top of the blind 0.15 base
         XCTAssertEqual(proseBias(PredictionContext(line: "how do i")),
-                       0.65, accuracy: 1e-9)
+                       0.30, accuracy: 1e-9)
     }
     func testSingleWordLineDoesNotNudge() {   // BVA: 1 word (below the >=2 gate)
         XCTAssertEqual(proseBias(PredictionContext(line: "how")),
-                       0.5, accuracy: 1e-9)   // a signal is present (line) so prior is 0.5, no nudge
+                       0.15, accuracy: 1e-9)   // no situational signal -> blind base, no nudge
     }
     func testCommandLineDoesNotNudge() {
         // first word "git" is a known binary -> no prose nudge even with 2 words
         XCTAssertEqual(proseBias(PredictionContext(line: "git commit")),
-                       0.5, accuracy: 1e-9)
+                       0.15, accuracy: 1e-9)   // no situational signal -> blind base, no nudge
+    }
+
+    // Production shape: the real caller (ConnectionViewModel) always supplies
+    // line/cursorIndex (a side effect of typing) but process/alt-screen are only
+    // known once polled. This proves the blind prior is reachable in that shape.
+    func testProductionShapeBareShellGetsBlindPrior() {
+        XCTAssertEqual(proseBias(PredictionContext(line: "how", cursorIndex: 3)),
+                       0.15, accuracy: 1e-9)
     }
 
     func testClassifyProcessBasename() {

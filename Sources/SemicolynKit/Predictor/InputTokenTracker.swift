@@ -19,6 +19,10 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// The token currently being typed (since the last delimiter).
     public private(set) var current: String = ""
     /// The full input line since the last line reset (for line-shape context).
+    /// Intentionally RETAINS paste-suppressed (L3) and tab-dropped text, unlike
+    /// `current`, which drops it: line-SHAPE detection wants what the user
+    /// physically typed. `line` is a transient shape signal only, it is never
+    /// learned or logged verbatim.
     public private(set) var line: String = ""
     /// Cursor position within `line` (cursor is assumed at the end today).
     public var cursorIndex: Int { line.count }

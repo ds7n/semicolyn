@@ -23,8 +23,11 @@ public struct PredictionContext: Sendable, Equatable {
         self.cursorIndex = cursorIndex
     }
 
-    /// True when no signal is available (new pane / pre-poll). Drives the CLI-safe
-    /// blind prior in `proseBias`.
+    /// True when no signal is available at all (new pane / pre-poll). NOTE: `proseBias`
+    /// no longer uses this to gate the blind prior (it keys on `foregroundProcess` and
+    /// `isAlternateScreen` alone, since `line`/`cursorIndex` are almost always present
+    /// as a side effect of typing and would otherwise make the blind prior unreachable
+    /// in production). Retained as public API / for other potential callers.
     public var allSignalsNil: Bool {
         foregroundProcess == nil && isAlternateScreen == nil
             && line == nil && cursorIndex == nil

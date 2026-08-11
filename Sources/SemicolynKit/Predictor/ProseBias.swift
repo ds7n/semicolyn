@@ -31,18 +31,28 @@ func classifyProcess(_ name: String?) -> ProcessClass {
 /// Prose-vs-CLI bias in `[0,1]` (0 = pure CLI, 1 = pure prose). Signals abstain when
 /// nil. Magnitudes are the spec's tunable starting points.
 func proseBias(_ context: PredictionContext) -> Double {
-    if context.allSignalsNil { return 0.15 }   // CLI-safe blind prior
+    // The blind prior fires when we don't know the SITUATION (no foreground
+    // process, no alt-screen state), not merely when the line/cursor are also
+    // absent. `line`/`cursorIndex` describe WHAT is being typed, not the
+    // situation, and are almost always present as a side effect of typing (the
+    // real caller supplies them unconditionally), so gating on `allSignalsNil`
+    // would make this branch unreachable in production. The blind prior is only
+    // the BASE here (not an early return): a line-shape nudge below may still
+    // apply on top of it.
+    let situationKnown = !(context.foregroundProcess == nil && context.isAlternateScreen == nil)
+    var b = situationKnown ? 0.5 : 0.15   // CLI-safe blind prior when situation unknown
 
-    var b = 0.5
-    let cls = classifyProcess(context.foregroundProcess)
-    switch cls {
-    case .prose: b += 0.35
-    case .cli:   b -= 0.35
-    case .unknown: break
+    if situationKnown {
+        let cls = classifyProcess(context.foregroundProcess)
+        switch cls {
+        case .prose: b += 0.35
+        case .cli:   b -= 0.35
+        case .unknown: break
+        }
+
+        // Alt-screen modifies the process vote (never rescues a CLI process).
+        if context.isAlternateScreen == true, cls != .cli { b += 0.15 }
     }
-
-    // Alt-screen modifies the process vote (never rescues a CLI process).
-    if context.isAlternateScreen == true, cls != .cli { b += 0.15 }
 
     // Line-shape: only a sentence-shaped line (>=2 words, first not a binary) nudges.
     if let line = context.line {
