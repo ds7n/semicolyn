@@ -24,8 +24,9 @@ actor PredictorActor {
         }
     }
 
-    func suggestions(forPrefix prefix: String, after previous: String?) -> [String] {
-        engine.suggestions(forPrefix: prefix, after: previous)
+    func suggestions(forPrefix prefix: String, after previous: String?,
+                     context: PredictionContext = .init()) -> [String] {
+        engine.suggestions(forPrefix: prefix, after: previous, context: context)
     }
 
     func harvest(output: String) { engine.harvest(output: output) }
