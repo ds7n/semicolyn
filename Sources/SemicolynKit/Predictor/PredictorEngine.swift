@@ -4,15 +4,19 @@ import Foundation
 
 /// The runtime facade: one type the app records into and queries for suggestions,
 /// composing the write-time privacy filter, the learned windowed stores, the
-/// pinned seed, and the seed-deferring ranker. Holds no I/O — the app loads its
+/// pinned seed, and the seed-deferring ranker. Holds no I/O, the app loads its
 /// inputs from ``SeedStore`` / ``LearnedStore`` and flushes `state` back. See
 /// `2026-06-21-predictor-engine-design`.
 public struct PredictorEngine: Sendable {
     private var learned: LearnedState
     private let seed: PredictorSeed?
+    /// Prose-domain seed (e.g. English/code-comment vocabulary), weighted against
+    /// `seed` (the CLI-domain seed) by `proseBias(context)` in the fill path. `nil`
+    /// keeps the fill path CLI-only regardless of context.
+    private let proseSeed: PredictorSeed?
     /// Ephemeral output-token context (not persisted); leads suggestions.
     private var output: OutputHarvest
-    /// Write-time exclusion rules — consulted only by `record`, never by reads.
+    /// Write-time exclusion rules, consulted only by `record`, never by reads.
     public var filter: TokenFilter
     /// Ranking knobs (top-K, confidence floor, seed weight).
     public var config: SuggestionConfig
@@ -20,17 +24,19 @@ public struct PredictorEngine: Sendable {
     public var window: RollingWindow
 
     public init(learned: LearnedState, seed: PredictorSeed?,
+                proseSeed: PredictorSeed? = nil,
                 filter: TokenFilter = .init(), config: SuggestionConfig = .init(),
                 window: RollingWindow = .days30) {
         self.learned = learned
         self.seed = seed
+        self.proseSeed = proseSeed
         self.output = OutputHarvest()
         self.filter = filter
         self.config = config
         self.window = window
     }
 
-    /// L6 frequency-graduation tier — ephemeral, never persisted (not part of
+    /// L6 frequency-graduation tier, ephemeral, never persisted (not part of
     /// `LearnedState`). Defers learning until a token recurs across N distinct
     /// contexts, so a once-typed secret never enters the suggestable store.
     private var graduation = GraduationTier()
@@ -49,7 +55,7 @@ public struct PredictorEngine: Sendable {
     ///
     /// L7: `echoConfirmed` and `optedOut` thread through to ``LearnConfidence``.
     /// A token with `.low` confidence graduates count-only (no stored literal) so it
-    /// never surfaces as a completion — the core secret-exclusion invariant.
+    /// never surfaces as a completion, the core secret-exclusion invariant.
     public mutating func record(_ token: String, count: UInt32 = 1, after previous: String? = nil,
                                 echoConfirmed: Bool = true, optedOut: Bool = false) {
         guard !filter.excludes(token) else { return }
@@ -72,7 +78,7 @@ public struct PredictorEngine: Sendable {
     }
 
     /// Clear the ephemeral graduation tier (context/host switch / incognito). The
-    /// persistent learned store is untouched — only un-graduated deferrals are lost.
+    /// persistent learned store is untouched, only un-graduated deferrals are lost.
     public mutating func resetGraduation() {
         graduation.reset()
     }
@@ -80,7 +86,7 @@ public struct PredictorEngine: Sendable {
     /// Mark an input-line boundary for surgical forget-last-line (App calls at Enter).
     public mutating func beginLine() { graduation.beginLine() }
 
-    /// Drop the current line's still-pending (un-graduated) tokens — the "oops, I just
+    /// Drop the current line's still-pending (un-graduated) tokens, the "oops, I just
     /// typed a secret" tool. A clean ephemeral delete: no CMS decrement, no index surgery.
     public mutating func forgetLastLine() { graduation.forgetLastLine() }
 
@@ -106,7 +112,7 @@ public struct PredictorEngine: Sendable {
         self.output.harvest(tokens)
     }
 
-    /// Drop harvested output tokens — for a context change (host switch, incognito).
+    /// Drop harvested output tokens, for a context change (host switch, incognito).
     public mutating func clearHarvest() {
         output.clear()
     }
@@ -114,10 +120,13 @@ public struct PredictorEngine: Sendable {
     /// Up to `config.topK` suggestions for `prefix`. Just-harvested output tokens
     /// lead (recency order, axis-independent), then next-token (bigram) candidates
     /// after `previous` when given, otherwise single-word (unigram) candidates,
-    /// each deferring to the seed per-prefix via the same ``SeededSuggester``.
-    /// Duplicates collapse to their first (harvested) position; a missing seed
-    /// yields learned-only results.
-    public func suggestions(forPrefix prefix: String, after previous: String? = nil) -> [String] {
+    /// each deferring to the CLI and prose seeds per-prefix via ``DualSeedSuggester``,
+    /// weighted by `proseBias(context)`. Duplicates collapse to their first
+    /// (harvested) position; a missing seed yields learned-only results. With no
+    /// `proseSeed` (or a default, all-nil `context`), the fill path's prose
+    /// contribution is zero and output matches the CLI-only ranking exactly.
+    public func suggestions(forPrefix prefix: String, after previous: String? = nil,
+                            context: PredictionContext = .init()) -> [String] {
         // Min-prefix floor on the FROM-SCRATCH path only. A usable `previous` means the
         // caller wants next-token (bigram) suggestions, which are valid with an empty
         // word-prefix; only the no-preceding-token case needs typed input (bugs 3/4).
@@ -125,18 +134,24 @@ public struct PredictorEngine: Sendable {
         guard hasUsablePrevious || prefix.count >= config.minPrefix else { return [] }
         guard config.topK > 0 else { return [] }   // harvest path isn't otherwise capped
         let learnedSource: any CandidateSource
-        let seedSource: any CandidateSource
-        // An empty `previous` means "no preceding token" (start of line) — fall back
+        let cliSeedSource: any CandidateSource
+        let proseSeedSource: any CandidateSource
+        // An empty `previous` means "no preceding token" (start of line), fall back
         // to the unigram axis rather than querying a dead bigram axis (no composite
         // key has an empty previous, so it would always return nothing).
         if let previous, !previous.isEmpty {
             learnedSource = learned.bigram.nextSource(after: previous, window: window)
-            seedSource = seed?.bigram.nextSource(after: previous) ?? Self.emptySource()
+            cliSeedSource = seed?.bigram.nextSource(after: previous) ?? Self.emptySource()
+            proseSeedSource = proseSeed?.bigram.nextSource(after: previous) ?? Self.emptySource()
         } else {
             learnedSource = learned.unigram.learnedSource(window: window)
-            seedSource = seed?.unigram ?? Self.emptySource()
+            cliSeedSource = seed?.unigram ?? Self.emptySource()
+            proseSeedSource = proseSeed?.unigram ?? Self.emptySource()
         }
-        let base = SeededSuggester(learned: learnedSource, seed: seedSource, config: config)
+
+        let bias = proseBias(context)
+        let base = DualSeedSuggester(learned: learnedSource, cliSeed: cliSeedSource,
+                                     proseSeed: proseSeedSource, bias: bias, config: config)
             .suggestions(forPrefix: prefix)
 
         // Harvested output leads (already newest-first); learned/seed fill the rest.
@@ -151,14 +166,14 @@ public struct PredictorEngine: Sendable {
         return merged
     }
 
-    /// Seal the day for both learned axes — the app calls this at user-local
+    /// Seal the day for both learned axes, the app calls this at user-local
     /// midnight.
     public mutating func rollover() {
         learned.unigram.rollover()
         learned.bigram.rollover()
     }
 
-    /// An always-empty candidate source — the seed stand-in for a seedless engine,
+    /// An always-empty candidate source, the seed stand-in for a seedless engine,
     /// so the ranker's fill path simply adds nothing.
     private static func emptySource() -> AggregateCandidateSource { AggregateCandidateSource([]) }
 }
