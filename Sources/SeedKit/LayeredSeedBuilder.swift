@@ -39,19 +39,33 @@ public struct LayeredSeedBuilder {
     /// loop), so there is no loop-iteration bound to enforce here.
     private let commonMass: Double = 1_000_000
 
-    public init() {}
+    /// Write-time privacy/profanity filter; `nil` disables filtering entirely
+    /// (every token is tallied). When set, an excluded token contributes to
+    /// neither the unigram tally nor any bigram touching it.
+    private let filter: TokenFilter?
+
+    public init(filter: TokenFilter? = nil) {
+        self.filter = filter
+    }
 
     /// Fold one layer's sentences in: each token is a raw unigram occurrence,
     /// each adjacent `(previous, next)` pair a raw bigram occurrence. `key`
     /// currently only documents provenance (no per-layer storage keying is
-    /// needed since layers are combined in `blobs()`).
+    /// needed since layers are combined in `blobs()`). A token the filter
+    /// excludes is dropped from the unigram tally, and a bigram is dropped
+    /// when either its previous or next token is excluded.
     public mutating func addLayer(_ key: String, config: LayerConfig, sentences: [[String]]) {
         var layer = Layer(config: config)
         for sentence in sentences {
-            for token in sentence { layer.uni[token, default: 0] += 1 }
+            for token in sentence where filter?.excludes(token) != true {
+                layer.uni[token, default: 0] += 1
+            }
             guard sentence.count >= 2 else { continue }
             for i in 1..<sentence.count {
-                layer.bi[sentence[i - 1], default: [:]][sentence[i], default: 0] += 1
+                let previous = sentence[i - 1]
+                let next = sentence[i]
+                guard filter?.excludes(previous) != true, filter?.excludes(next) != true else { continue }
+                layer.bi[previous, default: [:]][next, default: 0] += 1
             }
         }
         layers.append(layer)
