@@ -22,6 +22,12 @@ public struct PredictorEngine: Sendable {
     public var config: SuggestionConfig
     /// Which rolling pre-aggregate suggestions read.
     public var window: RollingWindow
+    /// `seed.unigram.magnitude()`, cached at init since `seed` is immutable, so
+    /// `suggestions` never re-enumerates the whole CLI vocabulary per keystroke.
+    private let cliMagnitude: Double
+    /// `proseSeed.unigram.magnitude()`, cached at init for the same reason as
+    /// `cliMagnitude`.
+    private let proseMagnitude: Double
 
     public init(learned: LearnedState, seed: PredictorSeed?,
                 proseSeed: PredictorSeed? = nil,
@@ -30,6 +36,8 @@ public struct PredictorEngine: Sendable {
         self.learned = learned
         self.seed = seed
         self.proseSeed = proseSeed
+        self.cliMagnitude = seed.map { Double($0.unigram.magnitude()) } ?? 0
+        self.proseMagnitude = proseSeed.map { Double($0.unigram.magnitude()) } ?? 0
         self.output = OutputHarvest()
         self.filter = filter
         self.config = config
@@ -154,11 +162,13 @@ public struct PredictorEngine: Sendable {
         // Each source's own p90 count magnitude, the scale `DualSeedSuggester` divides
         // by before applying the bias weight, so a source's raw size (e.g. a large
         // prose corpus vs. a small CLI seed) never dominates on its own. The learned
-        // magnitude tracks the same window as `learnedSource` above, kept a stable
-        // per-seed scalar; recomputed per call (O(distinct tokens), correctness first).
+        // magnitude tracks the same window as `learnedSource` above, recomputed per
+        // call since `learned` is the mutable rolling store; the seed magnitudes are
+        // constant (the seeds are `let`) and cached at init, see `cliMagnitude` /
+        // `proseMagnitude`.
         let learnedMag = Double(learned.unigram.magnitude(window: window))
-        let cliMag = seed.map { Double($0.unigram.magnitude()) } ?? 0
-        let proseMag = proseSeed.map { Double($0.unigram.magnitude()) } ?? 0
+        let cliMag = cliMagnitude
+        let proseMag = proseMagnitude
 
         let bias = proseBias(context)
         let base = DualSeedSuggester(learned: learnedSource, cliSeed: cliSeedSource,
