@@ -12,6 +12,13 @@ import SeedKit
 /// At least one source is required. Writes `seed_unigram_v1.sketch` and
 /// `seed_bigram_v1.sketch` into the out directory. `--combined <file>` additionally
 /// writes the single seed_pinned-format blob the app installs directly.
+///
+/// `--dev <dir>`, `--tech <dir>`, `--prompt <dir>` ingest running-text prose corpora
+/// (one directory of `.txt` files per layer) through `LayeredSeedBuilder`, blending
+/// the layers with default weights (dev 1.5, tech 1.5, prompt 2.0). `--prose-combined
+/// <file>` writes that blended layer set as its own combined seed_pinned-format blob,
+/// independent of the tldr/fig combined output above. See
+/// `2026-08-11-context-aware-prediction-plan-B-corpus`.
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -23,10 +30,13 @@ func warn(_ message: String) {
 }
 
 let usage = "usage: semicolyn-seedbuild --out <dir> [--tldr <dir>] [--fig <dir>] [--combined <file>]"
-let knownFlags: Set<String> = ["--out", "--tldr", "--fig", "--combined"]
+    + " [--dev <dir>] [--tech <dir>] [--prompt <dir>] [--prose-combined <file>]"
+let knownFlags: Set<String> = [
+    "--out", "--tldr", "--fig", "--combined", "--dev", "--tech", "--prompt", "--prose-combined",
+]
 
 /// Parse `--flag value` options into a dictionary. An unknown flag, a valueless
-/// flag, or a non-flag argument is a usage error — never a silent skip.
+/// flag, or a non-flag argument is a usage error, never a silent skip.
 func parseOptions(_ args: [String]) -> [String: String] {
     var options: [String: String] = [:]
     var i = 0
@@ -42,10 +52,10 @@ func parseOptions(_ args: [String]) -> [String: String] {
 }
 
 /// Ingest every file with `ext` under `dir`, parsing each with `parse` (given the
-/// file text and its URL — Fig needs the stem for the command) and folding the
+/// file text and its URL, Fig needs the stem for the command) and folding the
 /// result into `builder`. Returns the count of files successfully read. Warns
 /// (never silently drops) on an unreadable file. `recursive: false` walks only the
-/// directory's immediate children — Fig's nested `src/<tool>/*.ts` are
+/// directory's immediate children, Fig's nested `src/<tool>/*.ts` are
 /// subcommand *fragments* whose stems (`s3`, `3.0.0`) are not real commands, so
 /// only top-level `src/*.ts` specs are ingested.
 func ingestDirectory(_ dir: URL, ext: String, recursive: Bool, into builder: inout SeedBuilder,
@@ -72,8 +82,11 @@ let options = parseOptions(Array(CommandLine.arguments.dropFirst()))
 guard let outPath = options["--out"] else {
     fail("usage: semicolyn-seedbuild --out <dir> [--tldr <dir>] [--fig <dir>]")
 }
-guard options["--tldr"] != nil || options["--fig"] != nil else {
-    fail("at least one source required: --tldr <dir> and/or --fig <dir>")
+let hasProseSource = options["--dev"] != nil || options["--tech"] != nil || options["--prompt"] != nil
+guard options["--tldr"] != nil || options["--fig"] != nil || hasProseSource else {
+    fail(
+        "at least one source required: --tldr <dir>, --fig <dir>, "
+            + "and/or --dev/--tech/--prompt <dir>")
 }
 
 var builder = SeedBuilder()
@@ -101,9 +114,11 @@ if let figPath = options["--fig"] {
 }
 
 // Empty corpus is almost always a wrong directory, not intent; fail loudly rather
-// than write a useless valid-but-empty blob and exit 0.
-guard totalFiles > 0 else {
-    fail("no source files found — wrong directory?")
+// than write a useless valid-but-empty blob and exit 0. A prose-only invocation
+// (no --tldr/--fig) legitimately has zero tldr/fig files, so it skips this check;
+// its own ingestion below still fails loudly on an empty prose corpus.
+guard totalFiles > 0 || hasProseSource else {
+    fail("no source files found, wrong directory?")
 }
 
 let blobs = builder.blobs()
@@ -129,4 +144,49 @@ if let combinedPath = options["--combined"] {
         try Data(combined).write(to: url)
     } catch { fail("combined write failed: \(error)") }
     print("  combined seed: \(combined.count) bytes → \(url.path)")
+}
+
+/// Read every `.txt` file directly under `dir` (non-recursive, running text has
+/// no meaningful subcommand-fragment nesting like Fig) and tokenize each into
+/// per-sentence token sequences via `ProseCorpusParser`.
+func readTextFiles(_ dir: URL) -> [[String]] {
+    var out: [[String]] = []
+    let files = (try? FileManager.default.contentsOfDirectory(
+        at: dir, includingPropertiesForKeys: nil, options: [.skipsSubdirectoryDescendants])) ?? []
+    for f in files where f.pathExtension == "txt" {
+        guard let text = try? String(contentsOf: f, encoding: .utf8) else {
+            warn("warning: skipped \(f.path)")
+            continue
+        }
+        out.append(contentsOf: ProseCorpusParser.sentences(fromText: text))
+    }
+    return out
+}
+
+if options["--dev"] != nil || options["--tech"] != nil || options["--prompt"] != nil {
+    var proseBuilder = LayeredSeedBuilder()
+    let layerDefs: [(flag: String, key: String, config: LayerConfig)] = [
+        ("--dev", "dev", LayerConfig(weight: 1.5, bigramCapPerLayer: 500, bigramFloor: 2)),
+        ("--tech", "tech", LayerConfig(weight: 1.5, bigramCapPerLayer: 500, bigramFloor: 2)),
+        ("--prompt", "prompt", LayerConfig(weight: 2.0, bigramCapPerLayer: 500, bigramFloor: 2)),
+    ]
+    for (flag, key, config) in layerDefs {
+        guard let path = options[flag] else { continue }
+        let sentences = readTextFiles(URL(fileURLWithPath: path, isDirectory: true))
+        proseBuilder.addLayer(key, config: config, sentences: sentences)
+        print("\(key): ingested \(sentences.count) sentences")
+    }
+
+    if let proseCombinedPath = options["--prose-combined"] {
+        let proseBlobs = proseBuilder.blobs()
+        let combined = combinedSeedBlob(
+            version: 1, unigram: proseBlobs.unigram, bigram: proseBlobs.bigram)
+        let url = URL(fileURLWithPath: proseCombinedPath)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(combined).write(to: url)
+        } catch { fail("prose combined write failed: \(error)") }
+        print("  prose combined seed: \(combined.count) bytes → \(url.path)")
+    }
 }
