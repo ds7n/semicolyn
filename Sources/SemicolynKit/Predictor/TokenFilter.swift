@@ -8,11 +8,15 @@ public enum ExcludePattern: Sendable, Equatable {
     case contains(String)
     /// Case-sensitive prefix (e.g. a fixed-case key prefix `ghp_`).
     case hasPrefix(String)
+    /// Exact-token (case-insensitive) membership blocklist, e.g. profanity. Not a
+    /// substring match: only whole-token equality excludes, so "class" is safe even
+    /// if "ass" is listed.
+    case blocklist(Set<String>)
 }
 
 /// Write-time privacy filter: decides whether a token must never be recorded by
 /// the predictor, so secrets never enter any sketch. A pure predicate the
-/// recording orchestration consults *before* `record` — filtering at write time,
+/// recording orchestration consults *before* `record`, filtering at write time,
 /// not read time. Fails toward exclusion (learning a secret is the costly
 /// failure). See `2026-06-21-predictor-privacy-filter-design`.
 public struct TokenFilter: Sendable {
@@ -30,7 +34,7 @@ public struct TokenFilter: Sendable {
         .hasPrefix("github_pat_"),                                   // GitHub fine-grained PATs
         .hasPrefix("sk-"),                                           // OpenAI API keys
         .hasPrefix("sk_"), .hasPrefix("pk_"),                        // Stripe secret / publishable keys
-        // L5 (Phase 3) — curated public credential-format prefixes.
+        // L5 (Phase 3), curated public credential-format prefixes.
         .hasPrefix("AKIA"), .hasPrefix("ASIA"),                      // AWS access key IDs
         .hasPrefix("AIza"),                                          // Google API keys
         .hasPrefix("sk_live_"), .hasPrefix("rk_live_"),             // Stripe live keys (narrower than sk_)
@@ -57,6 +61,8 @@ public struct TokenFilter: Sendable {
                 if !needle.isEmpty, lowered.contains(needle.lowercased()) { return true }
             case .hasPrefix(let prefix):
                 if !prefix.isEmpty, token.hasPrefix(prefix) { return true }
+            case .blocklist(let words):
+                if words.contains(lowered) { return true }
             }
         }
         if isStructuredSecret(token) { return true }
@@ -74,7 +80,7 @@ public struct TokenFilter: Sendable {
     private static let softMargin = 0.75
 
     /// Soft L5 signal: true when `token` is NOT a hard-excluded secret but sits in an
-    /// entropy band just below the hard threshold — near-random enough that L7 should
+    /// entropy band just below the hard threshold, near-random enough that L7 should
     /// graduate it low-confidence (count only, no persisted literal). Returns false
     /// when the entropy backstop is disabled or the token is too short/low-entropy.
     public func isPatternAdjacent(_ token: String) -> Bool {
@@ -105,7 +111,7 @@ func isStructuredSecret(_ token: String) -> Bool {
     return false
 }
 
-/// True if `s` contains only base64url characters (A–Z a–z 0–9 - _ =).
+/// True if `s` contains only base64url characters (A-Z a-z 0-9 - _ =).
 private func isBase64URL(_ s: Substring) -> Bool {
     s.allSatisfy { c in
         c.isLetter || c.isNumber || c == "-" || c == "_" || c == "="
