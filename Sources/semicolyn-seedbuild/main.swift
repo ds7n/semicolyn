@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 import SeedKit
+import SemicolynKit
 
 /// Thin build-time driver: ingest one or more CLI corpora into the predictor seed
 /// blobs. All real logic lives in ``SeedKit``; this is argument parsing, directory
@@ -30,9 +31,10 @@ func warn(_ message: String) {
 }
 
 let usage = "usage: semicolyn-seedbuild --out <dir> [--tldr <dir>] [--fig <dir>] [--combined <file>]"
-    + " [--dev <dir>] [--tech <dir>] [--prompt <dir>] [--prose-combined <file>]"
+    + " [--dev <dir>] [--tech <dir>] [--prompt <dir>] [--prose-combined <file>] [--blocklist <file>]"
 let knownFlags: Set<String> = [
     "--out", "--tldr", "--fig", "--combined", "--dev", "--tech", "--prompt", "--prose-combined",
+    "--blocklist",
 ]
 
 /// Parse `--flag value` options into a dictionary. An unknown flag, a valueless
@@ -164,7 +166,16 @@ func readTextFiles(_ dir: URL) -> [[String]] {
 }
 
 if hasProseSource {
-    var proseBuilder = LayeredSeedBuilder()
+    var proseFilter: TokenFilter?
+    if let blocklistPath = options["--blocklist"] {
+        let text = (try? String(contentsOf: URL(fileURLWithPath: blocklistPath), encoding: .utf8)) ?? ""
+        let words = Set(text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { !$0.isEmpty })
+        if !words.isEmpty { proseFilter = TokenFilter(patterns: [.blocklist(words)]) }
+        print("blocklist: loaded \(words.count) words")
+    }
+    var proseBuilder = LayeredSeedBuilder(filter: proseFilter)
     var totalProseSentences = 0
     let layerDefs: [(flag: String, key: String, config: LayerConfig)] = [
         ("--dev", "dev", LayerConfig(weight: 1.5, bigramCapPerLayer: 500, bigramFloor: 2)),
