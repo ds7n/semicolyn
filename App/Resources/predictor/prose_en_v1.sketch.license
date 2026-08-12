@@ -1,0 +1,7 @@
+SPDX-FileCopyrightText: 2026 True Positive LLC
+SPDX-License-Identifier: GPL-3.0-only
+
+Derived token-frequency fingerprint for prose prediction, built from our own
+generated dev + AI-prompt corpora and cleaned public-domain IETF RFC prose; profane
+tokens are dropped at build via the blocklist. Contains frequencies, not verbatim
+source text. See prose_en_v1.provenance.txt and SEED_ATTRIBUTION.md.

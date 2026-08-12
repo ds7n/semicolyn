@@ -75,3 +75,6 @@
 
 # Git worktrees (SDD isolated workspaces)
 .worktrees/
+
+# prose seed build staging (transient)
+.prose-build/
