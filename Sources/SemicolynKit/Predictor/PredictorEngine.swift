@@ -47,8 +47,10 @@ public struct PredictorEngine: Sendable {
     /// Learn `count` occurrences of `token`, optionally as the successor of
     /// `previous`. Write-time privacy is applied here, once: an excluded `token` is
     /// learned nowhere; an excluded `previous` suppresses only the adjacency (the
-    /// non-excluded `token` is still a unigram). The data simply isn't recorded, so
-    /// reads never need to filter.
+    /// non-excluded `token` is still a unigram). Data recorded through this path
+    /// never needs read-time filtering; but `suggestions` also re-applies `filter`
+    /// as a safety net, since a bundled seed (unlike `record`) can carry an
+    /// excluded token (e.g. profanity) that never passed through this gate.
     ///
     /// L6: tokens are deferred until they recur across N distinct contexts; see
     /// ``GraduationTier``.
@@ -159,6 +161,7 @@ public struct PredictorEngine: Sendable {
         var seen = Set<String>()
         var merged: [String] = []
         for token in harvested + base {
+            if filter.excludes(token) { continue }
             guard seen.insert(token).inserted else { continue }
             merged.append(token)
             if merged.count == config.topK { break }
