@@ -163,8 +163,9 @@ func readTextFiles(_ dir: URL) -> [[String]] {
     return out
 }
 
-if options["--dev"] != nil || options["--tech"] != nil || options["--prompt"] != nil {
+if hasProseSource {
     var proseBuilder = LayeredSeedBuilder()
+    var totalProseSentences = 0
     let layerDefs: [(flag: String, key: String, config: LayerConfig)] = [
         ("--dev", "dev", LayerConfig(weight: 1.5, bigramCapPerLayer: 500, bigramFloor: 2)),
         ("--tech", "tech", LayerConfig(weight: 1.5, bigramCapPerLayer: 500, bigramFloor: 2)),
@@ -175,6 +176,16 @@ if options["--dev"] != nil || options["--tech"] != nil || options["--prompt"] !=
         let sentences = readTextFiles(URL(fileURLWithPath: path, isDirectory: true))
         proseBuilder.addLayer(key, config: config, sentences: sentences)
         print("\(key): ingested \(sentences.count) sentences")
+        totalProseSentences += sentences.count
+    }
+
+    // Same rationale as the tldr/fig guard above: an empty or misspelled
+    // --dev/--tech/--prompt directory must not silently produce a valid-but-empty
+    // blob. Check runs before any prose output is written.
+    guard totalProseSentences > 0 else {
+        fail(
+            "no prose sentences found in --dev/--tech/--prompt directories "
+                + "(check the paths contain .txt files)")
     }
 
     if let proseCombinedPath = options["--prose-combined"] {
