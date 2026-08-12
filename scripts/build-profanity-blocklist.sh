@@ -14,10 +14,11 @@ set -euo pipefail
 SRC="https://raw.githubusercontent.com/words/cuss/main/index.js"
 OUT="App/Resources/predictor/profanity_blocklist.txt"
 PROV="App/Resources/predictor/profanity_blocklist.provenance.txt"
-# A hand-curated set of identity slurs that words/cuss under-rates at sureness 1,
+# A hand-curated extra set merged on top of the cuss list: identity slurs cuss
+# under-rates at sureness 1, plus common acronym-profanity cuss omits (wtf, stfu, ...),
 # minus any word with a common innocent terminal/English meaning (kept suggestable).
 # See the provenance file for the curation rationale.
-CURATED="App/Resources/predictor/slurs_curated.txt"
+CURATED="App/Resources/predictor/blocklist_extra.txt"
 : "${CUSS_THRESHOLD:=2}"
 
 raw="$(curl -fsSL "$SRC")"
