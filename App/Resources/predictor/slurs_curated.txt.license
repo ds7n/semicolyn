@@ -1,0 +1,5 @@
+SPDX-FileCopyrightText: 2026 True Positive LLC
+SPDX-License-Identifier: GPL-3.0-only
+
+Build-time input only (not shipped): a hand-curated set of identity slurs that
+words/cuss under-rates at sureness 1, merged into profanity_blocklist.txt at build.
