@@ -151,9 +151,20 @@ public struct PredictorEngine: Sendable {
             proseSeedSource = proseSeed?.unigram ?? Self.emptySource()
         }
 
+        // Each source's own p90 count magnitude, the scale `DualSeedSuggester` divides
+        // by before applying the bias weight, so a source's raw size (e.g. a large
+        // prose corpus vs. a small CLI seed) never dominates on its own. The learned
+        // magnitude tracks the same window as `learnedSource` above, kept a stable
+        // per-seed scalar; recomputed per call (O(distinct tokens), correctness first).
+        let learnedMag = Double(learned.unigram.magnitude(window: window))
+        let cliMag = seed.map { Double($0.unigram.magnitude()) } ?? 0
+        let proseMag = proseSeed.map { Double($0.unigram.magnitude()) } ?? 0
+
         let bias = proseBias(context)
         let base = DualSeedSuggester(learned: learnedSource, cliSeed: cliSeedSource,
-                                     proseSeed: proseSeedSource, bias: bias, config: config)
+                                     proseSeed: proseSeedSource, bias: bias, config: config,
+                                     learnedMagnitude: learnedMag, cliMagnitude: cliMag,
+                                     proseMagnitude: proseMag)
             .suggestions(forPrefix: prefix)
 
         // Harvested output leads (already newest-first); learned/seed fill the rest.
