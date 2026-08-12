@@ -44,6 +44,7 @@ targets:
           - "Resources/Fonts/*.license"
           - "Resources/predictor/*.license"
           - "Resources/predictor/*.provenance.txt"
+          - "Resources/predictor/slurs_curated.txt"
     dependencies:
       - package: SemicolynPackage
         product: SemicolynSSHCoreFFI

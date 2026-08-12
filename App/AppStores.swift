@@ -177,6 +177,28 @@ final class AppStores {
         }
     }
 
+    /// The runtime `TokenFilter` the predictor is constructed with: the default
+    /// exclude patterns plus a `.blocklist` loaded from the bundled profanity word
+    /// list, so profanity the user types is never learned or suggested back.
+    /// Graceful: if the resource is missing or unreadable, returns the plain
+    /// default filter (no blocklist) so the app behaves exactly as it did before
+    /// this resource existed. Never crashes, never force-unwraps.
+    func predictorTokenFilter() -> TokenFilter {
+        guard let url = Bundle.main.url(forResource: "profanity_blocklist", withExtension: "txt"),
+              let contents = try? String(contentsOf: url, encoding: .utf8) else {
+            DebugLog.shared.log(.seed, "predictor:blocklist skipped=no-resource")
+            return TokenFilter()
+        }
+        let words = Set(
+            contents
+                .split(whereSeparator: \.isNewline)
+                .map { $0.lowercased() }
+                .filter { !$0.isEmpty }
+        )
+        DebugLog.shared.log(.seed, "predictor:blocklist loaded words=\(words.count)")
+        return TokenFilter(patterns: TokenFilter.defaultPatterns + [.blocklist(words)])
+    }
+
     // MARK: - Device seed
 
     /// Returns a stable per-install random seed, persisted in `UserDefaults`.

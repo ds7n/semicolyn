@@ -1432,7 +1432,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         predictor = PredictorActor(engine: PredictorEngine(
             learned: store.load(),
             seed: AppStores.shared.predictorSeed(),
-            proseSeed: AppStores.shared.proseSeed()))
+            proseSeed: AppStores.shared.proseSeed(),
+            filter: AppStores.shared.predictorTokenFilter()))
         // Register as the session a Settings-triggered panic-purge should reset.
         AppStores.shared.activePredictorSession = self
     }
