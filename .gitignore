@@ -72,3 +72,6 @@
 # per the global ignore and intentionally not overridden.)
 /TODO.md
 /docs/superpowers/
+
+# Git worktrees (SDD isolated workspaces)
+.worktrees/

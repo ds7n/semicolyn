@@ -121,7 +121,7 @@ final class InputTokenTrackerTests: XCTestCase {
 
     func testUnmatchedPasteCloseIsIgnored() {
         // A stray ESC[201~ with no open: a recognized (if redundant) exit marker is
-        // consumed harmlessly — it does not reset the line.
+        // consumed harmlessly, it does not reset the line.
         var input: [UInt8] = Array("ls".utf8)
         input += pasteOff
         input += Array(" -la".utf8); input += [0x0d]
@@ -138,7 +138,7 @@ final class InputTokenTrackerTests: XCTestCase {
     }
 
     func testLeadingSpaceOptsLineOut() {
-        // " secret command" — first byte is a space → line opted out.
+        // " secret command", first byte is a space → line opted out.
         XCTAssertTrue(optedOutAfter(Array(" secret cmd".utf8)))
     }
 
@@ -269,5 +269,22 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertTrue(t.lastCommittedLineOptedOut)
         t.reset()
         XCTAssertFalse(t.lastCommittedLineOptedOut)
+    }
+
+    // MARK: - Full-line exposure (for line-shape context, Task 7)
+
+    func testTrackerExposesFullLine() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("git com"))
+        XCTAssertEqual(t.line, "git com")
+        XCTAssertEqual(t.cursorIndex, 7)
+    }
+
+    func testTrackerLineResetsOnEnter() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("hello"))
+        _ = t.observe([0x0d])
+        XCTAssertEqual(t.line, "")
+        XCTAssertEqual(t.cursorIndex, 0)
     }
 }

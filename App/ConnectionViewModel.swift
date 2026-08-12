@@ -1543,11 +1543,26 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // A future task can plumb the config value through; out of scope here.
         let hasUsablePrevious = (prev?.isEmpty == false)
         if !hasUsablePrevious, prefix.count < 2 { predictorVM.setSuggestions([]); return }
+
+        // Build the prediction context from signals the VM already holds. Any signal
+        // that is not cheaply available stays nil (the bias treats nil as abstain).
+        let process: String? = {
+            guard let win = tmuxState?.activeWindow,
+                  let pane = tmuxState?.window(win)?.activePane else { return nil }
+            return paneContexts[pane]
+        }()
+        let isAlt = activePaneView()?.getTerminal().isCurrentBufferAlternate
+        let ctx = PredictionContext(foregroundProcess: process,
+                                    isAlternateScreen: isAlt,
+                                    line: tracker.line,
+                                    cursorIndex: tracker.cursorIndex)
+
         Task { [weak self] in
-            let raw = await predictor.suggestions(forPrefix: prefix, after: prev)
+            let raw = await predictor.suggestions(forPrefix: prefix, after: prev, context: ctx)
             let chips = predictorChips(current: prefix, suggestions: raw)
             await MainActor.run {
-                DebugLog.shared.log(.predictor, "predictor:suggest prefixLen=\(prefix.count) results=\(raw.count)")
+                DebugLog.shared.log(.predictor,
+                    "predictor:suggest prefixLen=\(prefix.count) bias-signals proc=\(process ?? "nil") alt=\(isAlt.map(String.init) ?? "nil") results=\(raw.count)")
                 self?.predictorVM.setSuggestions(chips)
             }
         }
