@@ -22,6 +22,12 @@ public struct PredictorEngine: Sendable {
     public var config: SuggestionConfig
     /// Which rolling pre-aggregate suggestions read.
     public var window: RollingWindow
+    /// `seed.unigram.magnitude()`, cached at init since `seed` is immutable, so
+    /// `suggestions` never re-enumerates the whole CLI vocabulary per keystroke.
+    private let cliMagnitude: Double
+    /// `proseSeed.unigram.magnitude()`, cached at init for the same reason as
+    /// `cliMagnitude`.
+    private let proseMagnitude: Double
 
     public init(learned: LearnedState, seed: PredictorSeed?,
                 proseSeed: PredictorSeed? = nil,
@@ -30,6 +36,8 @@ public struct PredictorEngine: Sendable {
         self.learned = learned
         self.seed = seed
         self.proseSeed = proseSeed
+        self.cliMagnitude = seed.map { Double($0.unigram.magnitude()) } ?? 0
+        self.proseMagnitude = proseSeed.map { Double($0.unigram.magnitude()) } ?? 0
         self.output = OutputHarvest()
         self.filter = filter
         self.config = config
@@ -47,8 +55,10 @@ public struct PredictorEngine: Sendable {
     /// Learn `count` occurrences of `token`, optionally as the successor of
     /// `previous`. Write-time privacy is applied here, once: an excluded `token` is
     /// learned nowhere; an excluded `previous` suppresses only the adjacency (the
-    /// non-excluded `token` is still a unigram). The data simply isn't recorded, so
-    /// reads never need to filter.
+    /// non-excluded `token` is still a unigram). Data recorded through this path
+    /// never needs read-time filtering; but `suggestions` also re-applies `filter`
+    /// as a safety net, since a bundled seed (unlike `record`) can carry an
+    /// excluded token (e.g. profanity) that never passed through this gate.
     ///
     /// L6: tokens are deferred until they recur across N distinct contexts; see
     /// ``GraduationTier``.
@@ -149,16 +159,44 @@ public struct PredictorEngine: Sendable {
             proseSeedSource = proseSeed?.unigram ?? Self.emptySource()
         }
 
+        // Each source's own p90 count magnitude, the scale `DualSeedSuggester` divides
+        // by before applying the bias weight, so a source's raw size (e.g. a large
+        // prose corpus vs. a small CLI seed) never dominates on its own. The learned
+        // magnitude tracks the same window as `learnedSource` above, recomputed per
+        // call since `learned` is the mutable rolling store; the seed magnitudes are
+        // constant (the seeds are `let`) and cached at init, see `cliMagnitude` /
+        // `proseMagnitude`.
+        //
+        // DELIBERATE proxy: `cliMagnitude`/`proseMagnitude` are each seed's UNIGRAM
+        // p90 magnitude, and that same scalar is reused below on the BIGRAM query
+        // path too (there is no separate `BigramVocabulary.magnitude`). Bigram counts
+        // for a given seed track that seed's unigram count scale closely enough that
+        // the unigram magnitude is a stable, deterministic per-seed normalizer for
+        // both axes. An exact per-axis bigram magnitude is a possible future
+        // refinement, not required for correct relative ranking today.
+        let learnedMag = Double(learned.unigram.magnitude(window: window))
+        let cliMag = cliMagnitude
+        let proseMag = proseMagnitude
+
         let bias = proseBias(context)
+        // Over-fetch beyond `config.topK`: the merge loop below re-applies `filter`
+        // (a bundled seed can carry an excluded token, e.g. profanity, that never
+        // passed through `record`'s write-time gate). If `DualSeedSuggester` only
+        // returned `topK` candidates, dropping an excluded one there would under-fill
+        // the result instead of backfilling from the next clean candidate.
+        let overfetchLimit = max(config.topK * 3, config.topK + 12)
         let base = DualSeedSuggester(learned: learnedSource, cliSeed: cliSeedSource,
-                                     proseSeed: proseSeedSource, bias: bias, config: config)
-            .suggestions(forPrefix: prefix)
+                                     proseSeed: proseSeedSource, bias: bias, config: config,
+                                     learnedMagnitude: learnedMag, cliMagnitude: cliMag,
+                                     proseMagnitude: proseMag)
+            .suggestions(forPrefix: prefix, limit: overfetchLimit)
 
         // Harvested output leads (already newest-first); learned/seed fill the rest.
         let harvested = output.candidates(forPrefix: prefix).map { $0.token }
         var seen = Set<String>()
         var merged: [String] = []
         for token in harvested + base {
+            if filter.excludes(token) { continue }
             guard seen.insert(token).inserted else { continue }
             merged.append(token)
             if merged.count == config.topK { break }

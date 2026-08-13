@@ -43,7 +43,7 @@ public struct RollingVocabulary: Equatable, Sendable {
     private let depth: Int
     private let width: Int
 
-    /// The retention horizon — the largest window's reach; older dailies are
+    /// The retention horizon, the largest window's reach; older dailies are
     /// pruned (no window can ever need them again).
     private static let retentionDays = 90
 
@@ -61,7 +61,7 @@ public struct RollingVocabulary: Equatable, Sendable {
     }
 
     /// Learn `count` occurrences of `token` into today's sketch. When `storeLiteral`
-    /// is false (L7 low-confidence) the literal is withheld from the prefix index —
+    /// is false (L7 low-confidence) the literal is withheld from the prefix index,
     /// the count still contributes to frequency, but the token can never be surfaced
     /// as a completion or reconstructed from disk. Ignored for empty token / zero count.
     public mutating func record(_ token: String, count: UInt32 = 1, storeLiteral: Bool = true) {
@@ -87,7 +87,7 @@ public struct RollingVocabulary: Equatable, Sendable {
 
         today = CountMinSketch(depth: depth, width: width)
 
-        // Prune past the horizon — only after the subtracts, so the 90-day
+        // Prune past the horizon, only after the subtracts, so the 90-day
         // window's evicted daily was still present above.
         if dailies.count > Self.retentionDays {
             dailies.removeFirst(dailies.count - Self.retentionDays)
@@ -106,6 +106,24 @@ public struct RollingVocabulary: Equatable, Sendable {
             IndexedSketch(index: index, counts: today),
             IndexedSketch(index: index, counts: rolling),
         ])
+    }
+
+    /// A representative high-frequency magnitude for `today ⊕ rolling_<window>`:
+    /// the ~90th percentile of all token counts, mirroring `Vocabulary.magnitude()`.
+    /// Used to normalize the learned source onto the same scale as the seeds before
+    /// blending. Returns 0 for an empty vocabulary.
+    public func magnitude(window: RollingWindow) -> UInt32 {
+        let tokens = index.matching(prefix: "")
+        guard !tokens.isEmpty else { return 0 }
+        let rolling: CountMinSketch
+        switch window {
+        case .days7: rolling = rolling7
+        case .days30: rolling = rolling30
+        case .days90: rolling = rolling90
+        }
+        let estimates = tokens.map { today.estimate($0) + rolling.estimate($0) }.sorted()
+        let idx = min(estimates.count - 1, Int((Double(estimates.count) * 0.9).rounded(.down)))
+        return estimates[idx]
     }
 
     // MARK: - Serialization
@@ -133,7 +151,7 @@ public struct RollingVocabulary: Equatable, Sendable {
 
     /// Reconstruct the whole state. Fails closed (`nil`) on wrong magic/version, a
     /// rejected sub-blob, trailing slack, or any sketch whose dimensions differ
-    /// from `today`'s — mixed dimensions would make the rollover merge/subtract a
+    /// from `today`'s, mixed dimensions would make the rollover merge/subtract a
     /// silent no-op, so such a blob is rejected outright. `depth`/`width` are taken
     /// from `today` (a CMS carries its own dimensions).
     public init?(deserializing bytes: [UInt8]) {
@@ -178,7 +196,7 @@ public struct RollingVocabulary: Equatable, Sendable {
     }
 }
 
-/// Append a length-prefixed sub-blob (`LE32 length | bytes`) — the write-side
+/// Append a length-prefixed sub-blob (`LE32 length | bytes`), the write-side
 /// counterpart to `readLengthPrefixed`, shared by the composite serializers.
 func appendSubBlob(_ out: inout [UInt8], _ blob: [UInt8]) {
     appendLE32(&out, UInt32(blob.count))

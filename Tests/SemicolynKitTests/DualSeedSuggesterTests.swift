@@ -20,21 +20,24 @@ final class DualSeedSuggesterTests: XCTestCase {
 
     func testBiasZeroIsCliOnly() {
         let s = DualSeedSuggester(learned: empty, cliSeed: cliSeed, proseSeed: proseSeed,
-                                  bias: 0.0, config: cfg)
+                                  bias: 0.0, config: cfg, learnedMagnitude: 100,
+                                  cliMagnitude: 100, proseMagnitude: 100)
         // prose scaled by 0 -> only "commit" survives.
         XCTAssertEqual(s.suggestions(forPrefix: "com"), ["commit"])
     }
 
     func testBiasOneIsProseOnly() {
         let s = DualSeedSuggester(learned: empty, cliSeed: cliSeed, proseSeed: proseSeed,
-                                  bias: 1.0, config: cfg)
+                                  bias: 1.0, config: cfg, learnedMagnitude: 100,
+                                  cliMagnitude: 100, proseMagnitude: 100)
         XCTAssertEqual(s.suggestions(forPrefix: "com"), ["compose"])
     }
 
     func testMidBiasInterleavesByScaledScore() {
         // bias 0.7: prose 100*0.7=70 outranks cli 100*0.3=30 -> compose first.
         let s = DualSeedSuggester(learned: empty, cliSeed: cliSeed, proseSeed: proseSeed,
-                                  bias: 0.7, config: cfg)
+                                  bias: 0.7, config: cfg, learnedMagnitude: 100,
+                                  cliMagnitude: 100, proseMagnitude: 100)
         XCTAssertEqual(s.suggestions(forPrefix: "com"), ["compose", "commit"])
     }
 
@@ -43,7 +46,8 @@ final class DualSeedSuggesterTests: XCTestCase {
         let learned = FakeSource(items: [TokenCount(token: "comrade", count: 9),
                                          TokenCount(token: "combine", count: 5)])
         let s = DualSeedSuggester(learned: learned, cliSeed: cliSeed, proseSeed: proseSeed,
-                                  bias: 0.9, config: cfg)
+                                  bias: 0.9, config: cfg, learnedMagnitude: 9,
+                                  cliMagnitude: 100, proseMagnitude: 100)
         XCTAssertEqual(s.suggestions(forPrefix: "com"), ["comrade", "combine"])
     }
 }

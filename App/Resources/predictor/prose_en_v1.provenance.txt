@@ -1,0 +1,9 @@
+prose_en_v1 provenance
+layers (LayeredSeedBuilder, normalize-per-layer then weight):
+  dev    (weight 1.5): corpora/prose/dev_v1.txt    (our own generated dev prose)
+  tech   (weight 1.5): corpora/prose/tech_rfc_v1.txt (cleaned IETF RFC prose, PD)
+  prompt (weight 2.0): corpora/prose/prompt_v1.txt  (our own generated AI-prompt prose)
+profanity: blocklist (App/Resources/predictor/profanity_blocklist.txt) applied at build; blocked tokens + their bigrams dropped.
+hygiene: per-layer bigram cap 500, rare-bigram floor 2.
+shipped: derived token frequencies only (this .sketch), NOT the corpus text.
+size: 1652940 bytes

@@ -1,0 +1,7 @@
+SPDX-FileCopyrightText: 2026 True Positive LLC
+SPDX-License-Identifier: GPL-3.0-only
+
+Cleaned prose extracted from IETF RFC plaintext (RFCs 793, 854, 959, 1035, 2616,
+4251, 5321), used as build-time input for the tech register of the prose predictor
+seed. RFC text is freely reproducible; only derived token frequencies ship in the
+app (prose_en_v1.sketch), not the RFC text itself.
