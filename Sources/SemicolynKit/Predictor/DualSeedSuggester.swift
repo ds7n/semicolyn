@@ -39,13 +39,19 @@ struct DualSeedSuggester {
         self.proseMagnitude = proseMagnitude
     }
 
-    func suggestions(forPrefix prefix: String) -> [String] {
-        guard config.topK > 0 else { return [] }
+    /// Up to `limit` suggestions for `prefix` (default `config.topK`). The caller
+    /// may pass a larger `limit` to over-fetch raw-ranked candidates beyond what it
+    /// will ultimately keep, e.g. `PredictorEngine.suggestions` does this so its
+    /// read-time exclusion filter can drop a top-ranked but excluded token and
+    /// still backfill from the next clean candidate rather than under-filling topK.
+    func suggestions(forPrefix prefix: String, limit: Int? = nil) -> [String] {
+        let cap = limit ?? config.topK
+        guard cap > 0 else { return [] }
 
         let confident = learned.candidates(forPrefix: prefix)
             .filter { $0.count >= config.confidenceFloor }
         if confident.count >= config.topK {
-            return ranked(confident.map { (token: $0.token, score: Double($0.count)) })
+            return ranked(confident.map { (token: $0.token, score: Double($0.count)) }, cap: cap)
         }
 
         // Normalized contribution of a raw `count` from a source whose scale is
@@ -64,14 +70,14 @@ struct DualSeedSuggester {
         }
         // A zero-weighted seed must not inject a token via a 0 score; drop zeros.
         let nonzero = scores.filter { $0.value > 0 }
-        return ranked(nonzero.map { (token: $0.key, score: $0.value) })
+        return ranked(nonzero.map { (token: $0.key, score: $0.value) }, cap: cap)
     }
 
-    private func ranked(_ scored: [(token: String, score: Double)]) -> [String] {
+    private func ranked(_ scored: [(token: String, score: Double)], cap: Int) -> [String] {
         let sorted = scored.sorted { a, b in
             if a.score != b.score { return a.score > b.score }
             return a.token.utf8.lexicographicallyPrecedes(b.token.utf8)
         }
-        return Array(sorted.prefix(config.topK).map { $0.token })
+        return Array(sorted.prefix(cap).map { $0.token })
     }
 }

@@ -30,4 +30,31 @@ final class PredictorEngineReadFilterTests: XCTestCase {
         XCTAssertFalse(results.contains("wtf"), "excluded token must never be suggested")
         XCTAssertTrue(results.contains("west"), "clean token sharing the prefix must still be suggested")
     }
+
+    // M-1 regression: when a profane token would rank ABOVE topK clean candidates
+    // sharing the prefix, the engine must still return topK CLEAN suggestions
+    // (backfilled from the next candidate), not topK-minus-the-excluded-one. This
+    // requires the exclusion filter to run BEFORE the topK truncation, not after.
+    func testProfaneTopRankedTokenIsBackfilledNotJustDropped() {
+        let filter = TokenFilter(patterns: [.blocklist(["shitshow"])])
+        let smallCfg = SuggestionConfig(topK: 3, confidenceFloor: 2, seedWeight: 1.0, minPrefix: 1)
+        // "shitshow" has the highest count so it would occupy the #1 topK slot if
+        // ranked before filtering; four clean tokens share the "sh" prefix, more
+        // than topK, so a correct backfill still fills all 3 slots with clean tokens.
+        let seed = seed(tokens: [
+            ("shitshow", 999),
+            ("share", 90),
+            ("shape", 80),
+            ("shell", 70),
+            ("ship", 60),
+        ])
+        let e = PredictorEngine(learned: LearnedState.empty, seed: seed, filter: filter, config: smallCfg)
+
+        let results = e.suggestions(forPrefix: "sh")
+
+        XCTAssertEqual(results.count, 3, "topK clean suggestions must be fully backfilled")
+        XCTAssertFalse(results.contains("shitshow"), "excluded token must never be suggested")
+        XCTAssertEqual(results, ["share", "shape", "shell"],
+                       "the 3 highest-count CLEAN tokens must fill topK, in rank order")
+    }
 }

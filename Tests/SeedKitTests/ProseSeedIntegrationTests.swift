@@ -24,7 +24,8 @@ final class ProseSeedIntegrationTests: XCTestCase {
         let repo = here.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let url = repo.appendingPathComponent("App/Resources/predictor/profanity_blocklist.txt")
         return Set((try? String(contentsOf: url, encoding: .utf8))?
-            .split(whereSeparator: \.isNewline).map { $0.lowercased() } ?? [])
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() } ?? [])
     }
 
     private func makeEngine() throws -> PredictorEngine {

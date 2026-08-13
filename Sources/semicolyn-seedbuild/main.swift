@@ -172,7 +172,9 @@ if hasProseSource {
         let words = Set(text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
             .filter { !$0.isEmpty })
-        if !words.isEmpty { proseFilter = TokenFilter(patterns: [.blocklist(words)]) }
+        if !words.isEmpty {
+            proseFilter = TokenFilter(patterns: TokenFilter.defaultPatterns + [.blocklist(words)])
+        }
         print("blocklist: loaded \(words.count) words")
     }
     var proseBuilder = LayeredSeedBuilder(filter: proseFilter)

@@ -192,7 +192,7 @@ final class AppStores {
         let words = Set(
             contents
                 .split(whereSeparator: \.isNewline)
-                .map { $0.lowercased() }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
                 .filter { !$0.isEmpty }
         )
         DebugLog.shared.log(.seed, "predictor:blocklist loaded words=\(words.count)")

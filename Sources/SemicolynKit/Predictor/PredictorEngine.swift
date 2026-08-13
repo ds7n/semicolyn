@@ -166,16 +166,30 @@ public struct PredictorEngine: Sendable {
         // call since `learned` is the mutable rolling store; the seed magnitudes are
         // constant (the seeds are `let`) and cached at init, see `cliMagnitude` /
         // `proseMagnitude`.
+        //
+        // DELIBERATE proxy: `cliMagnitude`/`proseMagnitude` are each seed's UNIGRAM
+        // p90 magnitude, and that same scalar is reused below on the BIGRAM query
+        // path too (there is no separate `BigramVocabulary.magnitude`). Bigram counts
+        // for a given seed track that seed's unigram count scale closely enough that
+        // the unigram magnitude is a stable, deterministic per-seed normalizer for
+        // both axes. An exact per-axis bigram magnitude is a possible future
+        // refinement, not required for correct relative ranking today.
         let learnedMag = Double(learned.unigram.magnitude(window: window))
         let cliMag = cliMagnitude
         let proseMag = proseMagnitude
 
         let bias = proseBias(context)
+        // Over-fetch beyond `config.topK`: the merge loop below re-applies `filter`
+        // (a bundled seed can carry an excluded token, e.g. profanity, that never
+        // passed through `record`'s write-time gate). If `DualSeedSuggester` only
+        // returned `topK` candidates, dropping an excluded one there would under-fill
+        // the result instead of backfilling from the next clean candidate.
+        let overfetchLimit = max(config.topK * 3, config.topK + 12)
         let base = DualSeedSuggester(learned: learnedSource, cliSeed: cliSeedSource,
                                      proseSeed: proseSeedSource, bias: bias, config: config,
                                      learnedMagnitude: learnedMag, cliMagnitude: cliMag,
                                      proseMagnitude: proseMag)
-            .suggestions(forPrefix: prefix)
+            .suggestions(forPrefix: prefix, limit: overfetchLimit)
 
         // Harvested output leads (already newest-first); learned/seed fill the rest.
         let harvested = output.candidates(forPrefix: prefix).map { $0.token }
