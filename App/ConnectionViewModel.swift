@@ -55,7 +55,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private(set) var osc52Allowed: Bool = true
     /// Per-pane engaged context (process name) for the keybar (Phase 4). Empty in
     /// raw-PTY mode. Re-derived from the runtime whenever a poll changes a pane.
+    /// GATED: only reports a process that is on the keybar promotion allowlist
+    /// (`knownProcesses`), so `claude`/`bash`/most shells resolve to nil here.
     @Published private(set) var paneContexts: [PaneID: String] = [:]
+    /// Per-pane RAW foreground command (un-gated: ANY process, not just the keybar
+    /// allowlist), for the predictor's prose-vs-CLI bias. Populated alongside
+    /// `paneContexts` from `runtime.paneRawCommand`. Keeps the keybar's gated
+    /// `paneContexts` semantics untouched while giving the predictor the real
+    /// foreground process (e.g. `claude`, `python`, `bash`).
+    private var paneRawContexts: [PaneID: String] = [:]
     /// Predictor-strip suggestion state, split into its own observable slice so a
     /// suggestion recompute invalidates only the predictor-strip views (Plan B §B1).
     let predictorVM = PredictorViewModel()
@@ -551,6 +559,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tmux?.stop()
         tmux = nil
         paneContexts = [:]
+        paneRawContexts = [:]
         fnState.reset()
         rawWriter?.finish()
         rawWriter = nil
@@ -1219,8 +1228,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         runtime.onContextsChanged = { [weak self, weak runtime] in
             guard let self, let runtime else { return }
             var map: [PaneID: String] = [:]
+            var rawMap: [PaneID: String] = [:]
             for pane in self.renderablePanes {
                 if let ctx = runtime.paneContext(pane) { map[pane] = ctx }
+                // Un-gated raw command for the predictor (any process, e.g. claude/bash).
+                if let raw = runtime.paneRawCommand(pane) { rawMap[pane] = raw }
             }
             // Context-map update trace (audit 2026-07-19: Bug-1 dragged-pane-absent was
             // undiagnosable). Log the INPUTS (renderable pane set) and what CHANGED vs the
@@ -1239,6 +1251,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                           ("changed", changed.isEmpty ? "none" : changed.joined(separator: ","))],
                 reason: "list-panes-reply"))
             self.paneContexts = map
+            self.paneRawContexts = rawMap
             self.refreshFnAutoEngage()
         }
         runtime.onExit = { [weak self] reason in
@@ -1325,6 +1338,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         do {
             try await openRawShell(conn: conn)   // sets session/rawWriter, tmuxState=nil, state=.shell
             paneContexts = [:]
+            paneRawContexts = [:]
             fnState.reset()
             paneViews.removeAll()
             pendingPaneBytes.removeAll()
@@ -1550,10 +1564,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
         // Build the prediction context from signals the VM already holds. Any signal
         // that is not cheaply available stays nil (the bias treats nil as abstain).
+        // Use the UN-GATED raw process (paneRawContexts), not the keybar-gated
+        // paneContexts, so common foreground processes like `claude`/`bash` are seen
+        // by the prose-vs-CLI bias (the gated map excludes them by design).
         let process: String? = {
             guard let win = tmuxState?.activeWindow,
                   let pane = tmuxState?.window(win)?.activePane else { return nil }
-            return paneContexts[pane]
+            return paneRawContexts[pane]
         }()
         let isAlt = activePaneView()?.getTerminal().isCurrentBufferAlternate
         let ctx = PredictionContext(foregroundProcess: process,
