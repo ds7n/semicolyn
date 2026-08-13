@@ -1,0 +1,6 @@
+SPDX-FileCopyrightText: 2026 True Positive LLC
+SPDX-License-Identifier: GPL-3.0-only
+
+Derived profanity/slur blocklist used to keep offensive tokens out of predictor
+suggestions. Built from words/cuss (MIT) sureness>=2 entries plus a hand-curated
+identity-slur set; see profanity_blocklist.provenance.txt and SEED_ATTRIBUTION.md.

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
-/// A token paired with its estimated frequency — the scored candidate the
+/// A token paired with its estimated frequency, the scored candidate the
 /// seed-deference layer ranks over.
 public struct TokenCount: Equatable, Sendable {
     public let token: String
@@ -16,7 +16,7 @@ public struct TokenCount: Equatable, Sendable {
 /// A single learned vocabulary: a ``PrefixIndex`` of seen tokens paired with a
 /// ``CountMinSketch`` of their frequencies. `record` learns; `suggestions` turns
 /// a typed prefix into frequency-ranked candidates (`clau` → `claude`). The
-/// confidence floor and seed deference are deliberately *not* here — this is the
+/// confidence floor and seed deference are deliberately *not* here, this is the
 /// single-source ranked-lookup mechanism the seed-aware layer composes over. See
 /// `2026-06-21-predictor-prefix-ranking-design`.
 public struct Vocabulary: Equatable, Sendable {
@@ -30,7 +30,7 @@ public struct Vocabulary: Equatable, Sendable {
     }
 
     /// Learn `count` occurrences of `token` (indexes the string, bumps its
-    /// frequency). Ignored for an empty token or a zero count — neither adds a
+    /// frequency). Ignored for an empty token or a zero count, neither adds a
     /// useful suggestion, and recording one would desync the index (token
     /// present) from the sketch (frequency 0).
     public mutating func record(_ token: String, count: UInt32 = 1) {
@@ -61,6 +61,20 @@ public struct Vocabulary: Equatable, Sendable {
         return Array(ranked.prefix(limit))
     }
 
+    /// A representative high-frequency magnitude for this vocabulary: the ~90th
+    /// percentile of all token counts. Used to normalize differently-sized seeds onto
+    /// a common scale before blending, so one seed's raw count magnitude cannot dominate
+    /// another's. Returns 0 for an empty vocabulary. O(n log n) over distinct tokens;
+    /// callers compute it ONCE at load, not per query.
+    public func magnitude() -> UInt32 {
+        let tokens = index.matching(prefix: "")
+        guard !tokens.isEmpty else { return 0 }
+        let estimates = tokens.map { counts.estimate($0) }.sorted()
+        // p90 index (nearest-rank); clamp to valid range.
+        let idx = min(estimates.count - 1, Int((Double(estimates.count) * 0.9).rounded(.down)))
+        return estimates[idx]
+    }
+
     // MARK: - Serialization
 
     private static let magic: [UInt8] = [0x47, 0x56, 0x4f, 0x43]  // "GVOC"
@@ -85,7 +99,7 @@ public struct Vocabulary: Equatable, Sendable {
 
     /// Reconstruct from a blob. Fails closed (`nil`) on wrong magic/version, a
     /// sub-blob length that overruns the buffer, trailing slack, or a sub-blob
-    /// that its own deserializer rejects — never a half-built vocabulary.
+    /// that its own deserializer rejects, never a half-built vocabulary.
     public init?(deserializing bytes: [UInt8]) {
         guard bytes.count >= Self.headerSize,
               Array(bytes[0..<4]) == Self.magic,

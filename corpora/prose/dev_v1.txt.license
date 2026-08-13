@@ -1,0 +1,6 @@
+SPDX-FileCopyrightText: 2026 True Positive LLC
+SPDX-License-Identifier: GPL-3.0-only
+
+Our own generated developer-prose corpus (commit-message / code-comment register)
+used as build-time input to the prose predictor seed. Not shipped in the app; only
+derived token frequencies ship (prose_en_v1.sketch).

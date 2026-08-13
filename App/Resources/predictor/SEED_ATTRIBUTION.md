@@ -19,3 +19,10 @@ The MIT License. Copyright (c) 2021 Hercules Labs Inc. (Fig).
 Permission is hereby granted, free of charge, to any person obtaining a copy of this
 software and associated documentation files (the "Software"), to deal in the Software
 without restriction [...] THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+## words/cuss (https://github.com/words/cuss): MIT
+The MIT License. The profanity/slur blocklist (`profanity_blocklist.txt`) is derived
+from the cuss word-sureness map: single-token entries rated sureness>=2, plus a
+hand-curated identity-slur set (`blocklist_extra.txt`, our own) covering slurs cuss
+under-rates at sureness 1. The blocklist keeps offensive tokens out of predictor
+suggestions; it is a word list, not verbatim source.

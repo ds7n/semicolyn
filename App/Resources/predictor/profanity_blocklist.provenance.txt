@@ -1,0 +1,8 @@
+profanity_blocklist provenance
+source: words/cuss (MIT license), https://raw.githubusercontent.com/words/cuss/main/index.js
+policy: single-token cuss entries with sureness >= 2, PLUS a
+  hand-curated identity-slur set (App/Resources/predictor/blocklist_extra.txt) covering slurs cuss under-rates at
+  sureness 1, minus words with a common innocent terminal/English meaning
+  (cracker, spade, guinea, paddy, queer, mick, etc. kept suggestable).
+match: exact-token, case-insensitive (no substring; no Scunthorpe).
+count: 1198 words
