@@ -6,4 +6,4 @@ layers (LayeredSeedBuilder, normalize-per-layer then weight):
 profanity: blocklist (App/Resources/predictor/profanity_blocklist.txt) applied at build; blocked tokens + their bigrams dropped.
 hygiene: per-layer bigram cap 500, rare-bigram floor 2.
 shipped: derived token frequencies only (this .sketch), NOT the corpus text.
-size: 1653731 bytes
+size: 1652940 bytes
