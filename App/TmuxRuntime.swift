@@ -69,6 +69,11 @@ final class TmuxRuntime {
     /// Fired when a pane's history may be stale (%pause/%continue, reconnect, resize
     /// desync), the seeder should mark affected panes unseeded and re-capture.
     var onResyncAll: (() -> Void)?
+    /// Fired exactly once on the `.attaching → .attached` edge (the first `%begin`
+    /// handshake), i.e. control mode is genuinely up. Distinct from `onResyncAll`
+    /// (which is about stale history): the ET `-CC` control-mode watchdog cancels
+    /// against this to tell "tmux attached" from "tmux never started."
+    var onControlReady: (() -> Void)?
     /// Called once per pane at attach with tmux's `#{alternate_on}` truth, so the
     /// mode tracker can reconcile a pane that was already on the alternate screen
     /// before this -CC client attached (device trace 2026-07-14).
@@ -111,8 +116,9 @@ final class TmuxRuntime {
             // time). No `%pause`/`%continue` event exists in the control-mode parser
             // yet, so this is the highest-value resync trigger reachable from here:
             // any pane history captured before this attach may now be stale.
-            DebugLog.shared.log(.tmux, "tmux prime: attach edge → onResyncAll")
+            DebugLog.shared.log(.tmux, "tmux prime: attach edge → onResyncAll + onControlReady")
             onResyncAll?()
+            onControlReady?()
         }
         // A window created AFTER attach (the user's `prefix c` → `%window-add`)
         // arrives with no layout, and tmux never sends its `%layout-change`

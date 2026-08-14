@@ -194,6 +194,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// stashed here for `onFirstFrame` to send. Nil on the raw ET path / after
     /// `teardown()`.
     private var etControlStartCommand: String?
+    /// ET `-CC` control-mode watchdog: armed right after the in-band `tmux -CC …`
+    /// launch is sent (`onFirstFrame`); fails the session if tmux never emits `%begin`
+    /// (no remote tmux, or a version without control mode) within the window. Cancelled
+    /// by `onControlReady` (attach edge) or any teardown. Distinct from `etWatchdog`,
+    /// which guards the ET STREAM (first-frame), not the tmux handshake.
+    private var etControlWatchdog: Task<Void, Never>?
+    /// True once the tmux control-mode handshake landed (`onControlReady`). The
+    /// control watchdog's cancel-condition and a guard so a late timer can't clobber
+    /// an already-attached session. Reset in `teardown()`.
+    private var etControlReady = false
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -554,6 +564,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         etFirstFrameSeen = false
         etControlLaunchSent = false
         etControlStartCommand = nil
+        etControlWatchdog?.cancel(); etControlWatchdog = nil
+        etControlReady = false
         etSession?.close()
         etSession = nil
         tmux?.stop()
@@ -1083,6 +1095,24 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             DebugLog.shared.log(.tmux, "et: in-band launch \(startCmd.prefix(60))")
             tmux.sendRawLaunch(Array((startCmd + "\n").utf8))
             tmux.startContextPolling()
+            // Arm the control-mode watchdog: if tmux never emits %begin (no remote
+            // tmux, or a version without control mode), no `onControlReady` ever
+            // fires and the pane container would stay empty forever. On timeout,
+            // fail with a banner (user decision: no silent fallback). Cancelled by
+            // `onControlReady` or any teardown.
+            self.etControlReady = false
+            self.etControlWatchdog = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)   // 5s
+                guard !Task.isCancelled, let self, !self.etControlReady else { return }
+                switch etControlModeDecision(handshakeSeen: false) {
+                case .ready:
+                    return   // unreachable (guarded above); belt-and-braces
+                case .failedNoControlMode(let msg):
+                    DebugLog.shared.log(.tmux, "et -CC: control-mode watchdog fired (no %begin in 5s) → .failed")
+                    self.teardown()
+                    self.state = .failed(msg)
+                }
+            }
         }
         sess.onState = { raw in
             DebugLog.shared.log(.transport, "et: state=\(mapETState(Int32(raw)))")
@@ -1090,6 +1120,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onEnd = { [weak self] reason in
             guard let self else { return }
             self.etWatchdog?.cancel(); self.etWatchdog = nil
+            // The stream ended, so the control-mode handshake will never arrive.
+            // Cancel the control watchdog here too: the `.handshakeFailed` branch
+            // below does NOT call teardown(), so it would otherwise fire a spurious
+            // second `.failed` ~5s later.
+            self.etControlWatchdog?.cancel(); self.etControlWatchdog = nil
             // User-initiated disconnect (the "x" button): `disconnect()` already tore the
             // session down and drove state to .idle. This async onEnd must NOT run the
             // failure path (teardown() reset etFirstFrameSeen, so etExitDecision would
@@ -1257,6 +1292,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         runtime.onExit = { [weak self] reason in
             DebugLog.shared.log(.lifecycle, "tmux onExit: reason=\(reason ?? "nil") → .failed")
             self?.state = .failed(reason ?? "tmux session ended")
+        }
+        // Control mode is genuinely up (first %begin, the .attaching→.attached edge).
+        // Cancels the ET `-CC` control-mode watchdog so a present-but-slow tmux is not
+        // failed. Inert on the SSH `-CC` path (no control watchdog is ever armed there,
+        // and nothing reads `etControlReady`); fires once per attach.
+        runtime.onControlReady = { [weak self] in
+            guard let self else { return }
+            self.etControlReady = true
+            self.etControlWatchdog?.cancel(); self.etControlWatchdog = nil
+            DebugLog.shared.log(.tmux, "tmux control ready (%begin) → control-mode watchdog cancelled")
         }
         // A pane already on the alternate screen before this -CC client attached
         // never emits `?1049h` for us to observe live, so `PaneModeTracker` would
