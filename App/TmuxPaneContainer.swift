@@ -150,6 +150,17 @@ struct TmuxPaneContainer: UIViewRepresentable {
         if let onSelectPane { context.coordinator.onSelectPane = onSelectPane }
         // Update mouse-active dot visibility and selection gesture state for all panes.
         context.coordinator.updateMouseDots(for: uiView.panes)
+        // Re-claim first responder when the VM requests focus (e.g. Settings sheet
+        // dismissed and resigned it). Only act on a NEW token, and only when nothing
+        // is first responder, so we never fight the user or thrash on every pass.
+        if vm.keyboardFocusRequestToken != coord.lastFocusRequestToken {
+            coord.lastFocusRequestToken = vm.keyboardFocusRequestToken
+            let anyFirstResponder = uiView.panes.values.contains { $0.isFirstResponder }
+            if !anyFirstResponder, let active = coord.currentActivePane, let view = uiView.panes[active] {
+                let ok = view.becomeFirstResponder()
+                DebugLog.shared.log(.tmux, "pane focus-request token=\(coord.lastFocusRequestToken) become=\(ok)")
+            }
+        }
     }
 
     /// Bridges SwiftTerm input from whichever pane is active to the VM.
@@ -198,6 +209,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// updated there. Read by each pane's `isActivePane` callback so a tap can tell
         /// whether it landed on the currently-focused pane.
         var currentActivePane: PaneID?
+        /// Last `vm.keyboardFocusRequestToken` acted on. Lets `updateUIView` tell a
+        /// NEW focus request apart from a repeated SwiftUI pass, so it doesn't
+        /// re-call `becomeFirstResponder()` on every render.
+        var lastFocusRequestToken: Int = 0
         /// Tracks each pane's `InteractionMode`, recomputed from `PaneTerminalView`'s
         /// `bufferActivated`/`mouseModeChanged` overrides (event-driven, replaces the
         /// old render-time poll in `updateMouseDots`).
@@ -298,6 +313,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
             )
             view.addGestureRecognizer(pinch)
             pinchRecognizers[key] = pinch
+
+            // Always-on keyboard-restore tap (mirrors the raw path's handleRestoreTap).
+            // Independent of pane SELECTION: onSelectPane early-returns when the pane is
+            // already active, so it can't restore the keyboard on the active pane. This
+            // tap fires regardless and only acts when the terminal is not first responder,
+            // so it no-ops while the keyboard is up (cursor-placement tap is unaffected).
+            let restoreTap = UITapGestureRecognizer(target: self, action: #selector(handlePaneRestoreTap(_:)))
+            restoreTap.cancelsTouchesInView = false
+            view.addGestureRecognizer(restoreTap)
 
             // Panes start non-reporting; the per-pane value is then owned solely by
             // `modeTracker.onChange`, which flips it to true for `.mouseReporting` /
@@ -457,6 +481,23 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// pinch recognizers for their attached view. Used to fan out font changes.
         private func paneView(for key: ObjectIdentifier) -> TerminalView? {
             pinchRecognizers[key]?.view as? TerminalView
+        }
+
+        /// Re-show the keyboard (and the keybar accessory) for a pane after the user
+        /// has dismissed it. Only acts when that pane's terminal is NOT already first
+        /// responder; when the keyboard is up, this no-ops and SwiftTerm's own tap
+        /// (cursor placement) is unaffected (this recognizer has `cancelsTouchesInView
+        /// = false`). Mirrors the raw path's `handleRestoreTap`.
+        @objc func handlePaneRestoreTap(_ recognizer: UITapGestureRecognizer) {
+            guard let view = recognizer.view as? TerminalView else { return }
+            if !view.isFirstResponder {
+                let ok = view.becomeFirstResponder()
+                // @objc gesture callbacks are delivered on the main thread but are a
+                // nonisolated context; hop onto the main actor for the @MainActor logger.
+                MainActor.assumeIsolated {
+                    DebugLog.shared.log(.input, "key:paneRestoreTap become=\(ok) isFR=\(view.isFirstResponder)")
+                }
+            }
         }
 
         /// Update the mouse-dot *visual* for each visible pane from the event-driven

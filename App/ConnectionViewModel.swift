@@ -122,6 +122,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// summary of what the tmux runtime sees on attach. Rendered as a small overlay
     /// in the connected view. Remove with the rest of the diagnostic once root-caused.
     @Published var tmuxDiag: String?
+    /// Bumped when the app wants the active terminal to re-claim first responder
+    /// (e.g. returning from the Settings sheet, which resigned it). The pane
+    /// container / raw terminal observes this and calls `becomeFirstResponder()`.
+    @Published private(set) var keyboardFocusRequestToken: Int = 0
     /// PaneID → live SwiftTerm view, populated by TmuxPaneContainer as panes appear.
     private var paneViews: [PaneID: TerminalView] = [:]
     /// PaneID → its last-seen OSC 0/2 title, so the window title can follow the active
@@ -529,6 +533,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// is re-seeded authoritatively (via `onAltScreenReconcile`) instead of the unreliable
     /// live emulator flag (Bug 2, 2026-07-16). No-op if not attached.
     func requeryAltScreenState() { tmux?.requeryAlternateOn() }
+
+    /// Ask the active terminal to re-show the keyboard + keybar. Safe to call when
+    /// already first responder (the container no-ops in that case).
+    func requestKeyboardFocus() {
+        keyboardFocusRequestToken &+= 1
+        DebugLog.shared.log(.input, "key:requestKeyboardFocus token=\(keyboardFocusRequestToken)")
+    }
 
     /// A pane's terminal row count changed (SwiftTerm `sizeChanged` → tmux resize landed).
     /// Bottom-align it if it's a freshly-seeded pane whose viewport the resize stranded short of
