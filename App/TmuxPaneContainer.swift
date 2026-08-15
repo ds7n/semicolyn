@@ -154,26 +154,32 @@ struct TmuxPaneContainer: UIViewRepresentable {
         // from the Settings sheet). Device build 135 proved the subtle truth: presenting
         // the sheet from the keybar (an inputAccessoryView) does NOT resign the pane's
         // first responder, it only hides the keyboard behind the modal. So on dismiss the
-        // pane is STILL first responder (`anyFR=true acted=false` in the build-134/135
-        // logs), and a plain `becomeFirstResponder()` is a no-op that leaves the keyboard
-        // down. Force iOS to re-present the input views by BOUNCING first responder:
-        // resign, then immediately become. Act only on a NEW token so we never thrash.
+        // pane is STILL first responder (`anyFR=true` in the build-134/135 logs), and a
+        // plain `becomeFirstResponder()` is a no-op that leaves the keyboard down.
+        //
+        // A resign+become BOUNCE re-shows the keyboard but regresses layout: the resign
+        // collapses the keybar inset so the container grows to full height, and the
+        // re-become does not recompute it back down, leaving the terminal full-screen with
+        // the keyboard floating on top (device build 136: `geo:pane frame=0,0,401x725`
+        // right after `bounced=true`, vs the healthy ~401x417). So instead use
+        // `reloadInputViews()`, which asks the still-first-responder pane to re-present its
+        // input views WITHOUT ever resigning, so `kbH` never drops to zero and the layout
+        // never collapses. Act only on a NEW token so we never thrash.
         if vm.keyboardFocusRequestToken != coord.lastFocusRequestToken {
             coord.lastFocusRequestToken = vm.keyboardFocusRequestToken
-            // Prefer the pane that is already first responder; fall back to the active
-            // pane. Bouncing the one that holds first responder is what re-shows the key-
-            // board; if none holds it, a plain become on the active pane suffices.
+            // Prefer the pane that already holds first responder; fall back to the active
+            // pane. reloadInputViews re-presents on the holder without a resign; if none
+            // holds it (a genuine focus loss), a plain become on the active pane suffices.
             let holder = uiView.panes.values.first { $0.isFirstResponder }
             let target = holder ?? coord.currentActivePane.flatMap { uiView.panes[$0] }
             if let target {
                 if target.isFirstResponder {
-                    target.resignFirstResponder()
-                    target.becomeFirstResponder()   // bounce: forces the keyboard to re-present
+                    target.reloadInputViews()   // re-present keyboard, no resign -> no layout collapse
                 } else {
                     target.becomeFirstResponder()
                 }
             }
-            DebugLog.shared.log(.tmux, "pane focus-request token=\(coord.lastFocusRequestToken) bounced=\(target?.isFirstResponder ?? false) hadHolder=\(holder != nil)")
+            DebugLog.shared.log(.tmux, "pane focus-request token=\(coord.lastFocusRequestToken) reloaded=\(holder != nil) fr=\(target?.isFirstResponder ?? false)")
         }
     }
 
