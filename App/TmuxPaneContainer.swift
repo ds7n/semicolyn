@@ -156,10 +156,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
         if vm.keyboardFocusRequestToken != coord.lastFocusRequestToken {
             coord.lastFocusRequestToken = vm.keyboardFocusRequestToken
             let anyFirstResponder = uiView.panes.values.contains { $0.isFirstResponder }
-            if !anyFirstResponder, let active = coord.currentActivePane, let view = uiView.panes[active] {
-                let ok = view.becomeFirstResponder()
-                DebugLog.shared.log(.tmux, "pane focus-request token=\(coord.lastFocusRequestToken) become=\(ok)")
-            }
+            let active = coord.currentActivePane
+            let view = active.flatMap { uiView.panes[$0] }
+            // Log the decision inputs unconditionally so we can tell "updateUIView never
+            // re-ran on the token bump" (line absent) from "ran but the guard was false"
+            // (line present, acted=false). Device build 134 showed key:requestKeyboardFocus
+            // firing but NO pane focus-request line at all, i.e. this path did not re-run.
+            let willAct = !anyFirstResponder && view != nil
+            if willAct { view?.becomeFirstResponder() }
+            DebugLog.shared.log(.tmux, "pane focus-request token=\(coord.lastFocusRequestToken) anyFR=\(anyFirstResponder) active=\(active?.raw.description ?? "nil") acted=\(willAct)")
         }
     }
 
@@ -392,8 +397,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     )
                 )
                 gestureControllers[key] = controller
-                // Re-enable pinch after the controller's sweep disabled pre-existing recognizers.
+                // Re-enable pinch AND the keyboard-restore tap after the controller's
+                // sweep (`disableSwiftTermRecognizers`) disabled every pre-existing
+                // recognizer that is not the native scroll pan. Both `pinch` and
+                // `restoreTap` are added ABOVE, before this controller, so the sweep
+                // turned them off; the raw path re-enables the identical pair at
+                // `TerminalScreen.swift` after its controller. Missing the restoreTap
+                // re-enable is why tapping a pane did not bring the keyboard back
+                // (device build 134: no `key:paneRestoreTap` ever logged).
                 pinch.isEnabled = true
+                restoreTap.isEnabled = true
                 DebugLog.shared.log(.seed, "scroll:init isScrollEnabled=\(view.isScrollEnabled) nativePan=\(view.panGestureRecognizer.isEnabled) contentSize=\(view.contentSize) offset=\(view.contentOffset)")
             }
         }
