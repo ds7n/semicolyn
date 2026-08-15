@@ -150,21 +150,30 @@ struct TmuxPaneContainer: UIViewRepresentable {
         if let onSelectPane { context.coordinator.onSelectPane = onSelectPane }
         // Update mouse-active dot visibility and selection gesture state for all panes.
         context.coordinator.updateMouseDots(for: uiView.panes)
-        // Re-claim first responder when the VM requests focus (e.g. Settings sheet
-        // dismissed and resigned it). Only act on a NEW token, and only when nothing
-        // is first responder, so we never fight the user or thrash on every pass.
+        // Re-present the software keyboard when the VM requests focus (e.g. returning
+        // from the Settings sheet). Device build 135 proved the subtle truth: presenting
+        // the sheet from the keybar (an inputAccessoryView) does NOT resign the pane's
+        // first responder, it only hides the keyboard behind the modal. So on dismiss the
+        // pane is STILL first responder (`anyFR=true acted=false` in the build-134/135
+        // logs), and a plain `becomeFirstResponder()` is a no-op that leaves the keyboard
+        // down. Force iOS to re-present the input views by BOUNCING first responder:
+        // resign, then immediately become. Act only on a NEW token so we never thrash.
         if vm.keyboardFocusRequestToken != coord.lastFocusRequestToken {
             coord.lastFocusRequestToken = vm.keyboardFocusRequestToken
-            let anyFirstResponder = uiView.panes.values.contains { $0.isFirstResponder }
-            let active = coord.currentActivePane
-            let view = active.flatMap { uiView.panes[$0] }
-            // Log the decision inputs unconditionally so we can tell "updateUIView never
-            // re-ran on the token bump" (line absent) from "ran but the guard was false"
-            // (line present, acted=false). Device build 134 showed key:requestKeyboardFocus
-            // firing but NO pane focus-request line at all, i.e. this path did not re-run.
-            let willAct = !anyFirstResponder && view != nil
-            if willAct { view?.becomeFirstResponder() }
-            DebugLog.shared.log(.tmux, "pane focus-request token=\(coord.lastFocusRequestToken) anyFR=\(anyFirstResponder) active=\(active?.raw.description ?? "nil") acted=\(willAct)")
+            // Prefer the pane that is already first responder; fall back to the active
+            // pane. Bouncing the one that holds first responder is what re-shows the key-
+            // board; if none holds it, a plain become on the active pane suffices.
+            let holder = uiView.panes.values.first { $0.isFirstResponder }
+            let target = holder ?? coord.currentActivePane.flatMap { uiView.panes[$0] }
+            if let target {
+                if target.isFirstResponder {
+                    target.resignFirstResponder()
+                    target.becomeFirstResponder()   // bounce: forces the keyboard to re-present
+                } else {
+                    target.becomeFirstResponder()
+                }
+            }
+            DebugLog.shared.log(.tmux, "pane focus-request token=\(coord.lastFocusRequestToken) bounced=\(target?.isFirstResponder ?? false) hadHolder=\(holder != nil)")
         }
     }
 
