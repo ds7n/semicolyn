@@ -180,6 +180,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 }
             }
             DebugLog.shared.log(.tmux, "pane focus-request token=\(coord.lastFocusRequestToken) reloaded=\(holder != nil) fr=\(target?.isFirstResponder ?? false)")
+            // reloadInputViews re-presents the keyboard, but the pane frames were left at
+            // their pre-Settings size and layoutSubviews' early-out sees the geometry as
+            // unchanged, so it skips the re-fit and the terminal stays full-screen behind
+            // the keyboard (device build 137: keyboard returned but sizing wrong). Force a
+            // re-fit on the NEXT runloop tick, once the keyboard height has settled, so the
+            // panes shrink back to the keyboard-inset height. Weak-capture the container so
+            // a teardown before the tick can't resurrect it.
+            DispatchQueue.main.async { [weak uiView] in uiView?.forceRelayout() }
         }
     }
 
@@ -747,6 +755,19 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Force the next layoutSubviews through the early-out (the cell metrics changed,
             // so the cached layout inputs are stale even if bounds/keybar didn't move).
             lastLayoutInputs = nil
+        }
+
+        /// Force a full geometry recompute on the next layout pass WITHOUT re-measuring the
+        /// cell. Used after re-presenting the keyboard (returning from the Settings sheet):
+        /// the pane frames were left at their pre-Settings size, but `layoutSubviews`'
+        /// render-storm early-out sees `bounds`/`kbH`/`keyboardTop` as unchanged and skips
+        /// the re-fit, so the terminal stays full-screen behind the keyboard (device build
+        /// 136: `geo:pane 401x725`). Resetting `lastLayoutInputs` defeats the early-out;
+        /// `setNeedsLayout` schedules the pass. Keeps the measured cell (font unchanged).
+        func forceRelayout() {
+            lastLayoutInputs = nil
+            setNeedsLayout()
+            DebugLog.shared.log(.geometry, "geo:forceRelayout (keyboard re-present -> re-fit panes)")
         }
 
         /// All live pane terminal views; used by `updateUIView` to re-apply the theme palette.
