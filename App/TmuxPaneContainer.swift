@@ -180,14 +180,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
                 }
             }
             DebugLog.shared.log(.tmux, "pane focus-request token=\(coord.lastFocusRequestToken) reloaded=\(holder != nil) fr=\(target?.isFirstResponder ?? false)")
-            // reloadInputViews re-presents the keyboard, but the pane frames were left at
-            // their pre-Settings size and layoutSubviews' early-out sees the geometry as
-            // unchanged, so it skips the re-fit and the terminal stays full-screen behind
-            // the keyboard (device build 137: keyboard returned but sizing wrong). Force a
-            // re-fit on the NEXT runloop tick, once the keyboard height has settled, so the
-            // panes shrink back to the keyboard-inset height. Weak-capture the container so
-            // a teardown before the tick can't resurrect it.
-            DispatchQueue.main.async { [weak uiView] in uiView?.forceRelayout() }
+            // No manual relayout tick here: the keyboard accessory settles asynchronously
+            // (a beat after this call), and a single guessed tick loses that race (build 138
+            // stayed full-screen ~2s after the tick fired). The real re-fit is driven by
+            // `usableH` now being part of the `layoutSubviews` early-out key, so the pass that
+            // sees the settled accessory height re-frames the panes on its own.
         }
     }
 
@@ -730,6 +727,14 @@ struct TmuxPaneContainer: UIViewRepresentable {
             let cellH: Double
             let keybarH: CGFloat
             let keyboardTop: Double?
+            /// The resolved window-space usable height (keybar-inset). MUST be in the key:
+            /// the keybar accessory's window-space top settles a beat LATER than `bounds`/
+            /// `kbH`/`keyboardTop` (e.g. returning from a Settings sheet), so those three can
+            /// all be stable while `usableTerminalHeight()` flips full-height -> inset. Without
+            /// this field the early-out strands the pane at the pre-settle full-height frame
+            /// until an unrelated `apply()` resets the key (device build 138: `geo:pane
+            /// 401x725` in a 417 container, fixed only by a window switch).
+            let usableH: Double
         }
         private var lastLayoutInputs: LayoutInputs?
 
@@ -755,19 +760,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // Force the next layoutSubviews through the early-out (the cell metrics changed,
             // so the cached layout inputs are stale even if bounds/keybar didn't move).
             lastLayoutInputs = nil
-        }
-
-        /// Force a full geometry recompute on the next layout pass WITHOUT re-measuring the
-        /// cell. Used after re-presenting the keyboard (returning from the Settings sheet):
-        /// the pane frames were left at their pre-Settings size, but `layoutSubviews`'
-        /// render-storm early-out sees `bounds`/`kbH`/`keyboardTop` as unchanged and skips
-        /// the re-fit, so the terminal stays full-screen behind the keyboard (device build
-        /// 136: `geo:pane 401x725`). Resetting `lastLayoutInputs` defeats the early-out;
-        /// `setNeedsLayout` schedules the pass. Keeps the measured cell (font unchanged).
-        func forceRelayout() {
-            lastLayoutInputs = nil
-            setNeedsLayout()
-            DebugLog.shared.log(.geometry, "geo:forceRelayout (keyboard re-present -> re-fit panes)")
         }
 
         /// All live pane terminal views; used by `updateUIView` to re-apply the theme palette.
@@ -798,13 +790,20 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // them changed. Any real geometry change (rotation/split/switch → bounds; pinch →
             // cell via invalidateCachedCell; keyboard/predictor-strip → kbH; the keyboard
             // re-laying-out post-app-switch with bounds/kbH unchanged → keyboardTop) differs
-            // here and runs. NOTE: `usableTerminalHeight()` (the window-space keybar inset)
-            // moves only when `bounds`, `kbH`, or the guide top move, all captured here, so
-            // this key is a valid superset of that fix's inputs. Do NOT drop `keyboardTop`
-            // from the key: the app-switch keybar-gap regime is distinguished only by the
-            // guide-top/bounds change, and skipping the pass would strand the stale inset.
+            // here and runs.
+            //
+            // `usableH` is computed BEFORE the early-out and IS part of the key. Earlier this
+            // relied on the (wrong) assumption that `usableTerminalHeight()` moves only when
+            // `bounds`/`kbH`/`keyboardTop` move; in fact the accessory's window-space top
+            // settles a beat later than all three (returning from a Settings sheet), so the
+            // pass that would re-fit the pane to the settled inset was being early-outed and
+            // the pane stranded full-height (build 138). Keying on `usableH` makes that
+            // settle transition differ here and re-run the re-fit. RawTerminalContainer has no
+            // early-out and re-evaluates this window-space height every pass for the same
+            // reason; `usableTerminalHeight()` is cheap (a few frame/convert reads).
+            let usableH = Double(usableTerminalHeight())
             let inputs = LayoutInputs(bounds: bounds.size, cellW: cell.w, cellH: cell.h,
-                                      keybarH: kbH, keyboardTop: kbTop)
+                                      keybarH: kbH, keyboardTop: kbTop, usableH: usableH)
             if inputs == lastLayoutInputs { return }
             lastLayoutInputs = inputs
 
@@ -816,10 +815,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // (rows behind the keybar) or subtracted a keybar height from `bounds`
             // (`keyboardLayoutGuide`/`visibleTerminalHeight`), but `bounds` is ambiguous
             // (keybar-included vs -excluded) with no same-window signal to disambiguate, so
-            // those gapped after an app-switch. The window-space measurement below (PR #122,
+            // those gapped after an app-switch. The window-space measurement (PR #122,
             // ported from RawTerminalContainer) uses the accessory's REAL window-space top and
             // is correct in both regimes.
-            let usableH = Double(usableTerminalHeight())
             guard let grid = terminalGrid(width: Double(bounds.width), height: usableH,
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
             // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15). Log the
