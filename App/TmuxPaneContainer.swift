@@ -727,23 +727,8 @@ struct TmuxPaneContainer: UIViewRepresentable {
             let cellH: Double
             let keybarH: CGFloat
             let keyboardTop: Double?
-            /// The resolved window-space usable height (keybar-inset). MUST be in the key:
-            /// the keybar accessory's window-space top settles a beat LATER than `bounds`/
-            /// `kbH`/`keyboardTop` (e.g. returning from a Settings sheet), so those three can
-            /// all be stable while `usableTerminalHeight()` flips full-height -> inset. Without
-            /// this field the early-out strands the pane at the pre-settle full-height frame
-            /// until an unrelated `apply()` resets the key (device build 138: `geo:pane
-            /// 401x725` in a 417 container, fixed only by a window switch).
-            let usableH: Double
         }
         private var lastLayoutInputs: LayoutInputs?
-
-        /// Last trusted usable height (window-space keybar-inset). HELD when a layout pass
-        /// can't trust the window-space geometry (the keybar accessory is mid-animation /
-        /// unreachable), mirroring `RawTerminalContainer.lastChildHeight`, rather than
-        /// falling back to full `bounds` (which hides the alt-screen's bottom rows in the
-        /// keybar-included `bounds` regime). `-1` = never computed yet.
-        private var lastUsableH: Double = -1
 
         /// The active window as of the last `apply` that reached the change-detect at the
         /// end of the method. Compared against `state.activeWindow` there to decide whether
@@ -790,33 +775,17 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // them changed. Any real geometry change (rotation/split/switch → bounds; pinch →
             // cell via invalidateCachedCell; keyboard/predictor-strip → kbH; the keyboard
             // re-laying-out post-app-switch with bounds/kbH unchanged → keyboardTop) differs
-            // here and runs.
-            //
-            // `usableH` is computed BEFORE the early-out and IS part of the key. Earlier this
-            // relied on the (wrong) assumption that `usableTerminalHeight()` moves only when
-            // `bounds`/`kbH`/`keyboardTop` move; in fact the accessory's window-space top
-            // settles a beat later than all three (returning from a Settings sheet), so the
-            // pass that would re-fit the pane to the settled inset was being early-outed and
-            // the pane stranded full-height (build 138). Keying on `usableH` makes that
-            // settle transition differ here and re-run the re-fit. RawTerminalContainer has no
-            // early-out and re-evaluates this window-space height every pass for the same
-            // reason; `usableTerminalHeight()` is cheap (a few frame/convert reads).
-            let usableH = Double(usableTerminalHeight())
-            // DIAGNOSTIC (keyboardLayoutGuide foundation probe, 2026-08-17): log the guide's
-            // top/height on EVERY pass, BEFORE the early-out, so we capture it even while the
-            // pane is stuck. Question this answers: does `keyboardLayoutGuide` track the keybar
-            // top (~bounds.height - kbH, e.g. 361) or does it still equal bounds.height (417,
-            // meaning the guide does NOT reflect the inputAccessoryView in this hierarchy)? If
-            // it tracks the keybar, we constrain the pane region to `keyboardLayoutGuide.top-
-            // Anchor` and delete the fragile window-space sampling. Gated behind the probe so
-            // we do not commit to that rewrite blind.
-            let klg = keyboardLayoutGuide.layoutFrame
-            DebugLog.shared.log(.geometry,
-                "geo:klgProbe bounds=\(Int(bounds.width))x\(Int(bounds.height)) kbH=\(String(format: "%.0f", kbH)) usableH=\(Int(usableH)) klgTop=\(Int(klg.minY)) klgH=\(Int(klg.height)) expectedKeybarTop=\(Int(bounds.height - kbH))")
+            // here and runs. `usableTerminalHeight()` is now simply `bounds.height` (device
+            // build 140 proved it correct in every regime; see that method), so it is fully
+            // captured by `bounds` in the key: no separate `usableH` field is needed, and the
+            // former stuck-full-height bug (window-space sampler holding a stale value while
+            // bounds was already correct) is gone.
             let inputs = LayoutInputs(bounds: bounds.size, cellW: cell.w, cellH: cell.h,
-                                      keybarH: kbH, keyboardTop: kbTop, usableH: usableH)
+                                      keybarH: kbH, keyboardTop: kbTop)
             if inputs == lastLayoutInputs { return }
             lastLayoutInputs = inputs
+
+            let usableH = Double(usableTerminalHeight())
 
             // Both the GRID (reported to tmux) and every pane frame (`fittedPaneRects`) are
             // computed from the SAME usable height, so the reported grid and the actual pane
@@ -1052,42 +1021,24 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// `bounds`-subtraction (`usableHeightFromKeyboardTop`/`visibleTerminalHeight`)
         /// was right in one regime and wrong in the other. The one correct-in-both signal
         /// is the first-responder pane's keybar accessory's REAL top in window space,
-        /// relative to this container's top in window space (`accessoryTopY - containerTopY`,
-        /// via the Kit-tested `rawTerminalChildHeight`).
+        /// Simply `bounds.height`. Device build 140 (`geo:klgProbe`) proved this is the
+        /// correct usable height in EVERY regime: the container's own `bounds` already
+        /// excludes the keyboard band (SwiftUI insets the representable leaf), and
+        /// `keyboardLayoutGuide.layoutFrame.minY == bounds.height` in every sampled pass
+        /// (settled/animating/full-screen/post-Settings), so there is nothing to subtract.
+        /// The keybar is a FLOATING inputAccessoryView that overlays the terminal's bottom;
+        /// it does not reduce the row count (the correct render was `usableH=417=bounds` at
+        /// grid 75x37, NOT 361).
         ///
-        /// Returns the full `bounds.height` when no pane is first responder (keyboard down:
-        /// the keybar is gone, panes fill the container), and HOLDS `lastUsableH` when the
-        /// window-space geometry is untrustworthy (accessory mid-animation / unreachable),
-        /// rather than filling `bounds` (which would hide the alt-screen's bottom rows).
-        /// Returns `CGFloat` (UIKit view-geometry height, matching
-        /// `firstResponderKeybarHeight() -> CGFloat` and `RawTerminalContainer`), NOT a
-        /// bare `Double`: the value IS view geometry read from `window`/`convert`/`bounds`,
-        /// not pure logic (the pure part, `rawTerminalChildHeight`, lives in Kit).
+        /// This replaces the former window-space sampling (accessory-frame `convert` to the
+        /// window + a `lastUsableH` hold-cache + the Kit `rawTerminalChildHeight` guard).
+        /// That subsystem was FRAGILE: reading the accessory frame from its separate keyboard
+        /// window failed the interior guard after a Settings-sheet re-present, so it held a
+        /// stale full-height value forever and stranded the pane full-screen (builds 134-139).
+        /// `bounds.height` cannot get stuck. Kept as a `CGFloat`-returning method (not a
+        /// stored value) so callers are unchanged.
         private func usableTerminalHeight() -> CGFloat {
-            // The first-responder pane and its keybar accessory (iOS shows exactly that
-            // pane's accessory). No first responder → keyboard down → full height.
-            let frPane = panes.values.first(where: { $0.isFirstResponder })
-            guard let frPane, let win = window else { return bounds.height }
-
-            let accH = Double((frPane.inputAccessoryView as? KeybarInputAccessory)?
-                .intrinsicContentSize.height ?? -1)
-            let containerTopY = Double(convert(CGPoint.zero, to: win).y)
-            let accessoryTopY: Double? = {
-                guard let acc = frPane.inputAccessoryView, let accSuper = acc.superview else { return nil }
-                let y = win.convert(CGPoint(x: acc.frame.minX, y: acc.frame.minY), from: accSuper).y
-                return y.isFinite ? Double(y) : nil
-            }()
-
-            let computed = rawTerminalChildHeight(accessoryTopY: accessoryTopY,
-                                                  containerTopY: containerTopY,
-                                                  containerHeight: Double(bounds.height),
-                                                  accessoryHeight: accH, isFirstResponder: true)
-            if let computed {
-                lastUsableH = computed
-                return CGFloat(computed)
-            }
-            if lastUsableH > 0 { return CGFloat(lastUsableH) }   // hold last-known-good
-            return bounds.height                                 // no trusted value yet
+            bounds.height
         }
 
         /// Cell metrics (monospace → uniform cell), used both to compute the container
