@@ -802,6 +802,17 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // early-out and re-evaluates this window-space height every pass for the same
             // reason; `usableTerminalHeight()` is cheap (a few frame/convert reads).
             let usableH = Double(usableTerminalHeight())
+            // DIAGNOSTIC (keyboardLayoutGuide foundation probe, 2026-08-17): log the guide's
+            // top/height on EVERY pass, BEFORE the early-out, so we capture it even while the
+            // pane is stuck. Question this answers: does `keyboardLayoutGuide` track the keybar
+            // top (~bounds.height - kbH, e.g. 361) or does it still equal bounds.height (417,
+            // meaning the guide does NOT reflect the inputAccessoryView in this hierarchy)? If
+            // it tracks the keybar, we constrain the pane region to `keyboardLayoutGuide.top-
+            // Anchor` and delete the fragile window-space sampling. Gated behind the probe so
+            // we do not commit to that rewrite blind.
+            let klg = keyboardLayoutGuide.layoutFrame
+            DebugLog.shared.log(.geometry,
+                "geo:klgProbe bounds=\(Int(bounds.width))x\(Int(bounds.height)) kbH=\(String(format: "%.0f", kbH)) usableH=\(Int(usableH)) klgTop=\(Int(klg.minY)) klgH=\(Int(klg.height)) expectedKeybarTop=\(Int(bounds.height - kbH))")
             let inputs = LayoutInputs(bounds: bounds.size, cellW: cell.w, cellH: cell.h,
                                       keybarH: kbH, keyboardTop: kbTop, usableH: usableH)
             if inputs == lastLayoutInputs { return }
