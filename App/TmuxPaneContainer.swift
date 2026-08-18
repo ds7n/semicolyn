@@ -150,6 +150,42 @@ struct TmuxPaneContainer: UIViewRepresentable {
         if let onSelectPane { context.coordinator.onSelectPane = onSelectPane }
         // Update mouse-active dot visibility and selection gesture state for all panes.
         context.coordinator.updateMouseDots(for: uiView.panes)
+        // Re-present the software keyboard when the VM requests focus (e.g. returning
+        // from the Settings sheet). Device build 135 proved the subtle truth: presenting
+        // the sheet from the keybar (an inputAccessoryView) does NOT resign the pane's
+        // first responder, it only hides the keyboard behind the modal. So on dismiss the
+        // pane is STILL first responder (`anyFR=true` in the build-134/135 logs), and a
+        // plain `becomeFirstResponder()` is a no-op that leaves the keyboard down.
+        //
+        // A resign+become BOUNCE re-shows the keyboard but regresses layout: the resign
+        // collapses the keybar inset so the container grows to full height, and the
+        // re-become does not recompute it back down, leaving the terminal full-screen with
+        // the keyboard floating on top (device build 136: `geo:pane frame=0,0,401x725`
+        // right after `bounced=true`, vs the healthy ~401x417). So instead use
+        // `reloadInputViews()`, which asks the still-first-responder pane to re-present its
+        // input views WITHOUT ever resigning, so `kbH` never drops to zero and the layout
+        // never collapses. Act only on a NEW token so we never thrash.
+        if vm.keyboardFocusRequestToken != coord.lastFocusRequestToken {
+            coord.lastFocusRequestToken = vm.keyboardFocusRequestToken
+            // Prefer the pane that already holds first responder; fall back to the active
+            // pane. reloadInputViews re-presents on the holder without a resign; if none
+            // holds it (a genuine focus loss), a plain become on the active pane suffices.
+            let holder = uiView.panes.values.first { $0.isFirstResponder }
+            let target = holder ?? coord.currentActivePane.flatMap { uiView.panes[$0] }
+            if let target {
+                if target.isFirstResponder {
+                    target.reloadInputViews()   // re-present keyboard, no resign -> no layout collapse
+                } else {
+                    target.becomeFirstResponder()
+                }
+            }
+            DebugLog.shared.log(.tmux, "pane focus-request token=\(coord.lastFocusRequestToken) reloaded=\(holder != nil) fr=\(target?.isFirstResponder ?? false)")
+            // No manual relayout tick here: the keyboard accessory settles asynchronously
+            // (a beat after this call), and a single guessed tick loses that race (build 138
+            // stayed full-screen ~2s after the tick fired). The real re-fit is driven by
+            // `usableH` now being part of the `layoutSubviews` early-out key, so the pass that
+            // sees the settled accessory height re-frames the panes on its own.
+        }
     }
 
     /// Bridges SwiftTerm input from whichever pane is active to the VM.
@@ -198,6 +234,10 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// updated there. Read by each pane's `isActivePane` callback so a tap can tell
         /// whether it landed on the currently-focused pane.
         var currentActivePane: PaneID?
+        /// Last `vm.keyboardFocusRequestToken` acted on. Lets `updateUIView` tell a
+        /// NEW focus request apart from a repeated SwiftUI pass, so it doesn't
+        /// re-call `becomeFirstResponder()` on every render.
+        var lastFocusRequestToken: Int = 0
         /// Tracks each pane's `InteractionMode`, recomputed from `PaneTerminalView`'s
         /// `bufferActivated`/`mouseModeChanged` overrides (event-driven, replaces the
         /// old render-time poll in `updateMouseDots`).
@@ -299,6 +339,15 @@ struct TmuxPaneContainer: UIViewRepresentable {
             view.addGestureRecognizer(pinch)
             pinchRecognizers[key] = pinch
 
+            // Always-on keyboard-restore tap (mirrors the raw path's handleRestoreTap).
+            // Independent of pane SELECTION: onSelectPane early-returns when the pane is
+            // already active, so it can't restore the keyboard on the active pane. This
+            // tap fires regardless and only acts when the terminal is not first responder,
+            // so it no-ops while the keyboard is up (cursor-placement tap is unaffected).
+            let restoreTap = UITapGestureRecognizer(target: self, action: #selector(handlePaneRestoreTap(_:)))
+            restoreTap.cancelsTouchesInView = false
+            view.addGestureRecognizer(restoreTap)
+
             // Panes start non-reporting; the per-pane value is then owned solely by
             // `modeTracker.onChange`, which flips it to true for `.mouseReporting` /
             // `.appOwnsInput` panes (fired once at prime time and on every mode
@@ -368,8 +417,16 @@ struct TmuxPaneContainer: UIViewRepresentable {
                     )
                 )
                 gestureControllers[key] = controller
-                // Re-enable pinch after the controller's sweep disabled pre-existing recognizers.
+                // Re-enable pinch AND the keyboard-restore tap after the controller's
+                // sweep (`disableSwiftTermRecognizers`) disabled every pre-existing
+                // recognizer that is not the native scroll pan. Both `pinch` and
+                // `restoreTap` are added ABOVE, before this controller, so the sweep
+                // turned them off; the raw path re-enables the identical pair at
+                // `TerminalScreen.swift` after its controller. Missing the restoreTap
+                // re-enable is why tapping a pane did not bring the keyboard back
+                // (device build 134: no `key:paneRestoreTap` ever logged).
                 pinch.isEnabled = true
+                restoreTap.isEnabled = true
                 DebugLog.shared.log(.seed, "scroll:init isScrollEnabled=\(view.isScrollEnabled) nativePan=\(view.panGestureRecognizer.isEnabled) contentSize=\(view.contentSize) offset=\(view.contentOffset)")
             }
         }
@@ -457,6 +514,23 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// pinch recognizers for their attached view. Used to fan out font changes.
         private func paneView(for key: ObjectIdentifier) -> TerminalView? {
             pinchRecognizers[key]?.view as? TerminalView
+        }
+
+        /// Re-show the keyboard (and the keybar accessory) for a pane after the user
+        /// has dismissed it. Only acts when that pane's terminal is NOT already first
+        /// responder; when the keyboard is up, this no-ops and SwiftTerm's own tap
+        /// (cursor placement) is unaffected (this recognizer has `cancelsTouchesInView
+        /// = false`). Mirrors the raw path's `handleRestoreTap`.
+        @objc func handlePaneRestoreTap(_ recognizer: UITapGestureRecognizer) {
+            guard let view = recognizer.view as? TerminalView else { return }
+            if !view.isFirstResponder {
+                let ok = view.becomeFirstResponder()
+                // @objc gesture callbacks are delivered on the main thread but are a
+                // nonisolated context; hop onto the main actor for the @MainActor logger.
+                MainActor.assumeIsolated {
+                    DebugLog.shared.log(.input, "key:paneRestoreTap become=\(ok) isFR=\(view.isFirstResponder)")
+                }
+            }
         }
 
         /// Update the mouse-dot *visual* for each visible pane from the event-driven
@@ -656,13 +730,6 @@ struct TmuxPaneContainer: UIViewRepresentable {
         }
         private var lastLayoutInputs: LayoutInputs?
 
-        /// Last trusted usable height (window-space keybar-inset). HELD when a layout pass
-        /// can't trust the window-space geometry (the keybar accessory is mid-animation /
-        /// unreachable), mirroring `RawTerminalContainer.lastChildHeight`, rather than
-        /// falling back to full `bounds` (which hides the alt-screen's bottom rows in the
-        /// keybar-included `bounds` regime). `-1` = never computed yet.
-        private var lastUsableH: Double = -1
-
         /// The active window as of the last `apply` that reached the change-detect at the
         /// end of the method. Compared against `state.activeWindow` there to decide whether
         /// to arm the keybar-grow resize-settle debounce (see `armResizeSettle`).
@@ -708,15 +775,17 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // them changed. Any real geometry change (rotation/split/switch → bounds; pinch →
             // cell via invalidateCachedCell; keyboard/predictor-strip → kbH; the keyboard
             // re-laying-out post-app-switch with bounds/kbH unchanged → keyboardTop) differs
-            // here and runs. NOTE: `usableTerminalHeight()` (the window-space keybar inset)
-            // moves only when `bounds`, `kbH`, or the guide top move, all captured here, so
-            // this key is a valid superset of that fix's inputs. Do NOT drop `keyboardTop`
-            // from the key: the app-switch keybar-gap regime is distinguished only by the
-            // guide-top/bounds change, and skipping the pass would strand the stale inset.
+            // here and runs. `usableTerminalHeight()` is now simply `bounds.height` (device
+            // build 140 proved it correct in every regime; see that method), so it is fully
+            // captured by `bounds` in the key: no separate `usableH` field is needed, and the
+            // former stuck-full-height bug (window-space sampler holding a stale value while
+            // bounds was already correct) is gone.
             let inputs = LayoutInputs(bounds: bounds.size, cellW: cell.w, cellH: cell.h,
                                       keybarH: kbH, keyboardTop: kbTop)
             if inputs == lastLayoutInputs { return }
             lastLayoutInputs = inputs
+
+            let usableH = Double(usableTerminalHeight())
 
             // Both the GRID (reported to tmux) and every pane frame (`fittedPaneRects`) are
             // computed from the SAME usable height, so the reported grid and the actual pane
@@ -726,10 +795,9 @@ struct TmuxPaneContainer: UIViewRepresentable {
             // (rows behind the keybar) or subtracted a keybar height from `bounds`
             // (`keyboardLayoutGuide`/`visibleTerminalHeight`), but `bounds` is ambiguous
             // (keybar-included vs -excluded) with no same-window signal to disambiguate, so
-            // those gapped after an app-switch. The window-space measurement below (PR #122,
+            // those gapped after an app-switch. The window-space measurement (PR #122,
             // ported from RawTerminalContainer) uses the accessory's REAL window-space top and
             // is correct in both regimes.
-            let usableH = Double(usableTerminalHeight())
             guard let grid = terminalGrid(width: Double(bounds.width), height: usableH,
                                           cellWidth: cell.w, cellHeight: cell.h) else { return }
             // Sizing diagnostics (#4 keybar-height / #5 col-count, 2026-07-15). Log the
@@ -953,42 +1021,24 @@ struct TmuxPaneContainer: UIViewRepresentable {
         /// `bounds`-subtraction (`usableHeightFromKeyboardTop`/`visibleTerminalHeight`)
         /// was right in one regime and wrong in the other. The one correct-in-both signal
         /// is the first-responder pane's keybar accessory's REAL top in window space,
-        /// relative to this container's top in window space (`accessoryTopY - containerTopY`,
-        /// via the Kit-tested `rawTerminalChildHeight`).
+        /// Simply `bounds.height`. Device build 140 (`geo:klgProbe`) proved this is the
+        /// correct usable height in EVERY regime: the container's own `bounds` already
+        /// excludes the keyboard band (SwiftUI insets the representable leaf), and
+        /// `keyboardLayoutGuide.layoutFrame.minY == bounds.height` in every sampled pass
+        /// (settled/animating/full-screen/post-Settings), so there is nothing to subtract.
+        /// The keybar is a FLOATING inputAccessoryView that overlays the terminal's bottom;
+        /// it does not reduce the row count (the correct render was `usableH=417=bounds` at
+        /// grid 75x37, NOT 361).
         ///
-        /// Returns the full `bounds.height` when no pane is first responder (keyboard down:
-        /// the keybar is gone, panes fill the container), and HOLDS `lastUsableH` when the
-        /// window-space geometry is untrustworthy (accessory mid-animation / unreachable),
-        /// rather than filling `bounds` (which would hide the alt-screen's bottom rows).
-        /// Returns `CGFloat` (UIKit view-geometry height, matching
-        /// `firstResponderKeybarHeight() -> CGFloat` and `RawTerminalContainer`), NOT a
-        /// bare `Double`: the value IS view geometry read from `window`/`convert`/`bounds`,
-        /// not pure logic (the pure part, `rawTerminalChildHeight`, lives in Kit).
+        /// This replaces the former window-space sampling (accessory-frame `convert` to the
+        /// window + a `lastUsableH` hold-cache + the Kit `rawTerminalChildHeight` guard).
+        /// That subsystem was FRAGILE: reading the accessory frame from its separate keyboard
+        /// window failed the interior guard after a Settings-sheet re-present, so it held a
+        /// stale full-height value forever and stranded the pane full-screen (builds 134-139).
+        /// `bounds.height` cannot get stuck. Kept as a `CGFloat`-returning method (not a
+        /// stored value) so callers are unchanged.
         private func usableTerminalHeight() -> CGFloat {
-            // The first-responder pane and its keybar accessory (iOS shows exactly that
-            // pane's accessory). No first responder → keyboard down → full height.
-            let frPane = panes.values.first(where: { $0.isFirstResponder })
-            guard let frPane, let win = window else { return bounds.height }
-
-            let accH = Double((frPane.inputAccessoryView as? KeybarInputAccessory)?
-                .intrinsicContentSize.height ?? -1)
-            let containerTopY = Double(convert(CGPoint.zero, to: win).y)
-            let accessoryTopY: Double? = {
-                guard let acc = frPane.inputAccessoryView, let accSuper = acc.superview else { return nil }
-                let y = win.convert(CGPoint(x: acc.frame.minX, y: acc.frame.minY), from: accSuper).y
-                return y.isFinite ? Double(y) : nil
-            }()
-
-            let computed = rawTerminalChildHeight(accessoryTopY: accessoryTopY,
-                                                  containerTopY: containerTopY,
-                                                  containerHeight: Double(bounds.height),
-                                                  accessoryHeight: accH, isFirstResponder: true)
-            if let computed {
-                lastUsableH = computed
-                return CGFloat(computed)
-            }
-            if lastUsableH > 0 { return CGFloat(lastUsableH) }   // hold last-known-good
-            return bounds.height                                 // no trusted value yet
+            bounds.height
         }
 
         /// Cell metrics (monospace → uniform cell), used both to compute the container
