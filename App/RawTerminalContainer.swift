@@ -155,6 +155,12 @@ final class RawTerminalContainer: UIView {
             + "targetHeight=\(targetHeight.map { String(format: "%.0f", Double($0)) } ?? "hold") "
             + "lastGood=\(String(format: "%.0f", Double(lastChildHeight))) applied=\(applied) "
             + "klgTop=\(Int(klg.minY)) klgH=\(Int(klg.height)) "
+            // Foundation probe (2026-08-17): the -CC path proved `bounds.height` (== klgTop)
+            // is the correct usable height in every regime, letting us delete the window-space
+            // sampler there. Before applying the same simplification to THIS path, we need
+            // keyboard-UP evidence that `bounds`/`klgTop`/`targetHeight` agree here too. Log
+            // the delta so a raw-SSH keyboard-up capture answers it directly.
+            + "boundsVsTarget=\(targetHeight.map { Int(bounds.height - $0) }.map(String.init) ?? "hold") "
             + "childFrame=\(Int(cf.minX)),\(Int(cf.minY)),\(Int(cf.width))x\(Int(cf.height)) "
             + "chain=[\(chain.joined(separator: ">"))]")
     }

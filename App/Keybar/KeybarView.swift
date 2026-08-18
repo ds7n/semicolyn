@@ -6,11 +6,11 @@ import SemicolynKit
 /// The keyboard accessory bar. Locked region renders fixed at the leading edge;
 /// the scroll region pans horizontally. 4d drives the composition from the
 /// user's persisted `KeybarSettings`; reverse-bar flips the whole layout via
-/// `layoutDirection` (a pure mirror — gestures are unaffected, per spec).
+/// `layoutDirection` (a pure mirror, gestures are unaffected, per spec).
 struct KeybarView: View {
     @ObservedObject var keybarSettings: KeybarSettingsStore
     @ObservedObject var vm: ConnectionViewModel
-    /// True when a hardware keyboard is connected — the bar shrinks to its compact
+    /// True when a hardware keyboard is connected, the bar shrinks to its compact
     /// built-in subset, or hides entirely per the user's setting (4e).
     var hardwareKeyboardConnected: Bool = false
     @Environment(\.theme) private var theme
@@ -45,7 +45,7 @@ struct KeybarView: View {
         // gesture semantics stay physical (keybar-customization spec).
         .environment(\.layoutDirection,
                      keybarSettings.settings.direction == .lockedRight ? .rightToLeft : .leftToRight)
-        .sheet(isPresented: $showingSettings) {
+        .sheet(isPresented: $showingSettings, onDismiss: { vm.requestKeyboardFocus() }) {
             SettingsView(context: .inSession, keybarSettings: keybarSettings)
         }
     }
@@ -88,7 +88,7 @@ struct KeybarView: View {
     }
 
     /// Compact bar (hardware keyboard): the built-in widgets from the user's
-    /// locked region only — no scroll region (4e "Keybar behavior").
+    /// locked region only, no scroll region (4e "Keybar behavior").
     private var compactContent: some View {
         HStack(spacing: 6) {
             ForEach(Array(compactKeybarSlots(locked: layout.locked).enumerated()), id: \.offset) { _, slot in
