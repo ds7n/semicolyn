@@ -152,9 +152,17 @@ jobs:
         run: xcodegen generate
 
       - name: Build Semicolyn app for iOS Simulator
+        # -skipPackagePluginValidation: SwiftTerm v1.19+ ships SwiftTermBuildInfoPlugin,
+        # a build-tool plugin. Headless xcodebuild refuses an untrusted build-tool
+        # plugin (there is no GUI "Trust & Enable" dialog in CI). We reviewed the
+        # plugin (a read-only `git` build-info stamper, no network / no arbitrary exec)
+        # and consciously trust it; this flag is the non-interactive equivalent of
+        # clicking Trust. Version is pinned exact in project.yml so what we trust can't
+        # silently change. (2026-08-19)
         run: |
           xcodebuild -project Semicolyn.xcodeproj -scheme Semicolyn \
             -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO build
 
       - name: Test MoshSession bridge plumbing (loopback fake mosh_main, M3)
@@ -163,4 +171,5 @@ jobs:
         run: |
           xcodebuild -project Semicolyn.xcodeproj -scheme SemicolynBridgeTests \
             -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO test
