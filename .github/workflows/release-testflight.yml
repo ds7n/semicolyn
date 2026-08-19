@@ -76,11 +76,16 @@ jobs:
       # manual distribution identity conflicts with the SPM/framework targets' automatic
       # signing. TestFlight only needs *distribution* signing, which we apply at export.
       - name: Archive (unsigned, signed at export)
+        # -skipPackagePluginValidation: SwiftTerm v1.19+ ships a build-tool plugin
+        # (SwiftTermBuildInfoPlugin) that headless xcodebuild will not run without
+        # explicit trust. Reviewed (read-only git build-info stamper, no network) and
+        # consciously trusted; version pinned exact in project.yml. Mirrors ci.yml.
         run: |
           xcodebuild archive \
             -project Semicolyn.xcodeproj -scheme Semicolyn \
             -destination 'generic/platform=iOS' \
             -archivePath build/Semicolyn.xcarchive \
+            -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
 
