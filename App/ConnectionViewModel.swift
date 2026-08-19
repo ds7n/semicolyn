@@ -84,6 +84,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     // land exactly on the threshold). Trailing-debounce intent unchanged: a newer
     // keystroke within ~35ms still defers the recompute.
     private var refreshCoalescer = SuggestionRefreshCoalescer(quietWindow: 0.035)
+    /// Monotonic tag assigned (in keystroke order, on the main actor) to each
+    /// suggestion refresh so the async `suggest`→`surface` boundary can be aligned in
+    /// the device log: if a lower `seq` surfaces AFTER a higher one, an older prefix's
+    /// results landed out of order (stale-chip hazard). Diagnostic-only.
+    private var predictorRefreshSeq = 0
     private var learnedStore: LearnedStore?
     /// Write-time gate keeping typed secrets out of the learned vocabulary
     /// (`observePredictorInput`). See `PasswordEntryDetector`. Lazily wires the
@@ -1634,13 +1639,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                                     line: tracker.line,
                                     cursorIndex: tracker.cursorIndex)
 
+        predictorRefreshSeq += 1
+        let seq = predictorRefreshSeq
         Task { [weak self] in
             let raw = await predictor.suggestions(forPrefix: prefix, after: prev, context: ctx)
             let chips = predictorChips(current: prefix, suggestions: raw)
             await MainActor.run {
                 DebugLog.shared.log(.predictor,
-                    "predictor:suggest prefixLen=\(prefix.count) bias-signals proc=\(process ?? "nil") alt=\(isAlt.map(String.init) ?? "nil") results=\(raw.count)")
-                self?.predictorVM.setSuggestions(chips)
+                    "predictor:suggest seq=\(seq) prefix='\(prefix)' bias-signals proc=\(process ?? "nil") alt=\(isAlt.map(String.init) ?? "nil") results=\(raw.count)")
+                self?.predictorVM.setSuggestions(chips, seq: seq)
             }
         }
     }
