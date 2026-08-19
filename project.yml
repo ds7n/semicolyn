@@ -25,7 +25,8 @@ packages:
     # `git`-metadata stamper, no network) and consciously adopt v1.20.0 + grant the
     # trust via `-skipPackagePluginValidation` in ci.yml / release-testflight.yml.
     # Bump this deliberately; do not float. (2026-08-19)
-    exact: "1.20.0"
+    # NB: XcodeGen's exact-pin key is `exactVersion` (not SwiftPM's `exact`).
+    exactVersion: "1.20.0"
   # The vendored swift-sodium package (extern/swift-sodium), prebuilt
   # Clibsodium.xcframework. ET's libETerminal.a calls crypto_secretbox_* /
   # sodium_init / sodium_memzero directly; link the product at app-link time
