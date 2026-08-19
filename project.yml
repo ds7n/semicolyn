@@ -19,7 +19,13 @@ packages:
     path: .
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
-    from: "1.0.0"
+    # Pinned exact (was floating `from: "1.0.0"`, which silently drifted): v1.19.0
+    # added a build-tool plugin (SwiftTermBuildInfoPlugin) that headless xcodebuild
+    # refuses to run without explicit trust. We reviewed that plugin (a read-only
+    # `git`-metadata stamper, no network) and consciously adopt v1.20.0 + grant the
+    # trust via `-skipPackagePluginValidation` in ci.yml / release-testflight.yml.
+    # Bump this deliberately; do not float. (2026-08-19)
+    exact: "1.20.0"
   # The vendored swift-sodium package (extern/swift-sodium), prebuilt
   # Clibsodium.xcframework. ET's libETerminal.a calls crypto_secretbox_* /
   # sodium_init / sodium_memzero directly; link the product at app-link time
