@@ -47,4 +47,34 @@ final class PredictorEngineContextTests: XCTestCase {
         let ctx = PredictionContext(foregroundProcess: "zsh")   // bias 0.15
         XCTAssertEqual(e.suggestions(forPrefix: "com", after: nil, context: ctx).first, "commit")
     }
+
+    // MARK: - Next-word (empty-prefix bigram) contract
+
+    // Contract lock: `suggestions(forPrefix: "", after: <known word>)` returns that
+    // word's recorded successors, ranked and capped at topK, excluding the keying
+    // word itself. Learned via `record(_:after:)`, mirroring the sibling bigram
+    // tests in `PredictorEngineTests.swift` (e.g. `testLearnedNextTokenSuggested`).
+    func testNextWordReturnsSuccessorsForKnownWord() {
+        var e = PredictorEngine(learned: .empty, seed: nil, config: cfg)
+        // Graduate "status" and "commit" via 3 nil occurrences each, then record the
+        // after-"git" adjacency (confidenceFloor 2 in `cfg`); status outranks commit.
+        for _ in 0..<3 { e.record("status") }
+        for _ in 0..<3 { e.record("status", after: "git") }
+        for _ in 0..<3 { e.record("commit") }
+        for _ in 0..<2 { e.record("commit", after: "git") }
+        let out = e.suggestions(forPrefix: "", after: "git")
+        XCTAssertEqual(out, ["status", "commit"], "known word must yield its recorded successors, ranked")
+        XCTAssertTrue(out.contains("status"))
+        XCTAssertFalse(out.contains("git"), "the keying word is never its own successor")
+        XCTAssertLessThanOrEqual(out.count, e.config.topK)
+    }
+
+    // Negative: a word with no recorded successors returns a specific empty list,
+    // not a crash and not some other word's successors.
+    func testNextWordEmptyForUnknownWord() {
+        var e = PredictorEngine(learned: .empty, seed: nil, config: cfg)
+        for _ in 0..<3 { e.record("status") }
+        for _ in 0..<3 { e.record("status", after: "git") }
+        XCTAssertEqual(e.suggestions(forPrefix: "", after: "nonexistentword"), [])
+    }
 }
