@@ -1675,15 +1675,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
     }
 
-    /// Accept a chip: send only the missing suffix so the existing input is kept
-    /// (never rewritten). The suffix flows back through `sendTerminalInput`, so the
-    /// tracker and suggestions update automatically.
+    /// Accept a chip. completeWord chips extend the current token (send the suffix);
+    /// next-word chips insert a fresh word (+ spacing) so the user can keep chaining. The
+    /// inserted bytes flow back through `sendTerminalInput`, so tracker + suggestions update.
     func acceptSuggestion(_ s: String) {
-        guard s.hasPrefix(tracker.current) else { return }
-        let suffix = String(s.dropFirst(tracker.current.count))
-        guard !suffix.isEmpty else { return }
-        predictorVM.setSuggestions([])   // clear immediately; the echo round-trip repopulates from the new prefix
-        sendTerminalInput(Array(suffix.utf8))
+        let kind = predictorVM.currentKind
+        guard let insertion = acceptanceInsertion(kind: kind, current: tracker.current, chip: s) else { return }
+        predictorVM.setSuggestions([])   // clear immediately; the echo round-trip repopulates
+        sendTerminalInput(Array(insertion.utf8))
     }
 
     // MARK: - Connect (saved host)
