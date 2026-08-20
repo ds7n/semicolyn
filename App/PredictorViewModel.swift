@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
+import SemicolynKit
 
 /// Observable slice holding the predictor strip's suggestion chips, split out of
 /// `ConnectionViewModel` (Plan B §B1) so a suggestion recompute invalidates only the
@@ -12,16 +13,20 @@ final class PredictorViewModel: ObservableObject {
     /// Top-K predictor chips for the current input token (empty → strip hidden).
     @Published private(set) var suggestions: [String] = []
 
+    /// Which query produced the currently-surfaced chips, so acceptance inserts correctly.
+    private(set) var currentKind: SuggestionKind = .completeWord
+
     /// Highest refresh `seq` surfaced so far. A `setSuggestions` call carrying a LOWER
     /// seq means an older prefix's async results landed after a newer one's (stale-chip
     /// hazard), logged as `stale=1`. Immediate clears pass seq 0 and don't regress it.
     private var lastSurfacedSeq = 0
 
-    func setSuggestions(_ s: [String], seq: Int = 0) {
+    func setSuggestions(_ s: [String], seq: Int = 0, kind: SuggestionKind = .completeWord) {
         suggestions = s
+        currentKind = kind
         let stale = seq != 0 && seq < lastSurfacedSeq
         if seq > lastSurfacedSeq { lastSurfacedSeq = seq }
         DebugLog.shared.log(.predictor,
-            "predictor:surface count=\(s.count) seq=\(seq) stale=\(stale ? 1 : 0)")
+            "predictor:surface count=\(s.count) seq=\(seq) stale=\(stale ? 1 : 0) kind=\(kind)")
     }
 }

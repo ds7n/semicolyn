@@ -31,6 +31,11 @@ actor PredictorActor {
 
     func harvest(output: String) { engine.harvest(output: output) }
 
+    /// The engine's configured minimum prefix length for the Trigger-B floor. Exposed
+    /// so the App layer never hardcodes this constant (it must stay in sync with the
+    /// engine's own config, not a mirrored literal).
+    func minPrefix() -> Int { engine.config.minPrefix }
+
     func snapshotState() -> LearnedState { engine.state }
     func purgeLearned() { engine.purgeLearned() }
     func forgetLastLine() { engine.forgetLastLine() }

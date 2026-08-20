@@ -1615,13 +1615,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private func refreshPredictorSuggestions() {
         guard let predictor else { predictorVM.setSuggestions([]); return }
         let prefix = tracker.current, prev = tracker.previous
-        // Mirror the engine's conditional min-prefix floor so a short from-scratch prefix
-        // clears chips instead of leaving stale ones up. The bigram path (a usable
-        // `prev`) is exempt, next-token suggestions are valid with an empty prefix.
-        // NOTE: literal `2` must stay in sync with SuggestionConfig.minPrefix (currently 2).
-        // A future task can plumb the config value through; out of scope here.
-        let hasUsablePrevious = (prev?.isEmpty == false)
-        if !hasUsablePrevious, prefix.count < 2 { predictorVM.setSuggestions([]); return }
 
         // Build the prediction context from signals the VM already holds. Any signal
         // that is not cheaply available stays nil (the bias treats nil as abstain).
@@ -1639,15 +1632,45 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                                     line: tracker.line,
                                     cursorIndex: tracker.cursorIndex)
 
+        let optedOut = tracker.lineOptedOut
+        let precedingToken = prev   // the token immediately before `current` on this line
+
         predictorRefreshSeq += 1
         let seq = predictorRefreshSeq
         Task { [weak self] in
-            let raw = await predictor.suggestions(forPrefix: prefix, after: prev, context: ctx)
-            let chips = predictorChips(current: prefix, suggestions: raw)
+            guard let self else { return }
+            let minPrefix = await predictor.minPrefix()
+            // Stage 1: try current-word completion when there is a partial word.
+            var chips: [String] = []
+            var kind: SuggestionKind = .completeWord
+            var completionsEmpty = true
+            if !prefix.isEmpty {
+                let raw = await predictor.suggestions(forPrefix: prefix, after: prev, context: ctx)
+                let c = predictorChips(current: prefix, suggestions: raw)
+                completionsEmpty = c.isEmpty
+                if !c.isEmpty { chips = c; kind = .completeWord }
+            }
+            // Decide whether a next-word query is warranted (pure).
+            let request = suggestionRequest(
+                current: prefix, previous: prev, precedingToken: precedingToken,
+                currentWordCompletionsWereEmpty: completionsEmpty,
+                lineOptedOut: optedOut, minPrefix: minPrefix)
+            // Stage 2: next-word query when the decision calls for it.
+            if chips.isEmpty {
+                switch request {
+                case .nextWord(let word):
+                    let raw = await predictor.suggestions(forPrefix: "", after: word, context: ctx)
+                    chips = predictorChips(current: word, suggestions: raw)
+                    kind = prefix.isEmpty ? .nextWordAfterPrevious : .nextWordAfterCurrent
+                case .completeWord, .none:
+                    chips = []   // nothing to surface
+                }
+            }
+            let logKind = kind
             await MainActor.run {
                 DebugLog.shared.log(.predictor,
-                    "predictor:suggest seq=\(seq) prefix='\(prefix)' bias-signals proc=\(process ?? "nil") alt=\(isAlt.map(String.init) ?? "nil") results=\(raw.count)")
-                self?.predictorVM.setSuggestions(chips, seq: seq)
+                    "predictor:suggest seq=\(seq) prefix='\(prefix)' kind=\(logKind) proc=\(process ?? "nil") alt=\(isAlt.map(String.init) ?? "nil") count=\(chips.count)")
+                self.predictorVM.setSuggestions(chips, seq: seq, kind: logKind)
             }
         }
     }
