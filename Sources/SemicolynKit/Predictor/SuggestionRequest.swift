@@ -21,15 +21,18 @@ public enum SuggestionRequest: Equatable, Sendable {
 /// 4. current non-empty + completions empty + qualifies -> nextWord(current) [Trigger B, read-only peek]
 /// 5. otherwise                                 -> none
 ///
-/// Trigger B (keying on the finished-but-uncommitted `current`) is SUPPRESSED when the
-/// line is opted out or when `current` is an L4b secret-value token, so a secret's
-/// existence never leaks onto the suggestion surface. Trigger A keys on the already-
-/// committed `previous`, which the tracker's write path has already gated.
+/// Trigger B (keying on the finished-but-uncommitted `current`) requires `current` to
+/// be a genuinely-finished (terminal) word, and is SUPPRESSED when the line is opted
+/// out or when `current` is an L4b secret-value token, so a still-typing partial never
+/// fires and a secret's existence never leaks onto the suggestion surface. Trigger A
+/// keys on the already-committed `previous`, which the tracker's write path has
+/// already gated.
 public func suggestionRequest(
     current: String,
     previous: String?,
     precedingToken: String?,
     currentWordCompletionsWereEmpty: Bool,
+    currentIsTerminalWord: Bool,
     lineOptedOut: Bool,
     minPrefix: Int
 ) -> SuggestionRequest {
@@ -43,8 +46,10 @@ public func suggestionRequest(
         return .completeWord(prefix: current, previous: previous)
     }
     // Trigger B: current-word ran dry. Peek next-words off the finished `current`,
-    // but never off a too-short token, an opted-out line, or a secret value.
+    // but only for a genuinely-finished (terminal) word, above the min-prefix floor,
+    // never off an opted-out line, and never off a secret value.
     guard current.count >= minPrefix else { return .none }
+    guard currentIsTerminalWord else { return .none }
     guard !lineOptedOut else { return .none }
     guard !isSecretValueToken(current, precededBy: precedingToken) else { return .none }
     return .nextWord(after: current)
