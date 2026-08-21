@@ -16,6 +16,14 @@ final class PredictorEngineContextTests: XCTestCase {
         return PredictorSeed(unigram: uni, bigram: bi)
     }
 
+    // Build a seed whose unigram vocab contains every token in `tokens`, each once.
+    private func seed(tokens: [String]) -> PredictorSeed {
+        var uni = Vocabulary(depth: 4, width: 1 << 12)
+        for token in tokens { uni.record(token) }
+        let bi = BigramVocabulary(depth: 4, width: 1 << 12)
+        return PredictorSeed(unigram: uni, bigram: bi)
+    }
+
     private let cfg = SuggestionConfig(topK: 2, confidenceFloor: 2, seedWeight: 1.0, minPrefix: 2)
 
     // Regression gate: default context (all-nil) with no prose seed == today.
@@ -76,5 +84,41 @@ final class PredictorEngineContextTests: XCTestCase {
         for _ in 0..<3 { e.record("status") }
         for _ in 0..<3 { e.record("status", after: "git") }
         XCTAssertEqual(e.suggestions(forPrefix: "", after: "nonexistentword"), [])
+    }
+
+    // MARK: - isTerminalWord (Trigger B gate, spec addendum 2026-08-21 Fix 1)
+
+    // Known token, and no longer token extends it -> terminal.
+    func testTerminalWordKnownAndNothingLonger() {
+        let e = PredictorEngine(learned: .empty, seed: seed(tokens: ["whoami"]), config: cfg)
+        XCTAssertTrue(e.isTerminalWord("whoami"))
+    }
+
+    // Known token, but a longer token sharing its prefix exists -> not terminal
+    // (the user may still be typing "island").
+    func testTerminalWordKnownButExtensible() {
+        let e = PredictorEngine(learned: .empty, seed: seed(tokens: ["is", "island"]), config: cfg)
+        XCTAssertFalse(e.isTerminalWord("is"))
+    }
+
+    // Unknown token: only longer tokens sharing its prefix are in the vocab, the
+    // bare token itself was never recorded -> not terminal.
+    func testTerminalWordUnknown() {
+        let e = PredictorEngine(learned: .empty, seed: seed(tokens: ["type", "typescript"]), config: cfg)
+        XCTAssertFalse(e.isTerminalWord("ty"))
+    }
+
+    // Union across sources: known in the CLI seed, extended only in the prose seed
+    // -> still not terminal (the union of ALL sources decides, not just one).
+    func testTerminalWordUnionAcrossSources() {
+        let e = PredictorEngine(learned: .empty, seed: seed(tokens: ["is"]),
+                                proseSeed: seed(tokens: ["island"]), config: cfg)
+        XCTAssertFalse(e.isTerminalWord("is"))
+    }
+
+    // Empty string is never a terminal word, regardless of vocab contents.
+    func testTerminalWordEmpty() {
+        let e = PredictorEngine(learned: .empty, seed: seed(tokens: ["whoami"]), config: cfg)
+        XCTAssertFalse(e.isTerminalWord(""))
     }
 }
