@@ -36,6 +36,10 @@ actor PredictorActor {
     /// engine's own config, not a mirrored literal).
     func minPrefix() -> Int { self.engine.config.minPrefix }
 
+    /// True iff `word` is a terminal vocab word (known, nothing longer extends it), for the
+    /// next-word Trigger-B gate. See spec addendum 2026-08-21.
+    func isTerminalWord(_ word: String) -> Bool { self.engine.isTerminalWord(word) }
+
     func snapshotState() -> LearnedState { engine.state }
     func purgeLearned() { engine.purgeLearned() }
     func forgetLastLine() { engine.forgetLastLine() }

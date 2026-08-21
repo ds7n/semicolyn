@@ -1568,7 +1568,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // @MainActor; the only caller is `sendTerminalInput`), so no lock is needed.
         // Settle and refresh run in the same hop in program order: no fragile
         // wall-clock offsets between them (findings C/D).
-        if !scalars.isEmpty {
+        if !scalars.isEmpty || containsEditingKey(bytes) {
             refreshCoalescer.requestRefresh(at: Date().timeIntervalSinceReferenceDate)
             DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
                 guard let self else { return }
@@ -1650,10 +1650,20 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 completionsEmpty = c.isEmpty
                 if !c.isEmpty { chips = c; kind = .completeWord }
             }
+            // Terminal-word gate for Trigger B: only query the engine when stage 1 came
+            // back empty on a non-empty current (the only situation where Trigger B
+            // could fire). Off the hot path for the common completeWord case.
+            let isTerminal: Bool
+            if completionsEmpty, !prefix.isEmpty {
+                isTerminal = await predictor.isTerminalWord(prefix)
+            } else {
+                isTerminal = false
+            }
             // Decide whether a next-word query is warranted (pure).
             let request = suggestionRequest(
                 current: prefix, previous: prev, precedingToken: precedingToken,
                 currentWordCompletionsWereEmpty: completionsEmpty,
+                currentIsTerminalWord: isTerminal,
                 lineOptedOut: optedOut, minPrefix: minPrefix)
             // Stage 2: next-word query when the decision calls for it.
             if chips.isEmpty {
