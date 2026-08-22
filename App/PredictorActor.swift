@@ -40,7 +40,7 @@ actor PredictorActor {
     /// by `allowNextWord` (suppressed for a too-short/opted-out/secret-value `current`
     /// so the successor query never even runs). See `PredictorEngine.blendedSuggestions`.
     func blendedSuggestions(current: String, previous: String?, allowNextWord: Bool,
-                            context: PredictionContext) -> [BlendedChip] {
+                            context: PredictionContext) -> [PredictorEngine.BlendedChip] {
         self.engine.blendedSuggestions(current: current, previous: previous,
                                        allowNextWord: allowNextWord, context: context)
     }
