@@ -77,4 +77,63 @@ final class PredictorEngineContextTests: XCTestCase {
         for _ in 0..<3 { e.record("status", after: "git") }
         XCTAssertEqual(e.suggestions(forPrefix: "", after: "nonexistentword"), [])
     }
+
+    // MARK: - blendedSuggestions
+
+    // Only completions exist ("com" has longer unigram completions, no bigram
+    // successors recorded after "com" itself) -> every chip is a completion, and
+    // the exact typed token is excluded even if it were somehow a candidate.
+    func testBlendCompletionsOnly() {
+        var e = PredictorEngine(learned: .empty, seed: nil, config: cfg)
+        for _ in 0..<3 { e.record("commit") }
+        for _ in 0..<3 { e.record("command") }
+        let out = e.blendedSuggestions(current: "com", previous: nil)
+        XCTAssertFalse(out.isEmpty)
+        XCTAssertTrue(out.allSatisfy { !$0.isNextWord })
+        XCTAssertFalse(out.contains { $0.token == "com" })
+        XCTAssertEqual(Set(["commit", "command"]).intersection(out.map { $0.token }).count, out.count,
+                       "every chip must be one of the recorded completions")
+    }
+
+    // Only next-words exist ("git" is a full word with recorded successors, but
+    // nothing longer than "git" itself as a unigram completion) -> every chip is
+    // a next-word chip.
+    func testBlendNextWordOnly() {
+        var e = PredictorEngine(learned: .empty, seed: nil, config: cfg)
+        for _ in 0..<3 { e.record("git") }
+        for _ in 0..<3 { e.record("status") }
+        for _ in 0..<3 { e.record("status", after: "git") }
+        for _ in 0..<3 { e.record("commit") }
+        for _ in 0..<2 { e.record("commit", after: "git") }
+        let out = e.blendedSuggestions(current: "git", previous: nil)
+        XCTAssertFalse(out.isEmpty)
+        XCTAssertTrue(out.allSatisfy { $0.isNextWord })
+        XCTAssertEqual(Set(["status", "commit"]).intersection(out.map { $0.token }).count, out.count)
+    }
+
+    // Both axes have candidates ("run" has longer completions "running"/"runner"
+    // AND recorded bigram successors "tests"/"build") -> at least one of each,
+    // capped at topK, no duplicate tokens.
+    func testBlendBothGuaranteesOnePerGroup() {
+        var e = PredictorEngine(learned: .empty, seed: nil, config: cfg)
+        for _ in 0..<4 { e.record("running") }
+        for _ in 0..<3 { e.record("runner") }
+        for _ in 0..<3 { e.record("run") }
+        for _ in 0..<4 { e.record("tests") }
+        for _ in 0..<4 { e.record("tests", after: "run") }
+        for _ in 0..<3 { e.record("build") }
+        for _ in 0..<3 { e.record("build", after: "run") }
+        let out = e.blendedSuggestions(current: "run", previous: nil)
+        XCTAssertLessThanOrEqual(out.count, e.config.topK)
+        XCTAssertTrue(out.contains { !$0.isNextWord }, "at least one completion")
+        XCTAssertTrue(out.contains { $0.isNextWord }, "at least one next-word")
+        XCTAssertEqual(Set(out.map { $0.token }).count, out.count, "no duplicate tokens")
+        XCTAssertFalse(out.contains { $0.token == "run" }, "exact current excluded")
+    }
+
+    // Empty current -> empty (Trigger A handled elsewhere, not by blend).
+    func testBlendEmptyCurrent() {
+        let e = PredictorEngine(learned: .empty, seed: nil, config: cfg)
+        XCTAssertEqual(e.blendedSuggestions(current: "", previous: "git"), [])
+    }
 }
