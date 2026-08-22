@@ -36,9 +36,14 @@ actor PredictorActor {
     /// engine's own config, not a mirrored literal).
     func minPrefix() -> Int { self.engine.config.minPrefix }
 
-    /// True iff `word` is a terminal vocab word (known, nothing longer extends it), for the
-    /// next-word Trigger-B gate. See spec addendum 2026-08-21.
-    func isTerminalWord(_ word: String) -> Bool { self.engine.isTerminalWord(word) }
+    /// Completions of `current` blended with next-word successors of `current`, gated
+    /// by `allowNextWord` (suppressed for a too-short/opted-out/secret-value `current`
+    /// so the successor query never even runs). See `PredictorEngine.blendedSuggestions`.
+    func blendedSuggestions(current: String, previous: String?, allowNextWord: Bool,
+                            context: PredictionContext) -> [BlendedChip] {
+        self.engine.blendedSuggestions(current: current, previous: previous,
+                                       allowNextWord: allowNextWord, context: context)
+    }
 
     func snapshotState() -> LearnedState { engine.state }
     func purgeLearned() { engine.purgeLearned() }

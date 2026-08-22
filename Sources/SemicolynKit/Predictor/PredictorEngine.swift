@@ -259,15 +259,22 @@ public struct PredictorEngine: Sendable {
     /// axes are merged by descending score to fill out the cap, skipping tokens
     /// already chosen. `current` itself is never suggested by either axis (it is
     /// what the user already typed, not a completion of itself).
-    public func blendedSuggestions(current: String, previous: String?,
+    ///
+    /// `allowNextWord` gates the next-word axis entirely: when `false` the
+    /// next-word query is not run at all (a secret-value `current`, an opted-out
+    /// line, or a too-short `current` must never leak a successor query), and the
+    /// result is completions-only, same as the `nextWords.isEmpty` case below.
+    public func blendedSuggestions(current: String, previous: String?, allowNextWord: Bool = true,
                                    context: PredictionContext = .init()) -> [BlendedChip] {
         guard !current.isEmpty else { return [] }
         // Completions of `current` (exclude the exact typed token).
         let completions = scoredMerged(prefix: current, previous: previous, context: context)
             .filter { $0.token != current }
-        // Next-words keyed on `current` (empty prefix, bigram after current).
-        let nextWords = scoredMerged(prefix: "", previous: current, context: context)
-            .filter { $0.token != current }
+        // Next-words keyed on `current` (empty prefix, bigram after current). Skipped
+        // entirely when `allowNextWord` is false.
+        let nextWords = allowNextWord
+            ? scoredMerged(prefix: "", previous: current, context: context).filter { $0.token != current }
+            : []
         let cap = config.topK
         if nextWords.isEmpty {
             return Array(completions.prefix(cap)).map { BlendedChip(token: $0.token, isNextWord: false) }

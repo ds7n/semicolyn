@@ -1640,47 +1640,25 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         Task { [weak self] in
             guard let self else { return }
             let minPrefix = await predictor.minPrefix()
-            // Stage 1: try current-word completion when there is a partial word.
-            var chips: [String] = []
-            var kind: SuggestionKind = .completeWord
-            var completionsEmpty = true
-            if !prefix.isEmpty {
-                let raw = await predictor.suggestions(forPrefix: prefix, after: prev, context: ctx)
-                let c = predictorChips(current: prefix, suggestions: raw)
-                completionsEmpty = c.isEmpty
-                if !c.isEmpty { chips = c; kind = .completeWord }
-            }
-            // Terminal-word gate for Trigger B: only query the engine when stage 1 came
-            // back empty on a non-empty current (the only situation where Trigger B
-            // could fire). Off the hot path for the common completeWord case.
-            let isTerminal: Bool
-            if completionsEmpty, !prefix.isEmpty {
-                isTerminal = await predictor.isTerminalWord(prefix)
-            } else {
-                isTerminal = false
-            }
-            // Decide whether a next-word query is warranted (pure).
             let request = suggestionRequest(
                 current: prefix, previous: prev, precedingToken: precedingToken,
-                currentWordCompletionsWereEmpty: completionsEmpty,
-                currentIsTerminalWord: isTerminal,
                 lineOptedOut: optedOut, minPrefix: minPrefix)
-            // Stage 2: next-word query when the decision calls for it.
-            if chips.isEmpty {
-                switch request {
-                case .nextWord(let word):
-                    let raw = await predictor.suggestions(forPrefix: "", after: word, context: ctx)
-                    chips = predictorChips(current: word, suggestions: raw)
-                    kind = prefix.isEmpty ? .nextWordAfterPrevious : .nextWordAfterCurrent
-                case .completeWord, .none:
-                    chips = []   // nothing to surface
-                }
+            var chips: [(text: String, kind: SuggestionKind)] = []
+            switch request {
+            case .blended(let current, let previous, let allowNextWord):
+                let blended = await predictor.blendedSuggestions(
+                    current: current, previous: previous, allowNextWord: allowNextWord, context: ctx)
+                chips = blended.map { ($0.token, $0.isNextWord ? .nextWordAfterCurrent : .completeWord) }
+            case .nextWord(let word):
+                let raw = await predictor.suggestions(forPrefix: "", after: word, context: ctx)
+                chips = predictorChips(current: word, suggestions: raw).map { ($0, .nextWordAfterPrevious) }
+            case .none:
+                chips = []
             }
-            let logKind = kind
             await MainActor.run {
                 DebugLog.shared.log(.predictor,
-                    "predictor:suggest seq=\(seq) prefix='\(prefix)' kind=\(logKind) proc=\(process ?? "nil") alt=\(isAlt.map(String.init) ?? "nil") count=\(chips.count)")
-                self.predictorVM.setSuggestions(chips, seq: seq, kind: logKind)
+                    "predictor:suggest seq=\(seq) prefix='\(prefix)' proc=\(process ?? "nil") alt=\(isAlt.map(String.init) ?? "nil") count=\(chips.count)")
+                self.predictorVM.setChips(chips, seq: seq)
             }
         }
     }
@@ -1689,7 +1667,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// next-word chips insert a fresh word (+ spacing) so the user can keep chaining. The
     /// inserted bytes flow back through `sendTerminalInput`, so tracker + suggestions update.
     func acceptSuggestion(_ s: String) {
-        let kind = predictorVM.currentKind
+        let kind = predictorVM.kindByToken[s] ?? .completeWord
         guard let insertion = acceptanceInsertion(kind: kind, current: tracker.current, chip: s) else { return }
         predictorVM.setSuggestions([])   // clear immediately; the echo round-trip repopulates
         sendTerminalInput(Array(insertion.utf8))

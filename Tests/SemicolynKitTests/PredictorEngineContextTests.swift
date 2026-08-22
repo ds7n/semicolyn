@@ -136,4 +136,24 @@ final class PredictorEngineContextTests: XCTestCase {
         let e = PredictorEngine(learned: .empty, seed: nil, config: cfg)
         XCTAssertEqual(e.blendedSuggestions(current: "", previous: "git"), [])
     }
+
+    // allowNextWord: false must suppress the next-word axis entirely, even when
+    // successors exist (same fixture as testBlendBothGuaranteesOnePerGroup, which
+    // proves next-word chips DO surface when allowed) -> every chip is a
+    // completion and none is a next-word chip.
+    func testBlendAllowNextWordFalseSuppressesNextWordAxis() {
+        var e = PredictorEngine(learned: .empty, seed: nil, config: cfg)
+        for _ in 0..<4 { e.record("running") }
+        for _ in 0..<3 { e.record("runner") }
+        for _ in 0..<3 { e.record("run") }
+        for _ in 0..<4 { e.record("tests") }
+        for _ in 0..<4 { e.record("tests", after: "run") }
+        for _ in 0..<3 { e.record("build") }
+        for _ in 0..<3 { e.record("build", after: "run") }
+        let out = e.blendedSuggestions(current: "run", previous: nil, allowNextWord: false)
+        XCTAssertFalse(out.isEmpty)
+        XCTAssertTrue(out.allSatisfy { !$0.isNextWord }, "next-word axis must be suppressed")
+        XCTAssertFalse(out.contains { $0.token == "tests" || $0.token == "build" },
+                       "next-word successors must not leak in even as completions")
+    }
 }
