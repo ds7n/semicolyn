@@ -8,7 +8,6 @@ final class SuggestionRequestTests: XCTestCase {
     func testCompleteWordWhenCompletionsExist() {
         let r = suggestionRequest(current: "comm", previous: nil, precedingToken: nil,
                                   currentWordCompletionsWereEmpty: false,
-                                  currentIsTerminalWord: false,
                                   lineOptedOut: false, minPrefix: 2)
         XCTAssertEqual(r, .completeWord(prefix: "comm", previous: nil))
     }
@@ -17,7 +16,6 @@ final class SuggestionRequestTests: XCTestCase {
     func testNextWordOnSpaceCommit() {
         let r = suggestionRequest(current: "", previous: "git", precedingToken: "git",
                                   currentWordCompletionsWereEmpty: false,
-                                  currentIsTerminalWord: false,
                                   lineOptedOut: false, minPrefix: 2)
         XCTAssertEqual(r, .nextWord(after: "git"))
     }
@@ -26,23 +24,20 @@ final class SuggestionRequestTests: XCTestCase {
     func testNoneAtLineStart() {
         let r = suggestionRequest(current: "", previous: nil, precedingToken: nil,
                                   currentWordCompletionsWereEmpty: false,
-                                  currentIsTerminalWord: false,
                                   lineOptedOut: false, minPrefix: 2)
         XCTAssertEqual(r, .none)
     }
     func testNoneWhenPreviousEmptyString() {
         let r = suggestionRequest(current: "", previous: "", precedingToken: nil,
                                   currentWordCompletionsWereEmpty: false,
-                                  currentIsTerminalWord: false,
                                   lineOptedOut: false, minPrefix: 2)
         XCTAssertEqual(r, .none)
     }
 
-    // EP: current non-empty, completions empty, count >= minPrefix, terminal word -> nextWord(after: current)  [Trigger B]
+    // EP: current non-empty, completions empty, count >= minPrefix -> nextWord(after: current)  [Trigger B]
     func testNextWordWhenCurrentWordDry() {
         let r = suggestionRequest(current: "whoami", previous: nil, precedingToken: nil,
                                   currentWordCompletionsWereEmpty: true,
-                                  currentIsTerminalWord: true,
                                   lineOptedOut: false, minPrefix: 2)
         XCTAssertEqual(r, .nextWord(after: "whoami"))
     }
@@ -51,12 +46,10 @@ final class SuggestionRequestTests: XCTestCase {
     func testTriggerBAtMinPrefixBoundary() {
         let atFloor = suggestionRequest(current: "ab", previous: nil, precedingToken: nil,
                                         currentWordCompletionsWereEmpty: true,
-                                        currentIsTerminalWord: true,
                                         lineOptedOut: false, minPrefix: 2)
         XCTAssertEqual(atFloor, .nextWord(after: "ab"))
         let belowFloor = suggestionRequest(current: "a", previous: nil, precedingToken: nil,
                                            currentWordCompletionsWereEmpty: true,
-                                           currentIsTerminalWord: true,
                                            lineOptedOut: false, minPrefix: 2)
         XCTAssertEqual(belowFloor, .none)
     }
@@ -65,7 +58,6 @@ final class SuggestionRequestTests: XCTestCase {
     func testTriggerBSuppressedWhenOptedOut() {
         let r = suggestionRequest(current: "whoami", previous: nil, precedingToken: nil,
                                   currentWordCompletionsWereEmpty: true,
-                                  currentIsTerminalWord: true,
                                   lineOptedOut: true, minPrefix: 2)
         XCTAssertEqual(r, .none)
     }
@@ -75,7 +67,6 @@ final class SuggestionRequestTests: XCTestCase {
     func testTriggerBSuppressedWhenCurrentIsSecretValue() {
         let r = suggestionRequest(current: "hunter2", previous: nil, precedingToken: "--password",
                                   currentWordCompletionsWereEmpty: true,
-                                  currentIsTerminalWord: true,
                                   lineOptedOut: false, minPrefix: 2)
         XCTAssertEqual(r, .none)
     }
@@ -84,44 +75,7 @@ final class SuggestionRequestTests: XCTestCase {
     func testTriggerANotGatedByMinPrefix() {
         let r = suggestionRequest(current: "", previous: "a", precedingToken: "a",
                                   currentWordCompletionsWereEmpty: false,
-                                  currentIsTerminalWord: false,
                                   lineOptedOut: false, minPrefix: 2)
         XCTAssertEqual(r, .nextWord(after: "a"))
-    }
-
-    // Fix: dry completions but current is NOT a terminal word (still-typing partial) -> none.
-    func testTriggerBSuppressedWhenNotTerminalWord() {
-        let r = suggestionRequest(current: "is", previous: nil, precedingToken: nil,
-                                  currentWordCompletionsWereEmpty: true,
-                                  currentIsTerminalWord: false,
-                                  lineOptedOut: false, minPrefix: 2)
-        XCTAssertEqual(r, .none)
-    }
-
-    // Terminal word + dry -> nextWord fires (the finished-word case still works).
-    func testTriggerBFiresWhenTerminalWord() {
-        let r = suggestionRequest(current: "whoami", previous: nil, precedingToken: nil,
-                                  currentWordCompletionsWereEmpty: true,
-                                  currentIsTerminalWord: true,
-                                  lineOptedOut: false, minPrefix: 2)
-        XCTAssertEqual(r, .nextWord(after: "whoami"))
-    }
-
-    // Terminal word but opted out -> none (secret/opt-out guard still wins over terminal).
-    func testTriggerBTerminalButOptedOut() {
-        let r = suggestionRequest(current: "whoami", previous: nil, precedingToken: nil,
-                                  currentWordCompletionsWereEmpty: true,
-                                  currentIsTerminalWord: true,
-                                  lineOptedOut: true, minPrefix: 2)
-        XCTAssertEqual(r, .none)
-    }
-
-    // Trigger A (current empty) is unaffected by the new param (pass either value).
-    func testTriggerAUnaffectedByTerminalParam() {
-        let r = suggestionRequest(current: "", previous: "git", precedingToken: "git",
-                                  currentWordCompletionsWereEmpty: false,
-                                  currentIsTerminalWord: false,
-                                  lineOptedOut: false, minPrefix: 2)
-        XCTAssertEqual(r, .nextWord(after: "git"))
     }
 }
