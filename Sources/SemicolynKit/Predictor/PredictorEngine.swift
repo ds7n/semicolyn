@@ -204,26 +204,6 @@ public struct PredictorEngine: Sendable {
         return merged
     }
 
-    /// True iff `word` is a "terminal" vocabulary word: a known token in at least one
-    /// unigram source (learned/CLI/prose) that NOTHING longer extends. Gates the
-    /// next-word Trigger B so it fires only on genuinely-finished words, not partials
-    /// the user is still typing (spec addendum 2026-08-21, Fix 1). Empty `word` is
-    /// never terminal.
-    public func isTerminalWord(_ word: String) -> Bool {
-        guard !word.isEmpty else { return false }
-        var sources: [any CandidateSource] = [learned.unigram.learnedSource(window: window)]
-        if let seed { sources.append(seed.unigram) }
-        if let proseSeed { sources.append(proseSeed.unigram) }
-        var known = false
-        for src in sources {
-            for tc in src.candidates(forPrefix: word) {
-                if tc.token == word { known = true }
-                else if tc.token.count > word.count { return false }  // something extends it
-            }
-        }
-        return known
-    }
-
     /// Seal the day for both learned axes, the app calls this at user-local
     /// midnight.
     public mutating func rollover() {
