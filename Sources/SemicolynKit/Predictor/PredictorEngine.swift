@@ -218,7 +218,13 @@ public struct PredictorEngine: Sendable {
         // by count), so synthesize one strictly above every seed/learned score here,
         // descending by harvest recency, which reproduces "harvested leads" both in
         // this axis's own order and when blended against another axis's scores.
-        let harvestedTokens = output.candidates(forPrefix: prefix).map { $0.token }
+        //
+        // Only apply harvest when `prefix` is non-empty. `OutputHarvest` is a pure
+        // completion-oriented (prefix) store with no bigram/"followed by" concept;
+        // on an empty prefix (the next-word axis, querying `previous`'s successors)
+        // `candidates(forPrefix: "")` would match every harvested token as a bogus
+        // successor of `previous`, which is wrong.
+        let harvestedTokens = prefix.isEmpty ? [] : output.candidates(forPrefix: prefix).map { $0.token }
         let maxSeedScore = base.map { $0.score }.max() ?? 0
         let harvested: [(token: String, score: Double)] = harvestedTokens.enumerated().map { index, token in
             (token: token, score: maxSeedScore + 1 + Double(harvestedTokens.count - index))

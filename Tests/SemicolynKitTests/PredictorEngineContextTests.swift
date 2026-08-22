@@ -137,6 +137,33 @@ final class PredictorEngineContextTests: XCTestCase {
         XCTAssertEqual(e.blendedSuggestions(current: "", previous: "git"), [])
     }
 
+    // The `cfg` fixture above uses topK: 2, so `testBlendBothGuaranteesOnePerGroup`
+    // only ever fills the two reserved slots (one completion + one next-word) and
+    // never exercises the score-sorted remainder merge in `blendedSuggestions`
+    // (the `rest` loop). Production uses topK: 3, so lock that remainder-fill
+    // ordering here at the real topK.
+    //
+    // Completions of "run": "running" (higher count) and "runner" (lower count).
+    // Next-word successor of "run": "tests" (lower learned count than either
+    // completion). Reserve takes the top of each axis first (running, tests),
+    // leaving one slot; the highest-scoring leftover across both axes' tails is
+    // "runner" (the only leftover), so it fills the remainder.
+    func testBlendRemainderFillAtTopK3() {
+        let cfg3 = SuggestionConfig(topK: 3, confidenceFloor: 2, seedWeight: 1.0, minPrefix: 2)
+        var e = PredictorEngine(learned: .empty, seed: nil, config: cfg3)
+        for _ in 0..<6 { e.record("running") }               // strong completion
+        for _ in 0..<4 { e.record("runner") }                // weaker completion
+        for _ in 0..<3 { e.record("run") }
+        for _ in 0..<3 { e.record("tests") }                 // graduate "tests" via nil-count
+        for _ in 0..<2 { e.record("tests", after: "run") }   // weaker next-word than either completion
+        let out = e.blendedSuggestions(current: "run", previous: nil)
+        XCTAssertEqual(out, [
+            PredictorEngine.BlendedChip(token: "running", isNextWord: false),
+            PredictorEngine.BlendedChip(token: "tests", isNextWord: true),
+            PredictorEngine.BlendedChip(token: "runner", isNextWord: false),
+        ], "reserved top-of-each first, then the remainder filled by descending score")
+    }
+
     // allowNextWord: false must suppress the next-word axis entirely, even when
     // successors exist (same fixture as testBlendBothGuaranteesOnePerGroup, which
     // proves next-word chips DO surface when allowed) -> every chip is a
