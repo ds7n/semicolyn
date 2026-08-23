@@ -113,6 +113,20 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// replay (no cursor model): treated as a line-context reset in `.ground`.
     private static let editingC0: Set<UInt8> = [0x17, 0x15, 0x0b, 0x01, 0x03, 0x05]  // Ctrl-W/U/K/A/C/E
 
+    /// The tmux prefix byte (`Ctrl-A`, the app's default). In a native `-CC` client
+    /// the prefix flips tmux into its prefix key-table and the NEXT byte dispatches a
+    /// binding (`prefix c` -> new-window): that following key is a tmux COMMAND, not
+    /// typed text, so it must be swallowed rather than extend `current`. Device log
+    /// (build 146) showed `Ctrl-A c whoami` leaking the binding `c` as `cwhoami`.
+    /// (Only 0x01 arms this: the other `editingC0` keys are ordinary line edits whose
+    /// following byte IS normal text.)
+    private static let tmuxPrefix: UInt8 = 0x01
+
+    /// One-shot: set when the tmux prefix was just seen; the next `.ground` byte is the
+    /// binding key (a command) and is swallowed, then this clears. Persists across
+    /// `observe(_:)` chunks (the binding key may arrive in a later chunk).
+    private var expectingPrefixCommand = false
+
     /// Route one byte through the VT ground-state machine. Only `.ground`-state
     /// printable bytes ever reach `classify`/extend `current`; every other state
     /// swallows bytes until its terminator, then dispatches (discard, or for CSI,
@@ -141,9 +155,21 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// `.ground`: printable bytes extend `current`/`line`; C0 controls dispatch as
     /// today (enter/backspace/tab/editing-reset); ESC/C1-CSI/C1-OSC transition out.
     private mutating func handleGroundByte(_ b: UInt8, into committed: inout [CommittedToken]) {
+        // Escape-sequence introducers ALWAYS start their state machine, even while a
+        // prefix swallow is armed: a terminal auto-response (e.g. a DA `ESC[...c`) can
+        // race in right after the user's prefix byte, before their binding key. If the
+        // swallow ate the leading ESC, the sequence body would fall through as garbage
+        // text (the exact poisoning the sanitizer prevents). So transition FIRST; the
+        // arm still catches the next real ground byte (the actual binding key).
         if b == 0x1b { enterState(.escape); return }
         if b == 0x9b { enterState(.csi(hadPrivateMarker: false, paramBytes: [])); return }
         if b == 0x9d { enterState(.osc); return }
+        // One-shot: the byte right after the tmux prefix is a binding key (a command),
+        // not typed text. Swallow it, clear the arm, and do nothing else.
+        if expectingPrefixCommand {
+            expectingPrefixCommand = false
+            return
+        }
 
         if !sawLineStart {
             sawLineStart = true
@@ -172,6 +198,9 @@ public struct InputTokenTracker: Equatable, Sendable {
             current = ""
         case let c where Self.editingC0.contains(c):   // Ctrl-W/U/K/A/C/E → reset
             resetLineContext()
+            // The tmux prefix additionally arms a one-shot swallow of the binding key
+            // that follows (the other editing keys take normal text after them).
+            if c == Self.tmuxPrefix { expectingPrefixCommand = true }
         default:                        // other control → reset line context
             resetLineContext()
         }
@@ -386,6 +415,7 @@ public struct InputTokenTracker: Equatable, Sendable {
         withinPaste = false
         parseState = .ground
         sequenceLength = 0
+        expectingPrefixCommand = false
         lineOptedOut = false
         lastCommittedLineOptedOut = false
         sawLineStart = false

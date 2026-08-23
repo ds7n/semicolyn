@@ -71,6 +71,79 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertNil(t.previous)
     }
 
+    // MARK: tmux prefix command-key swallow
+
+    // The tmux prefix (Ctrl-A, 0x01) flips the client into the prefix key-table;
+    // the NEXT byte dispatches a binding (`prefix c` -> new-window) and is a tmux
+    // COMMAND, not typed text. Device log (build 146) showed `Ctrl-A c whoami`
+    // leaking the binding `c` into `current` as `cwhoami` (count=0). The byte after
+    // the prefix must be swallowed, not extend `current`.
+
+    func testPrefixCommandKeySwallowedNotTypedAsText() {
+        var t = InputTokenTracker()
+        // Ctrl-A (prefix) then 'c' (new-window binding) then the user types `whoami`.
+        _ = t.observe([0x01])            // prefix: arms the one-shot command-key swallow
+        _ = t.observe(bytes("c"))        // tmux binding key: swallowed, NOT text
+        _ = t.observe(bytes("whoami"))
+        XCTAssertEqual(t.current, "whoami")   // NOT "cwhoami"
+    }
+
+    func testPrefixCommandKeySwallowedInOneChunk() {
+        var t = InputTokenTracker()
+        // The whole gesture + typing can arrive in a single observe() chunk.
+        _ = t.observe([0x01] + bytes("cwhoami"))
+        XCTAssertEqual(t.current, "whoami")   // prefix 'c' swallowed, then real text
+    }
+
+    func testOnlyOneKeyAfterPrefixIsSwallowed() {
+        var t = InputTokenTracker()
+        // Exactly ONE key is consumed by the prefix table; the second key is normal.
+        _ = t.observe([0x01])            // prefix
+        _ = t.observe(bytes("xy"))       // 'x' = binding (swallowed), 'y' = typed text
+        XCTAssertEqual(t.current, "y")
+    }
+
+    func testPrefixArmSurvivesChunkBoundary() {
+        var t = InputTokenTracker()
+        // The prefix and its binding key can land in SEPARATE observe() chunks; the
+        // arm must persist across the boundary so the binding key is still swallowed.
+        // (Without the fix the binding 'c' leaks: current would be "cwhoami".)
+        _ = t.observe([0x01])            // chunk 1: prefix only
+        _ = t.observe(bytes("cwhoami"))  // chunk 2: binding 'c' swallowed, "whoami" typed
+        XCTAssertEqual(t.current, "whoami")
+    }
+
+    func testEscapeSequenceAfterPrefixIsNotSwallowedAsBindingKey() {
+        var t = InputTokenTracker()
+        // A terminal auto-response can race in AFTER the prefix, before the binding key.
+        // The escape sequence must still be swallowed AS A SEQUENCE (not have its lead
+        // ESC eaten by the prefix arm, which would leak the CSI body into `current`).
+        // The arm then swallows the real binding key that follows.
+        _ = t.observe([0x01])                       // prefix: arm
+        // DA response ESC[?65;1c races in:
+        _ = t.observe([0x1b, 0x5b, 0x3f, 0x36, 0x35, 0x3b, 0x31, 0x63])
+        _ = t.observe(bytes("c"))                   // the real binding key: swallowed
+        _ = t.observe(bytes("whoami"))
+        XCTAssertEqual(t.current, "whoami")         // NOT "?65;1cwhoami" or "cwhoami"
+    }
+
+    func testEditingKeysOtherThanPrefixDoNotSwallowNextKey() {
+        var t = InputTokenTracker()
+        // Ctrl-C (0x03) is a plain line-edit reset, NOT the tmux prefix: the key after
+        // it is ordinary typed text and must extend `current` (no one-shot swallow).
+        _ = t.observe([0x03])            // Ctrl-C: reset only, no arm
+        _ = t.observe(bytes("ls"))
+        XCTAssertEqual(t.current, "ls")  // NOT "s" (the 'l' must NOT be swallowed)
+    }
+
+    func testPrefixArmDoesNotSurviveReset() {
+        var t = InputTokenTracker()
+        _ = t.observe([0x01])            // arm
+        t.reset()                        // context/host switch clears everything
+        _ = t.observe(bytes("cwhoami"))  // 'c' is now ordinary text again
+        XCTAssertEqual(t.current, "cwhoami")
+    }
+
     func testChipsDropExactCurrentAndEmpties() {
         XCTAssertEqual(predictorChips(current: "clau", suggestions: ["claude", "clang"]),
                        ["claude", "clang"])
