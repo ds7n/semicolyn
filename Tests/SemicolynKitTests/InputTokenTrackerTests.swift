@@ -402,6 +402,33 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertEqual(t.current, "ok")
     }
 
+    /// Pins the 64-byte max-sequence guard itself (not just "no crash"). Feeds
+    /// 70 param bytes (0x30-0x3f range, straddling the 64-byte bound) with no
+    /// final byte, THEN a real CSI final byte (`~`), THEN normal typed text, in
+    /// ONE `observe` call. This distinguishes guarded from unguarded:
+    /// - WITH the guard: the guard fires at byte 64, entering `.abortedSequence`,
+    ///   which keeps discarding 0x20-0x3f bytes (the remaining six `3`s) but is
+    ///   no longer inside a real CSI parse. The subsequent `~` (0x7e, outside
+    ///   0x20-0x3f) is therefore NOT consumed as a CSI final byte, it falls
+    ///   through to `.ground` and is re-handled as ordinary printable text, so
+    ///   `current` becomes `"~"` before `"ok"` is appended: `"~ok"`.
+    /// - WITHOUT the guard: the machine stays in `.csi` for all 70 param bytes
+    ///   (nothing ever aborts), so the FIRST byte in the CSI final-byte range
+    ///   0x40-0x7e it sees is `~` itself, consumed as a legitimate CSI final
+    ///   byte (dispatched via `csiKind`, swallowed as `.responseOrFormat`),
+    ///   NOT as ground text. `current` would then be just `"ok"`, missing the
+    ///   `"~"` the guard proves was released back into ground.
+    /// Deleting `enforceSequenceGuard`'s 64-byte check flips this assertion
+    /// from `"~ok"` to `"ok"`, so this test fails without the guard.
+    func testGuardReleasesGroundParsingBeforeCSIWouldNaturallyTerminate() {
+        var t = InputTokenTracker()
+        var input: [UInt8] = [0x1b, 0x5b]                                  // ESC[
+        input += Array(repeating: UInt8(ascii: "3"), count: 70)            // 70 param bytes, straddles 64
+        input += Array("~ok".utf8)                                        // real final byte + normal text
+        _ = t.observe(input)
+        XCTAssertEqual(t.current, "~ok")
+    }
+
     func testAdversarialSecretAfterSwallowedResponseStillDropped() {
         // ESC[c (swallowed response) then "--password hunter2" + Enter → hunter2
         // still gated by L4b (not learned), tally increments.

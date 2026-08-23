@@ -178,6 +178,10 @@ public struct InputTokenTracker: Equatable, Sendable {
     }
 
     /// `.escape`: the byte right after a bare ESC selects the sequence kind.
+    /// Deliberately does NOT call `enforceSequenceGuard`: `.escape` is a single-byte
+    /// transition state (exactly one byte is ever consumed here before moving to
+    /// `.csi`/`.osc`/`.stringSequence`/back to `.ground`), so it is bounded by
+    /// construction and cannot accumulate length like the other 5 handlers do.
     private mutating func handleEscapeByte(_ b: UInt8, into committed: inout [CommittedToken]) {
         switch b {
         case UInt8(ascii: "["):
@@ -301,7 +305,11 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// `.abortedSequence`: still discarding the tail of a malformed sequence that
     /// tripped the max-length guard. CSI-shaped bytes (params/intermediates) keep
     /// being swallowed; anything else (a plausible final byte, a fresh ESC, or
-    /// ordinary text) returns to `.ground` and is re-handled there.
+    /// ordinary text) returns to `.ground` and is re-handled there. Deliberately
+    /// does NOT call `enforceSequenceGuard`: this state IS the guard's already-
+    /// aborted swallow, re-running the length check here would be a no-op
+    /// (`sequenceLength` was already reset on entry) and re-triggering the abort
+    /// path from within itself would be redundant, not a second bound.
     private mutating func handleAbortedSequenceByte(_ b: UInt8, into committed: inout [CommittedToken]) {
         if (0x20...0x3f).contains(b) { return }
         backToGround()
