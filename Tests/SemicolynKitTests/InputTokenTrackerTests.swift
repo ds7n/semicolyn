@@ -441,4 +441,81 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertEqual(committed.map(\.token), ["--password"])
         XCTAssertEqual(t.droppedAsSecret, 1)
     }
+
+    // MARK: - OSC / DCS-string swallow paths (2026-08-23 review follow-up)
+
+    func testOSCTerminatedByBELSwallowsClipboardPayload() {
+        // OSC 52 (clipboard set): ESC ] 5 2 ; c ; Q Q = = BEL, then "ls".
+        // The base64-ish payload ("52;c;QQ==") must not leak into `current`.
+        var t = InputTokenTracker()
+        var input: [UInt8] = [0x1b, 0x5d]                        // ESC ]
+        input += Array("52;c;QQ==".utf8)
+        input += [0x07]                                          // BEL terminator
+        input += Array("ls".utf8)
+        _ = t.observe(input)
+        XCTAssertEqual(t.current, "ls")
+    }
+
+    func testOSCTerminatedBySTSwallowsTitlePayload() {
+        // OSC 0 (set title): ESC ] 0 ; t i t l e ESC \, then "x".
+        var t = InputTokenTracker()
+        var input: [UInt8] = [0x1b, 0x5d]                        // ESC ]
+        input += Array("0;title".utf8)
+        input += [0x1b, 0x5c]                                    // ST = ESC \
+        input += Array("x".utf8)
+        _ = t.observe(input)
+        XCTAssertEqual(t.current, "x")
+    }
+
+    func testOSCEmbeddedNonSTEscapeStaysSwallowed() {
+        // ESC ] 0 ; a b <ESC> Z c d <BEL>, then "y". The ESC mid-body is
+        // followed by 'Z' (not '\'), so it is NOT a real ST: `.oscEscape` must
+        // fall back into `.osc` and keep swallowing ("Zcd" must not leak). If
+        // `.oscEscape` wrongly treated the body ESC as a ground-level line
+        // reset, 'Z' would be re-handled in `.ground` as printable text and
+        // "cd" (plus the still-open OSC's later bytes) would leak into
+        // `current` well before the eventual BEL/`y`.
+        var t = InputTokenTracker()
+        var input: [UInt8] = [0x1b, 0x5d]                        // ESC ]
+        input += Array("0;ab".utf8)
+        input += [0x1b]                                          // ESC (not a real ST: next byte isn't '\')
+        input += Array("Zcd".utf8)
+        input += [0x07]                                          // BEL terminator (finally ends the OSC)
+        input += Array("y".utf8)
+        _ = t.observe(input)
+        XCTAssertEqual(t.current, "y")
+    }
+
+    func testDCSStringSequenceTerminatedBySTSwallowed() {
+        // DCS: ESC P <payload> ESC \, then "y".
+        var t = InputTokenTracker()
+        var input: [UInt8] = [0x1b, 0x50]                        // ESC P
+        input += Array("1$rpayload".utf8)
+        input += [0x1b, 0x5c]                                    // ST = ESC \
+        input += Array("y".utf8)
+        _ = t.observe(input)
+        XCTAssertEqual(t.current, "y")
+    }
+
+    func testDCSEmbeddedNonSTEscapeStaysSwallowed() {
+        // Mirrors testOSCEmbeddedNonSTEscapeStaysSwallowed for `.stringSequenceEscape`:
+        // ESC P a b <ESC> Z c d ESC \, then "y".
+        var t = InputTokenTracker()
+        var input: [UInt8] = [0x1b, 0x50]                        // ESC P
+        input += Array("ab".utf8)
+        input += [0x1b]                                          // ESC (not a real ST: next byte isn't '\')
+        input += Array("Zcd".utf8)
+        input += [0x1b, 0x5c]                                    // ST = ESC \ (finally ends the sequence)
+        input += Array("y".utf8)
+        _ = t.observe(input)
+        XCTAssertEqual(t.current, "y")
+    }
+
+    func testOSCSplitAcrossChunksFullySwallowed() {
+        // ESC ] 0 ; t i split into two observe() calls, then BEL, then "hi".
+        var t = InputTokenTracker()
+        _ = t.observe([0x1b, 0x5d] + Array("0;ti".utf8))
+        _ = t.observe(Array("tle".utf8) + [0x07] + Array("hi".utf8))
+        XCTAssertEqual(t.current, "hi")
+    }
 }
