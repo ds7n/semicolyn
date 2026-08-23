@@ -287,4 +287,131 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertEqual(t.line, "")
         XCTAssertEqual(t.cursorIndex, 0)
     }
+
+    // MARK: - VT ground-state sanitizer (2026-08-22 design)
+
+    func testDeviceAttributesResponseSwallowed() {
+        // ESC[?65;4;1;2;6;21;22;17;28c then "whoami" → current is the typed word only.
+        var t = InputTokenTracker()
+        let da = Array("\u{1b}[?65;4;1;2;6;21;22;17;28c".utf8)
+        _ = t.observe(da)
+        XCTAssertEqual(t.current, "")            // the response contributed nothing
+        _ = t.observe(bytes("whoami"))
+        XCTAssertEqual(t.current, "whoami")
+    }
+
+    func testMouseEventSwallowed() {
+        // ESC[<65;1;1M then "ls" → current == "ls".
+        var t = InputTokenTracker()
+        _ = t.observe(Array("\u{1b}[<65;1;1M".utf8))
+        _ = t.observe(bytes("ls"))
+        XCTAssertEqual(t.current, "ls")
+    }
+
+    func testSGRColorSwallowed() {
+        // ESC[38;2;122;162;247m then "git" → current == "git".
+        var t = InputTokenTracker()
+        _ = t.observe(Array("\u{1b}[38;2;122;162;247m".utf8))
+        _ = t.observe(bytes("git"))
+        XCTAssertEqual(t.current, "git")
+    }
+
+    func testCursorReportSwallowedMidWord() {
+        // "ab" + ESC[24;80R + "cd" → current == "abcd" (report vanishes, word intact).
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("ab"))
+        _ = t.observe(Array("\u{1b}[24;80R".utf8))
+        _ = t.observe(bytes("cd"))
+        XCTAssertEqual(t.current, "abcd")
+    }
+
+    func testArrowKeyResetsCurrent() {
+        // "abc" + ESC[D (left arrow) → current == "" (line-context reset).
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("abc"))
+        _ = t.observe(Array("\u{1b}[D".utf8))
+        XCTAssertEqual(t.current, "")
+    }
+
+    func testDeleteForwardResetsCurrent() {
+        // "abc" + ESC[3~ (Delete) → current == "".
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("abc"))
+        _ = t.observe(Array("\u{1b}[3~".utf8))
+        XCTAssertEqual(t.current, "")
+    }
+
+    func testCtrlWResetsCurrent() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("abc"))
+        _ = t.observe([0x17])
+        XCTAssertEqual(t.current, "")
+    }
+
+    func testCtrlUResetsCurrent() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("abc"))
+        _ = t.observe([0x15])
+        XCTAssertEqual(t.current, "")
+    }
+
+    func testCtrlKResetsCurrent() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("abc"))
+        _ = t.observe([0x0b])
+        XCTAssertEqual(t.current, "")
+    }
+
+    func testBackspaceStillPopsNotReset() {
+        // "abcd" + 0x7f → current == "abc" (pop, not a full reset).
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("abcd"))
+        _ = t.observe([0x7f])
+        XCTAssertEqual(t.current, "abc")
+    }
+
+    func testBracketedPasteStillDropsContent() {
+        // ESC[200~ + "secret" + ESC[201~ → paste content dropped, tally increments.
+        var t = InputTokenTracker()
+        var input: [UInt8] = pasteOn
+        input += Array("secret".utf8)
+        input += pasteOff
+        _ = t.observe(input)
+        XCTAssertEqual(t.current, "")
+        XCTAssertEqual(t.droppedInPaste, 1)
+    }
+
+    func testSplitDeviceAttributesAcrossChunksSwallowed() {
+        // ESC[?65c split across two observe() calls → still fully swallowed.
+        var t = InputTokenTracker()
+        _ = t.observe([0x1b, 0x5b, 0x3f, 0x36])
+        _ = t.observe([0x35, 0x63, 0x68, 0x69])
+        XCTAssertEqual(t.current, "hi")
+    }
+
+    func testNeverTerminatedSequenceIsBoundedAndResets() {
+        // ESC[ + 100 param bytes, no final byte → guard aborts, back to ground, reset.
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("abc"))
+        var input: [UInt8] = [0x1b, 0x5b]
+        input += Array(repeating: UInt8(ascii: "3"), count: 100)
+        _ = t.observe(input)
+        XCTAssertEqual(t.current, "")
+        // Machine must be back in ground state: subsequent typing works normally.
+        _ = t.observe(bytes("ok"))
+        XCTAssertEqual(t.current, "ok")
+    }
+
+    func testAdversarialSecretAfterSwallowedResponseStillDropped() {
+        // ESC[c (swallowed response) then "--password hunter2" + Enter → hunter2
+        // still gated by L4b (not learned), tally increments.
+        var t = InputTokenTracker()
+        var input: [UInt8] = Array("\u{1b}[c".utf8)
+        input += Array("--password hunter2".utf8)
+        input += [0x0d]
+        let committed = t.observe(input)
+        XCTAssertFalse(committed.map(\.token).contains("hunter2"))
+        XCTAssertEqual(committed.map(\.token), ["--password"])
+        XCTAssertEqual(t.droppedAsSecret, 1)
+    }
 }
