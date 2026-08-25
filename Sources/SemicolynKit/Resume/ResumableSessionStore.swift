@@ -47,6 +47,13 @@ public struct ResumableSessionStore {
         return result != nil
     }
 
+    /// The reconnect secret for `sessionID`, or nil (absent or unreadable). Read by
+    /// the cold-reattach executor to rebuild the Mosh/ET transport. The reconnect
+    /// logic gets the secret ONLY through this chokepoint, never from Keychain APIs.
+    public func secret(sessionID: UUID) -> Data? {
+        (try? secrets.getSecret(.resumeSecret(sessionID: sessionID))) ?? nil
+    }
+
     /// Prune orphans: a record whose transport needs a secret but has none, OR whose
     /// hostID no longer resolves. Returns the pruned sessionIDs. Also deletes any
     /// secret slot belonging to a pruned record (via `remove`).

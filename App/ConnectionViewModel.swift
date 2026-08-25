@@ -47,6 +47,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     @Published var degraded: DegradeReason?
     /// Non-nil while attached to tmux control mode; nil in raw-PTY mode.
     @Published var tmuxState: TmuxSessionState?
+    /// Non-nil when a cold Mosh/ET resume reattach failed: carries the host label for
+    /// the failure banner ("Couldn't resume <host>."). The persisted record is already
+    /// cleared; `resumeInMemory` holds the reattach info so the banner's Retry works.
+    /// Set by `resumeColdReattach` on failure; cleared when the user leaves the banner.
+    @Published var resumeFailure: String?
+    /// Non-nil when a raw-SSH resume record wants confirmation on launch: carries the
+    /// host label for the inline "Reconnect to <host>?" prompt. Cleared on either choice.
+    @Published var resumeRawPrompt: String?
+    /// Held-in-memory reattach info for the failure banner's Retry (the persisted copy
+    /// is cleared on failure per the spec; leaving the banner drops this). Retry rebuilds
+    /// the transport from this record + its (in-memory) secret.
+    private var resumeInMemory: (host: Host, record: ResumableSession, secret: Data)?
+    /// The raw-SSH record awaiting the inline "Reconnect to <host>?" prompt, so Decline
+    /// clears the correct record (a fresh VM's `sessionID` is unrelated to it).
+    private var resumeRawRecord: ResumableSession?
     /// Last OSC 0/2 title received from the remote (sanitized). Phase-4 Esc-pill
     /// Live row reads this to display the current window title.
     @Published var terminalTitle: String?
@@ -218,6 +233,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     @Published var moshFallback: String?
     /// Last saved-host connect args, retained so `⇧⌘R` can reconnect (Phase 4e).
     private var lastSavedHost: Host?
+    /// Stable per-connection id. Minted at each `connect(...)` start and used as the
+    /// key for the connection-resume record (capture at the connected edge, clear at
+    /// every observable end). One live connection at a time, so one id at a time.
+    private var sessionID = UUID()
     /// The resolved tmux session name for the current connection, computed once at
     /// connect time and reused by attach + the reattach/start-new banner actions.
     private var tmuxSessionNameForConnection = builtInTmuxSessionName
@@ -569,6 +588,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Reset all connection and pane state. Call at the start of each connect
     /// attempt so no stale handles or buffered bytes carry over to the new session.
     private func teardown() {
+        // Every observable end clears the resume record for the current session
+        // (clean disconnect routes through here; so do the ET .dismiss/.handshakeFailed
+        // and crash-recovery paths). Idempotent + secret-clearing. Runs before a fresh
+        // connect mints a new `sessionID`, so a new session is never clobbered.
+        clearResume()
         moshWatchdog?.cancel(); moshWatchdog = nil
         moshResolved = false
         moshSession?.stop()
@@ -623,6 +647,237 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         passwordDetector.reset()          // clear echo/prompt state across sessions
         pendingLineTokens.removeAll()     // drop any un-flushed line tokens
         predictorVM.setSuggestions([])
+    }
+
+    // MARK: - Connection resume
+
+    /// Whether the active session is driving tmux control mode (a `-CC` session),
+    /// so the resume record carries the tmux session name for `new-session -A -s`.
+    private var isTmuxControlMode: Bool { tmux != nil }
+
+    /// Persist a resumable record at a transport's connected edge. Raw SSH passes
+    /// `secret: nil` (it reconnects fresh after a prompt); Mosh/ET pass their reattach
+    /// credential. The tmux session name rides only for a `-CC` session. SECURITY: the
+    /// secret goes straight to the store; it is never logged here or in the coordinator.
+    private func captureResume(host: Host, transport: Transport,
+                               endpoint: (host: String, port: Int), secret: Data?) {
+        let tmuxName = isTmuxControlMode ? tmuxSessionNameForConnection : nil
+        AppStores.shared.resume.captureConnected(
+            sessionID: sessionID, host: host, transport: transport,
+            endpoint: endpoint, secret: secret, tmuxSessionName: tmuxName)
+    }
+
+    /// Clear the resumable record for the current session. Called at every observable
+    /// end (clean disconnect, teardown, mid-flight error). Idempotent.
+    private func clearResume() {
+        AppStores.shared.resume.clear(sessionID: sessionID)
+    }
+
+    // MARK: - Resume executor (launch)
+
+    /// Execute a `ResumeAction` on launch. `.reforeground` is a warm no-op here (the
+    /// live VM already holds the session); the App only reaches this VM cold (a fresh
+    /// VM), so the meaningful cases are `.coldReattach` (Mosh/ET) and `.promptRaw`.
+    /// `.none` is a normal launch.
+    func executeResume(_ action: ResumeAction, host: Host) {
+        switch action {
+        case .reforeground:
+            // Warm reforeground is handled by the surviving VM; a fresh VM never gets
+            // this. Log + no-op so an unexpected warm-on-cold is visible, not silent.
+            DebugLog.shared.log(.connect, "resume:execute reforeground (no-op on fresh VM)")
+        case .coldReattach(let record):
+            resumeColdReattach(host: host, record: record)
+        case .promptRaw(let record):
+            DebugLog.shared.log(.connect, "resume:execute promptRaw host=\(host.label)")
+            resumeRawRecord = record
+            resumeRawPrompt = host.label
+        case .none:
+            DebugLog.shared.log(.connect, "resume:execute none → normal launch")
+        }
+    }
+
+    /// Cold Mosh/ET reattach: read the stored secret, rebuild the transport DIRECTLY
+    /// to `record.host:record.port` (no SSH bootstrap: the mosh-server/etserver session
+    /// persists server-side and is reachable with the stored key). On any failure clear
+    /// the persisted record but KEEP an in-memory copy so the banner's Retry works.
+    private func resumeColdReattach(host: Host, record: ResumableSession) {
+        guard let secret = AppStores.shared.resume.secret(sessionID: record.sessionID) else {
+            DebugLog.shared.log(.connect, "resume:coldReattach ABORT no secret → banner")
+            failResume(host: host, record: record, secret: Data(), reason: "no stored secret")
+            return
+        }
+        // Adopt this record's id so the connected-edge capture REFRESHES the same record
+        // (and a later teardown clears the right one).
+        sessionID = record.sessionID
+        state = .connecting
+        DebugLog.shared.log(.connect,
+            "resume:coldReattach transport=\(record.transport.rawValue) endpoint=\(record.host):\(record.port)")
+        switch record.transport {
+        case .mosh: reattachMosh(host: host, record: record, key: secret)
+        case .et:   reattachET(host: host, record: record, idpasskey: secret)
+        case .ssh:
+            // Unreachable: raw SSH never yields .coldReattach (resumeDecision → .promptRaw).
+            DebugLog.shared.log(.connect, "resume:coldReattach ssh (unexpected) → prompt")
+            resumeRawPrompt = host.label
+        }
+    }
+
+    /// Rebuild a Mosh session directly from a stored record + MOSH_KEY. mosh-client
+    /// needs a NUMERIC IP (AI_NUMERICHOST), so resolve the stored host again.
+    private func reattachMosh(host: Host, record: ResumableSession, key: Data) {
+        let keyStr = String(decoding: key, as: UTF8.self)
+        guard let ip = MoshHostResolver.numericAddress(for: record.host) else {
+            DebugLog.shared.log(.connect, "resume:reattachMosh could not resolve \(record.host) → banner")
+            failResume(host: host, record: record, secret: key, reason: "couldn't resolve host")
+            return
+        }
+        let sess = MoshSession(ip: ip, port: String(record.port), key: keyStr,
+                               cols: 80, rows: 24, predictMode: "adaptive")
+        // Mosh callbacks are dispatched to the main queue (MoshSession.h). These mirror
+        // the fresh-attach closures' isolation pattern (bare `self.` access), which the
+        // App target already compiles: the Obj-C block property is inferred main-actor
+        // here, so no `MainActor.assumeIsolated` wrapper is needed (that guard is for
+        // nonisolated SwiftTerm/@objc callbacks, not these blocks).
+        sess.onOutput = { [weak self] data in self?.output.onOutput(data: data) }
+        sess.onFirstFrame = { [weak self] in
+            guard let self else { return }
+            // Reattach succeeded: frames flowing. Refresh the record (new lastConnectedAt)
+            // and drop the in-memory failure copy.
+            DebugLog.shared.log(.connect, "resume:reattachMosh onFirstFrame → live")
+            self.resumeInMemory = nil
+            self.captureResume(host: host, transport: .mosh,
+                               endpoint: (host: record.host, port: record.port), secret: key)
+        }
+        sess.onEnd = { [weak self] reason in
+            guard let self else { return }
+            DebugLog.shared.log(.connect, "resume:reattachMosh onEnd reason=\(reason ?? "nil") → banner")
+            self.moshSession?.stop(); self.moshSession = nil
+            self.failResume(host: host, record: record, secret: key,
+                            reason: reason ?? "reattach ended")
+        }
+        moshSession = sess
+        tmuxState = nil
+        sess.start()
+        state = .shell
+    }
+
+    /// Rebuild an ET session directly from a stored record + IDPASSKEY (`<id>/<passkey>`).
+    private func reattachET(host: Host, record: ResumableSession, idpasskey: Data) {
+        let combined = String(decoding: idpasskey, as: UTF8.self)
+        let parts = combined.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else {
+            DebugLog.shared.log(.connect, "resume:reattachET malformed stored IDPASSKEY → banner")
+            failResume(host: host, record: record, secret: idpasskey, reason: "malformed credential")
+            return
+        }
+        let id = String(parts[0]); let passkey = String(parts[1])
+        // A stored port of 0 (or out of UInt16 range) falls back to ET's default 2022.
+        let etPort: UInt16 = (record.port > 0 && record.port <= Int(UInt16.max)) ? UInt16(record.port) : 2022
+        let config: ETConfig
+        do {
+            config = try etConnectConfig(host: record.host, port: etPort, id: id, passkey: passkey,
+                                         term: "xterm-256color", cols: 80, rows: 24)
+        } catch {
+            DebugLog.shared.log(.connect, "resume:reattachET config invalid (\(error)) → banner")
+            failResume(host: host, record: record, secret: idpasskey, reason: "invalid config")
+            return
+        }
+        let sess = ETSession(host: config.host, port: config.port,
+                             id: config.id, passkey: config.passkey, env: config.env,
+                             cols: config.cols, rows: config.rows,
+                             width: config.width, height: config.height,
+                             keepaliveSecs: config.keepaliveSecs)
+        // Raw ET reattach (no -CC re-launch here; a resumed tmux session is reattached
+        // by the persisted server, and native -CC rebuild is a device follow-up). ET
+        // callbacks are dispatched to the main queue (ETSession.mm); these mirror the
+        // fresh-attach closures' bare-`self.` isolation pattern the App already compiles.
+        sess.onOutput = { [weak self] data in self?.output.onOutput(data: data) }
+        sess.onFirstFrame = { [weak self] in
+            guard let self else { return }
+            DebugLog.shared.log(.connect, "resume:reattachET onFirstFrame → live")
+            self.resumeInMemory = nil
+            self.state = .shell
+            self.captureResume(host: host, transport: .et,
+                               endpoint: (host: record.host, port: record.port), secret: idpasskey)
+        }
+        sess.onState = { raw in
+            DebugLog.shared.log(.transport, "resume:reattachET state=\(mapETState(Int32(raw)))")
+        }
+        sess.onEnd = { [weak self] reason in
+            guard let self else { return }
+            DebugLog.shared.log(.connect, "resume:reattachET onEnd reason=\(reason ?? "nil") → banner")
+            self.etSession?.close(); self.etSession = nil
+            self.failResume(host: host, record: record, secret: idpasskey,
+                            reason: reason ?? "reattach ended")
+        }
+        etSession = sess
+        tmuxState = nil
+        sess.start()
+    }
+
+    /// Handle a failed cold reattach: clear the persisted record (dead token) but keep
+    /// the reattach info IN MEMORY so the banner's Retry works, then show the banner.
+    private func failResume(host: Host, record: ResumableSession, secret: Data, reason: String) {
+        AppStores.shared.resume.clear(sessionID: record.sessionID)
+        resumeInMemory = (host: host, record: record, secret: secret)
+        // Set the banner label BEFORE flipping to .idle: SessionView's `.onChange(state)`
+        // dismisses on .idle ONLY when `resumeFailure == nil`, so the banner must be
+        // armed first or the cover would dismiss before the user can act.
+        resumeFailure = host.label
+        state = .idle   // no live shell; the banner drives the next action
+        DebugLog.shared.log(.connect, "resume:fail host=\(host.label) reason=\(reason) → banner (record cleared, in-mem kept)")
+    }
+
+    // MARK: - Resume banner + raw-prompt actions
+
+    /// Banner Retry: re-attempt the cold reattach from the in-memory copy.
+    func resumeRetry() {
+        guard let mem = resumeInMemory else { return }
+        DebugLog.shared.log(.connect, "resume:retry host=\(mem.host.label)")
+        resumeFailure = nil
+        // Re-persist the in-memory secret so the reattach path can read it, then re-run.
+        AppStores.shared.resume.captureConnected(
+            sessionID: mem.record.sessionID, host: mem.host, transport: mem.record.transport,
+            endpoint: (host: mem.record.host, port: mem.record.port),
+            secret: mem.secret, tmuxSessionName: mem.record.tmuxSessionName)
+        resumeColdReattach(host: mem.host, record: mem.record)
+    }
+
+    /// Banner Start fresh: a NEW connection to the same host (explicit new session).
+    func resumeStartFresh() {
+        guard let mem = resumeInMemory else { return }
+        DebugLog.shared.log(.connect, "resume:startFresh host=\(mem.host.label)")
+        resumeFailure = nil
+        resumeInMemory = nil
+        connect(savedHost: mem.host, password: lastPassword ?? "")
+    }
+
+    /// Banner Back to hosts: drop the in-memory copy and dismiss to the host list.
+    func resumeBackToHosts() {
+        DebugLog.shared.log(.connect, "resume:backToHosts")
+        resumeFailure = nil
+        resumeInMemory = nil
+        state = .idle
+    }
+
+    /// Raw-SSH prompt Reconnect: a fresh SSH connect to the same host. `connect`
+    /// clears the old record (teardown) and mints a fresh session id.
+    func resumeRawReconnect(host: Host) {
+        DebugLog.shared.log(.connect, "resume:rawReconnect host=\(host.label)")
+        resumeRawPrompt = nil
+        resumeRawRecord = nil
+        connect(savedHost: host, password: lastPassword ?? "")
+    }
+
+    /// Raw-SSH prompt Not now: clear the resumed record and dismiss to the host list.
+    func resumeRawDecline(host: Host) {
+        DebugLog.shared.log(.connect, "resume:rawDecline host=\(host.label)")
+        resumeRawPrompt = nil
+        if let rec = resumeRawRecord {
+            AppStores.shared.resume.clear(sessionID: rec.sessionID)
+        }
+        resumeRawRecord = nil
+        state = .idle
     }
 
     // MARK: - Auth
@@ -768,6 +1023,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             degraded = reason
             try await openRawShell(conn: conn)
         }
+        // Connected edge (raw SSH / tmux -CC over SSH): a raw SSH session is
+        // client-side, so it resumes by PROMPTING (transport = .ssh, no secret). If
+        // the host runs tmux -CC (`isTmuxControlMode`), the tmux session name rides so
+        // a confirmed fresh reconnect lands back in the same panes via `new-session -A`.
+        // Runs on the main actor (async method on a @MainActor class), no wrap needed.
+        captureResume(host: host, transport: .ssh,
+                      endpoint: (host: host.hostName, port: resolvePort(host: host, defaults: defaults)),
+                      secret: nil)
     }
 
     // MARK: - Mosh path
@@ -860,6 +1123,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self?.moshFirstFrameSeen = true
                 self?.moshWatchdog?.cancel(); self?.moshWatchdog = nil
                 DebugLog.shared.log(.connect, "mosh: watchdog cancelled (onFirstFrame)")
+                // Connected edge: persist the resume record. Reattach endpoint is the
+                // Mosh server (host + UDP port); secret is the MOSH_KEY. Bare `self?.`
+                // access mirrors the `self?.moshFirstFrameSeen` line above (this block is
+                // main-actor-inferred, the same as the rest of this closure).
+                self?.captureResume(host: host, transport: .mosh,
+                                    endpoint: (host: host.hostName, port: port),
+                                    secret: Data(key.utf8))
             }
             // Stamp the start time BEFORE the onEnd closure literal so the closure can
             // capture it (Swift resolves captures at declaration order, not runtime).
@@ -884,6 +1154,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     self.moshSession?.stop()
                     self.moshSession = nil
                     self.moshFirstFrameSeen = false
+                    // Mid-flight error: the session broke, the MOSH_KEY is likely stale.
+                    // Clear the resume record (this path does NOT call teardown).
+                    self.clearResume()
                     DebugLog.shared.log(.connect, "mosh: exit crashBanner (elapsed=\(String(format: "%.2f", elapsed))s) → crash banner")
                     self.crashBanner = .tmuxEnded
                     return
@@ -893,6 +1166,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     self.moshSession?.stop()
                     self.moshSession = nil
                     self.moshFirstFrameSeen = false
+                    // Session over (clean exit): clear the resume record (no teardown here).
+                    self.clearResume()
                     DebugLog.shared.log(.connect, "mosh: exit ended (clean, elapsed=\(String(format: "%.2f", elapsed))s) → session ended")
                     self.crashBanner = .tmuxEnded
                     return
@@ -1099,6 +1374,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.etWatchdog?.cancel(); self.etWatchdog = nil
             DebugLog.shared.log(.transport, "et: onFirstFrame, stream up; watchdog cancelled")
             self.state = .shell
+            // Connected edge: persist the resume record BEFORE the `-CC` early-return
+            // guard below (so the raw-ET path captures too). Reattach endpoint is the ET
+            // server (config.host + TCP port); secret is the IDPASSKEY (`<id>/<passkey>`,
+            // the wire form parseETIDPASSKEY reads). Bare `self.` access mirrors the
+            // `self.state = .shell` line above (this closure is main-actor-inferred).
+            self.captureResume(host: host, transport: .et,
+                               endpoint: (host: config.host, port: Int(config.port)),
+                               secret: Data("\(serverCred.id)/\(serverCred.passkey)".utf8))
             // ET `-CC`: the stream is up (login shell ready), so NOW launch tmux
             // control mode in-band by "typing" `tmux -CC new-session …\n`. Guarded
             // to fire exactly once (onFirstFrame is already once-only, but ET may
@@ -1307,6 +1590,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         runtime.onExit = { [weak self] reason in
             DebugLog.shared.log(.lifecycle, "tmux onExit: reason=\(reason ?? "nil") → .failed")
+            // Session ended (mid-flight): clear the resume record. This path drives
+            // .failed (not teardown), so clear here.
+            self?.clearResume()
             self?.state = .failed(reason ?? "tmux session ended")
         }
         // Control mode is genuinely up (first %begin, the .attaching→.attached edge).
@@ -1688,6 +1974,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         lastSavedHost = savedHost
         lastPassword = password
         teardown()
+        sessionID = UUID()   // fresh resume key for this connection (teardown cleared the old)
         etUserDisconnecting = false   // fresh connection: clear any prior user-disconnect guard
         state = .connecting
         degraded = nil
@@ -1708,6 +1995,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let addr = "\(savedHost.hostName):\(port)"
         output.onExit = { [weak self] exit in
             DebugLog.shared.log(.connect, "connect(saved): output.onExit → .failed(\(exit.error ?? "Session closed"))")
+            self?.clearResume()   // raw/session exit is an observable end: clear the record
             self?.state = .failed(exit.error ?? "Session closed")
         }
         DebugLog.shared.log(.connect, "connect(saved): START addr=\(addr) user=\(user)")
@@ -1791,12 +2079,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             return
         }
         teardown()
+        sessionID = UUID()   // fresh resume key for this connection (teardown cleared the old)
         etUserDisconnecting = false   // fresh connection: clear any prior user-disconnect guard
         state = .connecting
         degraded = nil
         let addr = "\(host):\(port.isEmpty ? "22" : port)"
         output.onExit = { [weak self] exit in
             DebugLog.shared.log(.connect, "connect(adhoc): output.onExit → .failed(\(exit.error ?? "Session closed"))")
+            self?.clearResume()   // raw/session exit is an observable end: clear the record
             self?.state = .failed(exit.error ?? "Session closed")
         }
         DebugLog.shared.log(.connect, "connect(adhoc): START addr=\(addr) user=\(user)")

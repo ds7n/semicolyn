@@ -30,6 +30,11 @@ final class AppStores {
     let secrets: SecretStore
     /// Mint/import + resolve SSH identities (publickey auth).
     let identities: IdentityService
+    /// Two-tier connection-resume store: non-secret `ResumableSession` metadata in
+    /// `EncryptedRecordStore` + the reconnect secret in the Keychain. Held under the
+    /// same `@MainActor` confinement as the other stores (it is not `Sendable`, its
+    /// deps aren't). The App-side `ResumeCoordinator` wraps it.
+    let resumableSessions: ResumableSessionStore
     /// Terminal rendering preferences (font, cursor, scrollback).
     let terminalSettings = TerminalSettingsStore()
     /// User keybar customization (slot layout + reverse-bar direction), persisted.
@@ -39,6 +44,10 @@ final class AppStores {
     let appearance = ThemeSettingsStore()
     /// Pro entitlement (stub seam; real StoreKit is a later slice).
     let pro = ProStore()
+    /// App-side connection-resume orchestrator over `resumableSessions`. Shared so the
+    /// capture edge (`ConnectionViewModel`), the launch-resume flow (`HostListView`),
+    /// and the banner/prompt (`SessionView`) all read/write one store.
+    private(set) lazy var resume = ResumeCoordinator(store: resumableSessions)
     /// Base Application Support directory (`…/semicolyn/`). Retained so store
     /// factory methods can build sub-paths without repeating the FileManager call.
     private let baseDirectory: URL
@@ -82,6 +91,27 @@ final class AppStores {
         // Identity service: mint/import + resolve SSH identities for publickey auth.
         // Constructed last so both `self.hosts` and `self.secrets` are already set.
         self.identities = IdentityService(store: self.hosts, secrets: secrets, minter: CoreIdentityMinter())
+
+        // Connection-resume store: a SEPARATE `EncryptedRecordStore` over the SAME
+        // blob store + record key as `hosts` (the record TYPE, not the store, keys the
+        // namespace, so reusing blobs+key is safe and correct). `hostExists` resolves a
+        // saved-host UUID at reconcile time. It is `@Sendable`, but `reconcile()` is
+        // only ever invoked synchronously on the main actor (via
+        // `ResumeCoordinator.resumeOnLaunch`), so reading the main-actor-confined
+        // `HostStore` under `MainActor.assumeIsolated` is concurrency-correct here
+        // (the alternative, snapshotting host IDs at construction, is WRONG: the host
+        // library changes over the app's lifetime, so a stale snapshot would keep
+        // orphaned records or prune live ones). `AppStores.shared` is read (not the
+        // still-initializing `self`) so the closure never captures a partially-built
+        // instance; by the time `reconcile()` runs, `shared` is fully assigned.
+        self.resumableSessions = ResumableSessionStore(
+            records: EncryptedRecordStore(backend: blobs, key: key),
+            secrets: secrets,
+            hostExists: { hostID in
+                MainActor.assumeIsolated {
+                    ((try? AppStores.shared.hosts.host(id: hostID)) ?? nil) != nil
+                }
+            })
 
         // Install the bundled predictor seed on first launch / version upgrade so
         // prediction works out of the box. Fail-soft: a missing/corrupt resource must
