@@ -104,9 +104,17 @@ final class AppStores {
         // orphaned records or prune live ones). `AppStores.shared` is read (not the
         // still-initializing `self`) so the closure never captures a partially-built
         // instance; by the time `reconcile()` runs, `shared` is fully assigned.
+        // Resume reconnect secrets get a SEPARATE, NON-synchronizable Keychain store:
+        // the spec ("Two-tier storage") requires the ephemeral per-session Mosh/ET
+        // reattach key to be `AfterFirstUnlock` AND NOT iCloud-synced (it is device-
+        // local roaming state, not a credential to fan out across the user's devices).
+        // The main `secrets` store stays synchronizable (identities/hosts/passwords ride
+        // iCloud Keychain). `resumeSecret/<uuid>` accounts live in a distinct item space
+        // (sync vs non-sync are separate query domains), so there is no collision.
+        let resumeSecrets = KeychainSecretStore(synchronizable: false)
         self.resumableSessions = ResumableSessionStore(
             records: EncryptedRecordStore(backend: blobs, key: key),
-            secrets: secrets,
+            secrets: resumeSecrets,
             hostExists: { hostID in
                 MainActor.assumeIsolated {
                     ((try? AppStores.shared.hosts.host(id: hostID)) ?? nil) != nil
