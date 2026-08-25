@@ -38,9 +38,44 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// True while inside a bracketed paste (`ESC[200~`…`ESC[201~`): tokens are
     /// tracked for prefix context but never emitted/learned (L3).
     public private(set) var withinPaste = false
-    /// Bytes captured after a bare `ESC`, pending a bracketed-paste match. Empty
-    /// when not mid-escape. Flushed back to normal handling on any deviation.
-    private var escapeBuffer: [UInt8] = []
+    /// VT ground-state parser state, persists across `observe(_:)` calls so a
+    /// sequence split across chunks (e.g. a DA response arriving in two reads)
+    /// resumes correctly. See `docs/superpowers/specs/2026-08-22-predictor-input-sanitizer-design.md`.
+    private enum ParseState: Equatable {
+        case ground
+        /// After a bare ESC (0x1b), awaiting the byte that selects the sequence kind.
+        case escape
+        /// Inside a CSI sequence (`ESC[` or C1 0x9b): accumulating params/intermediates
+        /// until a final byte (0x40-0x7e). `hadPrivateMarker` tracks whether a private
+        /// marker (0x3c-0x3f) appeared in the param region; `paramBytes` accumulates the
+        /// raw param bytes (for parsing `param0`).
+        case csi(hadPrivateMarker: Bool, paramBytes: [UInt8])
+        /// Inside an OSC sequence (`ESC]` or C1 0x9d): consume until BEL or ST.
+        case osc
+        /// Inside `.osc`, just saw an ESC: if the next byte is `\` this completes
+        /// the ST terminator (discard, back to ground); any other byte is still
+        /// part of the swallowed OSC body (stay swallowing, do NOT reset/re-handle
+        /// like a ground-level bare ESC would).
+        case oscEscape
+        /// Inside a DCS/SOS/PM/APC string sequence (`ESC P/X/^/_`): consume until ST.
+        case stringSequence
+        /// Inside `.stringSequence`, just saw an ESC: mirrors `.oscEscape`.
+        case stringSequenceEscape
+        /// A sequence exceeded the max-length guard with no final/terminator byte
+        /// seen. Keep discarding CSI-shaped bytes (0x20-0x3f, the param/intermediate
+        /// range) so trailing garbage from the SAME malformed sequence never leaks
+        /// into `current`; any other byte (a plausible final byte, a fresh ESC, or
+        /// ordinary ground text) returns to `.ground` and is re-handled there.
+        case abortedSequence
+    }
+    /// Current VT parser state. Also tracks the total byte length of the sequence
+    /// in progress (for the 64-byte max-sequence guard); reset to 0 on every
+    /// transition back to `.ground`.
+    private var parseState: ParseState = .ground
+    private var sequenceLength: Int = 0
+    /// Maximum bytes an escape/CSI/OSC/string sequence may run without a final
+    /// byte before we give up and treat it as malformed (never hang swallowing).
+    private static let maxSequenceLength = 64
     /// True when the current line began with a space (`HISTCONTROL=ignorespace`
     /// gesture): the WHOLE line is suppressed from learning (L4a). Reset each line.
     public private(set) var lineOptedOut = false
@@ -64,9 +99,6 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// count only (see `droppedInPaste`).
     public private(set) var droppedAsSecret = 0
 
-    private static let pasteEnter: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]  // ESC[200~
-    private static let pasteExit: [UInt8]  = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]  // ESC[201~
-
     public init() {}
 
     /// Fold one chunk of outgoing bytes. Returns the tokens committed by this chunk
@@ -77,49 +109,68 @@ public struct InputTokenTracker: Equatable, Sendable {
         return committed
     }
 
-    /// Route one byte. When mid-escape (after a bare ESC) we buffer until the byte
-    /// stream either completes a paste marker (toggle `withinPaste`, consume it) or
-    /// deviates (flush: the ESC becomes a line-context reset, the deviating byte is
-    /// re-handled normally).
+    /// C0 control bytes that represent a user editing gesture we cannot faithfully
+    /// replay (no cursor model): treated as a line-context reset in `.ground`.
+    private static let editingC0: Set<UInt8> = [0x17, 0x15, 0x0b, 0x01, 0x03, 0x05]  // Ctrl-W/U/K/A/C/E
+
+    /// The tmux prefix byte (`Ctrl-A`, the app's default). In a native `-CC` client
+    /// the prefix flips tmux into its prefix key-table and the NEXT byte dispatches a
+    /// binding (`prefix c` -> new-window): that following key is a tmux COMMAND, not
+    /// typed text, so it must be swallowed rather than extend `current`. Device log
+    /// (build 146) showed `Ctrl-A c whoami` leaking the binding `c` as `cwhoami`.
+    /// (Only 0x01 arms this: the other `editingC0` keys are ordinary line edits whose
+    /// following byte IS normal text.)
+    private static let tmuxPrefix: UInt8 = 0x01
+
+    /// One-shot: set when the tmux prefix was just seen; the next `.ground` byte is the
+    /// binding key (a command) and is swallowed, then this clears. Persists across
+    /// `observe(_:)` chunks (the binding key may arrive in a later chunk).
+    private var expectingPrefixCommand = false
+
+    /// Route one byte through the VT ground-state machine. Only `.ground`-state
+    /// printable bytes ever reach `classify`/extend `current`; every other state
+    /// swallows bytes until its terminator, then dispatches (discard, or for CSI,
+    /// classify via `csiKind` to decide swallow-vs-reset).
     private mutating func handleByte(_ b: UInt8, into committed: inout [CommittedToken]) {
-        if !escapeBuffer.isEmpty {
-            escapeBuffer.append(b)
-            // Still a viable prefix of either marker? keep buffering.
-            if Self.pasteEnter.starts(with: escapeBuffer) || Self.pasteExit.starts(with: escapeBuffer) {
-                if escapeBuffer == Self.pasteEnter { withinPaste = true; escapeBuffer = [] }
-                else if escapeBuffer == Self.pasteExit {
-                    if withinPaste {
-                        // Drop whatever accumulated inside the paste. This is the SECOND L3
-                        // drop site (the first is `commitCurrent`'s paste branch, for a
-                        // delimiter seen mid-paste); count it too so `droppedInPaste`
-                        // reflects every paste-suppressed token. Only tally non-empty
-                        // content so an empty/marker-only paste does not inflate the count.
-                        if !current.isEmpty { droppedInPaste += 1 }
-                        current = ""
-                    }
-                    withinPaste = false
-                    escapeBuffer = []
-                }
-                return
-            }
-            // Deviation: this ESC sequence is not a paste marker. Treat the ESC as
-            // a normal line-context reset, then re-handle the buffered tail bytes
-            // (everything after the ESC) as ordinary input.
-            let tail = Array(escapeBuffer.dropFirst())   // drop the ESC itself
-            escapeBuffer = []
-            resetLineContext()                            // ESC ⇒ reset (as today)
-            for t in tail { handleByte(t, into: &committed) }
-            return
+        switch parseState {
+        case .ground:
+            handleGroundByte(b, into: &committed)
+        case .escape:
+            handleEscapeByte(b, into: &committed)
+        case .csi(let hadPrivateMarker, let paramBytes):
+            handleCSIByte(b, hadPrivateMarker: hadPrivateMarker, paramBytes: paramBytes, into: &committed)
+        case .osc:
+            handleOSCByte(b, into: &committed)
+        case .oscEscape:
+            handleOSCEscapeByte(b, into: &committed)
+        case .stringSequence:
+            handleStringSequenceByte(b, into: &committed)
+        case .stringSequenceEscape:
+            handleStringSequenceEscapeByte(b, into: &committed)
+        case .abortedSequence:
+            handleAbortedSequenceByte(b, into: &committed)
         }
-        if b == 0x1B {                                    // ESC → start capturing
-            escapeBuffer = [b]
-            return
-        }
-        classify(b, into: &committed)
     }
 
-    /// The original per-byte tokenizer, minus the ESC case (ESC is handled above).
-    private mutating func classify(_ b: UInt8, into committed: inout [CommittedToken]) {
+    /// `.ground`: printable bytes extend `current`/`line`; C0 controls dispatch as
+    /// today (enter/backspace/tab/editing-reset); ESC/C1-CSI/C1-OSC transition out.
+    private mutating func handleGroundByte(_ b: UInt8, into committed: inout [CommittedToken]) {
+        // Escape-sequence introducers ALWAYS start their state machine, even while a
+        // prefix swallow is armed: a terminal auto-response (e.g. a DA `ESC[...c`) can
+        // race in right after the user's prefix byte, before their binding key. If the
+        // swallow ate the leading ESC, the sequence body would fall through as garbage
+        // text (the exact poisoning the sanitizer prevents). So transition FIRST; the
+        // arm still catches the next real ground byte (the actual binding key).
+        if b == 0x1b { enterState(.escape); return }
+        if b == 0x9b { enterState(.csi(hadPrivateMarker: false, paramBytes: [])); return }
+        if b == 0x9d { enterState(.osc); return }
+        // One-shot: the byte right after the tmux prefix is a binding key (a command),
+        // not typed text. Swallow it, clear the arm, and do nothing else.
+        if expectingPrefixCommand {
+            expectingPrefixCommand = false
+            return
+        }
+
         if !sawLineStart {
             sawLineStart = true
             if b == 0x20 { lineOptedOut = true }
@@ -145,9 +196,177 @@ public struct InputTokenTracker: Equatable, Sendable {
             if !line.isEmpty { line.removeLast() }
         case 0x09:                      // tab → remote completion: drop the partial
             current = ""
+        case let c where Self.editingC0.contains(c):   // Ctrl-W/U/K/A/C/E → reset
+            resetLineContext()
+            // The tmux prefix additionally arms a one-shot swallow of the binding key
+            // that follows (the other editing keys take normal text after them).
+            if c == Self.tmuxPrefix { expectingPrefixCommand = true }
         default:                        // other control → reset line context
             resetLineContext()
         }
+    }
+
+    /// `.escape`: the byte right after a bare ESC selects the sequence kind.
+    /// Deliberately does NOT call `enforceSequenceGuard`: `.escape` is a single-byte
+    /// transition state (exactly one byte is ever consumed here before moving to
+    /// `.csi`/`.osc`/`.stringSequence`/back to `.ground`), so it is bounded by
+    /// construction and cannot accumulate length like the other 5 handlers do.
+    private mutating func handleEscapeByte(_ b: UInt8, into committed: inout [CommittedToken]) {
+        switch b {
+        case UInt8(ascii: "["):
+            enterState(.csi(hadPrivateMarker: false, paramBytes: []))
+        case UInt8(ascii: "]"):
+            enterState(.osc)
+        case UInt8(ascii: "P"), UInt8(ascii: "X"), UInt8(ascii: "^"), UInt8(ascii: "_"):
+            enterState(.stringSequence)
+        case 0x30...0x7e:
+            // Two-byte ESC-final sequence (e.g. ESC c, ESC =, ESC >): discard, back to ground.
+            backToGround()
+        default:
+            // A bare ESC followed by a deviating byte (not a recognized sequence
+            // starter): the ESC itself is a line reset (preserve existing "ESC ⇒
+            // reset" behavior); the deviating byte is re-handled in ground.
+            backToGround()
+            resetLineContext()
+            handleByte(b, into: &committed)
+        }
+    }
+
+    /// `.csi`: accumulate params (0x30-0x3f) + intermediates (0x20-0x2f); a final
+    /// byte (0x40-0x7e) ends the sequence and dispatches via `csiKind`.
+    private mutating func handleCSIByte(
+        _ b: UInt8, hadPrivateMarker: Bool, paramBytes: [UInt8], into committed: inout [CommittedToken]
+    ) {
+        if enforceSequenceGuard(into: &committed) { return }
+        switch b {
+        case 0x30...0x3f:
+            // Private markers live in this range too (0x3c-0x3f: '<','=','>','?').
+            let isPrivateMarker = (0x3c...0x3f).contains(b)
+            parseState = .csi(hadPrivateMarker: hadPrivateMarker || isPrivateMarker, paramBytes: paramBytes + [b])
+            sequenceLength += 1
+        case 0x20...0x2f:
+            // Intermediate bytes: accumulate but do not affect the private-marker flag.
+            parseState = .csi(hadPrivateMarker: hadPrivateMarker, paramBytes: paramBytes + [b])
+            sequenceLength += 1
+        case 0x40...0x7e:
+            dispatchCSI(finalByte: b, hadPrivateMarker: hadPrivateMarker, paramBytes: paramBytes, into: &committed)
+        default:
+            // Unexpected byte inside a CSI sequence: abort defensively.
+            backToGround()
+            resetLineContext()
+        }
+    }
+
+    /// Parse `param0` (the integer before the first `;`, if any) from the
+    /// accumulated CSI param bytes, then classify and dispatch.
+    private mutating func dispatchCSI(
+        finalByte: UInt8, hadPrivateMarker: Bool, paramBytes: [UInt8], into committed: inout [CommittedToken]
+    ) {
+        backToGround()
+        let param0 = Self.parseParam0(paramBytes)
+        switch csiKind(finalByte: finalByte, hadPrivateMarker: hadPrivateMarker, param0: param0) {
+        case .editing:
+            resetLineContext()
+        case .responseOrFormat:
+            break   // swallow, `current` untouched
+        case .pasteEnter:
+            withinPaste = true
+        case .pasteExit:
+            if withinPaste {
+                if !current.isEmpty { droppedInPaste += 1 }
+                current = ""
+            }
+            withinPaste = false
+        }
+    }
+
+    /// Extract the first `;`-delimited integer parameter from raw CSI param
+    /// bytes (which may include a leading private marker like `?` or `<`,
+    /// skipped: it is not part of the numeric param).
+    private static func parseParam0(_ paramBytes: [UInt8]) -> Int? {
+        var digits: [UInt8] = []
+        for b in paramBytes {
+            if b == UInt8(ascii: ";") { break }
+            if (0x30...0x39).contains(b) { digits.append(b) }
+            // Non-digit, non-semicolon bytes before any digit (e.g. a leading '?'
+            // private marker) are skipped; a non-digit AFTER digits have started
+            // would be malformed input, treated the same as "stop collecting".
+            else if !digits.isEmpty { break }
+        }
+        guard !digits.isEmpty, let s = String(bytes: digits, encoding: .ascii) else { return nil }
+        return Int(s)
+    }
+
+    /// `.osc`: consume until BEL (0x07) or ST (`ESC \`) → discard.
+    private mutating func handleOSCByte(_ b: UInt8, into committed: inout [CommittedToken]) {
+        if enforceSequenceGuard(into: &committed) { return }
+        if b == 0x07 || b == 0x9c { backToGround(); return }
+        if b == 0x1b { enterState(.oscEscape); return }
+        sequenceLength += 1
+    }
+
+    /// `.oscEscape`: saw ESC while inside an OSC body. `\` completes the ST
+    /// terminator; anything else is still swallowed OSC content (stay in `.osc`,
+    /// do NOT treat it as a ground-level line reset).
+    private mutating func handleOSCEscapeByte(_ b: UInt8, into committed: inout [CommittedToken]) {
+        if enforceSequenceGuard(into: &committed) { return }
+        if b == UInt8(ascii: "\\") { backToGround(); return }
+        parseState = .osc
+        sequenceLength += 1
+    }
+
+    /// `.stringSequence` (DCS/SOS/PM/APC): consume until ST (`ESC \` / 0x9c) → discard.
+    private mutating func handleStringSequenceByte(_ b: UInt8, into committed: inout [CommittedToken]) {
+        if enforceSequenceGuard(into: &committed) { return }
+        if b == 0x9c { backToGround(); return }
+        if b == 0x1b { enterState(.stringSequenceEscape); return }
+        sequenceLength += 1
+    }
+
+    /// `.stringSequenceEscape`: mirrors `.oscEscape` for DCS/SOS/PM/APC bodies.
+    private mutating func handleStringSequenceEscapeByte(_ b: UInt8, into committed: inout [CommittedToken]) {
+        if enforceSequenceGuard(into: &committed) { return }
+        if b == UInt8(ascii: "\\") { backToGround(); return }
+        parseState = .stringSequence
+        sequenceLength += 1
+    }
+
+    /// `.abortedSequence`: still discarding the tail of a malformed sequence that
+    /// tripped the max-length guard. CSI-shaped bytes (params/intermediates) keep
+    /// being swallowed; anything else (a plausible final byte, a fresh ESC, or
+    /// ordinary text) returns to `.ground` and is re-handled there. Deliberately
+    /// does NOT call `enforceSequenceGuard`: this state IS the guard's already-
+    /// aborted swallow, re-running the length check here would be a no-op
+    /// (`sequenceLength` was already reset on entry) and re-triggering the abort
+    /// path from within itself would be redundant, not a second bound.
+    private mutating func handleAbortedSequenceByte(_ b: UInt8, into committed: inout [CommittedToken]) {
+        if (0x20...0x3f).contains(b) { return }
+        backToGround()
+        handleByte(b, into: &committed)
+    }
+
+    /// Move to a new non-ground state, resetting the length counter.
+    private mutating func enterState(_ state: ParseState) {
+        parseState = state
+        sequenceLength = 0
+    }
+
+    /// Return to `.ground`, clearing the length counter.
+    private mutating func backToGround() {
+        parseState = .ground
+        sequenceLength = 0
+    }
+
+    /// 64-byte max-sequence guard: if a sequence exceeds the bound with no
+    /// final/terminator byte, abort defensively (never hang swallowing forever).
+    /// Transitions to `.abortedSequence` (not straight to `.ground`) so trailing
+    /// bytes shaped like more of the SAME malformed sequence are still discarded.
+    /// Returns true if the guard fired (caller must return without further work).
+    private mutating func enforceSequenceGuard(into committed: inout [CommittedToken]) -> Bool {
+        guard sequenceLength >= Self.maxSequenceLength else { return false }
+        parseState = .abortedSequence
+        resetLineContext()
+        return true
     }
 
     /// Commit `current` as a token, UNLESS we're inside a paste (L3) or the token
@@ -194,7 +413,9 @@ public struct InputTokenTracker: Equatable, Sendable {
     public mutating func reset() {
         current = ""; line = ""; previous = nil; secretCheckPrev = nil
         withinPaste = false
-        escapeBuffer = []
+        parseState = .ground
+        sequenceLength = 0
+        expectingPrefixCommand = false
         lineOptedOut = false
         lastCommittedLineOptedOut = false
         sawLineStart = false

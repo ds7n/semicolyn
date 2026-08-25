@@ -137,6 +137,28 @@ public struct PredictorEngine: Sendable {
     /// contribution is zero and output matches the CLI-only ranking exactly.
     public func suggestions(forPrefix prefix: String, after previous: String? = nil,
                             context: PredictionContext = .init()) -> [String] {
+        scoredMerged(prefix: prefix, previous: previous, context: context)
+            .prefix(config.topK)
+            .map { $0.token }
+    }
+
+    /// The shared core of `suggestions(forPrefix:after:context:)`: source
+    /// construction (unigram vs bigram axis), the `DualSeedSuggester` fill-path
+    /// query, and the harvest-leads + `filter.excludes` + dedup merge, but
+    /// returning `(token, score)` pairs instead of collapsing to `[String]`, so a
+    /// caller (`blendedSuggestions`) can rank this axis's results against another
+    /// axis's by score. Harvested tokens (already newest-first, ephemeral output)
+    /// must keep leading the merge exactly as `suggestions` does today; they are
+    /// given a synthetic score strictly above the highest seed/learned score,
+    /// descending by recency, so they also sort first when blended against another
+    /// `scoredMerged` call's results.
+    ///
+    /// Callers that only need the final token order and count (`suggestions`)
+    /// truncate this result to `config.topK`; this helper itself does not cap so a
+    /// blend can compare a fuller ranked list from each axis before capping once at
+    /// the end.
+    private func scoredMerged(prefix: String, previous: String?,
+                              context: PredictionContext) -> [(token: String, score: Double)] {
         // Min-prefix floor on the FROM-SCRATCH path only. A usable `previous` means the
         // caller wants next-token (bigram) suggestions, which are valid with an empty
         // word-prefix; only the no-preceding-token case needs typed input (bugs 3/4).
@@ -189,19 +211,98 @@ public struct PredictorEngine: Sendable {
                                      proseSeed: proseSeedSource, bias: bias, config: config,
                                      learnedMagnitude: learnedMag, cliMagnitude: cliMag,
                                      proseMagnitude: proseMag)
-            .suggestions(forPrefix: prefix, limit: overfetchLimit)
+            .scoredSuggestions(forPrefix: prefix, limit: overfetchLimit)
 
         // Harvested output leads (already newest-first); learned/seed fill the rest.
-        let harvested = output.candidates(forPrefix: prefix).map { $0.token }
+        // Harvested tokens carry no natural score of their own (they are not ranked
+        // by count), so synthesize one strictly above every seed/learned score here,
+        // descending by harvest recency, which reproduces "harvested leads" both in
+        // this axis's own order and when blended against another axis's scores.
+        //
+        // Only apply harvest when `prefix` is non-empty. `OutputHarvest` is a pure
+        // completion-oriented (prefix) store with no bigram/"followed by" concept;
+        // on an empty prefix (the next-word axis, querying `previous`'s successors)
+        // `candidates(forPrefix: "")` would match every harvested token as a bogus
+        // successor of `previous`, which is wrong.
+        let harvestedTokens = prefix.isEmpty ? [] : output.candidates(forPrefix: prefix).map { $0.token }
+        let maxSeedScore = base.map { $0.score }.max() ?? 0
+        let harvested: [(token: String, score: Double)] = harvestedTokens.enumerated().map { index, token in
+            (token: token, score: maxSeedScore + 1 + Double(harvestedTokens.count - index))
+        }
+
         var seen = Set<String>()
-        var merged: [String] = []
-        for token in harvested + base {
-            if filter.excludes(token) { continue }
-            guard seen.insert(token).inserted else { continue }
-            merged.append(token)
-            if merged.count == config.topK { break }
+        var merged: [(token: String, score: Double)] = []
+        for entry in harvested + base {
+            if filter.excludes(entry.token) { continue }
+            guard seen.insert(entry.token).inserted else { continue }
+            merged.append(entry)
         }
         return merged
+    }
+
+    /// One chip in a ``blendedSuggestions`` result: either a completion of the
+    /// currently-typed word (`isNextWord == false`) or a predicted word to follow
+    /// it (`isNextWord == true`). The App uses `isNextWord` to style/insert the
+    /// chip differently (e.g. inserting a leading space for a next-word chip).
+    public struct BlendedChip: Equatable, Sendable {
+        public let token: String
+        public let isNextWord: Bool
+        public init(token: String, isNextWord: Bool) { self.token = token; self.isNextWord = isNextWord }
+    }
+
+    /// Up to `config.topK` chips blending two axes for the word the user is
+    /// currently typing (`current`): completions of `current` itself, and
+    /// predicted words to follow it (next-word, keyed as the bigram successor of
+    /// `current` with an empty prefix). Both axes go through the same
+    /// `scoredMerged` core (source construction, seed fill, harvest lead, privacy
+    /// filter, dedup) as `suggestions(...)`, so a blended chip is held to the same
+    /// exclusion/ranking rules as a plain completion or next-word query.
+    ///
+    /// When only one axis has candidates, the result is that axis's ranking
+    /// unchanged (capped at `topK`). When both do, the single top-ranked candidate
+    /// of each axis is reserved a slot first (so a completion and a next-word
+    /// always both appear when available), then the remaining candidates from both
+    /// axes are merged by descending score to fill out the cap, skipping tokens
+    /// already chosen. `current` itself is never suggested by either axis (it is
+    /// what the user already typed, not a completion of itself).
+    ///
+    /// `allowNextWord` gates the next-word axis entirely: when `false` the
+    /// next-word query is not run at all (a secret-value `current`, an opted-out
+    /// line, or a too-short `current` must never leak a successor query), and the
+    /// result is completions-only, same as the `nextWords.isEmpty` case below.
+    public func blendedSuggestions(current: String, previous: String?, allowNextWord: Bool = true,
+                                   context: PredictionContext = .init()) -> [BlendedChip] {
+        guard !current.isEmpty else { return [] }
+        // Completions of `current` (exclude the exact typed token).
+        let completions = scoredMerged(prefix: current, previous: previous, context: context)
+            .filter { $0.token != current }
+        // Next-words keyed on `current` (empty prefix, bigram after current). Skipped
+        // entirely when `allowNextWord` is false.
+        let nextWords = allowNextWord
+            ? scoredMerged(prefix: "", previous: current, context: context).filter { $0.token != current }
+            : []
+        let cap = config.topK
+        if nextWords.isEmpty {
+            return Array(completions.prefix(cap)).map { BlendedChip(token: $0.token, isNextWord: false) }
+        }
+        if completions.isEmpty {
+            return Array(nextWords.prefix(cap)).map { BlendedChip(token: $0.token, isNextWord: true) }
+        }
+        // Both non-empty: reserve top of each, then fill remainder by score, de-duped.
+        var chosen: [BlendedChip] = []
+        var seen = Set<String>()
+        func take(_ token: String, _ isNext: Bool) {
+            guard !seen.contains(token), chosen.count < cap else { return }
+            seen.insert(token); chosen.append(BlendedChip(token: token, isNextWord: isNext))
+        }
+        take(completions[0].token, false)
+        take(nextWords[0].token, true)
+        // Remainder: merge the two tails by descending score.
+        let rest = (completions.dropFirst().map { ($0.token, $0.score, false) }
+                  + nextWords.dropFirst().map { ($0.token, $0.score, true) })
+            .sorted { $0.1 > $1.1 }
+        for (token, _, isNext) in rest { take(token, isNext) }
+        return chosen
     }
 
     /// Seal the day for both learned axes, the app calls this at user-local

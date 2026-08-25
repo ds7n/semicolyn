@@ -45,6 +45,14 @@ struct DualSeedSuggester {
     /// read-time exclusion filter can drop a top-ranked but excluded token and
     /// still backfill from the next clean candidate rather than under-filling topK.
     func suggestions(forPrefix prefix: String, limit: Int? = nil) -> [String] {
+        scoredSuggestions(forPrefix: prefix, limit: limit).map { $0.token }
+    }
+
+    /// Same ranking as `suggestions(forPrefix:limit:)`, but with each token's
+    /// score attached, sorted by score descending then token lexicographic (the
+    /// same order `suggestions` returns). Lets a caller blend this axis's scores
+    /// against another axis's rather than only consuming the final token order.
+    func scoredSuggestions(forPrefix prefix: String, limit: Int? = nil) -> [(token: String, score: Double)] {
         let cap = limit ?? config.topK
         guard cap > 0 else { return [] }
 
@@ -73,11 +81,11 @@ struct DualSeedSuggester {
         return ranked(nonzero.map { (token: $0.key, score: $0.value) }, cap: cap)
     }
 
-    private func ranked(_ scored: [(token: String, score: Double)], cap: Int) -> [String] {
+    private func ranked(_ scored: [(token: String, score: Double)], cap: Int) -> [(token: String, score: Double)] {
         let sorted = scored.sorted { a, b in
             if a.score != b.score { return a.score > b.score }
             return a.token.utf8.lexicographicallyPrecedes(b.token.utf8)
         }
-        return Array(sorted.prefix(cap).map { $0.token })
+        return Array(sorted.prefix(cap))
     }
 }

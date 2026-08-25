@@ -84,6 +84,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     // land exactly on the threshold). Trailing-debounce intent unchanged: a newer
     // keystroke within ~35ms still defers the recompute.
     private var refreshCoalescer = SuggestionRefreshCoalescer(quietWindow: 0.035)
+    /// Monotonic tag assigned (in keystroke order, on the main actor) to each
+    /// suggestion refresh so the async `suggest`→`surface` boundary can be aligned in
+    /// the device log: if a lower `seq` surfaces AFTER a higher one, an older prefix's
+    /// results landed out of order (stale-chip hazard). Diagnostic-only.
+    private var predictorRefreshSeq = 0
     private var learnedStore: LearnedStore?
     /// Write-time gate keeping typed secrets out of the learned vocabulary
     /// (`observePredictorInput`). See `PasswordEntryDetector`. Lazily wires the
@@ -1563,7 +1568,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // @MainActor; the only caller is `sendTerminalInput`), so no lock is needed.
         // Settle and refresh run in the same hop in program order: no fragile
         // wall-clock offsets between them (findings C/D).
-        if !scalars.isEmpty {
+        if !scalars.isEmpty || containsEditingKey(bytes) {
             refreshCoalescer.requestRefresh(at: Date().timeIntervalSinceReferenceDate)
             DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
                 guard let self else { return }
@@ -1610,13 +1615,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private func refreshPredictorSuggestions() {
         guard let predictor else { predictorVM.setSuggestions([]); return }
         let prefix = tracker.current, prev = tracker.previous
-        // Mirror the engine's conditional min-prefix floor so a short from-scratch prefix
-        // clears chips instead of leaving stale ones up. The bigram path (a usable
-        // `prev`) is exempt, next-token suggestions are valid with an empty prefix.
-        // NOTE: literal `2` must stay in sync with SuggestionConfig.minPrefix (currently 2).
-        // A future task can plumb the config value through; out of scope here.
-        let hasUsablePrevious = (prev?.isEmpty == false)
-        if !hasUsablePrevious, prefix.count < 2 { predictorVM.setSuggestions([]); return }
 
         // Build the prediction context from signals the VM already holds. Any signal
         // that is not cheaply available stays nil (the bias treats nil as abstain).
@@ -1634,26 +1632,45 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                                     line: tracker.line,
                                     cursorIndex: tracker.cursorIndex)
 
+        let optedOut = tracker.lineOptedOut
+        let precedingToken = prev   // the token immediately before `current` on this line
+
+        predictorRefreshSeq += 1
+        let seq = predictorRefreshSeq
         Task { [weak self] in
-            let raw = await predictor.suggestions(forPrefix: prefix, after: prev, context: ctx)
-            let chips = predictorChips(current: prefix, suggestions: raw)
+            guard let self else { return }
+            let minPrefix = await predictor.minPrefix()
+            let request = suggestionRequest(
+                current: prefix, previous: prev, precedingToken: precedingToken,
+                lineOptedOut: optedOut, minPrefix: minPrefix)
+            var chips: [(text: String, kind: SuggestionKind)] = []
+            switch request {
+            case .blended(let current, let previous, let allowNextWord):
+                let blended = await predictor.blendedSuggestions(
+                    current: current, previous: previous, allowNextWord: allowNextWord, context: ctx)
+                chips = blended.map { ($0.token, $0.isNextWord ? .nextWordAfterCurrent : .completeWord) }
+            case .nextWord(let word):
+                let raw = await predictor.suggestions(forPrefix: "", after: word, context: ctx)
+                chips = predictorChips(current: word, suggestions: raw).map { ($0, .nextWordAfterPrevious) }
+            case .none:
+                chips = []
+            }
             await MainActor.run {
                 DebugLog.shared.log(.predictor,
-                    "predictor:suggest prefixLen=\(prefix.count) bias-signals proc=\(process ?? "nil") alt=\(isAlt.map(String.init) ?? "nil") results=\(raw.count)")
-                self?.predictorVM.setSuggestions(chips)
+                    "predictor:suggest seq=\(seq) prefix='\(prefix)' proc=\(process ?? "nil") alt=\(isAlt.map(String.init) ?? "nil") count=\(chips.count)")
+                self.predictorVM.setChips(chips, seq: seq)
             }
         }
     }
 
-    /// Accept a chip: send only the missing suffix so the existing input is kept
-    /// (never rewritten). The suffix flows back through `sendTerminalInput`, so the
-    /// tracker and suggestions update automatically.
+    /// Accept a chip. completeWord chips extend the current token (send the suffix);
+    /// next-word chips insert a fresh word (+ spacing) so the user can keep chaining. The
+    /// inserted bytes flow back through `sendTerminalInput`, so tracker + suggestions update.
     func acceptSuggestion(_ s: String) {
-        guard s.hasPrefix(tracker.current) else { return }
-        let suffix = String(s.dropFirst(tracker.current.count))
-        guard !suffix.isEmpty else { return }
-        predictorVM.setSuggestions([])   // clear immediately; the echo round-trip repopulates from the new prefix
-        sendTerminalInput(Array(suffix.utf8))
+        let kind = predictorVM.kindByToken[s] ?? .completeWord
+        guard let insertion = acceptanceInsertion(kind: kind, current: tracker.current, chip: s) else { return }
+        predictorVM.setSuggestions([])   // clear immediately; the echo round-trip repopulates
+        sendTerminalInput(Array(insertion.utf8))
     }
 
     // MARK: - Connect (saved host)

@@ -31,6 +31,20 @@ actor PredictorActor {
 
     func harvest(output: String) { engine.harvest(output: output) }
 
+    /// The engine's configured minimum prefix length for the Trigger-B floor. Exposed
+    /// so the App layer never hardcodes this constant (it must stay in sync with the
+    /// engine's own config, not a mirrored literal).
+    func minPrefix() -> Int { self.engine.config.minPrefix }
+
+    /// Completions of `current` blended with next-word successors of `current`, gated
+    /// by `allowNextWord` (suppressed for a too-short/opted-out/secret-value `current`
+    /// so the successor query never even runs). See `PredictorEngine.blendedSuggestions`.
+    func blendedSuggestions(current: String, previous: String?, allowNextWord: Bool,
+                            context: PredictionContext) -> [PredictorEngine.BlendedChip] {
+        self.engine.blendedSuggestions(current: current, previous: previous,
+                                       allowNextWord: allowNextWord, context: context)
+    }
+
     func snapshotState() -> LearnedState { engine.state }
     func purgeLearned() { engine.purgeLearned() }
     func forgetLastLine() { engine.forgetLastLine() }
