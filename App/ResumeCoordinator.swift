@@ -54,6 +54,23 @@ final class ResumeCoordinator {
         }
     }
 
+    /// Remove EVERY resume record (and secret slot) for `hostID`. Called when a host
+    /// is deleted or materially edited: a deleted host has no target, and an edited
+    /// host's stored endpoint may be stale, so the record must not survive to drive a
+    /// resume. The store has no remove-by-host, so this iterates `all()` and removes by
+    /// `sessionID`. Idempotent; logs outcome only (never a secret).
+    func clear(hostID: UUID) {
+        do {
+            let victims = try store.all().filter { $0.hostID == hostID }
+            for record in victims {
+                try store.remove(sessionID: record.sessionID)
+            }
+            DebugLog.shared.log(.connect, "resume:clearHost hostID=\(hostID) removed=\(victims.count)")
+        } catch {
+            DebugLog.shared.log(.connect, "resume:clearHost FAILED hostID=\(hostID) error=\(error)")
+        }
+    }
+
     /// Run the launch resume flow: sweep orphans, then decide (pure) how to resume
     /// the most-recent record. Returns the action for the UI to execute. Never throws
     /// into launch: a store read error degrades to `.none` (normal launch).

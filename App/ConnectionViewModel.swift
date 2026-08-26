@@ -1694,6 +1694,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             crashBanner = .tmuxEnded
         } catch {
             DebugLog.shared.log(.lifecycle, "recoverFromTmuxCrash: raw shell THREW \(String(describing: error)) → .failed")
+            clearResume()   // terminal error after the connected edge: clear the record
             state = .failed("tmux ended and the connection is no longer reachable.")
         }
     }
@@ -1707,7 +1708,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         crashBanner = nil
         Task {
             do { try await attachTmux(conn: conn) }
-            catch { DebugLog.shared.log(.lifecycle, "reattachTmux: attach THREW → .failed"); state = .failed("Could not reattach: the connection is no longer reachable.") }
+            catch { DebugLog.shared.log(.lifecycle, "reattachTmux: attach THREW → .failed"); clearResume(); state = .failed("Could not reattach: the connection is no longer reachable.") }
         }
     }
 
@@ -1724,6 +1725,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             do { try await attachTmux(conn: conn) }
             catch {
                 DebugLog.shared.log(.lifecycle, "startNewTmux: attach THREW → .failed")
+                clearResume()   // terminal error after the connected edge: clear the record
                 state = .failed("Could not start tmux: the connection is no longer reachable.")
             }
         }
