@@ -679,20 +679,38 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// live VM already holds the session); the App only reaches this VM cold (a fresh
     /// VM), so the meaningful cases are `.coldReattach` (Mosh/ET) and `.promptRaw`.
     /// `.none` is a normal launch.
-    func executeResume(_ action: ResumeAction, host: Host) {
+    /// Execute a launch-resume action. Returns `false` when the caller should instead
+    /// run its NORMAL fresh-connect path (with the caller's credential resolution): this
+    /// is how ET cold-resume works, since ET cannot cold-reattach with a stored
+    /// credential and must re-bootstrap over a fresh SSH connect (see `resumeColdReattach`).
+    /// Returns `true` when the action was fully handled here (mosh reattach, raw prompt,
+    /// reforeground, none).
+    @discardableResult
+    func executeResume(_ action: ResumeAction, host: Host) -> Bool {
         switch action {
         case .reforeground:
             // Warm reforeground is handled by the surviving VM; a fresh VM never gets
             // this. Log + no-op so an unexpected warm-on-cold is visible, not silent.
             DebugLog.shared.log(.connect, "resume:execute reforeground (no-op on fresh VM)")
+            return true
         case .coldReattach(let record):
+            // ET cold-resume is NOT a direct reattach: it re-bootstraps via a fresh
+            // connect using the caller's credential resolution (key / stored-password /
+            // prompt). Signal the caller to run its normal connect path.
+            if record.transport == .et {
+                DebugLog.shared.log(.connect, "resume:execute coldReattach et → normal fresh connect (re-bootstrap + tmux -A)")
+                return false
+            }
             resumeColdReattach(host: host, record: record)
+            return true
         case .promptRaw(let record):
             DebugLog.shared.log(.connect, "resume:execute promptRaw host=\(host.label)")
             resumeRawRecord = record
             resumeRawPrompt = host.label
+            return true
         case .none:
             DebugLog.shared.log(.connect, "resume:execute none → normal launch")
+            return false
         }
     }
 
@@ -700,6 +718,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// to `record.host:record.port` (no SSH bootstrap: the mosh-server/etserver session
     /// persists server-side and is reachable with the stored key). On any failure clear
     /// the persisted record but KEEP an in-memory copy so the banner's Retry works.
+    /// Cold MOSH reattach: read the stored MOSH_KEY, rebuild the transport DIRECTLY to
+    /// `record.host:record.port` (no SSH bootstrap: the mosh-server session persists
+    /// server-side and is reachable with the stored key). On any failure clear the
+    /// persisted record but KEEP an in-memory copy so the banner's Retry works.
+    ///
+    /// ET is NOT handled here: it cannot cold-reattach with a stored credential (etserver
+    /// roaming is for a LIVE process; a cold reattach does the INITIAL handshake the
+    /// server won't honor, device-confirmed build 149 "handshake timeout"). ET cold-resume
+    /// re-bootstraps via a fresh connect, routed by `executeResume` returning false.
     private func resumeColdReattach(host: Host, record: ResumableSession) {
         guard let secret = AppStores.shared.resume.secret(sessionID: record.sessionID) else {
             DebugLog.shared.log(.connect, "resume:coldReattach ABORT no secret → banner")
@@ -714,7 +741,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             "resume:coldReattach transport=\(record.transport.rawValue) endpoint=\(record.host):\(record.port)")
         switch record.transport {
         case .mosh: reattachMosh(host: host, record: record, key: secret)
-        case .et:   reattachET(host: host, record: record, idpasskey: secret)
+        case .et:
+            // Unreachable: ET is routed to a fresh connect by `executeResume` (returns false).
+            DebugLog.shared.log(.connect, "resume:coldReattach et (unexpected) → banner")
+            failResume(host: host, record: record, secret: secret, reason: "et unexpected")
         case .ssh:
             // Unreachable: raw SSH never yields .coldReattach (resumeDecision → .promptRaw).
             DebugLog.shared.log(.connect, "resume:coldReattach ssh (unexpected) → prompt")
@@ -761,59 +791,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         state = .shell
     }
 
-    /// Rebuild an ET session directly from a stored record + IDPASSKEY (`<id>/<passkey>`).
-    private func reattachET(host: Host, record: ResumableSession, idpasskey: Data) {
-        let combined = String(decoding: idpasskey, as: UTF8.self)
-        let parts = combined.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
-        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else {
-            DebugLog.shared.log(.connect, "resume:reattachET malformed stored IDPASSKEY → banner")
-            failResume(host: host, record: record, secret: idpasskey, reason: "malformed credential")
-            return
-        }
-        let id = String(parts[0]); let passkey = String(parts[1])
-        // A stored port of 0 (or out of UInt16 range) falls back to ET's default 2022.
-        let etPort: UInt16 = (record.port > 0 && record.port <= Int(UInt16.max)) ? UInt16(record.port) : 2022
-        let config: ETConfig
-        do {
-            config = try etConnectConfig(host: record.host, port: etPort, id: id, passkey: passkey,
-                                         term: "xterm-256color", cols: 80, rows: 24)
-        } catch {
-            DebugLog.shared.log(.connect, "resume:reattachET config invalid (\(error)) → banner")
-            failResume(host: host, record: record, secret: idpasskey, reason: "invalid config")
-            return
-        }
-        let sess = ETSession(host: config.host, port: config.port,
-                             id: config.id, passkey: config.passkey, env: config.env,
-                             cols: config.cols, rows: config.rows,
-                             width: config.width, height: config.height,
-                             keepaliveSecs: config.keepaliveSecs)
-        // Raw ET reattach (no -CC re-launch here; a resumed tmux session is reattached
-        // by the persisted server, and native -CC rebuild is a device follow-up). ET
-        // callbacks are dispatched to the main queue (ETSession.mm); these mirror the
-        // fresh-attach closures' bare-`self.` isolation pattern the App already compiles.
-        sess.onOutput = { [weak self] data in self?.output.onOutput(data: data) }
-        sess.onFirstFrame = { [weak self] in
-            guard let self else { return }
-            DebugLog.shared.log(.connect, "resume:reattachET onFirstFrame → live")
-            self.resumeInMemory = nil
-            self.state = .shell
-            self.captureResume(host: host, transport: .et,
-                               endpoint: (host: record.host, port: record.port), secret: idpasskey)
-        }
-        sess.onState = { raw in
-            DebugLog.shared.log(.transport, "resume:reattachET state=\(mapETState(Int32(raw)))")
-        }
-        sess.onEnd = { [weak self] reason in
-            guard let self else { return }
-            DebugLog.shared.log(.connect, "resume:reattachET onEnd reason=\(reason ?? "nil") → banner")
-            self.etSession?.close(); self.etSession = nil
-            self.failResume(host: host, record: record, secret: idpasskey,
-                            reason: reason ?? "reattach ended")
-        }
-        etSession = sess
-        tmuxState = nil
-        sess.start()
-    }
 
     /// Handle a failed cold reattach: clear the persisted record (dead token) but keep
     /// the reattach info IN MEMORY so the banner's Retry works, then show the banner.

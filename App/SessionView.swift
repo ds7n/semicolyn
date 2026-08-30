@@ -410,12 +410,18 @@ struct SessionView: View {
         credentialsResolved = true
 
         // Launch-resume: if this session was opened by the resume flow with a concrete
-        // action, execute it (cold Mosh/ET reattach or the raw-SSH prompt) instead of a
-        // fresh connect. `.none`/`.reforeground` fall through to the normal path below.
+        // action, execute it (cold Mosh reattach or the raw-SSH prompt) instead of a
+        // fresh connect. `executeResume` returns false when the caller should run its
+        // NORMAL fresh-connect path instead: ET cold-resume re-bootstraps via a fresh
+        // connect (it can't cold-reattach with a stored credential), so it must go
+        // through the normal credential resolution below (key / stored-password / prompt)
+        // rather than a direct reattach. `.none` also returns false and falls through.
         if let resume, resume != .none {
             DebugLog.shared.log(.connect, "session:resume execute host=\(host.label)")
-            vm.executeResume(resume, host: host)
-            return
+            if vm.executeResume(resume, host: host) { return }
+            // Fell through: run the normal fresh-connect path (ET re-bootstrap). The
+            // tmux session name resolves the same as any fresh connect, so `new-session
+            // -A -s <name>` reattaches the persisted ET/tmux session and restores the work.
         }
 
         let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
