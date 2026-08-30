@@ -698,7 +698,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // connect using the caller's credential resolution (key / stored-password /
             // prompt). Signal the caller to run its normal connect path.
             if record.transport == .et {
-                DebugLog.shared.log(.connect, "resume:execute coldReattach et → normal fresh connect (re-bootstrap + tmux -A)")
+                // ET re-bootstraps via a fresh connect (below), which mints a NEW
+                // sessionID and captures its own record. The record we resumed FROM is
+                // now consumed: clear it so it can't re-trigger a resume on the next
+                // launch. Without this, the stale record survives every disconnect
+                // (which only clears the fresh session's id) and the app resumes on
+                // every launch, even after an intentional disconnect. Mirrors the Mosh
+                // path, where `resumeColdReattach` adopts `record.sessionID` so its own
+                // teardown clears the same record; ET can't adopt (it re-bootstraps),
+                // so it clears the resumed record explicitly here instead.
+                DebugLog.shared.log(.connect, "resume:execute coldReattach et → clear resumed record, normal fresh connect (re-bootstrap + tmux -A)")
+                AppStores.shared.resume.clear(sessionID: record.sessionID)
                 return false
             }
             resumeColdReattach(host: host, record: record)
