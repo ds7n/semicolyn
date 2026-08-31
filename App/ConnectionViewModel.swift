@@ -667,13 +667,31 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// so the resume record carries the tmux session name for `new-session -A -s`.
     private var isTmuxControlMode: Bool { tmux != nil }
 
+    /// Whether the active session is on EITHER tmux path (`-CC` or the Phase-1
+    /// gesture-driven plain-tmux route), i.e. whether a resume record should carry
+    /// `tmuxSessionNameForConnection` at all. A plain-tmux SSH session is captured
+    /// as a bare raw-SSH `.promptRaw` record either way (see `resumeDecision`,
+    /// which branches purely on `record.transport`, never on `tmuxSessionName`),
+    /// but `tmuxSessionNameForConnection` is exactly the name `attachPlainTmux`
+    /// launched with (set right before it runs, mirroring the `-CC` branch), and
+    /// `resolveTmuxSessionName` is a DETERMINISTIC function of `host`/`defaults`
+    /// (no randomness, see `Resolution.swift`), so a later `resumeRawReconnect` →
+    /// `connect(savedHost:)` re-derives the SAME name and re-enters the SAME gate
+    /// (`attachSSHShell`) that launched it, `tmux new -A -s <name>` then reattaches
+    /// the still-running session either way. This flag exists purely so the
+    /// captured record's `tmuxSessionName` metadata is accurate for anything that
+    /// inspects it (diagnostics, the `resume:capture` log line's `tmux=` field), not
+    /// because the resume-READ path branches on it.
+    private var isTmuxSession: Bool { isTmuxControlMode || plainTmux != nil }
+
     /// Persist a resumable record at a transport's connected edge. Raw SSH passes
     /// `secret: nil` (it reconnects fresh after a prompt); Mosh/ET pass their reattach
-    /// credential. The tmux session name rides only for a `-CC` session. SECURITY: the
-    /// secret goes straight to the store; it is never logged here or in the coordinator.
+    /// credential. The tmux session name rides for a `-CC` session OR the Phase-1
+    /// plain-tmux session (`isTmuxSession`). SECURITY: the secret goes straight to
+    /// the store; it is never logged here or in the coordinator.
     private func captureResume(host: Host, transport: Transport,
                                endpoint: (host: String, port: Int), secret: Data?) {
-        let tmuxName = isTmuxControlMode ? tmuxSessionNameForConnection : nil
+        let tmuxName = isTmuxSession ? tmuxSessionNameForConnection : nil
         AppStores.shared.resume.captureConnected(
             sessionID: sessionID, host: host, transport: transport,
             endpoint: endpoint, secret: secret, tmuxSessionName: tmuxName)

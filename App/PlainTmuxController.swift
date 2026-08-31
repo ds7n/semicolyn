@@ -221,6 +221,6 @@ final class PlainTmuxController {
 private func cellScalar(at col: Int, row: Int, in view: TerminalView) -> Unicode.Scalar? {
     guard let cd = view.getTerminal().getCharData(col: col, row: row) else { return nil }
     let ch = cd.getCharacter()
-    if ch == "\u{0}" { return nil }
+    if ch == "\u{0}" || ch == " " { return nil }
     return ch.unicodeScalars.first
 }
