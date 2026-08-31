@@ -14,12 +14,13 @@ public enum RecordType: String, Codable, Sendable, CaseIterable {
     case host
     case defaults
     case identity
+    case resumableSession
 }
 
 /// Seals `Codable` records with `RecordEnvelope` (AES-256-GCM) over any
 /// `BlobStore`. `put` encrypts before storing; `get`/`list` decrypt on read. A
 /// present-but-undecryptable blob (wrong key or tampering) **throws**
-/// `RecordEnvelopeError.decryptionFailed` — confidentiality/integrity failures
+/// `RecordEnvelopeError.decryptionFailed`, confidentiality/integrity failures
 /// must surface, not be silently treated as "absent".
 public struct EncryptedRecordStore {
     private let backend: BlobStore
@@ -50,7 +51,7 @@ public struct EncryptedRecordStore {
     /// Every decrypted record of `type`. **Fail-closed:** if any one blob cannot
     /// be opened (wrong key or tampering), the whole call throws rather than
     /// silently dropping that record. This is deliberate for v1's security-first
-    /// posture — a tampered host record must surface loudly, not vanish from a
+    /// posture, a tampered host record must surface loudly, not vanish from a
     /// scan (which would also hide its jump-chain/identity references). The
     /// trade-off is availability: one corrupt record fails bulk reads until a
     /// repair path exists (a Phase 2b concern, alongside CloudKit sync/recovery).

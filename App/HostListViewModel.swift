@@ -12,7 +12,7 @@ final class HostListViewModel: ObservableObject {
     /// target as a jump host. Cleared by the view after the alert is dismissed.
     @Published var deleteError: String?
 
-    /// Reloads `hosts` from `HostStore`. Silences errors — a missing or
+    /// Reloads `hosts` from `HostStore`. Silences errors, a missing or
     /// unreadable store is treated as an empty library rather than a crash.
     func reload() {
         hosts = (try? AppStores.shared.hosts.allHosts()) ?? []
@@ -25,6 +25,9 @@ final class HostListViewModel: ObservableObject {
     func delete(_ host: Host) {
         do {
             try AppStores.shared.hosts.deleteHost(id: host.id)
+            // Cleanup (spec): a deleted host has no resume target, so drop any resume
+            // record for it now (not just on the next-launch reconcile sweep).
+            AppStores.shared.resume.clear(hostID: host.id)
             hosts.removeAll { $0.id == host.id }
         } catch StoreError.jumpHostInUse(let referrers) {
             let labels = referrers.map(\.label).joined(separator: ", ")

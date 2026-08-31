@@ -3,6 +3,20 @@
 import SwiftUI
 import SemicolynKit
 
+/// Identifies a launch-resume presentation: the resolved saved host plus the pure
+/// `ResumeAction` to execute. `id` is the record's session id (stable, unique per
+/// resumable session) so `.fullScreenCover(item:)` presents exactly once.
+private struct ResumeTarget: Identifiable {
+    let host: Host
+    let action: ResumeAction
+    var id: UUID {
+        switch action {
+        case .coldReattach(let r), .promptRaw(let r): return r.sessionID
+        case .reforeground, .none: return host.id
+        }
+    }
+}
+
 /// Root host-library screen. Shows an empty-state CTA when no hosts exist;
 /// otherwise a list where each row can be tapped to connect or swiped for
 /// Edit / Delete actions.
@@ -16,6 +30,12 @@ struct HostListView: View {
     @State private var showingSettings = false
     /// Non-nil when the user has tapped a saved host to connect (Task 8).
     @State private var connectingHost: IdentifiableHost?
+    /// Non-nil when launch-resume resolved an actionable record: presents a session
+    /// cover that executes the action (cold reattach or the raw-SSH prompt).
+    @State private var resumeTarget: ResumeTarget?
+    /// Guards the once-per-launch resume sweep so re-entering `onAppear` (e.g. after a
+    /// sheet dismiss) never re-triggers it.
+    @State private var didRunResume = false
 
     var body: some View {
         NavigationStack {
@@ -48,17 +68,23 @@ struct HostListView: View {
             }
             .onAppear {
                 vm.reload()
+                runLaunchResumeIfNeeded()
             }
-            // Settings sheet — Task 4.
+            // Settings sheet, Task 4.
             .sheet(isPresented: $showingSettings) {
                 SettingsView(context: .preConnect,
                              keybarSettings: AppStores.shared.keybarSettings)
             }
-            // Session cover — Task 8: tap a saved host to connect.
+            // Session cover, Task 8: tap a saved host to connect.
             .fullScreenCover(item: $connectingHost) { wrapper in
                 SessionView(host: wrapper.host)
             }
-            // Host editor sheet — Task 3.
+            // Launch-resume cover: opens a session that executes the resolved
+            // ResumeAction (cold Mosh/ET reattach, or the raw-SSH reconnect prompt).
+            .fullScreenCover(item: $resumeTarget) { target in
+                SessionView(host: target.host, resume: target.action)
+            }
+            // Host editor sheet, Task 3.
             .sheet(item: $editorMode, onDismiss: { vm.reload() }) { mode in
                 switch mode {
                 case .creating:
@@ -79,6 +105,31 @@ struct HostListView: View {
             } message: {
                 Text(vm.deleteError ?? "")
             }
+        }
+    }
+
+    // MARK: - Launch resume
+
+    /// Run the once-per-launch resume sweep: reconcile orphans, decide (pure), and, for
+    /// an actionable result (`.coldReattach` / `.promptRaw`), resolve the host and open
+    /// the resume cover. `isWarm: false`: a cold app launch has no surviving live VM, so
+    /// the App only ever handles the cold + prompt cases here. A `.none` result (or an
+    /// unresolvable host) leaves the user on the host list. Idempotent via `didRunResume`.
+    private func runLaunchResumeIfNeeded() {
+        guard !didRunResume else { return }
+        didRunResume = true
+        let action = AppStores.shared.resume.resumeOnLaunch(isWarm: false)
+        switch action {
+        case .coldReattach(let record), .promptRaw(let record):
+            guard let host = (try? AppStores.shared.hosts.host(id: record.hostID)) ?? nil else {
+                DebugLog.shared.log(.connect, "resume:launch host \(record.hostID) unresolved → host list")
+                return
+            }
+            DebugLog.shared.log(.connect, "resume:launch present host=\(host.label)")
+            resumeTarget = ResumeTarget(host: host, action: action)
+        case .reforeground, .none:
+            // Nothing to reforeground on a cold launch; normal host-list landing.
+            return
         }
     }
 

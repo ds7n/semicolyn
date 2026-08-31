@@ -126,6 +126,14 @@ final class HostEditorViewModel: ObservableObject {
 
         let outcome = try AppStores.shared.hosts.saveHost(host)
 
+        // Cleanup (spec): editing an existing host can change its endpoint
+        // (hostname/port), invalidating any stored resume record. Conservatively clear
+        // the resume record for this host on ANY existing-host save; a fresh create
+        // (isNew) has no prior record so nothing to clear.
+        if !isNew {
+            AppStores.shared.resume.clear(hostID: host.id)
+        }
+
         // Surface duplicate-label warning to the view if present.
         if !outcome.duplicateLabels.isEmpty {
             let dupeLabels = outcome.duplicateLabels.map(\.label).joined(separator: ", ")
