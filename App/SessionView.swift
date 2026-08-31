@@ -19,6 +19,12 @@ private struct IdentifiableHost: Identifiable {
 /// the user for a password.
 struct SessionView: View {
     let host: Host
+    /// A resume action to execute on appear instead of a fresh connect. Nil = the
+    /// normal path (tap-to-connect / quick-connect). Set only by the launch-resume
+    /// flow in `HostListView`: `.coldReattach` rebuilds the transport, `.promptRaw`
+    /// shows the inline reconnect prompt. `.reforeground`/`.none` fall through to the
+    /// normal path (a fresh cold VM has nothing warm to reforeground).
+    var resume: ResumeAction?
 
     @StateObject private var vm = ConnectionViewModel()
     @StateObject private var hardwareKeyboard = HardwareKeyboardMonitor()
@@ -215,6 +221,30 @@ struct SessionView: View {
                 statusView
             }
         }
+        // Resume-failure banner (cold Mosh/ET reattach failed): mirrors CrashBanner.
+        // Shown regardless of session state (it appears with .idle, no live shell).
+        .overlay(alignment: .top) {
+            if let label = vm.resumeFailure {
+                ResumeFailureBanner(
+                    hostLabel: label,
+                    onRetry: { vm.resumeRetry() },
+                    onStartFresh: { vm.resumeStartFresh() },
+                    onBackToHosts: { vm.resumeBackToHosts(); dismiss() })
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut, value: vm.resumeFailure)
+        // Raw-SSH resume prompt (lighter inline element): "Reconnect to <host>?".
+        .overlay(alignment: .top) {
+            if let label = vm.resumeRawPrompt {
+                ResumeRawPrompt(
+                    hostLabel: label,
+                    onReconnect: { vm.resumeRawReconnect(host: host) },
+                    onNotNow: { vm.resumeRawDecline(host: host); dismiss() })
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut, value: vm.resumeRawPrompt)
         // Connected-state Disconnect affordance: a small top-trailing control (the
         // connected view has no nav bar). Confirms before tearing down so a session
         // isn't lost by an accidental tap. Shown only while a live shell is up.
@@ -265,7 +295,11 @@ struct SessionView: View {
         // When a disconnect (or a terminal failure the user acknowledges) flips the
         // session out of the shell, leave the session screen back to the host list.
         .onChange(of: vm.state) { _, newState in
-            if case .idle = newState { dismiss() }
+            // A resume failure sets `.idle` while keeping the failure banner up (the
+            // record is cleared but the in-memory copy powers Retry). Do NOT dismiss
+            // while the banner is showing, or the user could never act on it; the
+            // banner's own actions (Start fresh / Back to hosts) drive the next step.
+            if case .idle = newState, vm.resumeFailure == nil { dismiss() }
             // Dump the effective logging config once a session goes live, so a device
             // trace shows whether logging/categories were actually on (build 44: the
             // stream was empty because the master gate was off, this makes that explicit
@@ -374,6 +408,21 @@ struct SessionView: View {
         guard !credentialsResolved else { return }
         defer { resolving = false }
         credentialsResolved = true
+
+        // Launch-resume: if this session was opened by the resume flow with a concrete
+        // action, execute it (cold Mosh reattach or the raw-SSH prompt) instead of a
+        // fresh connect. `executeResume` returns false when the caller should run its
+        // NORMAL fresh-connect path instead: ET cold-resume re-bootstraps via a fresh
+        // connect (it can't cold-reattach with a stored credential), so it must go
+        // through the normal credential resolution below (key / stored-password / prompt)
+        // rather than a direct reattach. `.none` also returns false and falls through.
+        if let resume, resume != .none {
+            DebugLog.shared.log(.connect, "session:resume execute host=\(host.label)")
+            if vm.executeResume(resume, host: host) { return }
+            // Fell through: run the normal fresh-connect path (ET re-bootstrap). The
+            // tmux session name resolves the same as any fresh connect, so `new-session
+            // -A -s <name>` reattaches the persisted ET/tmux session and restores the work.
+        }
 
         let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
         let storedPassword = storedPassword()

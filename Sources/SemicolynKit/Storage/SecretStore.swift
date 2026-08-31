@@ -19,8 +19,10 @@ public enum SecretRef: Hashable, Sendable {
     case password(id: UUID)
     /// An identity key's passphrase.
     case passphrase(identityID: UUID)
-    /// Serialized `[HostKey]` (known_hosts) for a host — see `HostKeyStore`.
+    /// Serialized `[HostKey]` (known_hosts) for a host, see `HostKeyStore`.
     case hostKeys(hostID: UUID)
+    /// Connection-resume session secret for roaming/reconnect state.
+    case resumeSecret(sessionID: UUID)
 }
 
 /// Keychain-bound secret storage. The swappable seam Phase 2b fills with iCloud
@@ -46,7 +48,7 @@ public final class InMemorySecretStore: SecretStore {
 }
 
 /// The AES-256 record key from `store`, generating and persisting one on first
-/// call. Stable across calls — the same key is returned for the life of the
+/// call. Stable across calls, the same key is returned for the life of the
 /// store's `.recordKey` secret, so records sealed earlier stay openable.
 public func recordKey(in store: SecretStore) throws -> SymmetricKey {
     if let data = try store.getSecret(.recordKey) {

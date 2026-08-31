@@ -8,7 +8,7 @@ import Foundation
 ///
 /// The mapping is injective: distinct `SecretRef` values always produce distinct
 /// account strings, so no two refs ever collide onto the same Keychain item.
-/// Stable strings — do not change without a migration.
+/// Stable strings, do not change without a migration.
 public func keychainAccount(for ref: SecretRef) -> String {
     switch ref {
     case .recordKey:
@@ -21,6 +21,8 @@ public func keychainAccount(for ref: SecretRef) -> String {
         return "passphrase/\(identityID.uuidString)"
     case .hostKeys(let hostID):
         return "hostKeys/\(hostID.uuidString)"
+    case .resumeSecret(let sessionID):
+        return "resumeSecret/\(sessionID.uuidString)"
     }
 }
 
