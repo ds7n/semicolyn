@@ -247,6 +247,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private var rawWriter: SerialByteWriter?
     /// Non-nil while a tmux control-mode session is active.
     private var tmux: TmuxRuntime?
+    /// Non-nil while the Phase-1 gesture-driven PLAIN tmux route is active (no
+    /// `-CC`), gated by `PlainTmuxDebugGate.isEnabled`. Mutually exclusive with
+    /// `tmux`: exactly one of the two tmux paths is ever set for a session. The
+    /// byte stream rides the same raw single-terminal path as `rawWriter`
+    /// (`output.onBytes`/`terminal.feed`); this only holds the gesture-command
+    /// controller. Phase-1-temporary, removed with the rest of the gate in Phase 2.
+    private(set) var plainTmux: PlainTmuxController?
     /// Seeds each tmux pane's scrollback history (capture-pane) before live output.
     private var historySeeder: PaneHistorySeeder?
     /// Shared output sink; the terminal view wires `onBytes` to render into itself.
@@ -447,8 +454,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     func selectAdjacentWindowWrapping(_ delta: Int) { stepWindow(delta) }
 
     /// True when the active tmux session has more than one window (drives horizontal
-    /// drag = window switch vs. scroll fall-through).
-    var isMultiWindowTmux: Bool { (tmuxState?.windows.count ?? 0) > 1 }
+    /// drag = window switch vs. scroll fall-through). The Phase-1 plain-tmux route
+    /// (`plainTmux`) tracks no window count (blind switch, see `PlainTmuxController`
+    /// doc), so it always reports true while active: the drag-switch gesture must
+    /// stay live even though we cannot confirm >1 window ahead of a swipe.
+    var isMultiWindowTmux: Bool { plainTmux != nil || (tmuxState?.windows.count ?? 0) > 1 }
 
     /// The window `delta` steps from `id` in window-list order, wrapping at the ends.
     /// nil with fewer than 2 windows. Matches the wrap the esc-pill switch uses.
@@ -610,6 +620,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         etSession = nil
         tmux?.stop()
         tmux = nil
+        plainTmux = nil
+        plainTmuxSessionNamePendingInstall = nil
         paneContexts = [:]
         paneRawContexts = [:]
         fnState.reset()
@@ -997,6 +1009,28 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// both `connect` methods, factored out so the Mosh pre-frame fallback can re-run
     /// it on the SAME retained connection (see `attachMoshIfPossible`).
     private func attachSSHShell(conn: Connection, host: Host, defaults: Defaults) async throws {
+        // Phase-1 gate (temporary, removed in Phase 2 with the -CC stack): plain
+        // gesture-driven tmux replaces the -CC branch ENTIRELY when flipped on, never
+        // stacked with it. Default OFF, so this is a no-op in every non-debug build
+        // and in a debug build that never calls `setEnabledForDebug`.
+        if PlainTmuxDebugGate.isEnabled {
+            let allow = resolveTmuxAttemptControlMode(host: host, defaults: defaults)
+            let probe = allow ? await probeTmuxVersion(conn: conn) : nil
+            DebugLog.shared.log(.lifecycle, "attachSSHShell: plainTmuxGate=ON allowControlMode=\(allow) probe=\(probe ?? "nil")")
+            switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
+            case .attach:
+                self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
+                try await attachPlainTmux(conn: conn)
+            case .degrade(let reason):
+                DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=DEGRADE(\(String(describing: reason))) → raw shell")
+                degraded = reason
+                try await openRawShell(conn: conn)
+            }
+            captureResume(host: host, transport: .ssh,
+                          endpoint: (host: host.hostName, port: resolvePort(host: host, defaults: defaults)),
+                          secret: nil)
+            return
+        }
         let allow = resolveTmuxAttemptControlMode(host: host, defaults: defaults)
         let probe = allow ? await probeTmuxVersion(conn: conn) : nil
         DebugLog.shared.log(.lifecycle, "attachSSHShell: allowControlMode=\(allow) probe=\(probe ?? "nil")")
@@ -1660,6 +1694,107 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         state = .shell
         DebugLog.shared.log(.lifecycle, "attachTmux: exec opened, tmux SET, state=.shell, awaiting tmux output")
         runtime.startContextPolling()
+    }
+
+    /// Phase-1 gate route (temporary, see `PlainTmuxDebugGate`): launch PLAIN tmux
+    /// (no `-CC`) and feed its byte stream through the SAME raw single-terminal
+    /// path `openRawShell` uses (`output`/`rawWriter`), so `TerminalScreen`/
+    /// `RawTerminalContainer` need no structural change, only a gesture-callback
+    /// wiring choice made at `makeUIView` time (see `TerminalScreen`). The
+    /// `PlainTmuxController` itself is built lazily by `TerminalScreen.makeUIView`
+    /// once the `TerminalView` exists (`installPlainTmuxControllerIfNeeded`),
+    /// because it needs that view's live grid + `getCharData` for the on-tap
+    /// border-drift check; this method only launches the session and wires bytes.
+    private func attachPlainTmux(conn: Connection) async throws {
+        DebugLog.shared.log(.lifecycle, "attachPlainTmux: ENTER session=\(tmuxSessionNameForConnection)")
+        guard isValidTmuxSessionName(tmuxSessionNameForConnection) else {
+            DebugLog.shared.log(.lifecycle, "attachPlainTmux: invalid session name → degraded raw shell")
+            degraded = .couldNotStart
+            try await openRawShell(conn: conn)
+            return
+        }
+        let startCmd = PlainTmuxController.launchCommand(sessionName: tmuxSessionNameForConnection)
+        DebugLog.shared.log(.tmux, "attachPlainTmux: openExec startCmd=\(startCmd.prefix(60))")
+        let sess = try await conn.openExec(command: startCmd, term: "xterm-256color",
+                                           cols: 80, rows: 24, output: output)
+        connection = conn
+        session = sess
+        rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
+        tmuxState = nil   // plain tmux never populates the -CC control-mode state
+        plainTmuxSessionNamePendingInstall = tmuxSessionNameForConnection
+        output.onHarvestBytes = { [weak self] bytes in
+            guard let self else { return }
+            self.passwordDetector.noteOutput(bytes)
+        }
+        state = .shell
+        DebugLog.shared.log(.lifecycle, "attachPlainTmux: exec opened, state=.shell, awaiting tmux output")
+    }
+
+    /// Set by `attachPlainTmux` to the launched session name, consumed once by
+    /// `TerminalScreen.makeUIView` to construct `PlainTmuxController` against the
+    /// freshly created `TerminalView` (nil = no plain-tmux install pending, either
+    /// the gate is off or the controller is already installed).
+    private(set) var plainTmuxSessionNamePendingInstall: String?
+
+    /// Build and retain `PlainTmuxController` for the just-mounted raw `TerminalView`,
+    /// consuming `plainTmuxSessionNamePendingInstall`. Idempotent: a second call
+    /// (e.g. a SwiftUI `makeUIView` re-invocation) is a no-op once `plainTmux` is set.
+    /// SSH's side-channel recovery (`recoverLayout`) re-queries `list-windows` on a
+    /// fresh one-shot exec over the SAME retained `connection`; Mosh/ET plumb no
+    /// side channel here yet (Phase 1: `recoverLayout` stays nil off-SSH, so
+    /// `PlainTmuxController` falls back to the blind Mosh cycle for every recovery,
+    /// matching the design spec's ET-recovery TODO, ET's `openExec` wiring for
+    /// plain-tmux recovery is deferred alongside the rest of ET's plain-tmux route).
+    func installPlainTmuxControllerIfNeeded(screen: TerminalView) {
+        guard plainTmux == nil, let name = plainTmuxSessionNamePendingInstall else { return }
+        plainTmuxSessionNamePendingInstall = nil
+        let recoverLayout: (@Sendable () async -> (window: WindowID, layout: PaneLayout)?)? = {
+            guard let conn = self.connection else { return nil }
+            return { [weak self] in
+                guard let self else { return nil }
+                return await self.queryPlainTmuxLayout(conn: conn)
+            }
+        }()
+        plainTmux = PlainTmuxController(
+            sessionName: name,
+            sendInput: { [weak self] bytes in self?.rawWriter?.enqueue(bytes) },
+            screen: screen,
+            recoverLayout: recoverLayout)
+        DebugLog.shared.log(.tmux, "plainTmux: controller installed session=\(name)")
+    }
+
+    /// SSH/ET side-channel recovery query: run `list-windows -F "..."` on a fresh
+    /// one-shot exec over the retained connection, parse it, and return the ACTIVE
+    /// window's id + layout (nil if the exec failed, produced nothing, or no window
+    /// was flagged active). Mirrors `probeTmuxVersion`'s one-shot-exec race pattern.
+    private func queryPlainTmuxLayout(conn: Connection) async -> (window: WindowID, layout: PaneLayout)? {
+        let sink = TerminalShellOutput()
+        var captured: [UInt8] = []
+        sink.onBytes = { captured.append(contentsOf: $0) }
+        let done = AsyncStream<Void> { cont in
+            sink.onExit = { _ in cont.yield(); cont.finish() }
+        }
+        let probeSession = try? await conn.openExec(command: TmuxCommand.listWindowsForLayout(),
+                                                     term: "xterm-256color", cols: 80, rows: 24, output: sink)
+        guard probeSession != nil else {
+            DebugLog.shared.log(.tmux, "plainTmux:recoveryQuery exec FAILED to open → nil")
+            return nil
+        }
+        defer { if let probeSession { Task { try? await probeSession.close() } } }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { for await _ in done { break } }
+            group.addTask { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+            await group.next(); group.cancelAll()
+        }
+        let text = String(decoding: captured, as: UTF8.self)
+        let lines = text.split(separator: "\n").map(String.init)
+        let windows = parseWindowListing(lines)
+        guard let active = windows.first(where: { $0.active }) else {
+            DebugLog.shared.log(.tmux, "plainTmux:recoveryQuery parsed=\(windows.count) noActiveWindow → nil")
+            return nil
+        }
+        DebugLog.shared.log(.tmux, "plainTmux:recoveryQuery parsed=\(windows.count) active=@\(active.id.raw)")
+        return (window: active.id, layout: active.layout)
     }
 
     // MARK: - Crash recovery + banner actions
