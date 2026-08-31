@@ -254,6 +254,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// (`output.onBytes`/`terminal.feed`); this only holds the gesture-command
     /// controller. Phase-1-temporary, removed with the rest of the gate in Phase 2.
     private(set) var plainTmux: PlainTmuxController?
+    /// True once the Phase-1 plain-tmux in-band launch (`tmux new -A -s <name>\n`)
+    /// has been sent for the current Mosh session (idempotency guard: `onFirstFrame`
+    /// is documented once-only per `MoshSession`, but this flag makes the send
+    /// itself robust to any future re-fire, mirroring `etControlLaunchSent`'s
+    /// existing pattern for the `-CC` in-band launch). Reset in `teardown()`.
+    private var moshPlainTmuxLaunchSent = false
+    /// Same idempotency guard as `moshPlainTmuxLaunchSent`, for the ET plain-tmux
+    /// route (kept separate from `-CC`'s `etControlLaunchSent`: the two launch
+    /// routes are mutually exclusive per session, gated by `PlainTmuxDebugGate`,
+    /// but use distinct flags so neither path's reset touches the other's state).
+    /// Reset in `teardown()`.
+    private var etPlainTmuxLaunchSent = false
     /// Seeds each tmux pane's scrollback history (capture-pane) before live output.
     private var historySeeder: PaneHistorySeeder?
     /// Shared output sink; the terminal view wires `onBytes` to render into itself.
@@ -622,6 +634,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tmux = nil
         plainTmux = nil
         plainTmuxSessionNamePendingInstall = nil
+        moshPlainTmuxLaunchSent = false
+        etPlainTmuxLaunchSent = false
         paneContexts = [:]
         paneRawContexts = [:]
         fnState.reset()
@@ -1109,6 +1123,23 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // legacy mosh.enabled migration) already decided Mosh is the transport
         // for this connection. No separate `resolveMoshEnabled` gate here.
         DebugLog.shared.log(.connect, "connect:mosh chosen by transport picker (resolveTransport==.mosh)")
+        // Phase-1 gate (temporary, see `PlainTmuxDebugGate`): Mosh attaches a LOGIN
+        // SHELL (no launch-command argument, unlike SSH's `openExec`), so "launch
+        // plain tmux" means sending the launch string IN-BAND once the first frame
+        // is up (`sess.onFirstFrame` below), the same shape PR #123 used to send
+        // `tmux -CC …` in-band on ET. There is no pre-frame exec channel over Mosh
+        // to probe `tmux -V` the way SSH's `probeTmuxVersion` does (Mosh's bootstrap
+        // exec only ever runs `mosh-server`), so for Phase 1 the launch is
+        // UNCONDITIONAL whenever the gate is on: if tmux isn't installed remotely,
+        // `tmux new -A -s <name>` fails visibly at the shell (same user-facing
+        // behavior as typing a bad command), no different from a user who typed it
+        // themselves. This mirrors the ET `-CC` precedent, which is also
+        // unconditional-when-opted-in for the same reason (no pre-attach probe).
+        let plainTmuxGateOn = PlainTmuxDebugGate.isEnabled
+        if plainTmuxGateOn {
+            self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
+            DebugLog.shared.log(.lifecycle, "mosh: plainTmuxGate=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
+        }
         // Effective config for the argv (port range, server path, prediction mode).
         // resolveOptional honors Inherited three-state (NOT host.mosh.value).
         let cfg = resolveOptional(host.mosh, defaults.mosh) ?? MoshConfig(enabled: true)
@@ -1169,6 +1200,27 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self?.captureResume(host: host, transport: .mosh,
                                     endpoint: (host: host.hostName, port: port),
                                     secret: Data(key.utf8))
+                // Phase-1 gate: Mosh has no launch-command argument (attaches a login
+                // shell), so send `tmux new -A -s <name>\n` IN-BAND now that frames are
+                // flowing, exactly like ET's `-CC` in-band launch (PR #123). Guarded by
+                // `moshPlainTmuxLaunchSent` (idempotency; `onFirstFrame` is documented
+                // once-only, but this makes the send itself robust either way).
+                // `installPlainTmuxControllerIfNeeded` is later invoked by
+                // `TerminalScreen.makeUIView` once the raw `TerminalView` mounts (shared
+                // with the SSH plain-tmux path); `recoverLayout` resolves to nil there
+                // because Mosh has no side channel (see that method's doc comment).
+                if plainTmuxGateOn, let self, !self.moshPlainTmuxLaunchSent,
+                   isValidTmuxSessionName(self.tmuxSessionNameForConnection) {
+                    self.moshPlainTmuxLaunchSent = true
+                    let launch = PlainTmuxController.launchCommand(sessionName: self.tmuxSessionNameForConnection)
+                    DebugLog.shared.log(.tmux, "mosh: plainTmux in-band launch \(launch.prefix(60))")
+                    self.plainTmuxSessionNamePendingInstall = self.tmuxSessionNameForConnection
+                    // Use the captured `sess` (not `self.moshSession`): `onFirstFrame` can
+                    // fire SYNCHRONOUSLY during `sess.start()` below (see the `onOutput`
+                    // comment above), before `moshSession = sess` runs, so `self.moshSession`
+                    // may still be nil at this instant.
+                    sess.writeInput(Data((launch + "\n").utf8))
+                }
             }
             // Stamp the start time BEFORE the onEnd closure literal so the closure can
             // capture it (Swift resolves captures at declaration order, not runtime).
@@ -1351,7 +1403,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // handler) and route ET bytes into a `TmuxRuntime` instead of the raw view.
         // If tmux is absent/fails remotely, no `%begin` ever arrives and the panes
         // stay empty (degrade is a device follow-up; the raw ET path is unaffected).
-        let etControlMode = resolveTmuxAttemptControlMode(host: host, defaults: defaults)
+        // Phase-1 gate (temporary, see `PlainTmuxDebugGate`): when on, the gesture-
+        // driven plain-tmux route REPLACES `-CC` entirely for ET too (never stacked),
+        // mirroring `attachSSHShell`'s gate. ET, like Mosh, attaches a login shell
+        // with no launch-command argument, so "launch plain tmux" means sending
+        // `tmux new -A -s <name>\n` IN-BAND once the stream is up (see `onFirstFrame`
+        // below), the same in-band shape `-CC` already uses (PR #123), just a
+        // different launch string and no `TmuxRuntime`/pane routing. `etControlMode`
+        // (the `-CC` branch immediately below) is gated OFF here so the two in-band
+        // launches can never both fire for one session.
+        let plainTmuxGateOn = PlainTmuxDebugGate.isEnabled
+        let etControlMode = !plainTmuxGateOn && resolveTmuxAttemptControlMode(host: host, defaults: defaults)
+        if plainTmuxGateOn {
+            self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
+            DebugLog.shared.log(.lifecycle, "et: plainTmuxGate=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
+        }
         var tmuxRuntime: TmuxRuntime?
         if etControlMode {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
@@ -1421,6 +1487,24 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.captureResume(host: host, transport: .et,
                                endpoint: (host: config.host, port: Int(config.port)),
                                secret: Data("\(serverCred.id)/\(serverCred.passkey)".utf8))
+            // Phase-1 gate: plain-tmux in-band launch, mutually exclusive with the
+            // `-CC` in-band launch below (`etControlMode` is forced false whenever
+            // this gate is on, so `etIsControlMode`/`self.tmux` are never set here).
+            // `installPlainTmuxControllerIfNeeded` runs later from
+            // `TerminalScreen.makeUIView` once the raw `TerminalView` mounts;
+            // `recoverLayout` resolves via `self.connection`, which IS reachable here
+            // (ET's bootstrap `openExec` and this session share the same underlying
+            // `Connection`, see `queryPlainTmuxLayout`), so ET plain-tmux gets the
+            // SAME side-channel `list-windows` recovery SSH does, not the Mosh blind
+            // fallback.
+            if plainTmuxGateOn, !self.etPlainTmuxLaunchSent,
+               isValidTmuxSessionName(self.tmuxSessionNameForConnection) {
+                self.etPlainTmuxLaunchSent = true
+                let launch = PlainTmuxController.launchCommand(sessionName: self.tmuxSessionNameForConnection)
+                DebugLog.shared.log(.tmux, "et: plainTmux in-band launch \(launch.prefix(60))")
+                self.plainTmuxSessionNamePendingInstall = self.tmuxSessionNameForConnection
+                sess.send(Data((launch + "\n").utf8))
+            }
             // ET `-CC`: the stream is up (login shell ready), so NOW launch tmux
             // control mode in-band by "typing" `tmux -CC new-session …\n`. Guarded
             // to fire exactly once (onFirstFrame is already once-only, but ET may
@@ -1757,17 +1841,24 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Build and retain `PlainTmuxController` for the just-mounted raw `TerminalView`,
     /// consuming `plainTmuxSessionNamePendingInstall`. Idempotent: a second call
     /// (e.g. a SwiftUI `makeUIView` re-invocation) is a no-op once `plainTmux` is set.
-    /// SSH's side-channel recovery (`recoverLayout`) re-queries `list-windows` on a
-    /// fresh one-shot exec over the SAME retained `connection`; Mosh/ET plumb no
-    /// side channel here yet (Phase 1: `recoverLayout` stays nil off-SSH, so
-    /// `PlainTmuxController` falls back to the blind Mosh cycle for every recovery,
-    /// matching the design spec's ET-recovery TODO, ET's `openExec` wiring for
-    /// plain-tmux recovery is deferred alongside the rest of ET's plain-tmux route).
+    /// SSH and ET side-channel recovery (`recoverLayout`) re-queries `list-windows`
+    /// on a fresh one-shot exec over the SAME retained `connection`: for SSH plain
+    /// tmux that's the very connection tmux was launched on; for ET it's the
+    /// underlying SSH `Connection` that bootstrapped ET (ET's own bootstrap exec
+    /// already proved a second `openExec` on it reaches the same host, and tmux's
+    /// server-daemon model means any client on that host, ET's login shell or a
+    /// fresh SSH exec, can query the same named session), so ET gets the SAME
+    /// recovery SSH does. Mosh is explicitly EXCLUDED (`isMoshActive` guard) even
+    /// though `self.connection` is technically still set (Mosh's `Connection` is a
+    /// bootstrap-only artifact used once to spawn `mosh-server`; treating it as a
+    /// persistent side channel for the whole roaming Mosh session's lifetime is
+    /// unproven for Phase 1), so `recoverLayout` stays nil off-Mosh's raw fallback:
+    /// `PlainTmuxController` falls back to the blind cycle for every Mosh recovery.
     func installPlainTmuxControllerIfNeeded(screen: TerminalView) {
         guard plainTmux == nil, let name = plainTmuxSessionNamePendingInstall else { return }
         plainTmuxSessionNamePendingInstall = nil
         let recoverLayout: (@Sendable () async -> (window: WindowID, layout: PaneLayout)?)? = {
-            guard let conn = self.connection else { return nil }
+            guard !isMoshActive, let conn = self.connection else { return nil }
             return { [weak self] in
                 guard let self else { return nil }
                 return await self.queryPlainTmuxLayout(conn: conn)
@@ -1778,7 +1869,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             sendInput: { [weak self] bytes in self?.rawWriter?.enqueue(bytes) },
             screen: screen,
             recoverLayout: recoverLayout)
-        DebugLog.shared.log(.tmux, "plainTmux: controller installed session=\(name)")
+        DebugLog.shared.log(.tmux, "plainTmux: controller installed session=\(name) recovery=\(recoverLayout != nil ? "sideChannel" : "blind")")
     }
 
     /// SSH/ET side-channel recovery query: run `list-windows -F "..."` on a fresh
