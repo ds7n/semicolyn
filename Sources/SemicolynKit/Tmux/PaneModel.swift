@@ -79,6 +79,12 @@ public struct PaneModel: Equatable, Sendable {
     /// reserved for tmux's border. E.g. splitting an 80-col pane `.sideBySide`:
     /// left (existing) keeps cols 0..39 (width 40), border at col 40, right (new)
     /// gets cols 41..79 (width 39): 40 + 1 + 39 == 80.
+    ///
+    /// PINNED DEGENERATE/MIN-SIZE RULE (fails closed): a split needs room for both
+    /// resulting panes (>=1 cell each) plus the 1-cell border, i.e. `usable =
+    /// dimension - 1` must be `>= 2`. If there isn't room (e.g. splitting a 1-wide
+    /// or 2-wide pane `.sideBySide`), this is a no-op: the model is left unchanged
+    /// (no zero/negative-size rect is ever created, `rects` keeps its prior count).
     public mutating func applySplit(_ dir: SplitDirection, newPane: PaneID) {
         guard let index = rects.firstIndex(where: { $0.pane == activePane }) else { return }
         let active = rects[index]
@@ -86,6 +92,7 @@ public struct PaneModel: Equatable, Sendable {
         switch dir {
         case .sideBySide:
             let usable = active.width - 1   // 1 cell reserved for the border
+            guard usable >= 2 else { return }   // no room for two >=1-cell panes + border
             let existingWidth = (usable / 2).rounded(.up)
             let newWidth = usable - existingWidth
             let existingRect = PaneRect(pane: active.pane, x: active.x, y: active.y,
@@ -96,6 +103,7 @@ public struct PaneModel: Equatable, Sendable {
             rects.insert(newRect, at: index + 1)
         case .stacked:
             let usable = active.height - 1  // 1 cell reserved for the border
+            guard usable >= 2 else { return }   // no room for two >=1-cell panes + border
             let existingHeight = (usable / 2).rounded(.up)
             let newHeight = usable - existingHeight
             let existingRect = PaneRect(pane: active.pane, x: active.x, y: active.y,
