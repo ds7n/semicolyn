@@ -137,20 +137,44 @@ struct TerminalScreen: UIViewRepresentable {
         restoreTap.cancelsTouchesInView = false
         terminal.addGestureRecognizer(restoreTap)
 
+        // Phase-1 gate (temporary, see `PlainTmuxDebugGate`): if `attachPlainTmux`
+        // launched a plain-tmux session for this connection, build the gesture
+        // controller against THIS freshly created `TerminalView` now (it needs the
+        // live grid + `getCharData` for the on-tap border-drift check). No-op (and
+        // `vm.plainTmux` stays nil) when the gate is off or this is a raw-PTY/Mosh
+        // screen, so the callbacks below fall through to the unchanged raw no-ops.
+        vm.installPlainTmuxControllerIfNeeded(screen: terminal)
+
         // Install our own gesture layer (replaces SwiftTerm's built-in tap/scrub/select).
         // Raw PTY: no tmux, so horizontal drag falls through to scroll and long-press
-        // zoom is a no-op.
+        // zoom is a no-op. Plain tmux (Phase-1 gate ON): the same callbacks route
+        // through `vm.plainTmux` instead, so window-switch/zoom/tap-select drive
+        // gesture-issued tmux commands (`PlainTmuxController`) rather than no-ops /
+        // raw arrow-key cursor placement.
         let gestureController = TerminalGestureController(
             terminalView: terminal,
             callbacks: .init(
-                isMultiWindowTmux: { false },
-                onSwitchWindow: { _ in },
-                onLongPressZoom: { },
+                isMultiWindowTmux: { [weak coordinator = context.coordinator] in
+                    coordinator?.vm?.isMultiWindowTmux ?? false
+                },
+                onSwitchWindow: { [weak coordinator = context.coordinator] delta in
+                    coordinator?.vm?.plainTmux?.onSwitchWindow(delta: delta)
+                },
+                onLongPressZoom: { [weak coordinator = context.coordinator] in
+                    coordinator?.vm?.plainTmux?.onLongPressZoom()
+                },
                 onPlaceCursor: { [weak coordinator = context.coordinator, weak terminal] col, row in
                     guard let terminal else { return }
-                    coordinator?.placeCursor(toCol: col, toRow: row, in: terminal)
+                    if let plainTmux = coordinator?.vm?.plainTmux {
+                        plainTmux.onTapSelectPane(col: col, row: row)
+                    } else {
+                        coordinator?.placeCursor(toCol: col, toRow: row, in: terminal)
+                    }
                 },
-                // Raw shell has exactly one pane, always active, and no tmux select-pane.
+                // Raw shell / plain tmux both have exactly one CLIENT-side pane
+                // registry entry here (the raw single-terminal path never tracks
+                // multiple `TerminalView`s), always active, so no tmux select-pane
+                // focus-shift is needed on this screen either way.
                 isActivePane: { true },
                 onSelectPane: { },
                 currentMode: { [weak coordinator = context.coordinator] in coordinator?.modeTracker.mode ?? .localScroll },
@@ -167,10 +191,13 @@ struct TerminalScreen: UIViewRepresentable {
                 sendBytes: { [weak coordinator = context.coordinator] bytes in coordinator?.send(bytes) },
                 hasSelection: { [weak terminal] in terminal?.selectionActive ?? false },
                 clearSelection: { [weak terminal] in terminal?.selectNone() },
-                // Raw-PTY / single-pane terminal: no tmux windows to switch, so the
-                // finger-drag commit callback is a no-op here (it only fires when
-                // `isMultiWindowTmux` is true, which is always false in this screen).
-                onDragCommit: { _ in }
+                // Finger-drag window-switch commit: routes to `PlainTmuxController`
+                // when plain tmux is active (gated by `isMultiWindowTmux` above,
+                // which only reports true then); a no-op raw-PTY/Mosh screen (no
+                // tmux windows to switch).
+                onDragCommit: { [weak coordinator = context.coordinator] delta in
+                    coordinator?.vm?.plainTmux?.onSwitchWindow(delta: delta)
+                }
             )
         )
         context.coordinator.gestureController = gestureController
