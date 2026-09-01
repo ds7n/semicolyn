@@ -155,6 +155,16 @@ final class PlainTmuxController {
         let verdict = validateBorders(borders) { c, r in cellScalar(at: c, row: r, in: screen) }
         switch verdict {
         case .valid:
+            let addedPane = detectUnpredictedBorder(rects: model.rects,
+                                                     gridCols: model.gridCols, gridRows: model.gridRows) { c, r in
+                cellScalar(at: c, row: r, in: screen)
+            }
+            if addedPane == .drift {
+                DebugLog.shared.log(.tmux,
+                    "plainTmux:tap col=\(col) row=\(row) verdict=valid unpredicted-border → recovery")
+                recover(thenResolveTapAt: col, row)
+                return
+            }
             guard let id = resolveTappedPane(col: col, row: row, in: model) else {
                 DebugLog.shared.log(.tmux, "plainTmux:tap col=\(col) row=\(row) verdict=valid resolve=nil → recovery")
                 recover(thenResolveTapAt: col, row)

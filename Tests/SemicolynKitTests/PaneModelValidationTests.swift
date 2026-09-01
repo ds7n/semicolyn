@@ -50,4 +50,61 @@ final class PaneModelValidationTests: XCTestCase {
         let v = validateBorders([border]) { _, _ in nil }   // out of range
         XCTAssertEqual(v, .drift)
     }
+
+    // MARK: - detectUnpredictedBorder (B1: catches added panes, e.g. a raw `C-b %`)
+
+    func testEmptyBordersIsVacuouslyValid() {
+        // Pins the KNOWN limitation of the OLD check: a single-pane model predicts
+        // NO borders, so validateBorders([]) is vacuously valid even when a split
+        // was made outside our tracking. This is exactly why detectUnpredictedBorder
+        // exists: it inspects the RENDERED grid, not just the predicted cells.
+        let v = validateBorders([]) { _, _ in nil }
+        XCTAssertEqual(v, .valid)
+    }
+
+    func testSinglePaneWithRenderedSplitIsUnpredictedDrift() {
+        let whole = PaneRect(pane: PaneID(raw: 1), x: 0, y: 0, width: 80, height: 24)
+        let v = detectUnpredictedBorder(rects: [whole], gridCols: 80, gridRows: 24) { col, row in
+            col == 40 ? scalar(0x2502) : scalar(0x20)
+        }
+        XCTAssertEqual(v, .drift)
+    }
+
+    func testCorrectTwoPaneModelHasNoUnpredictedBorder() {
+        var model = PaneModel(window: WindowID(raw: 0), pane: PaneID(raw: 1), gridCols: 80, gridRows: 24)
+        model.applySplit(.sideBySide, newPane: PaneID(raw: 2))
+        // Real border sits at col 40, the shared EDGE between the two rects (left
+        // is x:0 width:40 -> cols 0..39; right is x:41 width:39 -> cols 41..79),
+        // not in either rect's interior, so it must not false-trip.
+        let v = detectUnpredictedBorder(rects: model.rects, gridCols: 80, gridRows: 24) { col, row in
+            col == 40 ? scalar(0x2502) : scalar(0x20)
+        }
+        XCTAssertEqual(v, .valid)
+    }
+
+    func testSinglePaneNoBorderIsValid() {
+        let whole = PaneRect(pane: PaneID(raw: 1), x: 0, y: 0, width: 80, height: 24)
+        let v = detectUnpredictedBorder(rects: [whole], gridCols: 80, gridRows: 24) { _, _ in scalar(0x20) }
+        XCTAssertEqual(v, .valid)
+    }
+
+    func testUnpredictedHorizontalSplitIsDrift() {
+        let whole = PaneRect(pane: PaneID(raw: 1), x: 0, y: 0, width: 80, height: 24)
+        let v = detectUnpredictedBorder(rects: [whole], gridCols: 80, gridRows: 24) { col, row in
+            row == 12 ? scalar(0x2500) : scalar(0x20)
+        }
+        XCTAssertEqual(v, .drift)
+    }
+
+    func testNarrowRectHasNoInteriorToScan() {
+        // Width 2 -> no interior columns ((x+1)..<(x+width-1) is empty), so the
+        // vertical scan must not crash and must not false-trip on box-drawing
+        // rendered in the (only) two columns. Height is also degenerate (2) so
+        // the horizontal scan is likewise skipped, isolating the width guard.
+        let narrow = PaneRect(pane: PaneID(raw: 1), x: 0, y: 0, width: 2, height: 2)
+        let v = detectUnpredictedBorder(rects: [narrow], gridCols: 2, gridRows: 2) { col, row in
+            scalar(0x2502)
+        }
+        XCTAssertEqual(v, .valid)
+    }
 }

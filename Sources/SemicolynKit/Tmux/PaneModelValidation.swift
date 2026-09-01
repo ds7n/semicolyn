@@ -29,3 +29,44 @@ public func validateBorders(_ borders: [PredictedBorder],
     }
     return .valid
 }
+
+/// Detect a pane border the model does NOT predict: a contiguous full-span run
+/// of box-drawing in the INTERIOR of one of the model's rects (a column running
+/// the rect's full height, or a row running its full width), which implies a
+/// split tmux made outside our tracking. Targeted at rect interiors, NOT a blind
+/// whole-screen scan, so an app's border glyph at a rect EDGE (a real predicted
+/// border) is ignored. Over-eager by design (an app drawing a full-height line
+/// inside its pane trips it), which is safe: it only triggers an authoritative
+/// recovery re-query that self-corrects. `cellAt` returns the rendered scalar at
+/// (col,row) or nil out of range.
+public func detectUnpredictedBorder(rects: [PaneRect],
+                                    gridCols: Int, gridRows: Int,
+                                    cellAt: (_ col: Int, _ row: Int) -> Unicode.Scalar?) -> DriftVerdict {
+    for rect in rects {
+        let x = Int(rect.x), y = Int(rect.y)
+        let width = Int(rect.width), height = Int(rect.height)
+
+        // Full-height interior column: an unpredicted vertical split.
+        if width > 2 {
+            for c in (x + 1)..<(x + width - 1) {
+                let allBoxDrawing = (y..<(y + height)).allSatisfy { r in
+                    guard let s = cellAt(c, r) else { return false }
+                    return isBoxDrawing(s)
+                }
+                if allBoxDrawing { return .drift }
+            }
+        }
+
+        // Full-width interior row: an unpredicted horizontal split.
+        if height > 2 {
+            for r in (y + 1)..<(y + height - 1) {
+                let allBoxDrawing = (x..<(x + width)).allSatisfy { c in
+                    guard let s = cellAt(c, r) else { return false }
+                    return isBoxDrawing(s)
+                }
+                if allBoxDrawing { return .drift }
+            }
+        }
+    }
+    return .valid
+}
