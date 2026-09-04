@@ -39,6 +39,22 @@ final class TmuxLaunchProbeTests: XCTestCase {
         // "command not found" as data, not a shell diagnostic naming tmux
         XCTAssertEqual(classifyTmuxLaunch(output: "cat: command-not-found.log: No such file\n"), .inconclusive)
     }
+    func testHyphenatedNotFoundWithTmuxIsInconclusive() {
+        // tmux: command-not-found.log missing; contains "tmux:" but NOT "tmux: command not found"
+        XCTAssertEqual(classifyTmuxLaunch(output: "tmux: command-not-found.log missing\n"), .inconclusive)
+    }
+    func testTmuxConfNotFoundWarningIsInconclusive() {
+        // tmux's own benign warning when .tmux.conf is missing; NOT a shell diagnostic
+        XCTAssertEqual(classifyTmuxLaunch(output: "tmux.conf not found, using defaults\n"), .inconclusive)
+    }
+    func testDotTmuxConfNotFoundIsInconclusive() {
+        // full path to missing config file; benign warning, not shell diagnostic
+        XCTAssertEqual(classifyTmuxLaunch(output: "/home/u/.tmux.conf not found\n"), .inconclusive)
+    }
+    func testTmuxConfigNotFoundPhraseIsInconclusive() {
+        // generic phrase about tmux config; not the shell diagnostic shape
+        XCTAssertEqual(classifyTmuxLaunch(output: "tmux config not found\n"), .inconclusive)
+    }
     func testEmptyOutputIsInconclusive() {
         XCTAssertEqual(classifyTmuxLaunch(output: ""), .inconclusive)
     }

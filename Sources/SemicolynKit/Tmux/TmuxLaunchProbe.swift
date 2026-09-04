@@ -15,14 +15,19 @@ public enum TmuxLaunchProbe: Equatable, Sendable {
 /// evidence tmux is up (an app INSIDE tmux has not started yet at launch time).
 private let altScreenEnter: [String] = ["\u{1B}[?1049h", "\u{1B}[?1047h", "\u{1B}[?47h"]
 
-/// Shell "command not found" diagnostics that name tmux. Matched as a line shape
-/// (a `not found` diagnostic mentioning `tmux`), not the bare token `tmux`, so a
-/// benign mention of the word cannot trip a false positive.
+/// Shell "command not found" diagnostics that name tmux. Matched by specific
+/// diagnostic shapes to avoid false positives on benign warnings like
+/// "tmux.conf not found" or "tmux config not found". Real shell forms:
+/// - `tmux: command not found` (bash/zsh)
+/// - `tmux: not found` (sh/dash/busybox)
+/// - `command not found: tmux` (zsh word order)
+/// These are anchored to tmux: or : tmux adjacency, so "tmux.conf not found"
+/// (no colon) and "tmux config not found" do not match.
 private func lineIsTmuxNotFound(_ line: Substring) -> Bool {
     let l = line.lowercased()
-    guard l.contains("tmux") else { return false }
-    // "command not found" (bash/zsh) or "not found" (sh/dash/busybox), as a diagnostic.
-    return l.contains("command not found") || l.contains("not found")
+    return l.contains("tmux: command not found") ||
+           l.contains("tmux: not found") ||
+           l.contains("command not found: tmux")
 }
 
 public func classifyTmuxLaunch(output: String) -> TmuxLaunchProbe {
