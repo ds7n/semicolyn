@@ -153,8 +153,8 @@ public func resolveTailscaleRequired(host: Host, defaults: Defaults) -> Bool {
 public func resolvePredictorIncognito(host: Host, defaults: Defaults) -> Bool {
     resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.predictor?.incognito }, fallback: false)
 }
-public func resolveTmuxAttemptControlMode(host: Host, defaults: Defaults) -> Bool {
-    resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.tmux?.attemptControlMode }, fallback: true)
+public func resolveUseTmux(host: Host, defaults: Defaults) -> Bool {
+    resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.tmux?.useTmux }, fallback: true)
 }
 
 /// Resolve the tmux -CC session name: host leaf → Defaults leaf → builtin.
