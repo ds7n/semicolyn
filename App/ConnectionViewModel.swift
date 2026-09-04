@@ -247,23 +247,23 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private var rawWriter: SerialByteWriter?
     /// Non-nil while a tmux control-mode session is active.
     private var tmux: TmuxRuntime?
-    /// Non-nil while the Phase-1 gesture-driven PLAIN tmux route is active (no
-    /// `-CC`), gated by `PlainTmuxDebugGate.isEnabled`. Mutually exclusive with
+    /// Non-nil while the gesture-driven PLAIN tmux route is active (no `-CC`),
+    /// driven per-host/default by `resolveUseTmux`. Mutually exclusive with
     /// `tmux`: exactly one of the two tmux paths is ever set for a session. The
     /// byte stream rides the same raw single-terminal path as `rawWriter`
     /// (`output.onBytes`/`terminal.feed`); this only holds the gesture-command
-    /// controller. Phase-1-temporary, removed with the rest of the gate in Phase 2.
+    /// controller.
     private(set) var plainTmux: PlainTmuxController?
-    /// True once the Phase-1 plain-tmux in-band launch (`tmux new -A -s <name>\n`)
-    /// has been sent for the current Mosh session (idempotency guard: `onFirstFrame`
+    /// True once the plain-tmux in-band launch (`tmux new -A -s <name>\n`) has
+    /// been sent for the current Mosh session (idempotency guard: `onFirstFrame`
     /// is documented once-only per `MoshSession`, but this flag makes the send
     /// itself robust to any future re-fire, mirroring `etControlLaunchSent`'s
     /// existing pattern for the `-CC` in-band launch). Reset in `teardown()`.
     private var moshPlainTmuxLaunchSent = false
     /// Same idempotency guard as `moshPlainTmuxLaunchSent`, for the ET plain-tmux
     /// route (kept separate from `-CC`'s `etControlLaunchSent`: the two launch
-    /// routes are mutually exclusive per session, gated by `PlainTmuxDebugGate`,
-    /// but use distinct flags so neither path's reset touches the other's state).
+    /// routes are mutually exclusive per session, driven by `resolveUseTmux`, but
+    /// use distinct flags so neither path's reset touches the other's state).
     /// Reset in `teardown()`.
     private var etPlainTmuxLaunchSent = false
     /// True once a plain-tmux in-band launch has actually been SENT for the
@@ -1066,45 +1066,26 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// both `connect` methods, factored out so the Mosh pre-frame fallback can re-run
     /// it on the SAME retained connection (see `attachMoshIfPossible`).
     private func attachSSHShell(conn: Connection, host: Host, defaults: Defaults) async throws {
-        // Phase-1 gate (temporary, removed in Phase 2 with the -CC stack): plain
-        // gesture-driven tmux replaces the -CC branch ENTIRELY when flipped on, never
-        // stacked with it. Default OFF, so this is a no-op in every non-debug build
-        // and in a debug build that never calls `setEnabledForDebug`.
-        if PlainTmuxDebugGate.isEnabled {
-            let allow = resolveTmuxAttemptControlMode(host: host, defaults: defaults)
-            let probe = allow ? await probeTmuxVersion(conn: conn) : nil
-            DebugLog.shared.log(.lifecycle, "attachSSHShell: plainTmuxGate=ON allowControlMode=\(allow) probe=\(probe ?? "nil")")
-            switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
-            case .attach:
-                self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
-                try await attachPlainTmux(conn: conn)
-            case .degrade(let reason):
-                DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=DEGRADE(\(String(describing: reason))) → raw shell")
-                degraded = reason
-                try await openRawShell(conn: conn)
-            }
-            captureResume(host: host, transport: .ssh,
-                          endpoint: (host: host.hostName, port: resolvePort(host: host, defaults: defaults)),
-                          secret: nil)
-            return
-        }
-        let allow = resolveTmuxAttemptControlMode(host: host, defaults: defaults)
-        let probe = allow ? await probeTmuxVersion(conn: conn) : nil
-        DebugLog.shared.log(.lifecycle, "attachSSHShell: allowControlMode=\(allow) probe=\(probe ?? "nil")")
-        switch tmuxLaunchDecision(attemptControlMode: allow, versionProbe: probe) {
+        // Gesture-driven plain tmux (no `-CC`) is now the only tmux route: whether
+        // to attempt it at all is a per-host/default choice (`resolveUseTmux`), not
+        // a debug gate. The `-CC` stack (`attachTmux`/`TmuxRuntime`) stays in the
+        // tree, dead-until-Phase-2, but this path never calls it.
+        let useTmux = resolveUseTmux(host: host, defaults: defaults)
+        let probe = useTmux ? await probeTmuxVersion(conn: conn) : nil
+        DebugLog.shared.log(.lifecycle, "attachSSHShell: useTmux=\(useTmux) probe=\(probe ?? "nil")")
+        switch tmuxLaunchDecision(attemptControlMode: useTmux, versionProbe: probe) {
         case .attach:
-            DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=ATTACH tmux")
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
-            try await attachTmux(conn: conn)
+            try await attachPlainTmux(conn: conn)
         case .degrade(let reason):
-            DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=DEGRADE(\(String(describing: reason))) → raw shell")
+            DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=DEGRADE(\(String(describing: reason))) -> raw shell")
             degraded = reason
             try await openRawShell(conn: conn)
         }
-        // Connected edge (raw SSH / tmux -CC over SSH): a raw SSH session is
-        // client-side, so it resumes by PROMPTING (transport = .ssh, no secret). If
-        // the host runs tmux -CC (`isTmuxControlMode`), the tmux session name rides so
-        // a confirmed fresh reconnect lands back in the same panes via `new-session -A`.
+        // Connected edge (raw SSH / gesture-tmux over SSH): a raw SSH session is
+        // client-side, so it resumes by PROMPTING (transport = .ssh, no secret). The
+        // tmux session name always rides so a confirmed fresh reconnect lands back
+        // in the same session via `tmux new -A -s <name>`.
         // Runs on the main actor (async method on a @MainActor class), no wrap needed.
         captureResume(host: host, transport: .ssh,
                       endpoint: (host: host.hostName, port: resolvePort(host: host, defaults: defaults)),
@@ -1866,9 +1847,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         runtime.startContextPolling()
     }
 
-    /// Phase-1 gate route (temporary, see `PlainTmuxDebugGate`): launch PLAIN tmux
-    /// (no `-CC`) and feed its byte stream through the SAME raw single-terminal
-    /// path `openRawShell` uses (`output`/`rawWriter`), so `TerminalScreen`/
+    /// Launch PLAIN tmux (no `-CC`, driven per-host/default by `resolveUseTmux`)
+    /// and feed its byte stream through the SAME raw single-terminal path
+    /// `openRawShell` uses (`output`/`rawWriter`), so `TerminalScreen`/
     /// `RawTerminalContainer` need no structural change, only a gesture-callback
     /// wiring choice made at `makeUIView` time (see `TerminalScreen`). The
     /// `PlainTmuxController` itself is built lazily by `TerminalScreen.makeUIView`
