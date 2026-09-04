@@ -847,13 +847,46 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // App target already compiles: the Obj-C block property is inferred main-actor
         // here, so no `MainActor.assumeIsolated` wrapper is needed (that guard is for
         // nonisolated SwiftTerm/@objc callbacks, not these blocks).
-        sess.onOutput = { [weak self] data in self?.output.onOutput(data: data) }
+        sess.onOutput = { [weak self] data in
+            self?.output.onOutput(data: data)
+            // Feed the reactive tmux-missing probe on reattach too (the re-launched
+            // `tmux new -A -s <name>` in onFirstFrame arms it), mirroring the fresh path.
+            guard let self, self.plainTmuxProbeArmed, !self.plainTmuxProbeResolved else { return }
+            self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
+            self.evaluatePlainTmuxProbe()
+        }
         sess.onFirstFrame = { [weak self] in
             guard let self else { return }
             // Reattach succeeded: frames flowing. Refresh the record (new lastConnectedAt)
             // and drop the in-memory failure copy.
             DebugLog.shared.log(.connect, "resume:reattachMosh onFirstFrame → live")
             self.resumeInMemory = nil
+            // If the resumed record was a plain-tmux session, RE-LAUNCH tmux in-band and
+            // install the gesture controller, exactly like the fresh Mosh path. The
+            // reattached login shell is a fresh shell (Mosh reattach re-execs the login
+            // shell), so `tmux new -A -s <name>` (-A = attach-if-exists) lands back in the
+            // persisted session and the swipe/zoom/tap gestures work again. Without this,
+            // a cold reattach came back as a bare shell with no gestures (device bug
+            // 2026-09-04: "Mosh reconnect did not work").
+            if let name = record.tmuxSessionName, isValidTmuxSessionName(name) {
+                self.tmuxSessionNameForConnection = name
+                self.moshPlainTmuxLaunchSent = true
+                let launch = PlainTmuxController.launchCommand(sessionName: name)
+                DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux in-band launch \(launch.prefix(60))")
+                self.plainTmuxSessionNamePendingInstall = name
+                self.installPlainTmuxControllerIfMounted()
+                self.plainTmuxProbeArmed = true
+                self.plainTmuxProbeBuffer = ""
+                self.plainTmuxProbeResolved = false
+                self.plainTmuxProbeWatchdog?.cancel()
+                self.plainTmuxProbeWatchdog = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    guard let self, !self.plainTmuxProbeResolved else { return }
+                    self.plainTmuxProbeResolved = true
+                    DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux probe window expired inconclusive → assume started")
+                }
+                sess.writeInput(Data((launch + "\n").utf8))
+            }
             self.captureResume(host: host, transport: .mosh,
                                endpoint: (host: record.host, port: record.port), secret: key)
         }
@@ -1205,28 +1238,28 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self?.moshFirstFrameSeen = true
                 self?.moshWatchdog?.cancel(); self?.moshWatchdog = nil
                 DebugLog.shared.log(.connect, "mosh: watchdog cancelled (onFirstFrame)")
-                // Connected edge: persist the resume record. Reattach endpoint is the
-                // Mosh server (host + UDP port); secret is the MOSH_KEY. Bare `self?.`
-                // access mirrors the `self?.moshFirstFrameSeen` line above (this block is
-                // main-actor-inferred, the same as the rest of this closure).
-                self?.captureResume(host: host, transport: .mosh,
-                                    endpoint: (host: host.hostName, port: port),
-                                    secret: Data(key.utf8))
                 // Mosh has no launch-command argument (attaches a login shell), so
                 // send `tmux new -A -s <name>\n` IN-BAND now that frames are
                 // flowing, exactly like ET's `-CC` in-band launch (PR #123). Guarded by
                 // `moshPlainTmuxLaunchSent` (idempotency; `onFirstFrame` is documented
                 // once-only, but this makes the send itself robust either way).
-                // `installPlainTmuxControllerIfNeeded` is later invoked by
-                // `TerminalScreen.makeUIView` once the raw `TerminalView` mounts (shared
-                // with the SSH plain-tmux path); `recoverLayout` resolves to nil there
-                // because Mosh has no side channel (see that method's doc comment).
+                // Install the gesture controller NOW against the already-mounted view.
+                // The raw `TerminalView` mounted before this UDP first-frame (it mounts
+                // to receive Mosh output), so `TerminalScreen.makeUIView` already ran its
+                // one-time `installPlainTmuxControllerIfNeeded` while the pending name was
+                // still nil (a no-op) and never runs again. Setting the pending name here
+                // and immediately calling `installPlainTmuxControllerIfMounted()` builds
+                // the controller against the stashed view, so `vm.plainTmux != nil` and
+                // the swipe/zoom/tap gestures route through it (device bug 2026-09-04:
+                // Mosh gestures never installed -> swipe fell through to alt-screen
+                // scroll). `recoverLayout` resolves to nil (Mosh has no side channel).
                 if useTmux, let self, !self.moshPlainTmuxLaunchSent,
                    isValidTmuxSessionName(self.tmuxSessionNameForConnection) {
                     self.moshPlainTmuxLaunchSent = true
                     let launch = PlainTmuxController.launchCommand(sessionName: self.tmuxSessionNameForConnection)
                     DebugLog.shared.log(.tmux, "mosh: plainTmux in-band launch \(launch.prefix(60))")
                     self.plainTmuxSessionNamePendingInstall = self.tmuxSessionNameForConnection
+                    self.installPlainTmuxControllerIfMounted()
                     // Arm the reactive tmux-missing probe: Mosh can't pre-probe
                     // `tmux -V` (no pre-frame exec channel), so watch the first
                     // ~2s of output and classify it (see `evaluatePlainTmuxProbe`).
@@ -1249,6 +1282,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     // may still be nil at this instant.
                     sess.writeInput(Data((launch + "\n").utf8))
                 }
+                // Connected edge: persist the resume record. Reattach endpoint is the
+                // Mosh server (host + UDP port); secret is the MOSH_KEY. Runs AFTER the
+                // plain-tmux install above so `isTmuxSession` (reads `plainTmux != nil`)
+                // is true for a plain-tmux Mosh session, and the tmux session name RIDES
+                // the record so a cold reattach lands back in the tmux session rather
+                // than a raw shell (device bug 2026-09-04: Mosh resume captured tmux=false).
+                self?.captureResume(host: host, transport: .mosh,
+                                    endpoint: (host: host.hostName, port: port),
+                                    secret: Data(key.utf8))
             }
             // Stamp the start time BEFORE the onEnd closure literal so the closure can
             // capture it (Swift resolves captures at declaration order, not runtime).
@@ -1536,6 +1578,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 let launch = PlainTmuxController.launchCommand(sessionName: self.tmuxSessionNameForConnection)
                 DebugLog.shared.log(.tmux, "et: plainTmux in-band launch \(launch.prefix(60))")
                 self.plainTmuxSessionNamePendingInstall = self.tmuxSessionNameForConnection
+                // Install the gesture controller against the already-mounted view now:
+                // like Mosh, ET launches in-band on onFirstFrame AFTER makeUIView's
+                // one-time install already no-op'd, so it must install here (device bug
+                // 2026-09-04). No-op on SSH (installed at makeUIView).
+                self.installPlainTmuxControllerIfMounted()
                 // Arm the reactive tmux-missing probe: ET can't pre-probe `tmux -V`
                 // (no pre-shell exec), so watch the first ~2s of output and classify
                 // it (see `evaluatePlainTmuxProbe`).
@@ -1886,6 +1933,28 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// freshly created `TerminalView` (nil = no plain-tmux install pending, either
     /// the gate is off or the controller is already installed).
     private(set) var plainTmuxSessionNamePendingInstall: String?
+
+    /// The live raw `TerminalView`, stashed by `TerminalScreen.makeUIView` when it
+    /// mounts. Lets a transport whose plain-tmux launch happens AFTER the view has
+    /// mounted (Mosh/ET launch in-band on `onFirstFrame`, unlike SSH which sets the
+    /// pending name synchronously before `state = .shell`) install the controller
+    /// against the already-mounted view via `installPlainTmuxControllerIfMounted()`,
+    /// rather than relying on a second `makeUIView` that never comes. Weak: the view
+    /// is owned by SwiftUI; we only borrow it to build the controller.
+    private weak var mountedTerminalView: TerminalView?
+
+    /// Record the mounted raw `TerminalView` (called from `TerminalScreen.makeUIView`).
+    func setMountedTerminalView(_ view: TerminalView) { mountedTerminalView = view }
+
+    /// Install `PlainTmuxController` against the already-mounted `TerminalView`, if any.
+    /// Used by the Mosh/ET `onFirstFrame` launch path, where the pending-install name is
+    /// set AFTER `makeUIView` already ran its own (then-no-op) install. Idempotent via
+    /// `installPlainTmuxControllerIfNeeded`'s `plainTmux == nil` guard; a no-op when the
+    /// view hasn't mounted yet (then `makeUIView` will install once it does).
+    func installPlainTmuxControllerIfMounted() {
+        guard let view = mountedTerminalView else { return }
+        installPlainTmuxControllerIfNeeded(screen: view)
+    }
 
     /// Build and retain `PlainTmuxController` for the just-mounted raw `TerminalView`,
     /// consuming `plainTmuxSessionNamePendingInstall`. Idempotent: a second call

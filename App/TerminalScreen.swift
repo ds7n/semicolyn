@@ -143,6 +143,10 @@ struct TerminalScreen: UIViewRepresentable {
         // `getCharData` for the on-tap border-drift check). No-op (and
         // `vm.plainTmux` stays nil) when tmux is off or this is a raw-PTY/Mosh
         // screen, so the callbacks below fall through to the unchanged raw no-ops.
+        // Stash the mounted view so a transport that launches plain tmux AFTER this
+        // mount (Mosh/ET, in-band on onFirstFrame) can install the gesture controller
+        // against it (SSH installs right here since its pending name is already set).
+        vm.setMountedTerminalView(terminal)
         vm.installPlainTmuxControllerIfNeeded(screen: terminal)
 
         // Install our own gesture layer (replaces SwiftTerm's built-in tap/scrub/select).
