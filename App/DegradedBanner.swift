@@ -3,7 +3,7 @@
 import SwiftUI
 import SemicolynKit
 
-/// Transient amber banner: control mode was declined/failed, running plain SSH.
+/// Transient amber banner: tmux was declined or unavailable, using a plain shell.
 struct DegradedBanner: View {
     let reason: DegradeReason
     let onDismiss: () -> Void
@@ -11,10 +11,10 @@ struct DegradedBanner: View {
 
     private var message: String {
         switch reason {
-        case .optedOut:        return "tmux control mode is off for this host — running as plain SSH."
-        case .tmuxNotFound:    return "tmux not found — running as plain SSH."
-        case .tooOld(let v):   return "tmux \(v.major).\(v.minor) is too old (need 3.0+) — running as plain SSH."
-        case .couldNotStart:   return "Couldn't start tmux (check the session name) — running as plain SSH."
+        case .optedOut:        return "tmux is off for this host: using a plain shell."
+        case .tmuxNotFound:    return "tmux not found: using a plain shell."
+        case .tooOld(let v):   return "tmux \(v.major).\(v.minor) is too old (need 3.0+): using a plain shell."
+        case .couldNotStart:   return "Couldn't start tmux (check the session name): using a plain shell."
         }
     }
 

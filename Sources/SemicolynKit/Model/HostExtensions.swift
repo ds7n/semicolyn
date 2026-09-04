@@ -9,7 +9,7 @@ public enum AuthMethod: String, Codable, Equatable, Sendable {
     case keyboardInteractive = "keyboard-interactive"
 }
 
-/// `mosh.predictionMode` — mosh's local-echo prediction policy.
+/// `mosh.predictionMode`, mosh's local-echo prediction policy.
 public enum MoshPredictionMode: String, Codable, Equatable, Sendable {
     case adaptive, always, never, experimental
 }
@@ -42,7 +42,7 @@ public struct TailscaleConfig: Codable, Equatable, Sendable {
     }
 }
 
-/// `semicolyn.predictor.*` — per-host predictor controls.
+/// `semicolyn.predictor.*`, per-host predictor controls.
 public struct PredictorConfig: Codable, Equatable, Sendable {
     public var incognito: Bool?
 
@@ -51,19 +51,44 @@ public struct PredictorConfig: Codable, Equatable, Sendable {
     }
 }
 
-/// `semicolyn.tmux.*` — per-host tmux controls.
+/// `semicolyn.tmux.*`, per-host tmux controls.
 public struct TmuxConfig: Codable, Equatable, Sendable {
-    public var attemptControlMode: Bool?
-    /// User-chosen tmux -CC session name; nil = inherit (→ Defaults → "semicolyn").
+    /// Whether this host drives tmux via native gestures. nil = inherit (-> Defaults -> true).
+    public var useTmux: Bool?
+    /// User-chosen tmux session name; nil = inherit (-> Defaults -> "semicolyn").
     public var sessionName: String?
 
-    public init(attemptControlMode: Bool? = nil, sessionName: String? = nil) {
-        self.attemptControlMode = attemptControlMode
+    public init(useTmux: Bool? = nil, sessionName: String? = nil) {
+        self.useTmux = useTmux
         self.sessionName = sessionName
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case useTmux
+        case attemptControlMode   // legacy key; decoded as a fallback, never encoded
+        case sessionName
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Prefer the new key; fall back to the legacy key so saved hosts are preserved.
+        if let v = try c.decodeIfPresent(Bool.self, forKey: .useTmux) {
+            self.useTmux = v
+        } else {
+            self.useTmux = try c.decodeIfPresent(Bool.self, forKey: .attemptControlMode)
+        }
+        self.sessionName = try c.decodeIfPresent(String.self, forKey: .sessionName)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(useTmux, forKey: .useTmux)
+        try c.encodeIfPresent(sessionName, forKey: .sessionName)
+        // never encodes the legacy attemptControlMode key
     }
 }
 
-/// `semicolyn.osc52.*` — per-host clipboard policy.
+/// `semicolyn.osc52.*`, per-host clipboard policy.
 public struct Osc52Config: Codable, Equatable, Sendable {
     public var allow: Bool?
     public init(allow: Bool? = nil) { self.allow = allow }

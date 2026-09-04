@@ -4,34 +4,6 @@ import Foundation
 import SwiftTerm
 import SemicolynKit
 
-/// Phase-1 gate: gesture-driven plain tmux (no `-CC`) vs the existing `-CC` stack.
-/// Debug/compile-time only, never persisted per-host. Default OFF so `-CC`/raw
-/// stays the byte-for-byte default. Removed in Phase 2 with the `-CC` stack, once
-/// the plain-tmux path is device-proven and `-CC` is deleted (see the
-/// gesture-driven-plain-tmux design spec's Rollout section).
-enum PlainTmuxDebugGate {
-    private static let defaultsKey = "semicolyn.debug.plainTmuxGesture"
-
-    #if DEBUG
-    /// True only when explicitly flipped via `setEnabledForDebug`; false in every
-    /// build that never calls it (including Release), so shipping behavior is
-    /// unchanged unless a developer opts in locally.
-    static var isEnabled: Bool {
-        UserDefaults.standard.bool(forKey: defaultsKey)
-    }
-
-    /// Debug-only: flip the gate to exercise the plain-tmux route end-to-end.
-    /// Removed in Phase 2 alongside the rest of this temporary gate.
-    static func setEnabledForDebug(_ enabled: Bool) {
-        UserDefaults.standard.set(enabled, forKey: defaultsKey)
-    }
-    #else
-    /// Always off outside DEBUG builds: the flag has no setter to flip it on, so
-    /// Release/TestFlight always takes the unchanged `-CC`/raw path.
-    static var isEnabled: Bool { false }
-    #endif
-}
-
 /// Launches plain tmux (`tmux new -A -s <name>`, NO `-CC`, NO `set`/mouse
 /// mutation) over an already-connected transport and feeds its byte stream
 /// straight into the raw `TerminalScreen`/`TerminalView`. Owns the incremental

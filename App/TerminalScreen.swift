@@ -137,17 +137,17 @@ struct TerminalScreen: UIViewRepresentable {
         restoreTap.cancelsTouchesInView = false
         terminal.addGestureRecognizer(restoreTap)
 
-        // Phase-1 gate (temporary, see `PlainTmuxDebugGate`): if `attachPlainTmux`
-        // launched a plain-tmux session for this connection, build the gesture
-        // controller against THIS freshly created `TerminalView` now (it needs the
-        // live grid + `getCharData` for the on-tap border-drift check). No-op (and
-        // `vm.plainTmux` stays nil) when the gate is off or this is a raw-PTY/Mosh
+        // If `attachPlainTmux` launched a plain-tmux session for this connection
+        // (per-host/default `resolveUseTmux`), build the gesture controller against
+        // THIS freshly created `TerminalView` now (it needs the live grid +
+        // `getCharData` for the on-tap border-drift check). No-op (and
+        // `vm.plainTmux` stays nil) when tmux is off or this is a raw-PTY/Mosh
         // screen, so the callbacks below fall through to the unchanged raw no-ops.
         vm.installPlainTmuxControllerIfNeeded(screen: terminal)
 
         // Install our own gesture layer (replaces SwiftTerm's built-in tap/scrub/select).
         // Raw PTY: no tmux, so horizontal drag falls through to scroll and long-press
-        // zoom is a no-op. Plain tmux (Phase-1 gate ON): the same callbacks route
+        // zoom is a no-op. Plain tmux (useTmux ON): the same callbacks route
         // through `vm.plainTmux` instead, so window-switch/zoom/tap-select drive
         // gesture-issued tmux commands (`PlainTmuxController`) rather than no-ops /
         // raw arrow-key cursor placement.

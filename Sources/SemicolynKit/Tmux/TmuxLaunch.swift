@@ -39,11 +39,11 @@ public func tmuxSupportsControlMode(_ v: TmuxVersion) -> Bool {
 
 /// Why Semicolyn fell back to a raw-PTY shell instead of attaching control mode.
 public enum DegradeReason: Equatable, Sendable {
-    case optedOut                 // host's semicolyn.tmux.attemptControlMode == false
+    case optedOut                 // host's semicolyn.tmux.useTmux == false
     case tmuxNotFound             // probe empty / unparseable
     case tooOld(TmuxVersion)      // tmux < 3.0
     case couldNotStart            // the -CC start command couldn't be built (e.g. an
-                                  // invalid resolved session name) — so tmux never launched
+                                  // invalid resolved session name), so tmux never launched
 }
 
 /// The connect-time launch decision.
