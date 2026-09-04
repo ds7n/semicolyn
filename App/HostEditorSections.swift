@@ -579,7 +579,7 @@ extension HostEditorView {
 
 extension HostEditorView {
 
-    /// Semicolyn behavior section: predictor incognito and tmux control mode toggles.
+    /// Semicolyn behavior section: predictor incognito and use-tmux toggles.
     /// Collapsed by default; auto-expands on edit when `semicolyn` is explicitly configured.
     var semicolynSection: some View {
         DisclosureGroup(isExpanded: $semicolynExpanded) {
@@ -606,35 +606,32 @@ extension HostEditorView {
             }
             .onChange(of: vm.host.semicolyn) { _, _ in vm.revalidate() }
 
-            // Tmux control mode, default true per resolution
-            // Gated: shown for SSH/ET, hidden for Mosh (tmux -CC cannot run over Mosh).
-            if showsTmuxControlToggle(transport: selectedTransport) {
-                Toggle(isOn: Binding(
-                    get: { vm.host.semicolyn.value?.tmux?.attemptControlMode ?? true },
-                    set: { newAttempt in
-                        var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
-                        var tmux = cfg.tmux ?? TmuxConfig()
-                        tmux.attemptControlMode = newAttempt
-                        cfg.tmux = tmux
-                        vm.host.semicolyn = .explicit(cfg)
-                        vm.revalidate()
-                    }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("tmux control mode (native panes)")
-                            .foregroundStyle(Color(theme.text.primary))
-                        Text(selectedTransport == .et
-                             ? "Runs tmux -CC for native panes. ET support is coming soon."
-                             : "Automatically use tmux -CC if tmux is running (default on).")
-                            .font(.caption)
-                            .foregroundStyle(Color(theme.text.secondary))
-                    }
+            // Use tmux, default true per resolution. Shown for all transports:
+            // native gestures (swipe, long-press, tap) drive plain tmux over
+            // SSH/Mosh/ET alike.
+            Toggle(isOn: Binding(
+                get: { vm.host.semicolyn.value?.tmux?.useTmux ?? true },
+                set: { newUseTmux in
+                    var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
+                    var tmux = cfg.tmux ?? TmuxConfig()
+                    tmux.useTmux = newUseTmux
+                    cfg.tmux = tmux
+                    vm.host.semicolyn = .explicit(cfg)
+                    vm.revalidate()
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Use tmux")
+                        .foregroundStyle(Color(theme.text.primary))
+                    Text("Drive tmux with native gestures (swipe, long-press, tap).")
+                        .font(.caption)
+                        .foregroundStyle(Color(theme.text.secondary))
                 }
             }
 
             // tmux session name, Inherited via the nested leaf. Blank = inherit
-            // (→ Defaults → "semicolyn"). Disabled when control mode is off.
-            let controlModeOn = (vm.host.semicolyn.value?.tmux?.attemptControlMode ?? true)
+            // (→ Defaults → "semicolyn"). Disabled when tmux is off.
+            let useTmuxOn = (vm.host.semicolyn.value?.tmux?.useTmux ?? true)
             LabeledContent {
                 TextField(
                     "inherit · semicolyn",
@@ -656,7 +653,7 @@ extension HostEditorView {
                 Text("tmux session name")
                     .foregroundStyle(Color(theme.text.primary))
             }
-            .disabled(!controlModeOn)
+            .disabled(!useTmuxOn)
 
             if vm.issues.contains(where: { $0.kind == .invalidTmuxSessionName }) {
                 Text("Only letters, digits, - and _ (no spaces, dots, or colons).")
