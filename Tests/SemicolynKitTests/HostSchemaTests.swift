@@ -24,7 +24,7 @@ final class HostSchemaTests: XCTestCase {
                                        udpPortRange: [60000, 61000], predictionMode: .adaptive)),
             tailscale: .explicit(TailscaleConfig(required: true, tailnet: "corp.ts.net")),
             semicolyn: .explicit(SemicolynConfig(predictor: PredictorConfig(incognito: true),
-                                         tmux: TmuxConfig(attemptControlMode: false))))
+                                         tmux: TmuxConfig(useTmux: false))))
         let data = try JSONEncoder().encode(host)
         let back = try JSONDecoder().decode(Host.self, from: data)
         XCTAssertEqual(back, host)
@@ -49,11 +49,11 @@ final class HostSchemaTests: XCTestCase {
     }
 
     func testTmuxConfigSessionNameRoundTrips() {
-        let cfg = TmuxConfig(attemptControlMode: true, sessionName: "work")
+        let cfg = TmuxConfig(useTmux: true, sessionName: "work")
         let data = try! JSONEncoder().encode(cfg)
         let back = try! JSONDecoder().decode(TmuxConfig.self, from: data)
         XCTAssertEqual(back.sessionName, "work")
-        XCTAssertEqual(back.attemptControlMode, true)
+        XCTAssertEqual(back.useTmux, true)
     }
 
     func testTmuxConfigDecodesLegacyRecordWithoutSessionName() {
@@ -61,6 +61,6 @@ final class HostSchemaTests: XCTestCase {
         let json = Data(#"{"attemptControlMode":true}"#.utf8)
         let back = try! JSONDecoder().decode(TmuxConfig.self, from: json)
         XCTAssertNil(back.sessionName)
-        XCTAssertEqual(back.attemptControlMode, true)
+        XCTAssertEqual(back.useTmux, true)
     }
 }
