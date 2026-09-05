@@ -166,6 +166,14 @@ public func resolveTmuxSessionName(host: Host, defaults: Defaults) -> String {
                 fallback: builtInTmuxSessionName)
 }
 
+/// Resolve a per-host tmux prefix override: host leaf -> defaults leaf -> nil
+/// (nil means auto-discover; there is no built-in fallback string to guess).
+public func resolveTmuxPrefixOverride(host: Host, defaults: Defaults) -> String? {
+    if case .explicit(let c?) = host.semicolyn, let v = c.tmux?.prefixOverride { return v }
+    if case .explicit(let c?) = defaults.semicolyn, let v = c.tmux?.prefixOverride { return v }
+    return nil
+}
+
 /// Resolve whether OSC 52 clipboard writes are permitted (builtin default: true).
 public func resolveOsc52Allow(host: Host, defaults: Defaults) -> Bool {
     resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.osc52?.allow }, fallback: true)
