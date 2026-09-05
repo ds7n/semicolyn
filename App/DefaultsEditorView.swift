@@ -669,6 +669,40 @@ struct DefaultsEditorView: View {
                 }
             }
 
+            // Tmux prefix override, built-in fallback: auto-detect (C-b)
+            LabeledContent {
+                TextField(
+                    "auto-detect · C-b",
+                    text: Binding(
+                        get: { vm.defaults.semicolyn.value?.tmux?.prefixOverride ?? "" },
+                        set: { newPrefix in
+                            var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
+                            var tmux = cfg.tmux ?? TmuxConfig()
+                            tmux.prefixOverride = newPrefix.isEmpty ? nil : newPrefix
+                            cfg.tmux = tmux
+                            vm.defaults.semicolyn = .explicit(cfg)
+                        }
+                    )
+                )
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            } label: {
+                Text("tmux prefix")
+                    .foregroundStyle(Color(theme.text.primary))
+            }
+            .swipeActions {
+                if vm.defaults.semicolyn.value?.tmux?.prefixOverride != nil {
+                    Button("Clear override") {
+                        var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
+                        var tmux = cfg.tmux ?? TmuxConfig()
+                        tmux.prefixOverride = nil
+                        cfg.tmux = tmux
+                        vm.defaults.semicolyn = .explicit(cfg)
+                    }
+                    .tint(Color(theme.accent.primary))
+                }
+            }
+
             if case .inherit = vm.defaults.semicolyn {
                 Text("inherit · predictor on, tmux on")
                     .font(.caption)

@@ -240,6 +240,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// The resolved tmux session name for the current connection, computed once at
     /// connect time and reused by attach + the reattach/start-new banner actions.
     private var tmuxSessionNameForConnection = builtInTmuxSessionName
+    /// Per-host/default prefix-key override for plain tmux, resolved once at connect
+    /// time alongside `tmuxSessionNameForConnection` and consumed by
+    /// `installPlainTmuxControllerIfNeeded`. `nil` means no override: the controller
+    /// falls back to in-band sentinel discovery, then C-b.
+    private var tmuxPrefixOverrideForConnection: String?
+    /// SSH-only accumulator for in-band prefix-key sentinel discovery. SSH launches
+    /// plain tmux via `conn.openExec` (direct exec: only command stdout, no PTY echo),
+    /// so unlike Mosh/ET it has no reactive probe buffer feeding `noteLaunchOutput`.
+    /// This persistent accumulator (fed from `output.onHarvestBytes` in `attachPlainTmux`)
+    /// carries the sentinel bytes so `PlainTmuxController.noteLaunchOutput` can discover
+    /// the prefix once the controller is installed. Growth is capped (see the feed site);
+    /// reset in `teardown()`.
+    private var sshPrefixDiscoveryBuffer = ""
     private var lastPassword: String?
     private(set) var session: ShellSession?
     /// Serializes raw-PTY keystroke writes (FIFO under channel back-pressure).
@@ -654,6 +667,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tmux?.stop()
         tmux = nil
         plainTmux = nil
+        tmuxPrefixOverrideForConnection = nil
+        sshPrefixDiscoveryBuffer = ""
         plainTmuxSessionNamePendingInstall = nil
         moshPlainTmuxLaunchSent = false
         etPlainTmuxLaunchSent = false
@@ -870,6 +885,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // 2026-09-04: "Mosh reconnect did not work").
             if let name = record.tmuxSessionName, isValidTmuxSessionName(name) {
                 self.tmuxSessionNameForConnection = name
+                // Restore the per-host/default prefix-key override on reattach: teardown
+                // cleared it to nil, and without re-resolving it a reattached Mosh session
+                // would ignore a configured override and fall back to sentinel/C-b. Load
+                // defaults the same way the other connect sites do.
+                let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+                self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
                 self.moshPlainTmuxLaunchSent = true
                 let launch = PlainTmuxController.launchCommand(sessionName: name)
                 DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux in-band launch \(launch.prefix(60))")
@@ -1106,9 +1127,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let useTmux = resolveUseTmux(host: host, defaults: defaults)
         let probe = useTmux ? await probeTmuxVersion(conn: conn) : nil
         DebugLog.shared.log(.lifecycle, "attachSSHShell: useTmux=\(useTmux) probe=\(probe ?? "nil")")
-        switch tmuxLaunchDecision(attemptControlMode: useTmux, versionProbe: probe) {
+        switch tmuxLaunchDecision(useTmux: useTmux, versionProbe: probe) {
         case .attach:
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
+            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             try await attachPlainTmux(conn: conn)
         case .degrade(let reason):
             DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=DEGRADE(\(String(describing: reason))) -> raw shell")
@@ -1177,6 +1199,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let useTmux = resolveUseTmux(host: host, defaults: defaults)
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
+            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             DebugLog.shared.log(.lifecycle, "mosh: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         // Effective config for the argv (port range, server path, prediction mode).
@@ -1485,6 +1508,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let etControlMode = false
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
+            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             DebugLog.shared.log(.lifecycle, "et: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         var tmuxRuntime: TmuxRuntime?
@@ -1927,6 +1951,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         output.onHarvestBytes = { [weak self] bytes in
             guard let self else { return }
             self.passwordDetector.noteOutput(bytes)
+            // SSH-only in-band prefix discovery. `openExec` output does NOT echo (direct
+            // exec, only command stdout), so the `SEMICOLYN_PREFIX=<value>` sentinel from
+            // the launch printf appears exactly once and cleanly. Accumulate into the
+            // PERSISTENT buffer (not a per-chunk string) so a later call once the lazily
+            // installed controller exists still sees the full sentinel. `plainTmux` may be
+            // nil for the first few chunks (installed by `TerminalScreen.makeUIView` once
+            // `plainTmuxSessionNamePendingInstall`, set just below, is picked up); the
+            // optional-chain no-ops safely and the buffer persists. `noteLaunchOutput` is
+            // idempotent (its `prefixDiscovered` guard), so repeated calls are cheap. Cap
+            // growth so a long-lived exec can't grow the buffer unbounded once discovery
+            // is done or the sentinel simply never arrives.
+            if self.sshPrefixDiscoveryBuffer.utf8.count < 4096 {
+                self.sshPrefixDiscoveryBuffer += String(decoding: bytes, as: UTF8.self)
+                self.plainTmux?.noteLaunchOutput(self.sshPrefixDiscoveryBuffer)
+            }
         }
         state = .shell
         DebugLog.shared.log(.lifecycle, "attachPlainTmux: exec opened, state=.shell, awaiting tmux output")
@@ -1988,6 +2027,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }()
         plainTmux = PlainTmuxController(
             sessionName: name,
+            prefixOverride: tmuxPrefixOverrideForConnection,
             sendInput: { [weak self] bytes in self?.rawWriter?.enqueue(bytes) },
             screen: screen,
             recoverLayout: recoverLayout)
@@ -2004,6 +2044,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// is already live (fed by the same `output.onOutput` this buffer reads from),
     /// so no separate raw-shell attach is needed here.
     private func evaluatePlainTmuxProbe() {
+        // Feed the accumulated probe buffer to the controller (if installed yet) so
+        // it can scan for the SEMICOLYN_PREFIX sentinel emitted by the discovery
+        // compound in `PlainTmuxController.launchCommand`. `noteLaunchOutput` is
+        // idempotent, so repeated calls across ticks are safe; on transports where
+        // the controller installs after output has already started accumulating
+        // (Mosh/ET, gated on `onFirstFrame`), the buffer still holds the sentinel
+        // bytes from the start, so the next tick after install still discovers it.
+        plainTmux?.noteLaunchOutput(plainTmuxProbeBuffer)
         guard !plainTmuxProbeResolved else { return }
         switch classifyTmuxLaunch(output: plainTmuxProbeBuffer) {
         case .tmuxMissing:

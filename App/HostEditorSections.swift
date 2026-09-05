@@ -661,6 +661,35 @@ extension HostEditorView {
                     .foregroundStyle(Color(theme.state.broken))
             }
 
+            // tmux prefix override, Inherited via the nested leaf. Blank = auto-detect
+            // (discovered at launch, C-b fallback). Disabled when tmux is off.
+            LabeledContent {
+                TextField(
+                    "auto-detect · C-b",
+                    text: Binding(
+                        get: { vm.host.semicolyn.value?.tmux?.prefixOverride ?? "" },
+                        set: { newPrefix in
+                            var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
+                            var tmux = cfg.tmux ?? TmuxConfig()
+                            tmux.prefixOverride = newPrefix.isEmpty ? nil : newPrefix
+                            cfg.tmux = tmux
+                            vm.host.semicolyn = .explicit(cfg)
+                        }
+                    )
+                )
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .onChange(of: vm.host.semicolyn) { _, _ in vm.revalidate() }
+            } label: {
+                Text("tmux prefix")
+                    .foregroundStyle(Color(theme.text.primary))
+            }
+            .disabled(!useTmuxOn)
+
+            Text("Auto-detected. Override only if gestures do not work (e.g. C-a).")
+                .font(.caption)
+                .foregroundStyle(Color(theme.text.secondary))
+
             // OSC 52 clipboard, default true per resolution
             Toggle(isOn: Binding(
                 get: { vm.host.semicolyn.value?.osc52?.allow ?? true },
