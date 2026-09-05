@@ -54,8 +54,8 @@ public enum TmuxLaunchDecision: Equatable, Sendable {
 
 /// Decide whether to attach control mode given the host's opt-in flag and the
 /// captured `tmux -V` output (nil when the probe produced nothing).
-public func tmuxLaunchDecision(attemptControlMode: Bool, versionProbe: String?) -> TmuxLaunchDecision {
-    guard attemptControlMode else { return .degrade(.optedOut) }
+public func tmuxLaunchDecision(useTmux: Bool, versionProbe: String?) -> TmuxLaunchDecision {
+    guard useTmux else { return .degrade(.optedOut) }
     guard let probe = versionProbe, let v = parseTmuxVersion(probe) else { return .degrade(.tmuxNotFound) }
     return tmuxSupportsControlMode(v) ? .attach : .degrade(.tooOld(v))
 }

@@ -1106,7 +1106,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let useTmux = resolveUseTmux(host: host, defaults: defaults)
         let probe = useTmux ? await probeTmuxVersion(conn: conn) : nil
         DebugLog.shared.log(.lifecycle, "attachSSHShell: useTmux=\(useTmux) probe=\(probe ?? "nil")")
-        switch tmuxLaunchDecision(attemptControlMode: useTmux, versionProbe: probe) {
+        switch tmuxLaunchDecision(useTmux: useTmux, versionProbe: probe) {
         case .attach:
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
             try await attachPlainTmux(conn: conn)

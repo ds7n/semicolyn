@@ -22,12 +22,12 @@ final class TmuxLaunchTests: XCTestCase {
     }
 
     func testLaunchDecisionPartitions() {
-        XCTAssertEqual(tmuxLaunchDecision(attemptControlMode: false, versionProbe: "tmux 3.3a"), .degrade(.optedOut))
-        XCTAssertEqual(tmuxLaunchDecision(attemptControlMode: true, versionProbe: nil), .degrade(.tmuxNotFound))
-        XCTAssertEqual(tmuxLaunchDecision(attemptControlMode: true, versionProbe: "command not found"), .degrade(.tmuxNotFound))
-        XCTAssertEqual(tmuxLaunchDecision(attemptControlMode: true, versionProbe: "tmux 2.9"),
+        XCTAssertEqual(tmuxLaunchDecision(useTmux: false, versionProbe: "tmux 3.3a"), .degrade(.optedOut))
+        XCTAssertEqual(tmuxLaunchDecision(useTmux: true, versionProbe: nil), .degrade(.tmuxNotFound))
+        XCTAssertEqual(tmuxLaunchDecision(useTmux: true, versionProbe: "command not found"), .degrade(.tmuxNotFound))
+        XCTAssertEqual(tmuxLaunchDecision(useTmux: true, versionProbe: "tmux 2.9"),
                        .degrade(.tooOld(TmuxVersion(major: 2, minor: 9))))
-        XCTAssertEqual(tmuxLaunchDecision(attemptControlMode: true, versionProbe: "tmux 3.0"), .attach)
+        XCTAssertEqual(tmuxLaunchDecision(useTmux: true, versionProbe: "tmux 3.0"), .attach)
     }
 
     func testSessionNameIsStableHexSlug() {
