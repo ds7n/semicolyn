@@ -1554,23 +1554,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.etWatchdog?.cancel(); self.etWatchdog = nil
             DebugLog.shared.log(.transport, "et: onFirstFrame, stream up; watchdog cancelled")
             self.state = .shell
-            // Connected edge: persist the resume record BEFORE the `-CC` early-return
-            // guard below (so the raw-ET path captures too). Reattach endpoint is the ET
-            // server (config.host + TCP port); secret is the IDPASSKEY (`<id>/<passkey>`,
-            // the wire form parseETIDPASSKEY reads). Bare `self.` access mirrors the
-            // `self.state = .shell` line above (this closure is main-actor-inferred).
-            self.captureResume(host: host, transport: .et,
-                               endpoint: (host: config.host, port: Int(config.port)),
-                               secret: Data("\(serverCred.id)/\(serverCred.passkey)".utf8))
             // Plain-tmux in-band launch, mutually exclusive with the `-CC` in-band
             // launch below (`etControlMode` is unconditionally false now, so
             // `etIsControlMode`/`self.tmux` are never set here).
-            // `installPlainTmuxControllerIfNeeded` runs later from
-            // `TerminalScreen.makeUIView` once the raw `TerminalView` mounts;
-            // `recoverLayout` resolves via `self.connection`, which IS reachable here
-            // (ET's bootstrap `openExec` and this session share the same underlying
-            // `Connection`, see `queryPlainTmuxLayout`), so ET plain-tmux gets the
-            // SAME side-channel `list-windows` recovery SSH does, not the Mosh blind
+            // Install the gesture controller against the already-mounted view HERE (the
+            // in-band launch happens after `TerminalScreen.makeUIView`'s one-time install
+            // already no-op'd, so relying on makeUIView never installs it: device bug
+            // 2026-09-04). `recoverLayout` resolves via `self.connection`, which IS
+            // reachable here (ET's bootstrap `openExec` and this session share the same
+            // underlying `Connection`, see `queryPlainTmuxLayout`), so ET plain-tmux gets
+            // the SAME side-channel `list-windows` recovery SSH does, not the Mosh blind
             // fallback.
             if useTmux, !self.etPlainTmuxLaunchSent,
                isValidTmuxSessionName(self.tmuxSessionNameForConnection) {
@@ -1601,6 +1594,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 }
                 sess.send(Data((launch + "\n").utf8))
             }
+            // Connected edge: persist the resume record. Runs AFTER the plain-tmux install
+            // above (so `isTmuxSession` reads `plainTmux != nil` and the tmux session name
+            // rides the record, matching the Mosh path) and BEFORE the `-CC` early-return
+            // guard below (so a raw-ET path still captures). Reattach endpoint is the ET
+            // server (config.host + TCP port); secret is the IDPASSKEY (`<id>/<passkey>`,
+            // the wire form parseETIDPASSKEY reads). NOTE: ET has no cold-reattach today,
+            // so the tmux name on an ET record is diagnostics-only for now; capturing it
+            // keeps ET consistent with Mosh if ET cold-reattach lands later.
+            self.captureResume(host: host, transport: .et,
+                               endpoint: (host: config.host, port: Int(config.port)),
+                               secret: Data("\(serverCred.id)/\(serverCred.passkey)".utf8))
             // ET `-CC`: the stream is up (login shell ready), so NOW launch tmux
             // control mode in-band by "typing" `tmux -CC new-session …\n`. Guarded
             // to fire exactly once (onFirstFrame is already once-only, but ET may
