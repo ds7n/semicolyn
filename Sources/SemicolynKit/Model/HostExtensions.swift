@@ -57,16 +57,20 @@ public struct TmuxConfig: Codable, Equatable, Sendable {
     public var useTmux: Bool?
     /// User-chosen tmux session name; nil = inherit (-> Defaults -> "semicolyn").
     public var sessionName: String?
+    /// User-chosen tmux prefix key override (e.g. "C-a"); nil = auto-discover.
+    public var prefixOverride: String?
 
-    public init(useTmux: Bool? = nil, sessionName: String? = nil) {
+    public init(useTmux: Bool? = nil, sessionName: String? = nil, prefixOverride: String? = nil) {
         self.useTmux = useTmux
         self.sessionName = sessionName
+        self.prefixOverride = prefixOverride
     }
 
     private enum CodingKeys: String, CodingKey {
         case useTmux
         case attemptControlMode   // legacy key; decoded as a fallback, never encoded
         case sessionName
+        case prefixOverride
     }
 
     public init(from decoder: Decoder) throws {
@@ -78,12 +82,14 @@ public struct TmuxConfig: Codable, Equatable, Sendable {
             self.useTmux = try c.decodeIfPresent(Bool.self, forKey: .attemptControlMode)
         }
         self.sessionName = try c.decodeIfPresent(String.self, forKey: .sessionName)
+        self.prefixOverride = try c.decodeIfPresent(String.self, forKey: .prefixOverride)
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(useTmux, forKey: .useTmux)
         try c.encodeIfPresent(sessionName, forKey: .sessionName)
+        try c.encodeIfPresent(prefixOverride, forKey: .prefixOverride)
         // never encodes the legacy attemptControlMode key
     }
 }
