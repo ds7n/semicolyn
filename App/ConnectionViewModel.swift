@@ -240,6 +240,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// The resolved tmux session name for the current connection, computed once at
     /// connect time and reused by attach + the reattach/start-new banner actions.
     private var tmuxSessionNameForConnection = builtInTmuxSessionName
+    /// Per-host/default prefix-key override for plain tmux, resolved once at connect
+    /// time alongside `tmuxSessionNameForConnection` and consumed by
+    /// `installPlainTmuxControllerIfNeeded`. `nil` means no override: the controller
+    /// falls back to in-band sentinel discovery, then C-b.
+    private var tmuxPrefixOverrideForConnection: String?
     private var lastPassword: String?
     private(set) var session: ShellSession?
     /// Serializes raw-PTY keystroke writes (FIFO under channel back-pressure).
@@ -654,6 +659,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tmux?.stop()
         tmux = nil
         plainTmux = nil
+        tmuxPrefixOverrideForConnection = nil
         plainTmuxSessionNamePendingInstall = nil
         moshPlainTmuxLaunchSent = false
         etPlainTmuxLaunchSent = false
@@ -1109,6 +1115,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         switch tmuxLaunchDecision(useTmux: useTmux, versionProbe: probe) {
         case .attach:
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
+            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             try await attachPlainTmux(conn: conn)
         case .degrade(let reason):
             DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=DEGRADE(\(String(describing: reason))) -> raw shell")
@@ -1177,6 +1184,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let useTmux = resolveUseTmux(host: host, defaults: defaults)
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
+            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             DebugLog.shared.log(.lifecycle, "mosh: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         // Effective config for the argv (port range, server path, prediction mode).
@@ -1485,6 +1493,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let etControlMode = false
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
+            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             DebugLog.shared.log(.lifecycle, "et: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         var tmuxRuntime: TmuxRuntime?
@@ -1988,6 +1997,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }()
         plainTmux = PlainTmuxController(
             sessionName: name,
+            prefixOverride: tmuxPrefixOverrideForConnection,
             sendInput: { [weak self] bytes in self?.rawWriter?.enqueue(bytes) },
             screen: screen,
             recoverLayout: recoverLayout)
@@ -2004,6 +2014,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// is already live (fed by the same `output.onOutput` this buffer reads from),
     /// so no separate raw-shell attach is needed here.
     private func evaluatePlainTmuxProbe() {
+        // Feed the accumulated probe buffer to the controller (if installed yet) so
+        // it can scan for the SEMICOLYN_PREFIX sentinel emitted by the discovery
+        // compound in `PlainTmuxController.launchCommand`. `noteLaunchOutput` is
+        // idempotent, so repeated calls across ticks are safe; on transports where
+        // the controller installs after output has already started accumulating
+        // (Mosh/ET, gated on `onFirstFrame`), the buffer still holds the sentinel
+        // bytes from the start, so the next tick after install still discovers it.
+        plainTmux?.noteLaunchOutput(plainTmuxProbeBuffer)
         guard !plainTmuxProbeResolved else { return }
         switch classifyTmuxLaunch(output: plainTmuxProbeBuffer) {
         case .tmuxMissing:
