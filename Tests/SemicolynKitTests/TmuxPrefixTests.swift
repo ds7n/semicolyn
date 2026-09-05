@@ -29,6 +29,18 @@ final class TmuxPrefixTests: XCTestCase {
     func testSentinelTrailingSpacesTrimmed() {
         XCTAssertEqual(parseSemicolynPrefixSentinel("SEMICOLYN_PREFIX=C-a  \r"), "C-a")
     }
+    func testSentinelPrefersLastMatchOverEchoedCommand() {
+        // Simulates a Mosh/ET PTY echo of the printf source followed by the real executed output.
+        let buf = "printf 'SEMICOLYN_PREFIX=%s\\r' \"$(tmux show -gv prefix)\"; tmux new -A -s x\r\nSEMICOLYN_PREFIX=C-a\r"
+        XCTAssertEqual(parseSemicolynPrefixSentinel(buf), "C-a")
+    }
+    func testSentinelSingleOccurrenceStillWorks() {
+        XCTAssertEqual(parseSemicolynPrefixSentinel("SEMICOLYN_PREFIX=C-b\r"), "C-b")
+    }
+    func testSentinelLastOccurrenceEmptyIsNil() {
+        // real output truncated right after the marker on the last occurrence
+        XCTAssertNil(parseSemicolynPrefixSentinel("SEMICOLYN_PREFIX=C-a\r\nSEMICOLYN_PREFIX="))
+    }
 
     // prefixKeySequence
     func testPrefixKeyNextWindow() {

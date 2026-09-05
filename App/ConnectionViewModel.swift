@@ -245,6 +245,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `installPlainTmuxControllerIfNeeded`. `nil` means no override: the controller
     /// falls back to in-band sentinel discovery, then C-b.
     private var tmuxPrefixOverrideForConnection: String?
+    /// SSH-only accumulator for in-band prefix-key sentinel discovery. SSH launches
+    /// plain tmux via `conn.openExec` (direct exec: only command stdout, no PTY echo),
+    /// so unlike Mosh/ET it has no reactive probe buffer feeding `noteLaunchOutput`.
+    /// This persistent accumulator (fed from `output.onHarvestBytes` in `attachPlainTmux`)
+    /// carries the sentinel bytes so `PlainTmuxController.noteLaunchOutput` can discover
+    /// the prefix once the controller is installed. Growth is capped (see the feed site);
+    /// reset in `teardown()`.
+    private var sshPrefixDiscoveryBuffer = ""
     private var lastPassword: String?
     private(set) var session: ShellSession?
     /// Serializes raw-PTY keystroke writes (FIFO under channel back-pressure).
@@ -660,6 +668,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tmux = nil
         plainTmux = nil
         tmuxPrefixOverrideForConnection = nil
+        sshPrefixDiscoveryBuffer = ""
         plainTmuxSessionNamePendingInstall = nil
         moshPlainTmuxLaunchSent = false
         etPlainTmuxLaunchSent = false
@@ -876,6 +885,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // 2026-09-04: "Mosh reconnect did not work").
             if let name = record.tmuxSessionName, isValidTmuxSessionName(name) {
                 self.tmuxSessionNameForConnection = name
+                // Restore the per-host/default prefix-key override on reattach: teardown
+                // cleared it to nil, and without re-resolving it a reattached Mosh session
+                // would ignore a configured override and fall back to sentinel/C-b. Load
+                // defaults the same way the other connect sites do.
+                let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+                self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
                 self.moshPlainTmuxLaunchSent = true
                 let launch = PlainTmuxController.launchCommand(sessionName: name)
                 DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux in-band launch \(launch.prefix(60))")
@@ -1936,6 +1951,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         output.onHarvestBytes = { [weak self] bytes in
             guard let self else { return }
             self.passwordDetector.noteOutput(bytes)
+            // SSH-only in-band prefix discovery. `openExec` output does NOT echo (direct
+            // exec, only command stdout), so the `SEMICOLYN_PREFIX=<value>` sentinel from
+            // the launch printf appears exactly once and cleanly. Accumulate into the
+            // PERSISTENT buffer (not a per-chunk string) so a later call once the lazily
+            // installed controller exists still sees the full sentinel. `plainTmux` may be
+            // nil for the first few chunks (installed by `TerminalScreen.makeUIView` once
+            // `plainTmuxSessionNamePendingInstall`, set just below, is picked up); the
+            // optional-chain no-ops safely and the buffer persists. `noteLaunchOutput` is
+            // idempotent (its `prefixDiscovered` guard), so repeated calls are cheap. Cap
+            // growth so a long-lived exec can't grow the buffer unbounded once discovery
+            // is done or the sentinel simply never arrives.
+            if self.sshPrefixDiscoveryBuffer.utf8.count < 4096 {
+                self.sshPrefixDiscoveryBuffer += String(decoding: bytes, as: UTF8.self)
+                self.plainTmux?.noteLaunchOutput(self.sshPrefixDiscoveryBuffer)
+            }
         }
         state = .shell
         DebugLog.shared.log(.lifecycle, "attachPlainTmux: exec opened, state=.shell, awaiting tmux output")

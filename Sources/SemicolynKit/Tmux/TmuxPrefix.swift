@@ -17,8 +17,15 @@ public func parseTmuxPrefix(_ raw: String) -> UInt8? {
 }
 
 /// Extract `<value>` from `SEMICOLYN_PREFIX=<value>` in accumulated launch output.
+///
+/// Uses the LAST occurrence of the marker: on Mosh/ET the launch command is typed into
+/// an interactive PTY that ECHOES the `printf 'SEMICOLYN_PREFIX=%s\r' ...` source line, so
+/// the first `SEMICOLYN_PREFIX=` match is the unparseable format string; the real executed
+/// output always follows. If that last occurrence is a truncated partial chunk (buffer ends
+/// before the value completes) the value is empty and we return nil, so the idempotent caller
+/// retries on the next tick once more bytes arrive.
 public func parseSemicolynPrefixSentinel(_ output: String) -> String? {
-    guard let r = output.range(of: "SEMICOLYN_PREFIX=") else { return nil }
+    guard let r = output.range(of: "SEMICOLYN_PREFIX=", options: .backwards) else { return nil }
     let rest = output[r.upperBound...]
     // value runs until the first CR/LF; trim trailing spaces.
     let value = rest.prefix { $0 != "\r" && $0 != "\n" }
