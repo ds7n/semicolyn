@@ -2049,7 +2049,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         plainTmux = PlainTmuxController(
             sessionName: name,
             prefixOverride: tmuxPrefixOverrideForConnection,
-            sendInput: { [weak self] bytes in self?.rawWriter?.enqueue(bytes) },
+            // Route gesture bytes through the transport-aware send, NOT `rawWriter`
+            // directly: `rawWriter` is only set on the SSH paths, so on Mosh/ET it is
+            // nil and `rawWriter?.enqueue` silently dropped every gesture (device bug
+            // 2026-09-06: Mosh discovered the prefix and logged correct `prefix=0x1`
+            // sends, but the bytes never reached the session). `sendTerminalInput`
+            // routes to moshSession.writeInput / etSession.send / rawWriter as
+            // appropriate; for plain tmux the `-CC` `tmux` runtime is always nil, so it
+            // never takes the send-keys branch.
+            sendInput: { [weak self] bytes in self?.sendTerminalInput(bytes) },
             screen: screen,
             recoverLayout: recoverLayout)
         DebugLog.shared.log(.tmux, "plainTmux: controller installed session=\(name) recovery=\(recoverLayout != nil ? "sideChannel" : "blind")")
