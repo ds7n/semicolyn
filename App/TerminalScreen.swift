@@ -79,9 +79,14 @@ struct TerminalScreen: UIViewRepresentable {
             terminal?.isScrollEnabled = (mode == .localScroll)
             terminal?.allowMouseReporting = (mode == .mouseReporting)
             // Our alt-screen drag pan owns the drag in `.appOwnsInput` (where the native
-            // scroll pan above is parked). Enable it in lockstep with the isScrollEnabled
-            // flip so exactly one drag-recognizer is live per mode.
+            // scroll pan above is parked); OUR switch pan owns it in the other modes.
+            // BOTH must flip in lockstep so exactly one switch-owner is live per mode.
+            // Device bug 2026-09-06: this handler flipped only altPan and left switchPan
+            // enabled (its install default in .localScroll), so entering .appOwnsInput
+            // left BOTH switch pans live -> both recognized one finger -> the window
+            // switch committed twice per swipe (mirror TmuxPaneContainer's paired flip).
             coordinator?.gestureController?.setAltScreenPanEnabled(mode == .appOwnsInput)
+            coordinator?.gestureController?.setSwitchPanEnabled(mode != .appOwnsInput)
         }
         // Prime once at mount so a terminal that starts on the alt-screen (reattach
         // into a running vim/Claude) is correct from frame one.

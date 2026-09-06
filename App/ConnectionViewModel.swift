@@ -296,6 +296,26 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// assume started). Once-only: further `onOutput` bytes stop accumulating
     /// and `evaluatePlainTmuxProbe` becomes a no-op. Reset in `teardown()`.
     private var plainTmuxProbeResolved = false
+    /// Whether Mosh/ET `onOutput` should keep accumulating launch output into
+    /// `plainTmuxProbeBuffer`. The tmux-missing probe resolves on the first tmux
+    /// output (`.tmuxStarted`), but the SEMICOLYN_PREFIX prefix sentinel can arrive in
+    /// that same burst or just after, so accumulation must ALSO continue until the
+    /// controller has resolved its prefix (device bug 2026-09-06: coupling discovery to
+    /// `plainTmuxProbeResolved` cut it off before the sentinel parsed -> Mosh sent C-b on
+    /// a C-a host). A raw non-tmux session that never armed the probe still short-circuits
+    /// on `plainTmuxProbeArmed`. Once BOTH the probe is resolved and the prefix is
+    /// resolved, accumulation stops for good.
+    private var shouldAccumulatePlainTmuxProbe: Bool {
+        guard plainTmuxProbeArmed else { return false }
+        if !plainTmuxProbeResolved { return true }
+        // Probe resolved: keep going only for prefix discovery, and only within a bounded
+        // window. The SEMICOLYN_PREFIX sentinel is printed by the first `printf` BEFORE
+        // `tmux new`, so it always lands in the first few KB; cap the post-resolve
+        // discovery tail so a shell that never emits it (non-POSIX login shell, discovery
+        // failure) cannot grow the buffer without limit. Past the cap, gestures use the
+        // C-b default / per-host override.
+        return plainTmux?.isPrefixResolved == false && plainTmuxProbeBuffer.utf8.count < 8192
+    }
     /// Bounded watch (~2s) started when the in-band plain-tmux launch is sent;
     /// classifies the accumulated `plainTmuxProbeBuffer` on expiry if nothing
     /// resolved it sooner. Cancelled on resolution or `teardown()`.
@@ -866,7 +886,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self?.output.onOutput(data: data)
             // Feed the reactive tmux-missing probe on reattach too (the re-launched
             // `tmux new -A -s <name>` in onFirstFrame arms it), mirroring the fresh path.
-            guard let self, self.plainTmuxProbeArmed, !self.plainTmuxProbeResolved else { return }
+            // Keep accumulating until BOTH the probe and the prefix discovery resolve.
+            guard let self, self.shouldAccumulatePlainTmuxProbe else { return }
             self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
             self.evaluatePlainTmuxProbe()
         }
@@ -1245,10 +1266,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // pass in `onOutput` is a no-op.)
             sess.onOutput = { [weak self] data in
                 self?.output.onOutput(data: data)
-                // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`):
-                // only accumulate while a plain-tmux launch is actually armed and
-                // the probe hasn't already resolved (once-only, cheap after that).
-                guard let self, self.plainTmuxProbeArmed, !self.plainTmuxProbeResolved else { return }
+                // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`) AND
+                // prefix discovery: accumulate while armed and until BOTH the probe and
+                // the prefix are resolved (the sentinel can trail the first tmux output).
+                guard let self, self.shouldAccumulatePlainTmuxProbe else { return }
                 self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
                 self.evaluatePlainTmuxProbe()
             }
@@ -1564,10 +1585,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             } else {
                 self.output.onOutput(data: data)
             }
-            // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`): only
-            // accumulate while a plain-tmux launch is actually armed and the probe
-            // hasn't already resolved (once-only, cheap after that).
-            guard self.plainTmuxProbeArmed, !self.plainTmuxProbeResolved else { return }
+            // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`) AND prefix
+            // discovery: accumulate while armed and until BOTH the probe and the prefix
+            // are resolved (the SEMICOLYN_PREFIX sentinel can trail the first tmux output).
+            guard self.shouldAccumulatePlainTmuxProbe else { return }
             self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
             self.evaluatePlainTmuxProbe()
         }

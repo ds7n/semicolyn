@@ -566,6 +566,12 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// (-> tmux select-window); a short drag does nothing (no animation to cancel).
     private func resolveLiveSwitch(_ g: UIPanGestureRecognizer, in view: TerminalView) -> Bool {
         guard case .switchWindow = dragAxis else { return false }
+        // Consume the switch-lock immediately so a second `.ended` reading the same shared
+        // `dragAxis` (e.g. a co-recognizing pan, or a trailing state delivery) cannot commit
+        // the SAME drag twice. `dragAxis` is otherwise reset only in `beginDrag`, so without
+        // this a stale switch-lock survives past commit (defense-in-depth for the device
+        // double-commit bug 2026-09-06; the primary fix is the paired pan-enable flip).
+        dragAxis = .pending
         let t = g.translation(in: view)
         let v = g.velocity(in: view)
         let width = Double(view.bounds.width)

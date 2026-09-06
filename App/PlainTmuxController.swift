@@ -58,6 +58,14 @@ final class PlainTmuxController {
     /// must never stomp the already-discovered byte.
     private var prefixDiscovered = false
 
+    /// Whether the launch-output prefix has been discovered yet. The VM reads this to
+    /// keep feeding `noteLaunchOutput(_:)` on Mosh/ET until discovery lands: there the
+    /// feed rides the tmux-missing probe, which resolves the instant tmux output appears
+    /// (`.tmuxStarted`) and would otherwise cut discovery off before the SEMICOLYN_PREFIX
+    /// sentinel is parsed (device bug 2026-09-06: Mosh sent C-b on a C-a host). An
+    /// explicit override needs no discovery, so it counts as already-resolved here.
+    var isPrefixResolved: Bool { prefixDiscovered || prefixOverride.flatMap(parseTmuxPrefix) != nil }
+
     /// The prefix byte gestures should send: the per-host override if it parses,
     /// else whatever was discovered (or the C-b default pre-discovery).
     private var effectivePrefix: UInt8 {
