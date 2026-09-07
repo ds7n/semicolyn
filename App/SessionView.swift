@@ -63,6 +63,14 @@ struct SessionView: View {
     var body: some View {
         Group {
             if case .shell = vm.state {
+                // `.id(connectionEpoch)`: force a FRESH mount of the terminal view on
+                // every connection/reattach. The render sink (`output.onBytes`) is
+                // attached only in TerminalScreen.makeUIView; without a new identity per
+                // connection SwiftUI reuses the prior view (updateUIView, not makeUIView)
+                // on reattach, so the sink stays nil after teardown and Mosh frames never
+                // render = blank reconnect (device bug 2026-09-06/07). Wraps BOTH the -CC
+                // pane branch and the raw/mosh TerminalScreen branch.
+                Group {
                 if let tmuxState = vm.tmuxState {
                     VStack(spacing: 0) {
                         WindowTabStrip(windows: tmuxState.windows, active: tmuxState.activeWindow,
@@ -201,6 +209,8 @@ struct SessionView: View {
                         // Keybar + predictor now mount as the terminal's inputAccessoryView
                         // (see TerminalScreen); no .safeAreaInset keybar here anymore.
                 }
+                }
+                .id(vm.connectionEpoch)   // fresh mount per connection/reattach (see above)
             } else if case .idle = vm.state {
                 // Teardown in progress: a clean disconnect/exit sets `.idle`, and the
                 // `.onChange` below fires `dismiss()`. Render a BARE `Color.clear` (NOT

@@ -21,7 +21,7 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
         let evaluated = try? trust.evaluate(hostID: hostID, algorithm: info.keyType,
                                             fingerprint: info.fingerprint)
         // DebugLog is @MainActor; verify() is non-isolated async, so these hops need
-        // `await`. Fine here — host-key verify runs once per connect, not on any hot
+        // `await`. Fine here, host-key verify runs once per connect, not on any hot
         // path, so the main-actor hop cost is irrelevant.
         if evaluated == nil {
             await DebugLog.shared.log(.connect, "hostkey: trust.evaluate THREW → defaulting to firstTrust")
@@ -40,7 +40,7 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
                                      fingerprint: info.fingerprint, at: Date()) }
             return ok
         case .mismatch(let stored):
-            await DebugLog.shared.log(.connect, "hostkey: MISMATCH (\(info.keyType)) — stored key differs → prompting user")
+            await DebugLog.shared.log(.connect, "hostkey: MISMATCH (\(info.keyType)), stored key differs → prompting user")
             let ok = await present(.mismatch(hostLabel: info.hostLabel, keyType: info.keyType,
                                              stored: stored.first?.fingerprint ?? "",
                                              offered: info.fingerprint))
@@ -59,17 +59,29 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
 final class TerminalShellOutput: ShellOutput {
     /// Render slot, set by the terminal view (main thread). Backed by a
     /// `PendingOutputBuffer` so output that arrives BEFORE the view installs its
-    /// render closure — notably Mosh's one-shot first framebuffer diff, emitted
-    /// synchronously during connect before `TerminalScreen.makeUIView` runs — is
+    /// render closure, notably Mosh's one-shot first framebuffer diff, emitted
+    /// synchronously during connect before `TerminalScreen.makeUIView` runs, is
     /// buffered and replayed on install instead of being silently dropped (which
     /// left the Mosh terminal permanently blank). Setting nil detaches (teardown /
     /// view rebuild); the next non-nil set flushes anything buffered meanwhile.
     var onBytes: (([UInt8]) -> Void)? {
         didSet {
             if let onBytes {
+                // Diagnostic: how many bytes were buffered awaiting this sink (a
+                // non-zero count on Mosh reattach = frames arrived pre-mount and are
+                // being flushed now; zero on a supposed-live reattach with no later
+                // output = the blank-screen bug, device 2026-09-06).
+                let flushing = renderBuffer.pendingCount
                 renderBuffer.attachSink(onBytes)
+                DebugLog.shared.log(.lifecycle, "output:sink attached flushedPending=\(flushing)B")
             } else {
                 renderBuffer.detachSink()
+                // Reset the first-chunk diagnostic so `output:firstChunk` fires again on
+                // the NEXT sink attach (a reattach detaches via teardown, then the fresh
+                // mount re-attaches): without this the counter, living on the VM-lifetime
+                // `output`, only ever logged once for the app's whole life.
+                diagBytesSeen = 0
+                DebugLog.shared.log(.lifecycle, "output:sink detached")
             }
         }
     }
@@ -85,10 +97,25 @@ final class TerminalShellOutput: ShellOutput {
     /// Set by the view model to learn the session ended (called on the main thread).
     var onExit: ((ShellExit) -> Void)?
 
+    /// Diagnostic: cumulative render bytes seen since the last sink (re)attach cycle,
+    /// gating a throttled first-chunk log without per-frame spam. Reset to 0 on sink
+    /// detach (teardown), so the `output:firstChunk` log fires once per connection AND
+    /// per reattach, not once for the VM-lifetime `output` instance.
+    private var diagBytesSeen = 0
+
     func onOutput(data: Data) {
         let bytes = [UInt8](data)   // UniFFI maps Rust Vec<u8> → Swift Data
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // Diagnostic: log the FIRST output chunk (does output arrive at all on a
+            // reattach?) and whether a sink is attached to receive it (delivered) or
+            // not (buffered = will replay on the next sink attach). Throttled to the
+            // first chunk only to avoid per-frame spam; device blank-screen 2026-09-06.
+            if self.diagBytesSeen == 0 {
+                DebugLog.shared.log(.lifecycle,
+                    "output:firstChunk \(bytes.count)B sink=\(self.renderBuffer.hasSink ? "attached→deliver" : "none→buffer")")
+            }
+            self.diagBytesSeen += bytes.count
             // Route render bytes through the buffer: delivered now if a sink is
             // attached, held for replay if not. Harvest is a separate pass-through.
             self.renderBuffer.append(bytes)
