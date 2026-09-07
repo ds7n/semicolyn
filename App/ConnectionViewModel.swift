@@ -204,6 +204,23 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// First-frame watchdog: fires an SSH fallback if the Mosh loop signals no life
     /// (no onFirstFrame, no onEnd) within the window. Cancelled by either callback.
     private var moshWatchdog: Task<Void, Never>?
+    /// Cold-reattach liveness watchdog. A direct mosh RE-HOME to the stored port only
+    /// works if that mosh-server is still alive; if it died (mosh-server has no default
+    /// no-client timeout so it also cannot be relied upon, and an app-kill sends no UDP
+    /// disconnect), the re-homed client paints only its last-known LOCAL frame and then
+    /// hangs, with NO onEnd (UDP has no teardown) -> a permanently frozen reconnect
+    /// (device 2026-09-07, Blink-confirmed model). This watchdog proves liveness by
+    /// requiring REAL server output AFTER our in-band relaunch; on timeout it tears the
+    /// dead session down and falls back to a fresh SSH bootstrap connect (which spawns a
+    /// new mosh-server and provably works). Cancelled once live output is seen; cleared
+    /// in teardown().
+    private var moshReattachWatchdog: Task<Void, Never>?
+    /// True once server output has arrived AFTER the reattach's in-band relaunch was
+    /// sent (proving the re-homed mosh-server is alive, distinct from the initial local
+    /// restored-frame paint that arrives at onFirstFrame). The liveness watchdog reads
+    /// this; it is deliberately SEPARATE from `plainTmuxProbeResolved`, which the plain
+    /// tmux probe's own 2s "assume started" timer flips even with no server response.
+    private var moshReattachSawServerOutput = false
     /// True once a terminal Mosh handler (the watchdog fallback OR `onEnd`) has
     /// resolved this session. Guards against the watchdog and an already-enqueued
     /// `onEnd` both running their branch (main-actor-serialized, so a flag suffices):
@@ -690,6 +707,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // connect mints a new `sessionID`, so a new session is never clobbered.
         clearResume()
         moshWatchdog?.cancel(); moshWatchdog = nil
+        moshReattachWatchdog?.cancel(); moshReattachWatchdog = nil
+        moshReattachSawServerOutput = false
         moshResolved = false
         moshSession?.stop()
         moshSession = nil
@@ -903,13 +922,30 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // here, so no `MainActor.assumeIsolated` wrapper is needed (that guard is for
         // nonisolated SwiftTerm/@objc callbacks, not these blocks).
         sess.onOutput = { [weak self] data in
-            self?.output.onOutput(data: data)
+            guard let self else { return }
+            self.output.onOutput(data: data)
             // Feed the reactive tmux-missing probe on reattach too (the re-launched
             // `tmux new -A -s <name>` in onFirstFrame arms it), mirroring the fresh path.
             // Keep accumulating until BOTH the probe and the prefix discovery resolve.
-            guard let self, self.shouldAccumulatePlainTmuxProbe else { return }
+            guard self.shouldAccumulatePlainTmuxProbe else { return }
             self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
             self.evaluatePlainTmuxProbe()
+            // Liveness proof for the cold-reattach dead-server watchdog: the
+            // SEMICOLYN_PREFIX sentinel is printed ONLY when the server actually EXECUTES
+            // our in-band relaunch (`printf 'SEMICOLYN_PREFIX=%s...'; tmux new -A`). It
+            // can never appear in mosh's restored-frame paint (which is local, last-known
+            // screen state), so its presence proves the re-homed server is ALIVE.
+            // Keying off the sentinel (not "any output after launch-sent") avoids the
+            // false positive where the restored frame's own onOutput, dispatched right
+            // after onFirstFrame, would otherwise mark a DEAD server alive. Also distinct
+            // from `plainTmuxProbeResolved`, which the probe's 2s "assume started" timer
+            // flips with no server response.
+            if !self.moshReattachSawServerOutput,
+               parseSemicolynPrefixSentinel(self.plainTmuxProbeBuffer) != nil {
+                self.moshReattachSawServerOutput = true
+                self.moshReattachWatchdog?.cancel(); self.moshReattachWatchdog = nil
+                DebugLog.shared.log(.connect, "resume:reattachMosh SEMICOLYN_PREFIX seen → server alive, reattach confirmed")
+            }
         }
         sess.onFirstFrame = { [weak self] in
             guard let self else { return }
@@ -948,12 +984,48 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux probe window expired inconclusive → assume started")
                 }
                 sess.writeInput(Data((launch + "\n").utf8))
+                // Arm the dead-server liveness watchdog: the re-home paints the restored
+                // frame + fires onFirstFrame off LOCAL state, so "live" here does NOT mean
+                // the server is reachable. Require REAL output in response to the relaunch
+                // (set `moshReattachSawServerOutput` in onOutput) within the window; if none
+                // arrives the stored mosh-server is gone -> fall back to a fresh bootstrap
+                // connect (spawns a new server, provably works) instead of a frozen screen.
+                self.moshReattachSawServerOutput = false
+                self.moshReattachWatchdog?.cancel()
+                self.moshReattachWatchdog = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)   // 4s liveness window
+                    guard let self, !Task.isCancelled, !self.moshReattachSawServerOutput else { return }
+                    // Mutual exclusion with onEnd (shared moshResolved flag): claim the
+                    // resolution so a late onEnd can't also fire a banner over the fresh
+                    // connect we are about to start.
+                    if self.moshResolved { return }
+                    self.moshResolved = true
+                    DebugLog.shared.log(.connect, "resume:reattachMosh NO live server output in 4s → stored mosh-server dead, fresh reconnect")
+                    self.moshSession?.stop(); self.moshSession = nil
+                    self.moshReattachWatchdog = nil
+                    // Leave `.shell` first: `connect(savedHost:)` IGNORES the call while
+                    // state is `.shell`/`.connecting` (its re-entry guard), and reattach
+                    // left us in `.shell`. Flip to `.idle` so the fresh connect proceeds;
+                    // `connect` immediately tears down + flips to `.connecting`.
+                    self.state = .idle
+                    // Full fresh connect (SSH auth -> new mosh bootstrap) using stored
+                    // creds, the same entry the host list uses; password "" defers to the
+                    // saved key/credential resolution.
+                    self.connect(savedHost: host, password: "")
+                }
             }
             self.captureResume(host: host, transport: .mosh,
                                endpoint: (host: record.host, port: record.port), secret: key)
         }
         sess.onEnd = { [weak self] reason in
             guard let self else { return }
+            // Mutual exclusion with the liveness watchdog (mirrors the fresh path's
+            // moshResolved guard): if the watchdog already resolved this reattach (dead
+            // server -> fresh connect), a late onEnd must NOT clobber the new connection
+            // with a failure banner. `stop()` already nils onEnd, but the flag is the
+            // explicit contract.
+            if self.moshResolved { return }
+            self.moshResolved = true
             DebugLog.shared.log(.connect, "resume:reattachMosh onEnd reason=\(reason ?? "nil") → banner")
             self.moshSession?.stop(); self.moshSession = nil
             self.failResume(host: host, record: record, secret: key,

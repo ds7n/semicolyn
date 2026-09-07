@@ -122,6 +122,14 @@ final class PlainTmuxController {
     /// own overwritable line; `tmux new -A` then attaches, and tmux's alt-screen
     /// entry wipes that sentinel line from the visible terminal without us having
     /// to clear it ourselves. See `noteLaunchOutput(_:)` for the ingest side.
+    ///
+    /// INVARIANT: two features depend on this compound printing the `SEMICOLYN_PREFIX=`
+    /// sentinel: (1) prefix discovery, and (2) the Mosh cold-reattach liveness watchdog
+    /// (`ConnectionViewModel.reattachMosh`), which treats the sentinel's arrival as proof
+    /// the re-homed mosh-server is ALIVE (it can only appear when the server EXECUTES this
+    /// relaunch, never in a mosh restored-frame paint). If this ever stops printing the
+    /// sentinel, update that watchdog's liveness signal or it will false-fallback on a
+    /// live server.
     static func launchCommand(sessionName: String) -> String {
         "printf 'SEMICOLYN_PREFIX=%s\\r' \"$(tmux show -gv prefix)\"; tmux new -A -s \(sessionName)"
     }
