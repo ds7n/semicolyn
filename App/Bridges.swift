@@ -73,7 +73,13 @@ final class TerminalShellOutput: ShellOutput {
                 // output = the blank-screen bug, device 2026-09-06).
                 let flushing = renderBuffer.pendingCount
                 renderBuffer.attachSink(onBytes)
-                DebugLog.shared.log(.lifecycle, "output:sink attached flushedPending=\(flushing)B")
+                // `onBytes` is set from `TerminalScreen.makeUIView` (main actor), but this
+                // class is nonisolated (Sendable, fed from the Rust thread), so the
+                // @MainActor `DebugLog.shared` needs assumeIsolated (project pattern for the
+                // @MainActor callback trap). Safe: the set only happens on main.
+                MainActor.assumeIsolated {
+                    DebugLog.shared.log(.lifecycle, "output:sink attached flushedPending=\(flushing)B")
+                }
             } else {
                 renderBuffer.detachSink()
                 // Reset the first-chunk diagnostic so `output:firstChunk` fires again on
@@ -81,7 +87,9 @@ final class TerminalShellOutput: ShellOutput {
                 // mount re-attaches): without this the counter, living on the VM-lifetime
                 // `output`, only ever logged once for the app's whole life.
                 diagBytesSeen = 0
-                DebugLog.shared.log(.lifecycle, "output:sink detached")
+                MainActor.assumeIsolated {
+                    DebugLog.shared.log(.lifecycle, "output:sink detached")
+                }
             }
         }
     }
@@ -112,8 +120,12 @@ final class TerminalShellOutput: ShellOutput {
             // not (buffered = will replay on the next sink attach). Throttled to the
             // first chunk only to avoid per-frame spam; device blank-screen 2026-09-06.
             if self.diagBytesSeen == 0 {
-                DebugLog.shared.log(.lifecycle,
-                    "output:firstChunk \(bytes.count)B sink=\(self.renderBuffer.hasSink ? "attached→deliver" : "none→buffer")")
+                // Inside DispatchQueue.main.async, so this runs on main; assumeIsolated
+                // lets the nonisolated class reach the @MainActor DebugLog (see above).
+                MainActor.assumeIsolated {
+                    DebugLog.shared.log(.lifecycle,
+                        "output:firstChunk \(bytes.count)B sink=\(self.renderBuffer.hasSink ? "attached→deliver" : "none→buffer")")
+                }
             }
             self.diagBytesSeen += bytes.count
             // Route render bytes through the buffer: delivered now if a sink is
