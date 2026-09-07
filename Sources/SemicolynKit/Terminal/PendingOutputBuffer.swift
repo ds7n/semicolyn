@@ -7,7 +7,7 @@
 /// the Rust PTY, via `TerminalShellOutput.onOutput`) can emit bytes synchronously
 /// during connect, before SwiftUI's `makeUIView` installs the render closure. A
 /// shell PTY re-emits its prompt so a dropped byte is cosmetic, but Mosh paints one
-/// framebuffer diff and never replays it — so a dropped first frame leaves the
+/// framebuffer diff and never replays it, so a dropped first frame leaves the
 /// terminal permanently blank. This mirrors the tmux `pendingPaneBytes` replay for
 /// the single, non-pane output stream.
 ///
@@ -23,6 +23,12 @@ public struct PendingOutputBuffer {
 
     /// True when nothing is buffered (used by tests + teardown assertions).
     public var isEmpty: Bool { pending.isEmpty }
+
+    /// Number of bytes currently buffered awaiting a sink (diagnostics only).
+    public var pendingCount: Int { pending.count }
+
+    /// Whether a render sink is currently attached (diagnostics only).
+    public var hasSink: Bool { sink != nil }
 
     /// Deliver `bytes`: straight to the sink if one is attached, otherwise buffer
     /// them for replay when a sink next attaches. Order is preserved.

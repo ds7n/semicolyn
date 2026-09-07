@@ -38,7 +38,27 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         case failed(String)
     }
 
-    @Published var state: State = .idle
+    @Published var state: State = .idle {
+        didSet {
+            // Bump the connection epoch on every ENTRY into `.shell` (from any other
+            // state), so SessionView's `.id(connectionEpoch)` forces a FRESH mount of
+            // the terminal view per connection. Without this, a reattach (disconnect ->
+            // .idle -> reattach -> .shell) reuses the existing TerminalScreen: SwiftUI
+            // calls updateUIView, not makeUIView, so `output.onBytes` (set ONLY in
+            // makeUIView) is never re-attached after teardown nil'd it, and Mosh frames
+            // pile unrendered in PendingOutputBuffer = blank/frozen reconnect (device bug
+            // 2026-09-06/07). A fresh mount re-attaches the sink and flushes the buffer.
+            if state == .shell, oldValue != .shell {
+                connectionEpoch &+= 1
+                DebugLog.shared.log(.lifecycle, "connectionEpoch -> \(connectionEpoch) (fresh terminal mount)")
+            }
+        }
+    }
+    /// Increments on every entry into `.shell` (see `state.didSet`). Drives
+    /// SessionView's `.id()` so each connection/reattach remounts the terminal view,
+    /// guaranteeing `makeUIView` re-attaches the render sink. Published so the `.id()`
+    /// re-evaluates.
+    @Published private(set) var connectionEpoch: Int = 0
     @Published var pendingPrompt: HostKeyPrompt?
     /// Set by a Cmd-shortcut to ask `SessionView` to present a modal (Phase 4e).
     @Published var presentedSheet: SessionSheet?
