@@ -958,6 +958,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // and drop the in-memory failure copy.
             DebugLog.shared.log(.connect, "resume:reattachMosh onFirstFrame → live")
             self.resumeInMemory = nil
+            if isStateResume {
+                // Clear the one-shot state blob on EVERY state-resume reattach, independent
+                // of whether this record has a tmux session name. If this only ran inside
+                // the tmux-name branch below, a state-resume of a non-tmux mosh session
+                // would never clear it; a kill before the next background-triggered
+                // suspendMoshForBackground() overwrites it would then replay a now-stale
+                // Restoration::Context (old crypto seq) on the FOLLOWING reattach, causing
+                // the exact server-desync class ("floods stale addr, zero uplink") this
+                // feature exists to fix.
+                DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: clearing one-shot blob")
+                try? AppStores.shared.moshState.clear(sessionID: record.sessionID)
+            }
             // If the resumed record was a plain-tmux session, RE-LAUNCH tmux in-band and
             // install the gesture controller, exactly like the fresh Mosh path. The
             // reattached login shell is a fresh shell (Mosh reattach re-execs the login
@@ -977,10 +989,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self.installPlainTmuxControllerIfMounted()
                 if isStateResume {
                     // State-resume restored the attached-tmux screen verbatim; re-sending
-                    // `tmux new -A` would re-run inside the restored session. Clear the blob
-                    // (one-shot: now stale) and skip the relaunch + dead-server watchdog.
+                    // `tmux new -A` would re-run inside the restored session. Skip the
+                    // relaunch + dead-server watchdog (blob already cleared above,
+                    // unconditionally, regardless of tmux-name presence).
                     DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip tmux relaunch (restored screen)")
-                    try? AppStores.shared.moshState.clear(sessionID: record.sessionID)
                 } else {
                     self.moshPlainTmuxLaunchSent = true
                     let launch = PlainTmuxController.launchCommand(sessionName: name)
