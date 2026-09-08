@@ -309,7 +309,11 @@ struct SessionView: View {
             // record is cleared but the in-memory copy powers Retry). Do NOT dismiss
             // while the banner is showing, or the user could never act on it; the
             // banner's own actions (Start fresh / Back to hosts) drive the next step.
-            if case .idle = newState, vm.resumeFailure == nil { dismiss() }
+            // A mosh background-suspend ALSO sets `.idle` (to pass the warm-foreground
+            // re-home guard) but must keep the cover up so the in-place re-home has a
+            // SessionView to run in; `moshSuspendedForResume` suppresses dismiss until
+            // the `.active` handler below either re-homes (→ `.shell`) or dismisses.
+            if case .idle = newState, vm.resumeFailure == nil, !vm.moshSuspendedForResume { dismiss() }
             // Dump the effective logging config once a session goes live, so a device
             // trace shows whether logging/categories were actually on (build 44: the
             // stream was empty because the master gate was off, this makes that explicit
@@ -360,7 +364,15 @@ struct SessionView: View {
                 vm.suspendMoshForBackground()
             }
             if phase == .active {
-                vm.resumeMoshOnForegroundIfNeeded()
+                // Warm foreground: re-home the mosh session suspended on background.
+                // If nothing was resumable (record gone) but we suspended, the cover
+                // was pinned open by `moshSuspendedForResume` and its `.onChange` won't
+                // re-fire (state stayed `.idle`), dismiss here so we don't strand a
+                // blank cover. A successful re-home returns true and drove `.shell`.
+                let reHomed = vm.resumeMoshOnForegroundIfNeeded()
+                if !reHomed, case .idle = vm.state, vm.resumeFailure == nil {
+                    dismiss()
+                }
             }
             DebugLog.shared.log(.lifecycle,
                 "app scenePhase: \(phaseLabel(oldPhase)) → \(phaseLabel(phase)) flushedPredictor=\(didFlush)")

@@ -227,6 +227,27 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// e.g. the watchdog attaches SSH, then a queued `onEnd` would otherwise clobber
     /// it with a spurious crash banner. Reset in `teardown()` with the rest of Mosh state.
     private var moshResolved = false
+    /// True from app-background suspend (`suspendMoshForBackground`) until the warm
+    /// foreground re-home starts (`resumeMoshOnForegroundIfNeeded`). The suspend tears
+    /// the live mosh session down and flips `state` to `.idle` so the foreground guard
+    /// (`guard state == .idle`) passes, BUT the SessionView cover must NOT dismiss on
+    /// that `.idle` (it would drop us to the host list and the in-place re-home would
+    /// never run). SessionView's `.onChange(state)` reads this and suppresses `dismiss()`
+    /// while a suspend is pending, exactly as `resumeFailure != nil` does for the banner.
+    var moshSuspendedForResume = false
+    /// State-resume liveness plumbing. On a STATE-resume (blob replay), we do NOT
+    /// re-send `tmux new -A`, so the SEMICOLYN_PREFIX sentinel the fresh-relaunch
+    /// watchdog keys off is never printed, a different liveness signal is needed.
+    /// mosh's restored screen is a LOCAL paint that arrives right after onFirstFrame;
+    /// a genuinely-alive re-homed server sends FORWARD diffs AFTER that. So: onFirstFrame
+    /// arms a short "restore settled" timer; once it fires, ANY subsequent onOutput is
+    /// real server output (`moshStateResumeSawServerOutput`) and cancels the watchdog.
+    /// If no post-settle output arrives within the window, the stored server is dead
+    /// (or the blob is stale) and we fall back to a fresh bootstrap connect instead of
+    /// a frozen restored screen (Important-3 safety net). Reset in `teardown()`.
+    private var moshStateResumeRestoreSettled = false
+    private var moshStateResumeSawServerOutput = false
+    private var moshStateResumeSettleTimer: Task<Void, Never>?
     /// ET connect watchdog: fails the connect if the session shows no life (no
     /// onFirstFrame, no onEnd) within the window. Cancelled by either callback.
     private var etWatchdog: Task<Void, Never>?
@@ -710,6 +731,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         moshReattachWatchdog?.cancel(); moshReattachWatchdog = nil
         moshReattachSawServerOutput = false
         moshResolved = false
+        moshStateResumeSettleTimer?.cancel(); moshStateResumeSettleTimer = nil
+        moshStateResumeRestoreSettled = false
+        moshStateResumeSawServerOutput = false
+        moshSuspendedForResume = false
         moshSession?.stop()
         moshSession = nil
         moshFirstFrameSeen = false
@@ -911,16 +936,28 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// cold-launch resume sweep runs only in HostListView.onAppear). isWarm:false is
     /// intentional: we want .coldReattach (blob-aware reattachMosh), not .reforeground
     /// (no handler; suspend already tore the local session down).
-    func resumeMoshOnForegroundIfNeeded() {
-        guard state == .idle else { return }
+    /// Returns true if it kicked off an in-place re-home (state driven back to
+    /// `.shell`); false if there was nothing to resume. SessionView uses the return to
+    /// decide whether to dismiss a suspended-but-not-resumed cover.
+    @discardableResult
+    func resumeMoshOnForegroundIfNeeded() -> Bool {
+        // Clear the suspend guard unconditionally on foreground: from here on the
+        // SessionView cover may dismiss on `.idle` again (a stale flag would wrongly
+        // pin a genuinely-finished session's cover open). `resumeColdReattach` below
+        // drives `state` back to `.shell` on a successful re-home before any dismiss
+        // can observe the cleared flag against `.idle`.
+        let wasSuspended = moshSuspendedForResume
+        moshSuspendedForResume = false
+        guard state == .idle else { return false }
         let action = AppStores.shared.resume.resumeOnLaunch(isWarm: false)
         guard case let .coldReattach(record) = action else {
-            DebugLog.shared.log(.connect, "resume:foreground no coldReattach action=\(String(describing: action))")
-            return
+            DebugLog.shared.log(.connect, "resume:foreground no coldReattach action=\(String(describing: action)) wasSuspended=\(wasSuspended)")
+            return false
         }
-        guard let host = (try? AppStores.shared.hosts.host(id: record.hostID)) ?? nil else { return }
+        guard let host = (try? AppStores.shared.hosts.host(id: record.hostID)) ?? nil else { return false }
         DebugLog.shared.log(.connect, "resume:foreground re-home host=\(host.label)")
         resumeColdReattach(host: host, record: record)
+        return true
     }
 
     /// Rebuild a Mosh session directly from a stored record + MOSH_KEY. mosh-client
@@ -947,6 +984,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onOutput = { [weak self] data in
             guard let self else { return }
             self.output.onOutput(data: data)
+            // STATE-resume liveness: onFirstFrame armed a short "restore settled" timer;
+            // the restored screen is a LOCAL paint that lands in the onOutput chunks
+            // right after onFirstFrame. Any onOutput AFTER that timer fires is a forward
+            // diff from a genuinely-alive re-homed server, so it proves liveness and
+            // cancels the dead-server watchdog. Checked BEFORE the plain-tmux-probe
+            // guard below (state-resume never arms that probe, so the guard would return
+            // early and skip this). Distinct from the fresh-relaunch sentinel path.
+            if isStateResume, self.moshStateResumeRestoreSettled,
+               !self.moshStateResumeSawServerOutput {
+                self.moshStateResumeSawServerOutput = true
+                self.moshReattachWatchdog?.cancel(); self.moshReattachWatchdog = nil
+                DebugLog.shared.log(.connect, "resume:reattachMosh state-resume post-settle server output → alive, confirmed")
+            }
             // Feed the reactive tmux-missing probe on reattach too (the re-launched
             // `tmux new -A -s <name>` in onFirstFrame arms it), mirroring the fresh path.
             // Keep accumulating until BOTH the probe and the prefix discovery resolve.
@@ -987,6 +1037,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // feature exists to fix.
                 DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: clearing one-shot blob")
                 try? AppStores.shared.moshState.clear(sessionID: record.sessionID)
+                // Important-3 safety net: a state-resume paints the restored screen from
+                // LOCAL state and fires onFirstFrame off that paint, so "live" here does
+                // NOT prove the re-homed server is reachable. If the blob is stale or the
+                // server is gone, mosh sits in "Nothing received from server" and NEVER
+                // pthread_exits (no onEnd) -> a permanently frozen restored screen. Arm a
+                // liveness watchdog that requires REAL server output AFTER the restore
+                // paint settles; on timeout, fall back to a fresh bootstrap connect.
+                // Armed for EVERY state-resume (tmux or not) since the freeze afflicts
+                // both. The settle timer fires shortly after this onFirstFrame so the
+                // restore paint's own onOutput chunks (which arrive right after this) are
+                // NOT mistaken for server liveness; any onOutput after it is a real diff.
+                self.armMoshStateResumeWatchdog(host: host)
             }
             // If the resumed record was a plain-tmux session, RE-LAUNCH tmux in-band and
             // install the gesture controller, exactly like the fresh Mosh path. The
@@ -1085,6 +1147,61 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // Full fresh connect (SSH auth -> new mosh bootstrap) using stored
             // creds, the same entry the host list uses; password "" defers to the
             // saved key/credential resolution.
+            self.connect(savedHost: host, password: "")
+        }
+    }
+
+    /// Arm the STATE-resume dead-server liveness watchdog (Important-3 safety net).
+    /// Unlike the fresh-relaunch watchdog, a state-resume prints no SEMICOLYN_PREFIX
+    /// sentinel (we skip `tmux new -A`), so it uses a different signal: mosh's restored
+    /// screen is a LOCAL paint arriving in the onOutput chunks right after onFirstFrame;
+    /// a live re-homed server sends FORWARD diffs after that. We arm a short "restore
+    /// settled" timer (so the local paint is not mistaken for liveness), after which any
+    /// onOutput sets `moshStateResumeSawServerOutput` and cancels this watchdog. If none
+    /// arrives inside the window, the server is unreachable / the blob is stale -> fall
+    /// back to a fresh bootstrap connect (spawns a new server) instead of a frozen
+    /// restored screen. Reuses `moshReattachWatchdog` (only one reattach watchdog is
+    /// ever live at a time) and the shared `moshResolved` mutual-exclusion with onEnd.
+    ///
+    /// TRADEOFF (documented heuristic): a genuinely-alive server that happens to send NO
+    /// forward diff at all within the window (an idle, output-quiescent tmux pane with no
+    /// clock/updates) would be misjudged dead and trigger a needless fresh reconnect.
+    /// That reconnect is non-destructive (`tmux new -A` re-attaches the SAME persisted
+    /// session, losing only mosh's local predictive echo), so a false positive costs a
+    /// reconnect, never data. The window (settle 0.6s + 4s liveness) is sized so a live
+    /// server's keepalive/heartbeat traffic, which mosh exchanges continuously, lands
+    /// inside it; a truly dead server sends nothing. Preferred over the alternative of
+    /// injecting a synthetic keystroke to force a server echo, which would perturb the
+    /// restored session's input stream.
+    private func armMoshStateResumeWatchdog(host: Host) {
+        moshStateResumeRestoreSettled = false
+        moshStateResumeSawServerOutput = false
+        moshStateResumeSettleTimer?.cancel()
+        moshReattachWatchdog?.cancel()
+        // Settle timer: let the restore paint's onOutput chunks drain before treating
+        // further output as server liveness. 0.6s comfortably covers the local paint,
+        // which lands within milliseconds of this onFirstFrame.
+        moshStateResumeSettleTimer = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.moshStateResumeRestoreSettled = true
+            DebugLog.shared.log(.connect, "resume:reattachMosh state-resume restore settled → post-output now proves liveness")
+        }
+        moshReattachWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)   // 4s post-onFirstFrame window
+            guard let self, !Task.isCancelled, !self.moshStateResumeSawServerOutput else { return }
+            // Mutual exclusion with onEnd (shared moshResolved flag): claim the
+            // resolution so a late onEnd can't also fire a banner over the fresh connect.
+            if self.moshResolved { return }
+            self.moshResolved = true
+            DebugLog.shared.log(.connect, "resume:reattachMosh state-resume NO server output in 4s → stored mosh-server dead/blob stale, fresh reconnect")
+            self.moshStateResumeSettleTimer?.cancel(); self.moshStateResumeSettleTimer = nil
+            self.moshSession?.stop(); self.moshSession = nil
+            self.moshReattachWatchdog = nil
+            // Leave `.shell` first (connect() ignores the call while `.shell`), same as
+            // the fresh-relaunch watchdog; connect() then tears down + flips to
+            // `.connecting`, which also resets the state-resume flags via teardown().
+            self.state = .idle
             self.connect(savedHost: host, password: "")
         }
     }
@@ -2362,6 +2479,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             UIApplication.shared.endBackgroundTask(bgTask)
             bgTask = .invalid
         }
+        // The blob capture must NOT depend on `moshSession` staying non-nil: this
+        // block captures `sid` (not `self.moshSession`) and calls the store directly,
+        // so niling moshSession below is safe for the persist.
         sess.onEncodedState = { blob in
             do {
                 try AppStores.shared.moshState.put(blob, sessionID: sid)
@@ -2374,8 +2494,34 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 bgTask = .invalid
             }
         }
+        // suspendForResume sends Ctrl-^ Ctrl-Z, and mosh SUSPEND makes the vendored
+        // client pthread_exit SYNCHRONOUSLY inside mosh_main, so runMoshLoop's own
+        // teardown (fclose + fireEnd) NEVER runs. suspendForResume therefore drives
+        // the session's teardown itself (via -stop, which nils onEnd), so onEnd will
+        // NOT fire here to flip us off `.shell`. We must do the VM-side transition
+        // ourselves, or warm-foreground's `guard state == .idle` in
+        // resumeMoshOnForegroundIfNeeded() fails and no re-home happens (frozen
+        // terminal on reopen, the feature's primary case).
         sess.suspendForResume()
         DebugLog.shared.log(.connect, "mosh:suspend sent Ctrl-^ Ctrl-Z sid=\(sid)")
+        // Cancel any in-flight mosh watchdogs/probes for this now-suspended session so
+        // they can't fire against the torn-down session (mirrors teardown()'s subset).
+        moshWatchdog?.cancel(); moshWatchdog = nil
+        moshReattachWatchdog?.cancel(); moshReattachWatchdog = nil
+        moshReattachSawServerOutput = false
+        moshResolved = false
+        plainTmuxProbeWatchdog?.cancel(); plainTmuxProbeWatchdog = nil
+        // Drop the live session handle + leave `.shell`. onEncodedState above (already
+        // captured `sid`) still fires on the main queue independently of this, so the
+        // blob is persisted regardless of niling moshSession. On `.active`,
+        // resumeMoshOnForegroundIfNeeded() now finds `state == .idle` and re-homes.
+        // Set moshSuspendedForResume BEFORE flipping to `.idle` so SessionView's
+        // `.onChange(state)` sees it and suppresses the dismiss-on-idle (otherwise the
+        // cover drops to the host list and the in-place foreground re-home never runs).
+        moshSuspendedForResume = true
+        moshSession = nil
+        state = .idle
+        DebugLog.shared.log(.connect, "mosh:suspend torn down → .idle (warm-foreground will re-home)")
     }
 
     /// Forget the most-recently-typed line's un-graduated tokens (surgical L7 tool).
