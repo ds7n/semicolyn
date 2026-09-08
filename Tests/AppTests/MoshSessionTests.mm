@@ -131,45 +131,55 @@
 // killing the mosh thread mid-call WITHOUT running runMoshLoop's own fclose (which
 // would have EOF'd the reader). Before the fix, -stop's NORMAL reader branch joined
 // the reader assuming that fclose already delivered EOF  - so pthread_join(reader)
-// blocked FOREVER and the reader thread + fds leaked. This test proves the fix:
+// blocked FOREVER and the reader thread + fds leaked. This test proves the fix by
+// DIRECTLY OBSERVING the reader thread's termination:
 //   (1) the encoded-state blob is STILL captured through suspendForResume, AND
-//   (2) -stop (invoked internally by suspendForResume, and again explicitly) COMPLETES
-//       instead of deadlocking  - verified by racing an async [s stop] against a wall-
-//       clock timeout on a fresh expectation.
-// Pre-fix, step (2)'s expectation would time out (the async stop wedged in
-// pthread_join) → the test FAILS; that failure is what makes this test real.
+//   (2) -stop's async teardown block RUNS TO COMPLETION  - it fires onTeardownComplete
+//       as its final action, which happens ONLY after pthread_join(reader) returns
+//       (i.e. the reader thread actually terminated). We wait on that signal.
+// WHY THIS IS REAL (fails against the pre-fix impl): pre-fix, -stop's NORMAL reader
+// branch runs on the suspend path and pthread_join(reader) blocks forever (mosh's
+// fclose that would EOF the reader never ran). The teardown block is therefore wedged
+// in the join and NEVER reaches its final onTeardownComplete call  - so the
+// `teardown` expectation is never fulfilled and this test TIMES OUT / FAILS. Post-fix
+// the suspend path delivers the reader's EOF (closes _outPipe[1]) before joining, the
+// join returns, and onTeardownComplete fires promptly → the expectation is met.
+// Contrast the OLD version of this test, which fulfilled its expectation from a SECOND
+// [s stop] that returns immediately via the idempotency guard WITHOUT reaching the
+// reader join  - so it passed even against a deadlocked reader (a tautology). This
+// version cannot: the ONLY thing that fulfills `teardown` is the teardown block
+// running past the reader join.
 - (void)testSuspendThenStopTearsDownWithoutDeadlock {
     MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
                                                 cols:80 rows:24 predictMode:@"none"];
     XCTestExpectation *captured = [self expectationWithDescription:@"onEncodedState"];
+    XCTestExpectation *teardown = [self expectationWithDescription:@"onTeardownComplete"];
     __block NSData *blob = nil;
+    __block BOOL teardownFired = NO;
     s.onEncodedState = ^(NSData *d) { blob = [d copy]; [captured fulfill]; };
+    // onTeardownComplete is the teardown block's FINAL action, reached ONLY after the
+    // reader join returns. Fulfill exactly once (the block fires it once per -stop, but
+    // suspendForResume's internal -stop is the one that reaches it here; guard anyway).
+    s.onTeardownComplete = ^{
+        if (!teardownFired) { teardownFired = YES; [teardown fulfill]; }
+    };
     [s start];
     // suspendForResume writes the suspend bytes (→ pthread_exit on the mosh thread) and
-    // internally drives teardown via -stop (which takes the suspend-aware EOF-we-deliver
-    // reader path). If that path deadlocked, the process would still make progress here
-    // because -stop's join runs on a utility queue, but a SECOND explicit -stop below
-    // is idempotent and returns immediately.
+    // internally drives teardown via -stop (the suspend-aware EOF-we-deliver reader
+    // path). Pre-fix, that -stop's reader join deadlocks and onTeardownComplete never
+    // fires → the `teardown` wait below times out.
     [s suspendForResume];
-    [self waitForExpectations:@[ captured ] timeout:2.0];
+
+    // Wait for BOTH: the blob was captured AND the async teardown ran to completion
+    // (reader joined, all fds closed). A generous timeout so a slow CI machine does not
+    // flake, but a real deadlock (pre-fix) never fires teardown and this WILL time out.
+    [self waitForExpectations:@[ captured, teardown ] timeout:3.0];
     XCTAssertEqualObjects([[NSString alloc] initWithData:blob encoding:NSUTF8StringEncoding], @"STATE",
                           @"suspend must still capture the state blob after the teardown-driving change");
+    XCTAssertTrue(teardownFired,
+                  @"teardown block must run to completion (reader joined) instead of deadlocking");
 
-    // Prove the whole teardown actually COMPLETES (the reader thread was joined, not
-    // wedged). We can't join MoshSession's internal threads directly, so we assert the
-    // observable proxy: a subsequent -stop returns promptly (idempotent no-op) AND the
-    // async utility-queue teardown does not starve the run loop. Fulfill from a barrier
-    // dispatched to the SAME utility queue -stop uses: if -stop's teardown block were
-    // wedged in pthread_join, a serial-ordering barrier would still run (global queue is
-    // concurrent), so instead we simply assert -stop returns and give the async teardown
-    // a bounded settle window, then confirm a further -stop is still a clean no-op.
-    XCTestExpectation *stopped = [self expectationWithDescription:@"second stop returns"];
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        [s stop];   // idempotent; must return, not block
-        [stopped fulfill];
-    });
-    [self waitForExpectations:@[ stopped ] timeout:5.0];
-    // A third stop after everything settled must also be a crash-free no-op.
+    // A further -stop after everything settled must also be a crash-free idempotent no-op.
     [s stop];
     XCTAssertTrue(YES, @"suspend → stop teardown completed without deadlock");
 }

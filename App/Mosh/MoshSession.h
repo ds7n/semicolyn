@@ -72,6 +72,15 @@ NS_ASSUME_NONNULL_BEGIN
 /// Thread-safe snapshot of the most recently captured state blob (nil if none).
 - (nullable NSData *)latestEncodedState;
 
+/// DIAGNOSTIC / test-observable: fires (on the utility teardown queue) as the very
+/// LAST action of -stop's async teardown block, i.e. only AFTER both threads are
+/// joined and every fd is closed. Because it runs past the reader join, it is a
+/// direct, positive signal that teardown actually completed rather than wedging in
+/// pthread_join. Fires on ALL -stop paths (normal, suspended, degenerate). Harmless
+/// in production (unset); tests use it to prove the suspend-teardown does not
+/// deadlock (a wedged reader join means this never runs).
+@property (nonatomic, copy, nullable) void (^onTeardownComplete)(void);
+
 @end
 
 NS_ASSUME_NONNULL_END

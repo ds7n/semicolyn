@@ -86,8 +86,9 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
 // whenever _suspended is set (not only in the never-ran degenerate case): -stop is
 // the one that closes _outPipe[1] to EOF the reader, closes the orphaned _inPipe[0],
 // and closes _outPipe[0] after the join. (pthread_exit also skips the trampoline's
-// CFBridgingRelease, so a suspended session's mosh-thread +1 is never balanced and
-// dealloc never runs  - see the retain-leak note in -stop. The Swift caller drives
+// CFBridgingRelease, so a suspended session's mosh-thread +1 would never be balanced;
+// -stop's teardown block balances it on the suspend path, after the joins + closes
+// (retain-leak-balance note at the end of -stop). The Swift caller drives
 // the state transition since -stop deliberately nils onEnd; see suspendForResume.)
 // Because the teardown block joins each thread BEFORE closing any fd that thread
 // touches, no close() ever races a read()/write()/fclose() on a live-or-recycled
@@ -469,6 +470,12 @@ static void *reader_thread_main(void *ctx) {
     pthread_t readerT = _readerThread;
     int inWrite = _inPipe[1];    // app write end → close to give mosh EOF
     _inPipe[1] = -1;             // publish -1 NOW: writeInput will see it and bail
+    // Snapshot the teardown-complete diagnostic under the lock and hold it in a
+    // local for the async block. We do NOT nil it (it is a completion signal, not a
+    // data callback), but we must capture it into a local so the block can fire it
+    // even if this Ivar is touched later, and  - critically  - so it survives the
+    // CFBridgingRelease at the end of the block that may dealloc self.
+    void (^teardownDone)(void) = self.onTeardownComplete;
     // Silence callbacks under the lock: nothing fires onOutput/onFirstFrame/onEnd
     // after -stop.
     self.onOutput = nil;
@@ -547,11 +554,12 @@ static void *reader_thread_main(void *ctx) {
             int appRead = _outPipe[0];
             _outPipe[0] = -1;
             // On the SUSPEND path runMoshLoop never ran its fclose(fin), so the mosh
-            // READ end (_inPipe[0]) is orphaned OPEN. dealloc would normally sweep it,
-            // but mosh's pthread_exit skipped the trampoline's CFBridgingRelease, so
-            // the mosh-thread +1 is never balanced and dealloc never runs  - close it
-            // here to avoid leaking the fd. (Nothing reads _inPipe[0] after the mosh
-            // thread is gone, so this close is race-free.) On the never-ran path
+            // READ end (_inPipe[0]) is orphaned OPEN. We close it here rather than
+            // leaving it for dealloc: mosh's pthread_exit skipped the trampoline's
+            // CFBridgingRelease, so the mosh-thread +1 is balanced only by the explicit
+            // CFBridgingRelease at the end of this block  - which runs AFTER this close,
+            // so dealloc cannot have swept this fd yet. (Nothing reads _inPipe[0] after
+            // the mosh thread is gone, so this close is race-free.) On the never-ran path
             // _inPipe[0] is left for dealloc (which DOES run there, since the failed
             // pthread_create already released its +1); guarding on `suspended` keeps
             // that path unchanged and avoids a double-close.
@@ -562,7 +570,40 @@ static void *reader_thread_main(void *ctx) {
             if (moshRead >= 0) close(moshRead);
         }
         // All threads joined; all fds closed exactly once. Teardown complete.
-        (void)self;  // keep self alive to end of block
+        //
+        // Fire the teardown-complete diagnostic (test-observable). This runs ONLY
+        // after both pthread_join()s returned and every fd was closed, so it is a
+        // positive proof that teardown reached its end rather than wedging in a join.
+        // We call the LOCAL snapshot (captured under _lock in phase 1), not
+        // self.onTeardownComplete, because the CFBridgingRelease below may dealloc
+        // self  - so we must not touch self after it. Fire it BEFORE that release so
+        // "teardown complete" is observed while self is still guaranteed alive.
+        if (teardownDone) teardownDone();
+
+        // RETAIN-LEAK BALANCE (suspend path only). On SUSPEND, mosh's handler calls
+        // pthread_exit() SYNCHRONOUSLY inside mosh_main, so mosh_thread_main's body
+        // after `[self runMoshLoop]`  - including its `CFBridgingRelease(ctx)` that
+        // balances the `moshCtx = CFBridgingRetain(self)` (+1) taken in -start  - NEVER
+        // runs. That leaks exactly ONE +1 (one MoshSession + one pthread_mutex) per
+        // suspend. Balance it here with exactly ONE CFBridgingRelease, guarded on
+        // `suspended`:
+        //   • It balances the TRAMPOLINE's leaked +1  - a retain that provably never
+        //     otherwise releases on this path (pthread_exit skipped it). Over-release
+        //     is therefore IMPOSSIBLE: on non-suspend paths the trampoline DID (or
+        //     will) run its own CFBridgingRelease, and the `suspended` guard keeps
+        //     this line off those paths entirely.
+        //   • It runs AFTER `pthread_join(moshT, NULL)` above (the mosh thread is
+        //     provably gone and will never touch ctx again) and AFTER every fd close +
+        //     the reader join, so no thread is live and all fds are already -1: if this
+        //     release triggers dealloc, dealloc's `>=0`-guarded closes are all no-ops
+        //     and its pthread_mutex_destroy runs with no thread holding _lock (we are
+        //     NOT under _lock here). No use-after-free, no double-close.
+        //   • This is separate from the block's OWN strong capture of self: that
+        //     capture keeps self alive until the block returns and is released by ARC
+        //     at block end. Net effect: this line releases the leaked +1; the block's
+        //     capture keeps self alive through here; after the block returns, the
+        //     refcount is correct (one fewer than before  - the exact leak repaired).
+        if (suspended) { CFBridgingRelease((__bridge CFTypeRef)self); }
     });
 }
 
