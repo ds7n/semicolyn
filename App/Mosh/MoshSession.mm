@@ -31,7 +31,7 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
 }
 
 // Private methods invoked from the C pthread trampolines below, which are defined
-// before the @implementation — declare them here so the trampolines compile.
+// before the @implementation  - declare them here so the trampolines compile.
 @interface MoshSession ()
 - (void *)runMoshLoop;
 - (void *)runReaderLoop;
@@ -41,7 +41,7 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
 @end
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OWNERSHIP + CONCURRENCY MODEL (holistic — read this before touching anything)
+// OWNERSHIP + CONCURRENCY MODEL (holistic  - read this before touching anything)
 //
 // Three threads touch a MoshSession:
 //   (M)  the main thread/actor: -start, -writeInput:, -resizeCols:rows:, -stop,
@@ -53,7 +53,7 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
 // _inPipe/_outPipe/_started/_stopped/_moshThreadLive/_readerThreadLive/_endFired/
 // _winsize/_moshThread/_readerThread happens under _lock. Blocking syscalls
 // (mosh_main, read, write, pthread_join) are NEVER performed while holding the
-// lock — the lock only brackets the snapshot-fd-and-record-intent step; every
+// lock  - the lock only brackets the snapshot-fd-and-record-intent step; every
 // thread copies the fd/flag it needs into a local under the lock, drops the lock,
 // then blocks on the local copy. So no two threads ever touch the fd table or the
 // state ivars concurrently, and no thread blocks another by holding the lock.
@@ -64,17 +64,31 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
 //     ONLY by runMoshLoop, via fclose, exactly once each, as the last thing it
 //     does before returning. Nothing else ever closes them.
 //   • The app-side fds are closed ONLY by -stop's teardown block:
-//       – _inPipe[1] (input write end): closed under _lock in phase 1, atomically
+//       - _inPipe[1] (input write end): closed under _lock in phase 1, atomically
 //         with setting it to -1, so no writeInput can be mid-write on it (writeInput
 //         snapshots the same fd under the same lock and, seeing _stopped, bails).
 //         Closing it gives the mosh read side EOF → mosh_main returns.
-//       – _outPipe[0] (output read end): closed by the teardown block AFTER the
+//       - _outPipe[0] (output read end): closed by the teardown block AFTER the
 //         reader thread is joined, so the reader's read() can never race the close
-//         and hit a recycled fd number. In the normal path the mosh thread's
-//         fclose(f_out) is what EOFs the reader (so it exits, then we join, then we
-//         close); only in the degenerate "mosh thread never ran" path do we first
-//         close the WRITE end (_outPipe[1]) to deliver EOF, then join, then close
-//         the read end.
+//         and hit a recycled fd number. In the NORMAL path (mosh ran AND was not
+//         suspended) the mosh thread's fclose(f_out) is what EOFs the reader (so it
+//         exits, then we join, then we close). In the EOF-WE-DELIVER path (the mosh
+//         thread never ran, OR mosh pthread_exit'd on SUSPEND without running its own
+//         fclose) we first close the WRITE end (_outPipe[1]) to deliver EOF, then
+//         join, then close the read end.
+//
+// SUSPEND CAVEAT (the mosh-thread-dies-mid-call case): mosh's SUSPEND handler
+// (0x1e 0x1a) fires state_callback then pthread_exit()s SYNCHRONOUSLY inside
+// mosh_main  - on THIS (T1) thread. So everything in runMoshLoop AFTER the mosh_main
+// call (the fflush/fclose of the mosh-side fds, and -fireEnd) NEVER runs: the mosh
+// thread just vanishes with _inPipe[0]/_outPipe[1] STILL OPEN and the reader STILL
+// blocked in read() with no EOF. That is why -stop must take the EOF-we-deliver path
+// whenever _suspended is set (not only in the never-ran degenerate case): -stop is
+// the one that closes _outPipe[1] to EOF the reader, closes the orphaned _inPipe[0],
+// and closes _outPipe[0] after the join. (pthread_exit also skips the trampoline's
+// CFBridgingRelease, so a suspended session's mosh-thread +1 is never balanced and
+// dealloc never runs  - see the retain-leak note in -stop. The Swift caller drives
+// the state transition since -stop deliberately nils onEnd; see suspendForResume.)
 // Because the teardown block joins each thread BEFORE closing any fd that thread
 // touches, no close() ever races a read()/write()/fclose() on a live-or-recycled
 // number. Every fd number is live for its whole thread's life. (Single reader +
@@ -85,11 +99,14 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
 //     Else set _stopped, snapshot both pthread_t + their "live" flags, send the
 //     quit sequence and close _inPipe[1] (→ mosh EOF), clear onOutput/onEnd so no
 //     callback fires after -stop returns. Drop the lock.
-//   Phase 2 (async, off-main utility queue): join the mosh thread (it fclose()s
-//     the mosh-side fds and fires onEnd on the way out). Then retire the reader:
-//     in the normal path join it (it already EOF'd via the mosh fclose) THEN close
-//     _outPipe[0]; in the degenerate no-mosh-thread path close _outPipe[1] first to
-//     deliver EOF, join, then close _outPipe[0]. Join-before-close throughout.
+//   Phase 2 (async, off-main utility queue): join the mosh thread (in the normal
+//     path it fclose()s the mosh-side fds and fires onEnd on the way out; on SUSPEND
+//     it pthread_exit'd and did neither, but the join still returns immediately).
+//     Then retire the reader: in the normal path (mosh ran AND not suspended) join it
+//     (it already EOF'd via the mosh fclose) THEN close _outPipe[0]; in the EOF-we-
+//     deliver path (mosh never ran OR suspended) close _outPipe[1] first to deliver
+//     EOF, join, then close _outPipe[0] (and, on the suspend sub-case, the orphaned
+//     _inPipe[0]). Join-before-close throughout.
 //   The block retains self, so teardown safely outlives the app dropping its ref.
 //
 // CALLBACK-AFTER-STOP: -stop nils onOutput/onEnd under _lock before joining, and
@@ -109,7 +126,10 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
     BOOL _started;
     BOOL _moshThreadLive;    // mosh thread was created (guards pthread_kill/join)
     BOOL _readerThreadLive;  // reader thread was created (guards pthread_join)
-    BOOL _stopped;           // teardown requested — set once, under _lock
+    BOOL _stopped;           // teardown requested  - set once, under _lock
+    BOOL _suspended;         // suspendForResume ran: mosh pthread_exit'd mid-mosh_main
+                             // WITHOUT its own fclose, so -stop must deliver EOF to the
+                             // reader itself (EOF-we-deliver path). Set once, under _lock.
     BOOL _endFired;          // onEnd dispatched already (fire at most once), under _lock
     BOOL _firstFrameFired;   // onFirstFrame dispatched already (fire at most once), under _lock
     pthread_mutex_t _lock;
@@ -159,7 +179,7 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
 
 // Trampolines: pthread entry points hop back into the ObjC object. Each thread is
 // handed a RETAINED (+1) reference via CFBridgingRetain at pthread_create, and
-// releases it (CFBridgingRelease) when it exits — as the LAST thing it does, after
+// releases it (CFBridgingRelease) when it exits  - as the LAST thing it does, after
 // runMoshLoop/runReaderLoop have fully returned and touch no more ivars. This keeps
 // the MoshSession alive for the whole lifetime of its threads. The release can
 // trigger dealloc, but only once BOTH threads have released and both have exited,
@@ -191,7 +211,7 @@ static void *reader_thread_main(void *ctx) {
     if (pipe(_inPipe) != 0 || pipe(_outPipe) != 0) {
         // Leave any partially-opened pipe for dealloc to sweep; report failure.
         pthread_mutex_unlock(&_lock);
-        [self fireEnd:@"Mosh connection failed — using SSH"];
+        [self fireEnd:@"Mosh connection failed  - using SSH"];
         return;
     }
 
@@ -239,19 +259,19 @@ static void *reader_thread_main(void *ctx) {
         pthread_mutex_unlock(&_lock);
         if (fin) { fclose(fin); } else if (inFd >= 0) { close(inFd); }
         if (fout) { fclose(fout); } else if (outFd >= 0) { close(outFd); }
-        [self fireEnd:@"Mosh connection failed — using SSH"];
+        [self fireEnd:@"Mosh connection failed  - using SSH"];
         return NULL;
     }
     setvbuf(fout, NULL, _IONBF, 0);  // unbuffered: every frame flushes to the pipe immediately
 
     // Snapshot the config strings + winsize pointer. _winsize is shared with resize;
     // mosh reads it on SIGWINCH. It is a plain POD struct written under _lock by
-    // resize and read here by mosh's handler — the tearing risk on two u16 fields is
+    // resize and read here by mosh's handler  - the tearing risk on two u16 fields is
     // benign (a resize is idempotent and re-sent), and passing &_winsize matches the
     // vendored contract. We take &_winsize directly as the vendored API requires.
     // DIAGNOSTIC: capture what mosh writes to stderr during the run. The vendored
-    // bridge (moshiosbridge.cc) prints the caught Network/Crypto/std exception —
-    // the REAL reason a session failed — to stderr, which otherwise vanishes into
+    // bridge (moshiosbridge.cc) prints the caught Network/Crypto/std exception  -
+    // the REAL reason a session failed  - to stderr, which otherwise vanishes into
     // the device console. Redirect fd 2 into a pipe around the mosh_main call (this
     // thread only sees the failure path; the happy path prints nothing), then use
     // the captured text as the onEnd reason so a device trace names the cause.
@@ -300,7 +320,7 @@ static void *reader_thread_main(void *ctx) {
     // The mosh thread is the SOLE owner of the mosh-side fds: fclose each exactly
     // once (fclose closes the underlying _inPipe[0]/_outPipe[1] fd). -stop never
     // touches these fds and, crucially, -stop always pthread_join()s THIS thread
-    // BEFORE it does anything that could observe a recycled number — so these
+    // BEFORE it does anything that could observe a recycled number  - so these
     // fclose()s have fully completed (and these fd numbers are dead) by the time any
     // -stop close runs. That join is the barrier that removes the fd-reuse race.
     // Mark the mosh-side slots consumed under the lock so nothing else references
@@ -318,8 +338,8 @@ static void *reader_thread_main(void *ctx) {
     NSString *endReason = nil;
     if (rc != 0) {
         endReason = capturedErr.length > 0
-            ? [NSString stringWithFormat:@"Mosh failed: %@ — using SSH", capturedErr]
-            : @"Mosh connection failed — using SSH";
+            ? [NSString stringWithFormat:@"Mosh failed: %@  - using SSH", capturedErr]
+            : @"Mosh connection failed  - using SSH";
     }
     [self fireEnd:endReason];
     return NULL;
@@ -345,7 +365,7 @@ static void *reader_thread_main(void *ctx) {
         // dispatch is enqueued for a session the app already tore down. The blocks
         // themselves are [weak self] on the Swift side, so even an in-flight dispatch
         // is safe if the object is gone. On the FIRST byte, also fire onFirstFrame
-        // (once) — enqueued BEFORE this byte's onOutput, so the "frames are flowing"
+        // (once)  - enqueued BEFORE this byte's onOutput, so the "frames are flowing"
         // signal reaches the main actor before the byte it announces.
         pthread_mutex_lock(&_lock);
         void (^firstFrame)(void) = nil;
@@ -383,18 +403,37 @@ static void *reader_thread_main(void *ctx) {
 }
 
 - (void)suspendForResume {
-    // Reuses the writeInput guarded-fd pattern: snapshot the write fd under the
-    // lock so it can't be closed/recycled between the guard and the write(). If
-    // -stop already ran (or -start never did), _stopped/!_started make this a
-    // no-op, idempotent with -stop.
+    // Snapshot the write fd + flip _suspended under the lock so -stop below takes the
+    // suspend-aware EOF-we-deliver reader path. If -stop already ran (or -start never
+    // did, or a prior suspend already fired), the guard makes this a no-op.
     pthread_mutex_lock(&_lock);
-    int fd = (_started && !_stopped) ? _inPipe[1] : -1;
+    BOOL go = (_started && !_stopped && !_suspended);
+    if (go) { _suspended = YES; }
+    int fd = go ? _inPipe[1] : -1;
     pthread_mutex_unlock(&_lock);
     if (fd < 0) return;
+
+    // Write the suspend bytes OUTSIDE the lock (write() can block; never block under
+    // _lock). mosh serializes its Restoration::Context, calls state_callback (→
+    // -captureEncodedState, which stashes latestEncodedState and dispatches
+    // onEncodedState to the MAIN queue), then pthread_exit()s  - SYNCHRONOUSLY, on the
+    // mosh (T1) thread, INSIDE mosh_main. That kills T1 mid-call: runMoshLoop's own
+    // post-mosh_main teardown (fclose of the mosh-side fds; -fireEnd) NEVER runs. So
+    // the session is left half-torn-down (reader blocked with no EOF, mosh-side fds
+    // still open) and we MUST drive teardown ourselves. We do NOT close _inPipe[1]
+    // here  - -stop owns that fd (single-owner) and closes it in its phase 1.
     (void)write(fd, kMoshSuspendSequence, sizeof(kMoshSuspendSequence));
-    // mosh serializes → state_callback → pthread_exit; runMoshLoop returns and the
-    // existing teardown fires onEnd. The caller reads latestEncodedState after the
-    // onEncodedState callback (or after a bounded wait) before persisting.
+
+    // Drive teardown. -stop is idempotent and, seeing _suspended, takes the
+    // EOF-we-deliver reader path (it closes _outPipe[1] to EOF the reader, joins,
+    // then closes _outPipe[0] + the orphaned _inPipe[0]). -stop NILS onEnd, so the
+    // Swift-side state transition off .shell is the caller's job (see
+    // suspendMoshForBackground). onEncodedState is NOT niled by -stop, so the
+    // main-queue capture dispatched above still delivers the blob to persist; -stop's
+    // teardown runs async on a utility queue and never blocks that main-queue
+    // dispatch. The blob is captured synchronously into _latestEncodedState under the
+    // lock before pthread_exit, so latestEncodedState is also already populated here.
+    [self stop];
 }
 
 - (void)resizeCols:(int)cols rows:(int)rows {
@@ -402,7 +441,7 @@ static void *reader_thread_main(void *ctx) {
     _winsize.ws_col = (unsigned short)cols;
     _winsize.ws_row = (unsigned short)rows;
     // pthread_kill only if the mosh thread was actually created AND we have not
-    // begun teardown (which joins it — signalling a joined pthread_t is UB).
+    // begun teardown (which joins it  - signalling a joined pthread_t is UB).
     BOOL deliver = _moshThreadLive && !_stopped;
     pthread_t target = _moshThread;
     pthread_mutex_unlock(&_lock);
@@ -424,6 +463,8 @@ static void *reader_thread_main(void *ctx) {
 
     BOOL moshLive = _moshThreadLive;
     BOOL readerLive = _readerThreadLive;
+    BOOL suspended = _suspended;  // mosh pthread_exit'd mid-call → it did NOT fclose
+                                  // the mosh-side fds, so we deliver the reader's EOF.
     pthread_t moshT = _moshThread;
     pthread_t readerT = _readerThread;
     int inWrite = _inPipe[1];    // app write end → close to give mosh EOF
@@ -435,7 +476,7 @@ static void *reader_thread_main(void *ctx) {
     self.onEnd = nil;
     pthread_mutex_unlock(&_lock);
 
-    // Best-effort clean quit, then EOF — done OUTSIDE the lock because write() to a
+    // Best-effort clean quit, then EOF  - done OUTSIDE the lock because write() to a
     // full pipe can block, and we must never block while holding _lock. inWrite is
     // now exclusively ours: _inPipe[1] is -1 under the lock, so no writeInput can
     // touch this fd number, and this is the only close() of it (single-owner).
@@ -449,15 +490,19 @@ static void *reader_thread_main(void *ctx) {
     // the object outlives the async teardown even if the app drops its ref now.
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         // Retain self across the async teardown (block captures self strongly).
-        // Join the mosh thread first. After this returns, runMoshLoop has fully
-        // finished — including its fclose(_outPipe[1]) — so the reader is at (or is
-        // about to hit) EOF, and the mosh-side fds (_inPipe[0]/_outPipe[1]) are
-        // already closed by that fclose (their numbers are dead) UNLESS the mosh
-        // thread never ran (the degenerate branch below handles that).
+        // Join the mosh thread first. Joining is valid whether it returned normally
+        // OR pthread_exit'd (mosh's SUSPEND), and returns immediately for an already-
+        // exited thread. After this returns the mosh thread is gone. In the NORMAL
+        // case runMoshLoop fully finished  - including its fclose(_outPipe[1])  - so the
+        // reader is at (or about to hit) EOF and the mosh-side fds are already closed
+        // (numbers dead). In the SUSPEND case (suspended == YES) runMoshLoop's post-
+        // mosh_main teardown did NOT run: the mosh-side fds (_inPipe[0]/_outPipe[1])
+        // are STILL OPEN and the reader has NO EOF  - the EOF-we-deliver branch below
+        // handles that, exactly like the mosh-never-ran degenerate case.
         if (moshLive) pthread_join(moshT, NULL);
 
         // Now retire the reader and close the app read end. The ORDER matters and
-        // differs by case — the reader thread reads _outPipe[0] with no lock between
+        // differs by case  - the reader thread reads _outPipe[0] with no lock between
         // iterations, so closing that fd while the reader is mid-loop would free its
         // number for another thread to recycle (e.g. attachSSHShell opening a russh
         // socket during the pre-frame fallback), and the reader's next read() would
@@ -467,10 +512,10 @@ static void *reader_thread_main(void *ctx) {
         // Single reader + a real join barrier is why this needs no self-pipe/refcount
         // machinery. If a SECOND consumer of _outPipe[0] is ever added, switch the
         // reader to a select() over a self-pipe wakeup instead of relying on join.
-        if (moshLive) {
+        if (moshLive && !suspended) {
             // Normal path: the mosh thread's fclose(_outPipe[1]) already EOF'd the
             // reader, so it exits on its own. Join FIRST (honoring runReaderLoop's
-            // "fd valid until after join" invariant), THEN close the read end — no
+            // "fd valid until after join" invariant), THEN close the read end  - no
             // window in which a live reader can hit a recycled fd number.
             if (readerLive) pthread_join(readerT, NULL);
             pthread_mutex_lock(&_lock);
@@ -479,12 +524,17 @@ static void *reader_thread_main(void *ctx) {
             pthread_mutex_unlock(&_lock);
             if (appRead >= 0) close(appRead);
         } else {
-            // Degenerate path: the mosh thread never ran, so nothing fclose'd the
-            // write end and the reader (if it started) is blocked in read() with no
-            // EOF coming. Deliver EOF by closing the WRITE end first (closing the read
-            // end does NOT reliably wake a blocked reader on Darwin), THEN join, THEN
-            // close the read end. No concurrent russh fd traffic exists on this path
-            // (the connection never handed off), so there is no recycle hazard here.
+            // EOF-we-deliver path  - taken when the mosh thread never ran (moshLive ==
+            // NO) OR when it pthread_exit'd on SUSPEND (suspended == YES). In BOTH
+            // cases nothing fclose'd the write end, so the reader (if it started) is
+            // blocked in read() with no EOF coming. Deliver EOF by closing the WRITE
+            // end first (closing the read end does NOT reliably wake a blocked reader
+            // on Darwin), THEN join, THEN close the read end. On the suspend path the
+            // mosh thread is already joined (above), so no thread is mid-fclose on
+            // _outPipe[1]; on the never-ran path no mosh thread exists  - either way
+            // this close is single-owner. No concurrent russh fd traffic exists on
+            // either path (never-ran = no handoff; suspend = app backgrounding, no new
+            // russh socket opening), so there is no recycle hazard here.
             pthread_mutex_lock(&_lock);
             int outWrite = _outPipe[1];
             _outPipe[1] = -1;
@@ -496,8 +546,20 @@ static void *reader_thread_main(void *ctx) {
             pthread_mutex_lock(&_lock);
             int appRead = _outPipe[0];
             _outPipe[0] = -1;
+            // On the SUSPEND path runMoshLoop never ran its fclose(fin), so the mosh
+            // READ end (_inPipe[0]) is orphaned OPEN. dealloc would normally sweep it,
+            // but mosh's pthread_exit skipped the trampoline's CFBridgingRelease, so
+            // the mosh-thread +1 is never balanced and dealloc never runs  - close it
+            // here to avoid leaking the fd. (Nothing reads _inPipe[0] after the mosh
+            // thread is gone, so this close is race-free.) On the never-ran path
+            // _inPipe[0] is left for dealloc (which DOES run there, since the failed
+            // pthread_create already released its +1); guarding on `suspended` keeps
+            // that path unchanged and avoids a double-close.
+            int moshRead = suspended ? _inPipe[0] : -1;
+            if (suspended) { _inPipe[0] = -1; }
             pthread_mutex_unlock(&_lock);
             if (appRead >= 0) close(appRead);
+            if (moshRead >= 0) close(moshRead);
         }
         // All threads joined; all fds closed exactly once. Teardown complete.
         (void)self;  // keep self alive to end of block
