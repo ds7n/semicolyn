@@ -2299,6 +2299,34 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         Task { let s = await predictor.snapshotState(); try? learnedStore.save(s) }
     }
 
+    /// On app-background, suspend the live mosh session (Ctrl-^ Ctrl-Z), capture the
+    /// serialized transport-state blob, and persist it so a reopen can re-home to the
+    /// still-alive server at the correct sequence. Wrapped in a background task so
+    /// iOS's ~5s suspension budget can't cut the capture/write short.
+    func suspendMoshForBackground() {
+        guard let sess = moshSession else { return }
+        let sid = sessionID
+        var bgTask: UIBackgroundTaskIdentifier = .invalid
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "mosh-suspend") {
+            UIApplication.shared.endBackgroundTask(bgTask)
+            bgTask = .invalid
+        }
+        sess.onEncodedState = { blob in
+            do {
+                try AppStores.shared.moshState.put(blob, sessionID: sid)
+                DebugLog.shared.log(.connect, "mosh:suspend captured+persisted blob=\(blob.count)B sid=\(sid)")
+            } catch {
+                DebugLog.shared.log(.connect, "mosh:suspend persist FAILED error=\(error)")
+            }
+            if bgTask != .invalid {
+                UIApplication.shared.endBackgroundTask(bgTask)
+                bgTask = .invalid
+            }
+        }
+        sess.suspendForResume()
+        DebugLog.shared.log(.connect, "mosh:suspend sent Ctrl-^ Ctrl-Z sid=\(sid)")
+    }
+
     /// Forget the most-recently-typed line's un-graduated tokens (surgical L7 tool).
     /// Surfaced by the predictor strip's eraser. No-op when the predictor is off.
     func forgetLastLine() {

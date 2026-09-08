@@ -355,7 +355,10 @@ struct SessionView: View {
         // match it to a user report of foregrounding/backgrounding.
         .onChange(of: scenePhase) { oldPhase, phase in
             let didFlush = phase == .background
-            if didFlush { vm.flushPredictor() }
+            if didFlush {
+                vm.flushPredictor()
+                vm.suspendMoshForBackground()
+            }
             DebugLog.shared.log(.lifecycle,
                 "app scenePhase: \(phaseLabel(oldPhase)) → \(phaseLabel(phase)) flushedPredictor=\(didFlush)")
         }
