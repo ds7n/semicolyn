@@ -106,4 +106,22 @@
     XCTAssertTrue(YES);
 }
 
+// Suspend sequence (0x1e 0x1a) makes mosh serialize state → our state_callback
+// copies it → onEncodedState fires with the blob AND latestEncodedState returns it.
+- (void)testSuspendCapturesEncodedState {
+    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
+                                                cols:80 rows:24 predictMode:@"none"];
+    XCTestExpectation *captured = [self expectationWithDescription:@"onEncodedState"];
+    __block NSData *blob = nil;
+    s.onEncodedState = ^(NSData *d) { blob = [d copy]; [captured fulfill]; };
+    [s start];
+    unsigned char suspend[2] = {0x1e, 0x1a};
+    [s writeInput:[NSData dataWithBytes:suspend length:2]];
+    [self waitForExpectations:@[ captured ] timeout:2.0];
+    // The fake emits a known blob "STATE" on suspend (see fake_mosh_main.mm).
+    XCTAssertEqualObjects([[NSString alloc] initWithData:blob encoding:NSUTF8StringEncoding], @"STATE");
+    XCTAssertEqualObjects([s latestEncodedState], blob, @"latestEncodedState returns the captured blob");
+    [s stop];
+}
+
 @end

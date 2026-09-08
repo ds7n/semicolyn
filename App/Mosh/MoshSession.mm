@@ -18,12 +18,12 @@
 // Mosh's clean-quit sequence is Ctrl-^ then '.'  (0x1e 0x2e).
 static const unsigned char kMoshQuitSequence[2] = {0x1e, 0x2e};
 
-// The bridge passes empty session state and a no-op state callback for M3/M4
-// (session restoration across process death is out of scope).
-static void mosh_state_noop(const void *ctx, const void *buf, size_t len) {
-    (void)ctx;
-    (void)buf;
-    (void)len;
+// mosh hands us the serialized transport state (on suspend + on shutdown). Copy it
+// under _lock, stash as the latest, and dispatch onEncodedState to the main queue.
+static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
+    if (!ctx || !buf || len == 0) return;
+    MoshSession *self = (__bridge MoshSession *)ctx;
+    [self captureEncodedState:[NSData dataWithBytes:buf length:len]];
 }
 
 // Private methods invoked from the C pthread trampolines below, which are defined
@@ -32,6 +32,8 @@ static void mosh_state_noop(const void *ctx, const void *buf, size_t len) {
 - (void *)runMoshLoop;
 - (void *)runReaderLoop;
 - (void)fireEnd:(NSString *_Nullable)reason;
+- (void)captureEncodedState:(NSData *)blob;
+- (nullable NSData *)latestEncodedState;
 @end
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,6 +109,7 @@ static void mosh_state_noop(const void *ctx, const void *buf, size_t len) {
     BOOL _endFired;          // onEnd dispatched already (fire at most once), under _lock
     BOOL _firstFrameFired;   // onFirstFrame dispatched already (fire at most once), under _lock
     pthread_mutex_t _lock;
+    NSData *_latestEncodedState;  // most recent captured state blob, guarded by _lock
 }
 
 - (instancetype)initWithIP:(NSString *)ip port:(NSString *)port key:(NSString *)key
@@ -250,7 +253,7 @@ static void *reader_thread_main(void *ctx) {
     }
 
     char emptyState = 0;
-    int rc = mosh_main(fin, fout, &_winsize, mosh_state_noop, (__bridge void *)self,
+    int rc = mosh_main(fin, fout, &_winsize, mosh_state_capture, (__bridge void *)self,
                        _ip.UTF8String, _port.UTF8String, _key.UTF8String, _predict.UTF8String,
                        &emptyState, 0, _predict.UTF8String);
 
@@ -471,6 +474,21 @@ static void *reader_thread_main(void *ctx) {
     void (^cb)(NSString *) = self.onEnd;
     pthread_mutex_unlock(&_lock);
     if (cb) dispatch_async(dispatch_get_main_queue(), ^{ cb(reason); });
+}
+
+- (void)captureEncodedState:(NSData *)blob {
+    pthread_mutex_lock(&_lock);
+    _latestEncodedState = [blob copy];
+    void (^cb)(NSData *) = self.onEncodedState;
+    pthread_mutex_unlock(&_lock);
+    if (cb) dispatch_async(dispatch_get_main_queue(), ^{ cb(blob); });
+}
+
+- (NSData *)latestEncodedState {
+    pthread_mutex_lock(&_lock);
+    NSData *b = _latestEncodedState;
+    pthread_mutex_unlock(&_lock);
+    return b;
 }
 
 @end

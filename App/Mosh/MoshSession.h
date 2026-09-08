@@ -5,8 +5,8 @@
 NS_ASSUME_NONNULL_BEGIN
 
 /// Drives one vendored `mosh_main` session over a pipe pair on a background
-/// thread. Speaks only bytes + size events — the same contract SwiftTerm already
-/// consumes from the SSH/tmux paths — so the terminal view is transport-agnostic.
+/// thread. Speaks only bytes + size events, the same contract SwiftTerm already
+/// consumes from the SSH/tmux paths, so the terminal view is transport-agnostic.
 ///
 /// Threading: `mosh_main` runs on a detached thread; a second reader thread pumps
 /// output-pipe bytes into `onOutput`. Both callbacks are dispatched to the main
@@ -37,7 +37,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// Output bytes from Mosh (main queue). Wire to `terminalView.feed(byteArray:)`.
 @property (nonatomic, copy, nullable) void (^onOutput)(NSData *bytes);
 
-/// Fires exactly once (main queue) when the FIRST output byte arrives from Mosh —
+/// Fires exactly once (main queue) when the FIRST output byte arrives from Mosh,
 /// i.e. the UDP handshake completed and frames are flowing. The VM uses this to
 /// divide "pre-handoff" failures (fall back to SSH on the retained connection)
 /// from "mid-session" loop exits (crash banner). Fires before that first
@@ -46,6 +46,14 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Fires once when the mosh loop exits (main queue). `reason` nil = clean exit.
 @property (nonatomic, copy, nullable) void (^onEnd)(NSString *_Nullable reason);
+
+/// Fires (main queue) when mosh serializes its transport state, on SUSPEND
+/// (Ctrl-^ Ctrl-Z) and on shutdown. `blob` is the serialized Restoration::Context
+/// (crypto seq + sent/received states) to persist and replay on resume.
+@property (nonatomic, copy, nullable) void (^onEncodedState)(NSData *blob);
+
+/// Thread-safe snapshot of the most recently captured state blob (nil if none).
+- (nullable NSData *)latestEncodedState;
 
 @end
 
