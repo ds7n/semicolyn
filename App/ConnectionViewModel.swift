@@ -905,6 +905,24 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
     }
 
+    /// On warm foreground (app kept in memory), if we suspended a mosh session on
+    /// background (a state blob was persisted) and no live shell is up, re-home from
+    /// the blob via the same cold-reattach path. Closes the warm-reopen gap (the
+    /// cold-launch resume sweep runs only in HostListView.onAppear). isWarm:false is
+    /// intentional: we want .coldReattach (blob-aware reattachMosh), not .reforeground
+    /// (no handler; suspend already tore the local session down).
+    func resumeMoshOnForegroundIfNeeded() {
+        guard state == .idle else { return }
+        let action = AppStores.shared.resume.resumeOnLaunch(isWarm: false)
+        guard case let .coldReattach(record) = action else {
+            DebugLog.shared.log(.connect, "resume:foreground no coldReattach action=\(String(describing: action))")
+            return
+        }
+        guard let host = (try? AppStores.shared.hosts.host(id: record.hostID)) ?? nil else { return }
+        DebugLog.shared.log(.connect, "resume:foreground re-home host=\(host.label)")
+        resumeColdReattach(host: host, record: record)
+    }
+
     /// Rebuild a Mosh session directly from a stored record + MOSH_KEY. mosh-client
     /// needs a NUMERIC IP (AI_NUMERICHOST), so resolve the stored host again.
     private func reattachMosh(host: Host, record: ResumableSession, key: Data) {

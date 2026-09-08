@@ -359,6 +359,9 @@ struct SessionView: View {
                 vm.flushPredictor()
                 vm.suspendMoshForBackground()
             }
+            if phase == .active {
+                vm.resumeMoshOnForegroundIfNeeded()
+            }
             DebugLog.shared.log(.lifecycle,
                 "app scenePhase: \(phaseLabel(oldPhase)) → \(phaseLabel(phase)) flushedPredictor=\(didFlush)")
         }
