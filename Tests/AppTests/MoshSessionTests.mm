@@ -124,4 +124,44 @@
     [s stop];
 }
 
+// A session constructed WITH a restore blob passes it into mosh_main; the fake
+// echoes "R:<blob>" so we observe that the RESTORE branch ran with our bytes.
+- (void)testEncodedStateIsReplayedIntoMoshMain {
+    NSData *blob = [@"STATE" dataUsingEncoding:NSUTF8StringEncoding];
+    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
+                                                cols:80 rows:24 predictMode:@"none"
+                                          encodedState:blob];
+    XCTestExpectation *got = [self expectationWithDescription:@"replay echo"];
+    __block NSMutableData *acc = [NSMutableData data];
+    __block BOOL done = NO;
+    s.onOutput = ^(NSData *d) {
+        [acc appendData:d];
+        NSString *str = [[NSString alloc] initWithData:acc encoding:NSUTF8StringEncoding];
+        if ([str containsString:@"R:STATE"] && !done) { done = YES; [got fulfill]; }
+    };
+    [s start];
+    [self waitForExpectations:@[ got ] timeout:2.0];
+    XCTAssertTrue(done, @"mosh_main received the encoded_state buffer on resume");
+    [s stop];
+}
+
+// Empty/no restore blob => fresh session => the fake emits NO "R:" prefix.
+- (void)testFreshSessionSendsNoEncodedState {
+    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
+                                                cols:80 rows:24 predictMode:@"none"];
+    XCTestExpectation *echoed = [self expectationWithDescription:@"echo"];
+    __block NSMutableData *acc = [NSMutableData data];
+    __block BOOL done = NO;
+    s.onOutput = ^(NSData *d) {
+        [acc appendData:d];
+        if (acc.length >= 1 && !done) { done = YES; [echoed fulfill]; }
+    };
+    [s start];
+    [s writeInput:[@"Z" dataUsingEncoding:NSUTF8StringEncoding]];
+    [self waitForExpectations:@[ echoed ] timeout:2.0];
+    NSString *str = [[NSString alloc] initWithData:acc encoding:NSUTF8StringEncoding];
+    XCTAssertFalse([str hasPrefix:@"R:"], @"fresh session must not carry restore state");
+    [s stop];
+}
+
 @end

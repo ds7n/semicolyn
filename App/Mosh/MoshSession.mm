@@ -18,6 +18,10 @@
 // Mosh's clean-quit sequence is Ctrl-^ then '.'  (0x1e 0x2e).
 static const unsigned char kMoshQuitSequence[2] = {0x1e, 0x2e};
 
+// Mosh's suspend sequence is Ctrl-^ then Ctrl-Z (0x1e 0x1a). It makes iosclient
+// serialize its Restoration::Context, fire state_callback, and pthread_exit.
+static const unsigned char kMoshSuspendSequence[2] = {0x1e, 0x1a};
+
 // mosh hands us the serialized transport state (on suspend + on shutdown). Copy it
 // under _lock, stash as the latest, and dispatch onEncodedState to the main queue.
 static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
@@ -110,6 +114,7 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
     BOOL _firstFrameFired;   // onFirstFrame dispatched already (fire at most once), under _lock
     pthread_mutex_t _lock;
     NSData *_latestEncodedState;  // most recent captured state blob, guarded by _lock
+    NSData *_encodedState;        // restore blob to replay into mosh_main, guarded by _lock
 }
 
 - (instancetype)initWithIP:(NSString *)ip port:(NSString *)port key:(NSString *)key
@@ -125,6 +130,15 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
                                     .ws_ypixel = 0};
         _inPipe[0] = _inPipe[1] = _outPipe[0] = _outPipe[1] = -1;
         pthread_mutex_init(&_lock, NULL);
+    }
+    return self;
+}
+
+- (instancetype)initWithIP:(NSString *)ip port:(NSString *)port key:(NSString *)key
+                      cols:(int)cols rows:(int)rows predictMode:(NSString *)predictMode
+              encodedState:(nullable NSData *)encodedState {
+    if ((self = [self initWithIP:ip port:port key:key cols:cols rows:rows predictMode:predictMode])) {
+        _encodedState = [encodedState copy];
     }
     return self;
 }
@@ -252,10 +266,19 @@ static void *reader_thread_main(void *ctx) {
         close(errPipe[1]);
     }
 
-    char emptyState = 0;
+    // Snapshot the restore blob (if any) under the lock; use it outside the lock
+    // for the (blocking) mosh_main call. `restore` is held in this local for the
+    // whole call so its bytes stay valid; empty/nil replays exactly like the
+    // fresh-connect path used to with the old &emptyState/0 pair.
+    NSData *restore = nil;
+    pthread_mutex_lock(&_lock);
+    restore = _encodedState;
+    pthread_mutex_unlock(&_lock);
+    const char *stateBuf = restore.length > 0 ? (const char *)restore.bytes : "";
+    size_t stateLen = restore.length;
     int rc = mosh_main(fin, fout, &_winsize, mosh_state_capture, (__bridge void *)self,
                        _ip.UTF8String, _port.UTF8String, _key.UTF8String, _predict.UTF8String,
-                       &emptyState, 0, _predict.UTF8String);
+                       stateBuf, stateLen, _predict.UTF8String);
 
     // Restore the real stderr, then drain whatever mosh printed into a bounded buffer.
     NSString *capturedErr = nil;
@@ -357,6 +380,21 @@ static void *reader_thread_main(void *ctx) {
         p += (size_t)w;
         remaining -= (size_t)w;
     }
+}
+
+- (void)suspendForResume {
+    // Reuses the writeInput guarded-fd pattern: snapshot the write fd under the
+    // lock so it can't be closed/recycled between the guard and the write(). If
+    // -stop already ran (or -start never did), _stopped/!_started make this a
+    // no-op, idempotent with -stop.
+    pthread_mutex_lock(&_lock);
+    int fd = (_started && !_stopped) ? _inPipe[1] : -1;
+    pthread_mutex_unlock(&_lock);
+    if (fd < 0) return;
+    (void)write(fd, kMoshSuspendSequence, sizeof(kMoshSuspendSequence));
+    // mosh serializes → state_callback → pthread_exit; runMoshLoop returns and the
+    // existing teardown fires onEnd. The caller reads latestEncodedState after the
+    // onEncodedState callback (or after a bounded wait) before persisting.
 }
 
 - (void)resizeCols:(int)cols rows:(int)rows {

@@ -21,6 +21,18 @@ NS_ASSUME_NONNULL_BEGIN
                predictMode:(NSString *)predictMode NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
+/// Resume variant: passes `encodedState` into `mosh_main` as the
+/// `encoded_state_buffer`/`encoded_state_size` pair so iosclient takes the RESTORE
+/// branch and re-homes at the correct sequence, instead of starting a fresh
+/// session. `encodedState` nil/empty behaves exactly like the fresh initializer.
+- (instancetype)initWithIP:(NSString *)ip
+                      port:(NSString *)port
+                       key:(NSString *)key
+                      cols:(int)cols
+                      rows:(int)rows
+               predictMode:(NSString *)predictMode
+              encodedState:(nullable NSData *)encodedState;
+
 /// Allocate pipes + spawn the mosh thread and the output-reader thread.
 - (void)start;
 
@@ -33,6 +45,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Request a clean shutdown (quit sequence), then join the thread with a bounded
 /// timeout off the main thread. Idempotent.
 - (void)stop;
+
+/// Send mosh's SUSPEND sequence (Ctrl-^ Ctrl-Z). mosh serializes its transport
+/// state (delivered via onEncodedState / latestEncodedState) and exits the loop
+/// cleanly. Use on app-background so the session is resumable server-side.
+- (void)suspendForResume;
 
 /// Output bytes from Mosh (main queue). Wire to `terminalView.feed(byteArray:)`.
 @property (nonatomic, copy, nullable) void (^onOutput)(NSData *bytes);
