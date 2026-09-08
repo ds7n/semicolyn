@@ -914,8 +914,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             failResume(host: host, record: record, secret: key, reason: "couldn't resolve host")
             return
         }
+        let blob = (try? AppStores.shared.moshState.get(sessionID: record.sessionID)) ?? nil
+        let isStateResume = (blob?.isEmpty == false)
+        DebugLog.shared.log(.connect,
+            "resume:reattachMosh mode=\(isStateResume ? "state-resume" : "fresh-relaunch") blob=\(blob?.count ?? 0)B")
         let sess = MoshSession(ip: ip, port: String(record.port), key: keyStr,
-                               cols: 80, rows: 24, predictMode: "adaptive")
+                               cols: 80, rows: 24, predictMode: "adaptive",
+                               encodedState: isStateResume ? blob : nil)
         // Mosh callbacks are dispatched to the main queue (MoshSession.h). These mirror
         // the fresh-attach closures' isolation pattern (bare `self.` access), which the
         // App target already compiles: the Obj-C block property is inferred main-actor
@@ -968,50 +973,30 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // defaults the same way the other connect sites do.
                 let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
                 self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
-                self.moshPlainTmuxLaunchSent = true
-                let launch = PlainTmuxController.launchCommand(sessionName: name)
-                DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux in-band launch \(launch.prefix(60))")
                 self.plainTmuxSessionNamePendingInstall = name
                 self.installPlainTmuxControllerIfMounted()
-                self.plainTmuxProbeArmed = true
-                self.plainTmuxProbeBuffer = ""
-                self.plainTmuxProbeResolved = false
-                self.plainTmuxProbeWatchdog?.cancel()
-                self.plainTmuxProbeWatchdog = Task { [weak self] in
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    guard let self, !self.plainTmuxProbeResolved else { return }
-                    self.plainTmuxProbeResolved = true
-                    DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux probe window expired inconclusive → assume started")
-                }
-                sess.writeInput(Data((launch + "\n").utf8))
-                // Arm the dead-server liveness watchdog: the re-home paints the restored
-                // frame + fires onFirstFrame off LOCAL state, so "live" here does NOT mean
-                // the server is reachable. Require REAL output in response to the relaunch
-                // (set `moshReattachSawServerOutput` in onOutput) within the window; if none
-                // arrives the stored mosh-server is gone -> fall back to a fresh bootstrap
-                // connect (spawns a new server, provably works) instead of a frozen screen.
-                self.moshReattachSawServerOutput = false
-                self.moshReattachWatchdog?.cancel()
-                self.moshReattachWatchdog = Task { [weak self] in
-                    try? await Task.sleep(nanoseconds: 4_000_000_000)   // 4s liveness window
-                    guard let self, !Task.isCancelled, !self.moshReattachSawServerOutput else { return }
-                    // Mutual exclusion with onEnd (shared moshResolved flag): claim the
-                    // resolution so a late onEnd can't also fire a banner over the fresh
-                    // connect we are about to start.
-                    if self.moshResolved { return }
-                    self.moshResolved = true
-                    DebugLog.shared.log(.connect, "resume:reattachMosh NO live server output in 4s → stored mosh-server dead, fresh reconnect")
-                    self.moshSession?.stop(); self.moshSession = nil
-                    self.moshReattachWatchdog = nil
-                    // Leave `.shell` first: `connect(savedHost:)` IGNORES the call while
-                    // state is `.shell`/`.connecting` (its re-entry guard), and reattach
-                    // left us in `.shell`. Flip to `.idle` so the fresh connect proceeds;
-                    // `connect` immediately tears down + flips to `.connecting`.
-                    self.state = .idle
-                    // Full fresh connect (SSH auth -> new mosh bootstrap) using stored
-                    // creds, the same entry the host list uses; password "" defers to the
-                    // saved key/credential resolution.
-                    self.connect(savedHost: host, password: "")
+                if isStateResume {
+                    // State-resume restored the attached-tmux screen verbatim; re-sending
+                    // `tmux new -A` would re-run inside the restored session. Clear the blob
+                    // (one-shot: now stale) and skip the relaunch + dead-server watchdog.
+                    DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip tmux relaunch (restored screen)")
+                    try? AppStores.shared.moshState.clear(sessionID: record.sessionID)
+                } else {
+                    self.moshPlainTmuxLaunchSent = true
+                    let launch = PlainTmuxController.launchCommand(sessionName: name)
+                    DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux in-band launch \(launch.prefix(60))")
+                    self.plainTmuxProbeArmed = true
+                    self.plainTmuxProbeBuffer = ""
+                    self.plainTmuxProbeResolved = false
+                    self.plainTmuxProbeWatchdog?.cancel()
+                    self.plainTmuxProbeWatchdog = Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        guard let self, !self.plainTmuxProbeResolved else { return }
+                        self.plainTmuxProbeResolved = true
+                        DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux probe window expired inconclusive → assume started")
+                    }
+                    sess.writeInput(Data((launch + "\n").utf8))
+                    self.armMoshReattachWatchdog(host: host)
                 }
             }
             self.captureResume(host: host, transport: .mosh,
@@ -1037,6 +1022,42 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         state = .shell
     }
 
+    /// Arm the fresh-relaunch dead-server liveness watchdog: after re-sending
+    /// `tmux new -A` on a reattach WITHOUT restored state, require REAL server output
+    /// (the SEMICOLYN_PREFIX sentinel, set in onOutput) within 4s. If none arrives the
+    /// stored mosh-server is unreachable -> fall back to a fresh bootstrap connect.
+    /// NOT armed on the state-resume path (blob replay is its own success signal).
+    private func armMoshReattachWatchdog(host: Host) {
+        // Arm the dead-server liveness watchdog: the re-home paints the restored
+        // frame + fires onFirstFrame off LOCAL state, so "live" here does NOT mean
+        // the server is reachable. Require REAL output in response to the relaunch
+        // (set `moshReattachSawServerOutput` in onOutput) within the window; if none
+        // arrives the stored mosh-server is gone -> fall back to a fresh bootstrap
+        // connect (spawns a new server, provably works) instead of a frozen screen.
+        moshReattachSawServerOutput = false
+        moshReattachWatchdog?.cancel()
+        moshReattachWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)   // 4s liveness window
+            guard let self, !Task.isCancelled, !self.moshReattachSawServerOutput else { return }
+            // Mutual exclusion with onEnd (shared moshResolved flag): claim the
+            // resolution so a late onEnd can't also fire a banner over the fresh
+            // connect we are about to start.
+            if self.moshResolved { return }
+            self.moshResolved = true
+            DebugLog.shared.log(.connect, "resume:reattachMosh NO live server output in 4s → stored mosh-server dead, fresh reconnect")
+            self.moshSession?.stop(); self.moshSession = nil
+            self.moshReattachWatchdog = nil
+            // Leave `.shell` first: `connect(savedHost:)` IGNORES the call while
+            // state is `.shell`/`.connecting` (its re-entry guard), and reattach
+            // left us in `.shell`. Flip to `.idle` so the fresh connect proceeds;
+            // `connect` immediately tears down + flips to `.connecting`.
+            self.state = .idle
+            // Full fresh connect (SSH auth -> new mosh bootstrap) using stored
+            // creds, the same entry the host list uses; password "" defers to the
+            // saved key/credential resolution.
+            self.connect(savedHost: host, password: "")
+        }
+    }
 
     /// Handle a failed cold reattach: clear the persisted record (dead token) but keep
     /// the reattach info IN MEMORY so the banner's Retry works, then show the banner.
