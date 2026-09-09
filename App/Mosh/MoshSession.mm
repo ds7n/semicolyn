@@ -22,14 +22,6 @@ static const unsigned char kMoshQuitSequence[2] = {0x1e, 0x2e};
 // serialize its Restoration::Context, fire state_callback, and pthread_exit.
 static const unsigned char kMoshSuspendSequence[2] = {0x1e, 0x1a};
 
-// mosh hands us the serialized transport state (on suspend + on shutdown). Copy it
-// under _lock, stash as the latest, and dispatch onEncodedState to the main queue.
-static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
-    if (!ctx || !buf || len == 0) return;
-    MoshSession *self = (__bridge MoshSession *)ctx;
-    [self captureEncodedState:[NSData dataWithBytes:buf length:len]];
-}
-
 // Private methods invoked from the C pthread trampolines below, which are defined
 // before the @implementation  - declare them here so the trampolines compile.
 @interface MoshSession ()
@@ -39,6 +31,15 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
 - (void)captureEncodedState:(NSData *)blob;
 - (nullable NSData *)latestEncodedState;
 @end
+
+// mosh hands us the serialized transport state (on suspend + on shutdown). Copy it
+// under _lock, stash as the latest, and dispatch onEncodedState to the main queue.
+// Defined AFTER the class extension so `captureEncodedState:` is visible here.
+static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
+    if (!ctx || !buf || len == 0) return;
+    MoshSession *self = (__bridge MoshSession *)ctx;
+    [self captureEncodedState:[NSData dataWithBytes:buf length:len]];
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OWNERSHIP + CONCURRENCY MODEL (holistic  - read this before touching anything)
