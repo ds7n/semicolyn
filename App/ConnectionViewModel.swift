@@ -6,6 +6,17 @@ import UIKit
 import SemicolynKit
 import SemicolynSSHCoreFFI
 
+/// Upper bound on the bytes a single mosh restored-frame paint can plausibly emit,
+/// for the state-resume liveness byte-floor (see `ConnectionViewModel.onOutput`). A
+/// restored screen is one terminal-worth of content plus scrollback replay: even a
+/// dense full alt-screen with SGR runs is a few KB, and a large scrollback repaint is
+/// well under this. Cumulative output ABOVE this ceiling (after the first chunk) is
+/// therefore genuine live-server forward-diff traffic, not the paint. Sized generously
+/// so the discriminator fails SAFE: an ambiguous multi-chunk paint stays under the
+/// ceiling and biases toward a harmless fresh reconnect, never a false "alive" that
+/// would freeze a dead-server resume.
+private let moshStateResumePaintCeilingBytes = 65536
+
 /// Crash-banner presentation state (degraded-mode spec). One case today.
 enum CrashBannerState: Equatable { case tmuxEnded }
 
@@ -238,16 +249,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// State-resume liveness plumbing. On a STATE-resume (blob replay), we do NOT
     /// re-send `tmux new -A`, so the SEMICOLYN_PREFIX sentinel the fresh-relaunch
     /// watchdog keys off is never printed, a different liveness signal is needed.
-    /// mosh's restored screen is a LOCAL paint that arrives right after onFirstFrame;
-    /// a genuinely-alive re-homed server sends FORWARD diffs AFTER that. So: onFirstFrame
-    /// arms a short "restore settled" timer; once it fires, ANY subsequent onOutput is
-    /// real server output (`moshStateResumeSawServerOutput`) and cancels the watchdog.
-    /// If no post-settle output arrives within the window, the stored server is dead
-    /// (or the blob is stale) and we fall back to a fresh bootstrap connect instead of
-    /// a frozen restored screen (Important-3 safety net). Reset in `teardown()`.
-    private var moshStateResumeRestoreSettled = false
+    /// mosh renders the restored screen from LOCAL blob state as the FIRST onOutput
+    /// chunk at onFirstFrame; a genuinely-alive re-homed server sends FORWARD diffs as
+    /// SUBSEQUENT chunks (wire-confirmed 2026-09-10). So the 2nd chunk onward proves
+    /// liveness (`moshStateResumeSawServerOutput`) and cancels the watchdog. If only the
+    /// paint arrives within the window, the stored server is dead (or the blob is stale)
+    /// and we fall back to a fresh bootstrap connect instead of a frozen restored screen
+    /// (Important-3 safety net). Chunk-count, not a wall-clock timer: the old 0.6s
+    /// "settle" gate discarded the server's real diffs (they arrive < 0.6s, before mosh's
+    /// ~3s idle heartbeat) and false-fired the watchdog = the ~4s reconnect lag. Reset in
+    /// `teardown()`.
+    private var moshStateResumeSawFirstChunk = false
     private var moshStateResumeSawServerOutput = false
-    private var moshStateResumeSettleTimer: Task<Void, Never>?
+    /// Cumulative onOutput bytes since the state-resume onFirstFrame, for the byte-floor
+    /// half of the liveness discriminator (see the onOutput closure). Reset per reattach.
+    private var moshStateResumeBytesSinceFirstFrame = 0
     /// ET connect watchdog: fails the connect if the session shows no life (no
     /// onFirstFrame, no onEnd) within the window. Cancelled by either callback.
     private var etWatchdog: Task<Void, Never>?
@@ -731,9 +747,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         moshReattachWatchdog?.cancel(); moshReattachWatchdog = nil
         moshReattachSawServerOutput = false
         moshResolved = false
-        moshStateResumeSettleTimer?.cancel(); moshStateResumeSettleTimer = nil
-        moshStateResumeRestoreSettled = false
+        moshStateResumeSawFirstChunk = false
         moshStateResumeSawServerOutput = false
+        moshStateResumeBytesSinceFirstFrame = 0
         moshSuspendedForResume = false
         moshSession?.stop()
         moshSession = nil
@@ -984,18 +1000,40 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onOutput = { [weak self] data in
             guard let self else { return }
             self.output.onOutput(data: data)
-            // STATE-resume liveness: onFirstFrame armed a short "restore settled" timer;
-            // the restored screen is a LOCAL paint that lands in the onOutput chunks
-            // right after onFirstFrame. Any onOutput AFTER that timer fires is a forward
-            // diff from a genuinely-alive re-homed server, so it proves liveness and
-            // cancels the dead-server watchdog. Checked BEFORE the plain-tmux-probe
-            // guard below (state-resume never arms that probe, so the guard would return
-            // early and skip this). Distinct from the fresh-relaunch sentinel path.
-            if isStateResume, self.moshStateResumeRestoreSettled,
-               !self.moshStateResumeSawServerOutput {
-                self.moshStateResumeSawServerOutput = true
-                self.moshReattachWatchdog?.cancel(); self.moshReattachWatchdog = nil
-                DebugLog.shared.log(.connect, "resume:reattachMosh state-resume post-settle server output → alive, confirmed")
+            // STATE-resume liveness (chunk-count discriminator, NOT a time gate).
+            // Wire evidence (2026-09-10 tcpdump): mosh renders the restored screen from
+            // LOCAL blob state SYNCHRONOUSLY at onFirstFrame, delivered as the FIRST
+            // onOutput chunk. Every SUBSEQUENT chunk is a forward diff driven by an
+            // inbound server datagram (the re-homed server's replay lands in the first
+            // ~0.4s, interleaved with the paint) so the 2nd chunk onward proves a live
+            // re-home. The previous 0.6s "restore settled" wall-clock timer discarded
+            // exactly this proof: the server's real diffs arrived BEFORE 0.6s, then mosh
+            // went into its ~3s idle heartbeat, so the post-settle window landed in a
+            // silent gap and the watchdog false-fired a needless fresh reconnect (the
+            // ~4s reconnect lag; device-confirmed). Counting chunks is immune to mosh's
+            // idle cadence. Checked BEFORE the plain-tmux-probe guard below (state-resume
+            // never arms that probe). Distinct from the fresh-relaunch sentinel path.
+            if isStateResume, !self.moshStateResumeSawServerOutput {
+                // HYBRID discriminator (chunk-order + byte floor), biased to fail SAFE.
+                // The paint is normally the FIRST chunk, but it is emitted deep in
+                // vendored mosh over a blind 16KB pipe read, so a large restored screen
+                // (big scrollback / altscreen repaint) could span 2+ chunks. Requiring
+                // ONLY a 2nd chunk would then let a split paint falsely prove liveness on
+                // a DEAD server (the frozen-screen regression, the worse failure). So we
+                // ALSO require cumulative output to exceed a generous single-paint ceiling
+                // before treating later output as a real server forward diff: an ambiguous
+                // multi-chunk paint stays under the ceiling and biases toward false-dead (a
+                // harmless non-destructive reconnect), never false-alive. A live server's
+                // continued traffic clears the ceiling; a dead server's lone restored paint
+                // does not.
+                self.moshStateResumeBytesSinceFirstFrame += data.count
+                if !self.moshStateResumeSawFirstChunk {
+                    self.moshStateResumeSawFirstChunk = true
+                } else if self.moshStateResumeBytesSinceFirstFrame > moshStateResumePaintCeilingBytes {
+                    self.moshStateResumeSawServerOutput = true
+                    self.moshReattachWatchdog?.cancel(); self.moshReattachWatchdog = nil
+                    DebugLog.shared.log(.connect, "resume:reattachMosh state-resume server diff after restore paint (\(self.moshStateResumeBytesSinceFirstFrame)B > ceiling) → alive, confirmed")
+                }
             }
             // Feed the reactive tmux-missing probe on reattach too (the re-launched
             // `tmux new -A -s <name>` in onFirstFrame arms it), mirroring the fresh path.
@@ -1042,12 +1080,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // NOT prove the re-homed server is reachable. If the blob is stale or the
                 // server is gone, mosh sits in "Nothing received from server" and NEVER
                 // pthread_exits (no onEnd) -> a permanently frozen restored screen. Arm a
-                // liveness watchdog that requires REAL server output AFTER the restore
-                // paint settles; on timeout, fall back to a fresh bootstrap connect.
+                // liveness watchdog that requires a REAL server forward diff after the
+                // restored paint; on timeout, fall back to a fresh bootstrap connect.
                 // Armed for EVERY state-resume (tmux or not) since the freeze afflicts
-                // both. The settle timer fires shortly after this onFirstFrame so the
-                // restore paint's own onOutput chunks (which arrive right after this) are
-                // NOT mistaken for server liveness; any onOutput after it is a real diff.
+                // both. The paint is the FIRST onOutput chunk; a live re-homed server's
+                // diffs are subsequent chunks, so a second chunk cancels the watchdog.
                 self.armMoshStateResumeWatchdog(host: host)
             }
             // If the resumed record was a plain-tmux session, RE-LAUNCH tmux in-band and
@@ -1153,40 +1190,41 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     /// Arm the STATE-resume dead-server liveness watchdog (Important-3 safety net).
     /// Unlike the fresh-relaunch watchdog, a state-resume prints no SEMICOLYN_PREFIX
-    /// sentinel (we skip `tmux new -A`), so it uses a different signal: mosh's restored
-    /// screen is a LOCAL paint arriving in the onOutput chunks right after onFirstFrame;
-    /// a live re-homed server sends FORWARD diffs after that. We arm a short "restore
-    /// settled" timer (so the local paint is not mistaken for liveness), after which any
-    /// onOutput sets `moshStateResumeSawServerOutput` and cancels this watchdog. If none
-    /// arrives inside the window, the server is unreachable / the blob is stale -> fall
-    /// back to a fresh bootstrap connect (spawns a new server) instead of a frozen
+    /// sentinel (we skip `tmux new -A`), so it uses a different signal: mosh renders the
+    /// restored screen from LOCAL blob state as the FIRST onOutput chunk at onFirstFrame;
+    /// a live re-homed server sends FORWARD diffs as SUBSEQUENT chunks. So the 2nd chunk
+    /// onward sets `moshStateResumeSawServerOutput` and cancels this watchdog. If only the
+    /// paint arrives inside the window, the server is unreachable / the blob is stale ->
+    /// fall back to a fresh bootstrap connect (spawns a new server) instead of a frozen
     /// restored screen. Reuses `moshReattachWatchdog` (only one reattach watchdog is
     /// ever live at a time) and the shared `moshResolved` mutual-exclusion with onEnd.
     ///
-    /// TRADEOFF (documented heuristic): a genuinely-alive server that happens to send NO
-    /// forward diff at all within the window (an idle, output-quiescent tmux pane with no
-    /// clock/updates) would be misjudged dead and trigger a needless fresh reconnect.
-    /// That reconnect is non-destructive (`tmux new -A` re-attaches the SAME persisted
-    /// session, losing only mosh's local predictive echo), so a false positive costs a
-    /// reconnect, never data. The window (settle 0.6s + 4s liveness) is sized so a live
-    /// server's keepalive/heartbeat traffic, which mosh exchanges continuously, lands
-    /// inside it; a truly dead server sends nothing. Preferred over the alternative of
-    /// injecting a synthetic keystroke to force a server echo, which would perturb the
-    /// restored session's input stream.
+    /// WHY CHUNK-COUNT, NOT A TIMER (device + wire evidence, 2026-09-10): the prior design
+    /// used a 0.6s "restore settled" timer and counted only output AFTER it as server
+    /// liveness. But tcpdump showed the re-homed server sends its real forward diffs within
+    /// ~0.4s (BEFORE 0.6s), then mosh drops into its ~3s idle heartbeat. So the post-settle
+    /// window fell inside a silent gap and the 4s watchdog false-fired a needless fresh
+    /// reconnect on every resume = the ~4s reconnect lag the user reported. Ordering (paint
+    /// first, diff second) is immune to mosh's idle cadence.
+    ///
+    /// TRADEOFF (documented heuristic): a genuinely-alive server that sends NO forward diff
+    /// beyond the restored paint within the window (an idle, output-quiescent tmux pane)
+    /// would be misjudged dead and trigger a needless fresh reconnect. That reconnect is
+    /// non-destructive (`tmux new -A` re-attaches the SAME persisted session, losing only
+    /// mosh's local predictive echo), so a false positive costs a reconnect, never data.
+    /// Preferred over injecting a synthetic keystroke to force a server echo, which would
+    /// perturb the restored session's input stream.
     private func armMoshStateResumeWatchdog(host: Host) {
-        moshStateResumeRestoreSettled = false
+        moshStateResumeSawFirstChunk = false
         moshStateResumeSawServerOutput = false
-        moshStateResumeSettleTimer?.cancel()
+        moshStateResumeBytesSinceFirstFrame = 0
         moshReattachWatchdog?.cancel()
-        // Settle timer: let the restore paint's onOutput chunks drain before treating
-        // further output as server liveness. 0.6s comfortably covers the local paint,
-        // which lands within milliseconds of this onFirstFrame.
-        moshStateResumeSettleTimer = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            guard let self, !Task.isCancelled else { return }
-            self.moshStateResumeRestoreSettled = true
-            DebugLog.shared.log(.connect, "resume:reattachMosh state-resume restore settled → post-output now proves liveness")
-        }
+        // Liveness = a SECOND onOutput chunk (server forward diff) after the first
+        // (the local restored paint); onOutput sets moshStateResumeSawServerOutput. No
+        // settle timer: the discriminator is chunk ordering, not wall-clock time (the
+        // server's real diffs arrive within ~0.4s, before mosh's ~3s idle heartbeat, so
+        // a time gate raced the heartbeat and lost). If only the paint arrives inside the
+        // window, the stored server is dead / the blob is stale -> fresh bootstrap.
         moshReattachWatchdog = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 4_000_000_000)   // 4s post-onFirstFrame window
             guard let self, !Task.isCancelled, !self.moshStateResumeSawServerOutput else { return }
@@ -1194,8 +1232,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // resolution so a late onEnd can't also fire a banner over the fresh connect.
             if self.moshResolved { return }
             self.moshResolved = true
-            DebugLog.shared.log(.connect, "resume:reattachMosh state-resume NO server output in 4s → stored mosh-server dead/blob stale, fresh reconnect")
-            self.moshStateResumeSettleTimer?.cancel(); self.moshStateResumeSettleTimer = nil
+            DebugLog.shared.log(.connect, "resume:reattachMosh state-resume no server diff after paint in 4s → stored mosh-server dead/blob stale, fresh reconnect")
             self.moshSession?.stop(); self.moshSession = nil
             self.moshReattachWatchdog = nil
             // Leave `.shell` first (connect() ignores the call while `.shell`), same as
