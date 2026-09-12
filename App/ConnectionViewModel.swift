@@ -1079,12 +1079,28 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // LOCAL state and fires onFirstFrame off that paint, so "live" here does
                 // NOT prove the re-homed server is reachable. If the blob is stale or the
                 // server is gone, mosh sits in "Nothing received from server" and NEVER
-                // pthread_exits (no onEnd) -> a permanently frozen restored screen. Arm a
-                // liveness watchdog that requires a REAL server forward diff after the
-                // restored paint; on timeout, fall back to a fresh bootstrap connect.
-                // Armed for EVERY state-resume (tmux or not) since the freeze afflicts
-                // both. The paint is the FIRST onOutput chunk; a live re-homed server's
-                // diffs are subsequent chunks, so a second chunk cancels the watchdog.
+                // pthread_exits (no onEnd) -> a permanently frozen restored screen.
+                //
+                // PROVOKE A REDRAW so the liveness check works even on an IDLE session.
+                // An idle server sends no terminal output on its own (only protocol-level
+                // ACK heartbeats the app cannot observe), so the byte-floor liveness check
+                // below would never trip and the watchdog would false-fire a needless fresh
+                // reconnect (device bug 2026-09-12: "instant then full reconnect"). Send a
+                // bare Ctrl-L (0x0c, the standard redraw key): the shell / tmux / most TUIs
+                // repaint, so the SERVER emits real output -> the byte-floor check trips ->
+                // the watchdog confirms the re-home live. Prefix-free on purpose (no tmux
+                // command-mode), so nothing can leak a literal command string into a focused
+                // full-screen app; an app that ignores Ctrl-L just produces no output, so
+                // the watchdog falls back to a fresh reconnect (the SAFE direction), never a
+                // frozen screen. Issued for EVERY state-resume (tmux or not).
+                DebugLog.shared.log(.connect, "resume:reattachMosh state-resume: send Ctrl-L to provoke a confirming redraw")
+                sess.writeInput(Data([0x0c]))
+                // Arm the liveness watchdog: the paint is the FIRST onOutput chunk; a live
+                // re-homed server's redraw output is subsequent chunks past the paint
+                // ceiling, which sets moshStateResumeSawServerOutput and cancels this
+                // watchdog. On timeout (no server output), fall back to a fresh bootstrap
+                // connect. Armed for EVERY state-resume since the freeze afflicts both
+                // tmux and non-tmux sessions.
                 self.armMoshStateResumeWatchdog(host: host)
             }
             // If the resumed record was a plain-tmux session, RE-LAUNCH tmux in-band and
@@ -1107,8 +1123,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 if isStateResume {
                     // State-resume restored the attached-tmux screen verbatim; re-sending
                     // `tmux new -A` would re-run inside the restored session. Skip the
-                    // relaunch + dead-server watchdog (blob already cleared above,
-                    // unconditionally, regardless of tmux-name presence).
+                    // relaunch (blob already cleared above; Ctrl-L redraw + watchdog were
+                    // issued unconditionally above, before this tmux-name branch).
                     DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip tmux relaunch (restored screen)")
                 } else {
                     self.moshPlainTmuxLaunchSent = true
