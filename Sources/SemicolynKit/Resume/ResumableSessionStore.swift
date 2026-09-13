@@ -27,6 +27,23 @@ public struct ResumableSessionStore {
         }
     }
 
+    /// Record the tmux prefix byte discovered in-band, on the EXISTING record for
+    /// `sessionID`, preserving every other field AND the reconnect secret (which lives
+    /// in the separate secret store and is untouched here). Called at background/suspend,
+    /// after in-band discovery has completed, so a state-resume reattach can replay the
+    /// byte instead of re-probing inside attached tmux (device bug 2026-09-13, Issue B).
+    /// No-op if no record exists for the session (cleared between schedule and write).
+    public func updateDiscoveredPrefix(sessionID: UUID, prefix: UInt8) throws {
+        guard let existing = try records.get(.resumableSession, id: sessionID,
+                                             as: ResumableSession.self) else { return }
+        let updated = ResumableSession(
+            sessionID: existing.sessionID, hostID: existing.hostID,
+            transport: existing.transport, host: existing.host, port: existing.port,
+            tmuxSessionName: existing.tmuxSessionName, lastConnectedAt: existing.lastConnectedAt,
+            discoveredPrefix: prefix)
+        try records.put(updated, type: .resumableSession, id: sessionID)
+    }
+
     /// Remove a record and its secret slot. Idempotent.
     public func remove(sessionID: UUID) throws {
         try records.delete(.resumableSession, id: sessionID)

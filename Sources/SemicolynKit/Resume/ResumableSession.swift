@@ -20,9 +20,18 @@ public struct ResumableSession: Codable, Sendable, Equatable {
     /// Timestamp for most-recent ordering. NOT used for expiry (records clear on
     /// failure, not on a timer).
     public let lastConnectedAt: Date
+    /// The tmux prefix byte discovered in-band during the live session (e.g. 0x01 for
+    /// C-a), captured at background/suspend. Replayed on a state-resume reattach, where
+    /// in-band re-discovery cannot run: the restored screen is already inside attached
+    /// tmux, so a probe `printf` would be typed into the running pane, never executed
+    /// (device bug 2026-09-13, Issue B). `nil` when unknown (a pre-field record, a
+    /// session whose discovery never completed, or a transport without a tmux prefix);
+    /// the reattach path then falls back to the in-band probe.
+    public let discoveredPrefix: UInt8?
 
     public init(sessionID: UUID, hostID: UUID, transport: Transport, host: String,
-                port: Int, tmuxSessionName: String?, lastConnectedAt: Date) {
+                port: Int, tmuxSessionName: String?, lastConnectedAt: Date,
+                discoveredPrefix: UInt8? = nil) {
         self.sessionID = sessionID
         self.hostID = hostID
         self.transport = transport
@@ -30,5 +39,6 @@ public struct ResumableSession: Codable, Sendable, Equatable {
         self.port = port
         self.tmuxSessionName = tmuxSessionName
         self.lastConnectedAt = lastConnectedAt
+        self.discoveredPrefix = discoveredPrefix
     }
 }

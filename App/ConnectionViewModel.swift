@@ -1124,27 +1124,37 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     // relaunch (blob already cleared above; Ctrl-L redraw + watchdog were
                     // issued unconditionally above, before this tmux-name branch).
                     //
-                    // BUT still (re)discover the tmux prefix: the reattached controller
-                    // starts with `discoveredPrefix` at the C-b default, and skipping the
-                    // launch means the SEMICOLYN_PREFIX sentinel is never printed, so a
-                    // non-C-b host (e.g. C-a) would have its swipe/zoom gestures sent to
-                    // the WRONG prefix and silently do nothing (device bug 2026-09-13:
-                    // "window swipe broken" after the repaint fix). Send the sentinel-only
-                    // probe (no `tmux new -A`) and arm the same discovery probe the fresh
-                    // path uses, so `evaluatePlainTmuxProbe` parses the real prefix.
-                    self.plainTmuxProbeArmed = true
-                    self.plainTmuxProbeBuffer = ""
-                    self.plainTmuxProbeResolved = false
-                    self.plainTmuxProbeWatchdog?.cancel()
-                    self.plainTmuxProbeWatchdog = Task { [weak self] in
-                        try? await Task.sleep(nanoseconds: 2_000_000_000)
-                        guard let self, !self.plainTmuxProbeResolved else { return }
-                        self.plainTmuxProbeResolved = true
-                        DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume prefix probe window expired inconclusive → assume started")
+                    // The tmux prefix must still be right, or swipe/zoom gestures go to the
+                    // WRONG prefix and silently do nothing (device bug 2026-09-13, Issue B:
+                    // "window swipe broken" after the repaint fix). In-band re-discovery
+                    // CANNOT work here: the restored screen is already inside attached tmux,
+                    // so a probe `printf` is typed into the running pane, never executed, and
+                    // the SEMICOLYN_PREFIX sentinel is never printed back. So REPLAY the
+                    // prefix captured at suspend: seed the controller directly (no probe).
+                    if let prefix = record.discoveredPrefix {
+                        self.plainTmux?.seedDiscoveredPrefix(prefix)
+                        DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip relaunch, seeded prefix=0x\(String(prefix, radix: 16)) (no probe)")
+                    } else {
+                        // No persisted prefix (a record from before this shipped, or a
+                        // session whose discovery never completed). Fall back to the
+                        // sentinel-only probe: it works only if the restored active pane
+                        // happens to be a shell prompt, but it is the best available and
+                        // never sends a wrong prefix (controller stays at the C-b default
+                        // until/unless the sentinel is parsed).
+                        self.plainTmuxProbeArmed = true
+                        self.plainTmuxProbeBuffer = ""
+                        self.plainTmuxProbeResolved = false
+                        self.plainTmuxProbeWatchdog?.cancel()
+                        self.plainTmuxProbeWatchdog = Task { [weak self] in
+                            try? await Task.sleep(nanoseconds: 2_000_000_000)
+                            guard let self, !self.plainTmuxProbeResolved else { return }
+                            self.plainTmuxProbeResolved = true
+                            DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume prefix probe window expired inconclusive → assume started")
+                        }
+                        let probe = PlainTmuxController.prefixProbeCommand()
+                        DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: no persisted prefix, send probe \(probe.prefix(48))")
+                        sess.writeInput(Data((probe + "\n").utf8))
                     }
-                    let probe = PlainTmuxController.prefixProbeCommand()
-                    DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip relaunch, send prefix probe \(probe.prefix(48))")
-                    sess.writeInput(Data((probe + "\n").utf8))
                 } else {
                     self.moshPlainTmuxLaunchSent = true
                     let launch = PlainTmuxController.launchCommand(sessionName: name)
@@ -2569,6 +2579,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // terminal on reopen, the feature's primary case).
         sess.suspendForResume()
         DebugLog.shared.log(.connect, "mosh:suspend sent Ctrl-^ Ctrl-Z sid=\(sid)")
+        // Persist the in-band-discovered tmux prefix onto the resume record so a
+        // state-resume reattach can replay it: re-discovery can't run inside the
+        // restored, already-attached tmux (device bug 2026-09-13, Issue B). Metadata-only
+        // update, secret preserved. Runs after discovery has completed for a live session.
+        if let prefix = plainTmux?.currentPrefix {
+            do {
+                try AppStores.shared.resume.updateDiscoveredPrefix(sessionID: sid, prefix: prefix)
+                DebugLog.shared.log(.tmux, "mosh:suspend persisted prefix=0x\(String(prefix, radix: 16)) sid=\(sid)")
+            } catch {
+                DebugLog.shared.log(.tmux, "mosh:suspend prefix persist FAILED error=\(error)")
+            }
+        }
         // Cancel any in-flight mosh watchdogs/probes for this now-suspended session so
         // they can't fire against the torn-down session (mirrors teardown()'s subset).
         moshWatchdog?.cancel(); moshWatchdog = nil

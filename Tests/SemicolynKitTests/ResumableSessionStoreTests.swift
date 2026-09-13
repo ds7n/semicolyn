@@ -29,6 +29,37 @@ final class ResumableSessionStoreTests: XCTestCase {
                                       lastConnectedAt: Date(timeIntervalSince1970: 0)).tmuxSessionName)
     }
 
+    // Issue B: the discovered tmux prefix byte round-trips so it can be replayed on a
+    // state-resume reattach (where in-band re-discovery cannot run inside attached tmux).
+    func testDiscoveredPrefixRoundTrips() throws {
+        let r = ResumableSession(sessionID: UUID(), hostID: UUID(), transport: .mosh,
+                                 host: "h", port: 60001, tmuxSessionName: "s",
+                                 lastConnectedAt: Date(timeIntervalSince1970: 1), discoveredPrefix: 0x01)
+        let back = try JSONDecoder().decode(ResumableSession.self, from: JSONEncoder().encode(r))
+        XCTAssertEqual(back.discoveredPrefix, 0x01)
+        XCTAssertEqual(back, r)
+    }
+
+    // Back-compat: a record persisted BEFORE this field existed (no `discoveredPrefix`
+    // key in its JSON) must still decode, with the field nil (fall back to in-band probe).
+    func testLegacyRecordWithoutPrefixDecodesAsNil() throws {
+        let legacy = """
+        {"sessionID":"\(UUID().uuidString)","hostID":"\(UUID().uuidString)",\
+        "transport":"mosh","host":"h","port":60001,"tmuxSessionName":"s",\
+        "lastConnectedAt":0}
+        """.data(using: .utf8)!
+        let back = try JSONDecoder().decode(ResumableSession.self, from: legacy)
+        XCTAssertNil(back.discoveredPrefix)
+    }
+
+    // A raw-SSH or ET record simply carries no prefix; nil is the normal absence.
+    func testDefaultDiscoveredPrefixIsNil() {
+        let r = ResumableSession(sessionID: UUID(), hostID: UUID(), transport: .ssh,
+                                 host: "h", port: 22, tmuxSessionName: nil,
+                                 lastConnectedAt: Date(timeIntervalSince1970: 0))
+        XCTAssertNil(r.discoveredPrefix)
+    }
+
     private func makeStore(hostIDs: Set<UUID>) -> ResumableSessionStore {
         let records = EncryptedRecordStore(backend: InMemoryBlobStore(), key: SymmetricKey(size: .bits256))
         let secrets = InMemorySecretStore()
@@ -62,6 +93,28 @@ final class ResumableSessionStoreTests: XCTestCase {
         try store.remove(sessionID: r.sessionID)
         XCTAssertEqual(try store.all(), [])
         XCTAssertFalse(store.hasSecret(sessionID: r.sessionID))
+    }
+
+    // Issue B: updating the discovered prefix rewrites the metadata but PRESERVES the
+    // reconnect secret (they live in separate stores; a prefix update must not drop the
+    // MOSH_KEY, else the reattach can't re-home at all).
+    func testUpdateDiscoveredPrefixPreservesSecret() throws {
+        let h = UUID(); let store = makeStore(hostIDs: [h])
+        let r = rec(.mosh, host: h, at: 10)
+        try store.upsert(r, secret: Data([7, 8, 9]))
+        try store.updateDiscoveredPrefix(sessionID: r.sessionID, prefix: 0x01)
+        let back = try XCTUnwrap(try store.all().first)
+        XCTAssertEqual(back.discoveredPrefix, 0x01)
+        XCTAssertEqual(store.secret(sessionID: r.sessionID), Data([7, 8, 9]))   // secret intact
+        XCTAssertEqual(back.sessionID, r.sessionID)                             // same record
+    }
+
+    // Updating a prefix for a sessionID with no record is a silent no-op (the session may
+    // have been cleared between suspend scheduling and the write).
+    func testUpdateDiscoveredPrefixNoRecordIsNoOp() throws {
+        let h = UUID(); let store = makeStore(hostIDs: [h])
+        try store.updateDiscoveredPrefix(sessionID: UUID(), prefix: 0x01)
+        XCTAssertEqual(try store.all(), [])
     }
 
     func testReconcilePrunesSecretlessMoshRecord() throws {
