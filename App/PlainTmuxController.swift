@@ -134,6 +134,19 @@ final class PlainTmuxController {
         "printf 'SEMICOLYN_PREFIX=%s\\r' \"$(tmux show -gv prefix)\"; tmux new -A -s \(sessionName)"
     }
 
+    /// The prefix-discovery half of `launchCommand()` WITHOUT the `tmux new -A` attach.
+    /// Used on the Mosh state-resume reattach path, which must NOT relaunch tmux (the
+    /// session is already restored) but still needs to (re)discover the prefix: the
+    /// reattached controller starts with `discoveredPrefix` at the C-b default, so
+    /// without this a C-a (or any non-C-b) host's swipe/zoom gestures would be sent to
+    /// the wrong prefix and do nothing (device bug 2026-09-13). Read-only (`tmux show
+    /// -gv prefix`), prints the same `SEMICOLYN_PREFIX=` sentinel `noteLaunchOutput(_:)`
+    /// / `parseSemicolynPrefixSentinel` ingest, ending with a bare `\r` so it lands on
+    /// its own overwritable line inside the restored screen.
+    static func prefixProbeCommand() -> String {
+        "printf 'SEMICOLYN_PREFIX=%s\\r' \"$(tmux show -gv prefix)\""
+    }
+
     /// Scan accumulated launch-time output for the `SEMICOLYN_PREFIX=` sentinel
     /// printed by `launchCommand()` and, on the first successful parse, cache the
     /// discovered prefix byte. Idempotent: a no-op after the first successful

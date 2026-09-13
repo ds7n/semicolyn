@@ -1123,7 +1123,28 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     // `tmux new -A` would re-run inside the restored session. Skip the
                     // relaunch (blob already cleared above; Ctrl-L redraw + watchdog were
                     // issued unconditionally above, before this tmux-name branch).
-                    DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip tmux relaunch (restored screen)")
+                    //
+                    // BUT still (re)discover the tmux prefix: the reattached controller
+                    // starts with `discoveredPrefix` at the C-b default, and skipping the
+                    // launch means the SEMICOLYN_PREFIX sentinel is never printed, so a
+                    // non-C-b host (e.g. C-a) would have its swipe/zoom gestures sent to
+                    // the WRONG prefix and silently do nothing (device bug 2026-09-13:
+                    // "window swipe broken" after the repaint fix). Send the sentinel-only
+                    // probe (no `tmux new -A`) and arm the same discovery probe the fresh
+                    // path uses, so `evaluatePlainTmuxProbe` parses the real prefix.
+                    self.plainTmuxProbeArmed = true
+                    self.plainTmuxProbeBuffer = ""
+                    self.plainTmuxProbeResolved = false
+                    self.plainTmuxProbeWatchdog?.cancel()
+                    self.plainTmuxProbeWatchdog = Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        guard let self, !self.plainTmuxProbeResolved else { return }
+                        self.plainTmuxProbeResolved = true
+                        DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume prefix probe window expired inconclusive → assume started")
+                    }
+                    let probe = PlainTmuxController.prefixProbeCommand()
+                    DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip relaunch, send prefix probe \(probe.prefix(48))")
+                    sess.writeInput(Data((probe + "\n").utf8))
                 } else {
                     self.moshPlainTmuxLaunchSent = true
                     let launch = PlainTmuxController.launchCommand(sessionName: name)
