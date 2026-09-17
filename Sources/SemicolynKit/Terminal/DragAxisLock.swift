@@ -16,30 +16,18 @@ public enum DragAxis: Equatable, Sendable {
     case switchWindow(delta: Int)
 }
 
-/// Pure axis-lock decision for a live terminal pan. Biased hard toward scroll so a
-/// vertical scroll that drifts sideways does not fling into the wrong window (device bug
-/// 2026-09-13): the lock is deferred until the drag clears the COMMIT radius (larger than
-/// the dead-zone, so the decision reflects the drag's settled direction, not its first
-/// past-dead-zone twitch), a vertical VETO forces scroll whenever there is clear vertical
-/// travel regardless of a momentary horizontal lead, and the dominance ratio is raised.
-/// Window-switch is gated on multi-window tmux; every other drag scrolls.
+/// Pure axis-lock decision for a live terminal pan. Reuses the dead-zone radius and the
+/// switch-dominance ratio (biased toward scroll, so a vertical scroll that drifts
+/// sideways does not fling into the wrong window). Window-switch is gated on multi-window
+/// tmux; every other drag scrolls.
 public struct DragAxisLock: Sendable {
-    /// Legacy dead-zone radius (points). Kept for reference/back-compat; the lock now
-    /// commits at `commitRadiusPoints`. Below the dead-zone a drag was never actioned.
+    /// Radius (points) the finger must travel (Euclidean) before the pan locks an axis.
     public static let deadZonePoints: Double = 12
-    /// Radius (points) the finger must travel (Euclidean) before the pan COMMITS an axis.
-    /// Larger than `deadZonePoints` so the axis is chosen from the drag's settled
-    /// direction rather than the noisy first sample past the dead-zone.
-    public static let commitRadiusPoints: Double = 24
-    /// If |dy| exceeds this many points, the drag scrolls regardless of the horizontal
-    /// component: clear vertical intent vetoes a window switch (kills the twitch misfire).
-    public static let verticalVetoPoints: Double = 14
     /// |dx| >= ratio * |dy| for a drag to count as a window switch rather than a scroll.
-    public static let switchDominanceRatio: Double = 2.0
+    public static let switchDominanceRatio: Double = 1.7
 
     public static func resolve(dx: Double, dy: Double, isMultiWindowTmux: Bool) -> DragAxis {
-        guard (dx * dx + dy * dy) >= commitRadiusPoints * commitRadiusPoints else { return .pending }
-        if abs(dy) > verticalVetoPoints { return .scroll }
+        guard (dx * dx + dy * dy) >= deadZonePoints * deadZonePoints else { return .pending }
         if isMultiWindowTmux, abs(dx) >= abs(dy) * switchDominanceRatio {
             return .switchWindow(delta: dx > 0 ? -1 : +1)
         }
