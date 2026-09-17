@@ -28,12 +28,11 @@ final class ResumeCoordinator {
     /// after a prompt). `tmuxSessionName` is non-nil only for a tmux `-CC` session.
     func captureConnected(sessionID: UUID, host: Host, transport: Transport,
                           endpoint: (host: String, port: Int), secret: Data?,
-                          tmuxSessionName: String?, discoveredPrefix: UInt8? = nil) {
+                          tmuxSessionName: String?) {
         let record = ResumableSession(
             sessionID: sessionID, hostID: host.id, transport: transport,
             host: endpoint.host, port: endpoint.port,
-            tmuxSessionName: tmuxSessionName, lastConnectedAt: Date(),
-            discoveredPrefix: discoveredPrefix)
+            tmuxSessionName: tmuxSessionName, lastConnectedAt: Date())
         do {
             try store.upsert(record, secret: secret)
             DebugLog.shared.log(.connect,
@@ -42,13 +41,6 @@ final class ResumeCoordinator {
         } catch {
             DebugLog.shared.log(.connect, "resume:capture FAILED error=\(error)")
         }
-    }
-
-    /// Record the in-band-discovered tmux prefix onto the existing resume record so a
-    /// state-resume reattach can replay it (device bug 2026-09-13, Issue B). Metadata-only
-    /// update; the reconnect secret is preserved. No-op if no record exists.
-    func updateDiscoveredPrefix(sessionID: UUID, prefix: UInt8) throws {
-        try store.updateDiscoveredPrefix(sessionID: sessionID, prefix: prefix)
     }
 
     /// Remove the resumable record (and its secret slot) for `sessionID`. Called at

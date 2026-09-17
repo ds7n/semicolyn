@@ -72,22 +72,6 @@ final class PlainTmuxController {
         prefixOverride.flatMap(parseTmuxPrefix) ?? discoveredPrefix
     }
 
-    /// The prefix byte this controller would send right now, for capture at
-    /// background/suspend so a state-resume reattach can replay it (Issue B). Reads the
-    /// same resolution gestures use (`effectivePrefix`).
-    var currentPrefix: UInt8 { effectivePrefix }
-
-    /// Seed the discovered prefix from a persisted value on a state-resume reattach,
-    /// where in-band re-discovery cannot run (the restored screen is inside attached
-    /// tmux, so a probe `printf` is typed into the running pane, never executed). Marks
-    /// discovery complete so a later `noteLaunchOutput(_:)` chunk cannot stomp it. A
-    /// parsing per-host `prefixOverride` still wins via `effectivePrefix`, as always.
-    func seedDiscoveredPrefix(_ byte: UInt8) {
-        discoveredPrefix = byte
-        prefixDiscovered = true
-        DebugLog.shared.log(.tmux, "plainTmux:prefix seeded byte=0x\(String(byte, radix: 16)) (state-resume)")
-    }
-
     /// - Parameters:
     ///   - sessionName: validated by the caller (`isValidTmuxSessionName`) before
     ///     `launchCommand()` is ever sent; stored as-is.
