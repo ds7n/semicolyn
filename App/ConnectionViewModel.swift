@@ -313,6 +313,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `installPlainTmuxControllerIfNeeded`. `nil` means no override: the controller
     /// falls back to in-band sentinel discovery, then C-b.
     private var tmuxPrefixOverrideForConnection: String?
+    /// Per-host AUTO-LEARNED prefix, resolved at connect time alongside the override and
+    /// passed to `installPlainTmuxControllerIfNeeded`. Lets a RESUMED session (which can't
+    /// run in-band discovery) send the right prefix. nil = never learned for this host.
+    private var tmuxLearnedPrefixForConnection: String?
+    /// The host id for the current connection, retained so `onPrefixDiscovered` can write
+    /// the learned prefix back onto the host record. Set alongside the prefix resolution
+    /// at each connect site.
+    private var hostIDForConnection: UUID?
     /// SSH-only accumulator for in-band prefix-key sentinel discovery. SSH launches
     /// plain tmux via `conn.openExec` (direct exec: only command stdout, no PTY echo),
     /// so unlike Mosh/ET it has no reactive probe buffer feeding `noteLaunchOutput`.
@@ -761,6 +769,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tmux = nil
         plainTmux = nil
         tmuxPrefixOverrideForConnection = nil
+        tmuxLearnedPrefixForConnection = nil
+        hostIDForConnection = nil
         sshPrefixDiscoveryBuffer = ""
         plainTmuxSessionNamePendingInstall = nil
         moshPlainTmuxLaunchSent = false
@@ -1116,6 +1126,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // defaults the same way the other connect sites do.
                 let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
                 self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
+                self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
+                self.hostIDForConnection = host.id
                 self.plainTmuxSessionNamePendingInstall = name
                 self.installPlainTmuxControllerIfMounted()
                 if isStateResume {
@@ -1124,27 +1136,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     // relaunch (blob already cleared above; Ctrl-L redraw + watchdog were
                     // issued unconditionally above, before this tmux-name branch).
                     //
-                    // BUT still (re)discover the tmux prefix: the reattached controller
-                    // starts with `discoveredPrefix` at the C-b default, and skipping the
-                    // launch means the SEMICOLYN_PREFIX sentinel is never printed, so a
-                    // non-C-b host (e.g. C-a) would have its swipe/zoom gestures sent to
-                    // the WRONG prefix and silently do nothing (device bug 2026-09-13:
-                    // "window swipe broken" after the repaint fix). Send the sentinel-only
-                    // probe (no `tmux new -A`) and arm the same discovery probe the fresh
-                    // path uses, so `evaluatePlainTmuxProbe` parses the real prefix.
-                    self.plainTmuxProbeArmed = true
-                    self.plainTmuxProbeBuffer = ""
-                    self.plainTmuxProbeResolved = false
-                    self.plainTmuxProbeWatchdog?.cancel()
-                    self.plainTmuxProbeWatchdog = Task { [weak self] in
-                        try? await Task.sleep(nanoseconds: 2_000_000_000)
-                        guard let self, !self.plainTmuxProbeResolved else { return }
-                        self.plainTmuxProbeResolved = true
-                        DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume prefix probe window expired inconclusive → assume started")
-                    }
-                    let probe = PlainTmuxController.prefixProbeCommand()
-                    DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip relaunch, send prefix probe \(probe.prefix(48))")
-                    sess.writeInput(Data((probe + "\n").utf8))
+                    // NO in-band prefix probe here: the restored screen is already inside
+                    // attached tmux (no shell prompt), so a probe `printf` is typed into the
+                    // running pane and never executes (device bug 2026-09-13, Issue B). The
+                    // controller instead resolves the prefix from the host's LEARNED value
+                    // (passed via installPlainTmuxControllerIfMounted -> learnedPrefix),
+                    // populated on a prior fresh connect. If nothing was ever learned it
+                    // falls back to C-b, and the next fresh connect learns it.
+                    DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip relaunch, prefix from learned/override (no probe)")
                 } else {
                     self.moshPlainTmuxLaunchSent = true
                     let launch = PlainTmuxController.launchCommand(sessionName: name)
@@ -1477,6 +1476,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         case .attach:
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
             self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
+            self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
+            self.hostIDForConnection = host.id
             try await attachPlainTmux(conn: conn)
         case .degrade(let reason):
             DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=DEGRADE(\(String(describing: reason))) -> raw shell")
@@ -1546,6 +1547,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
             self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
+            self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
+            self.hostIDForConnection = host.id
             DebugLog.shared.log(.lifecycle, "mosh: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         // Effective config for the argv (port range, server path, prediction mode).
@@ -1855,6 +1858,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
             self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
+            self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
+            self.hostIDForConnection = host.id
             DebugLog.shared.log(.lifecycle, "et: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         var tmuxRuntime: TmuxRuntime?
@@ -2371,9 +2376,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 return await self.queryPlainTmuxLayout(conn: conn)
             }
         }()
+        let learned = tmuxLearnedPrefixForConnection
+        let hostID = hostIDForConnection
         plainTmux = PlainTmuxController(
             sessionName: name,
             prefixOverride: tmuxPrefixOverrideForConnection,
+            learnedPrefix: learned,
+            // On a genuine fresh-connect discovery, persist the byte as the host's
+            // learnedPrefix so every future resume (which cannot run in-band discovery
+            // inside attached tmux) reuses it. Skip the write if it already matches what
+            // is stored (self-healing but not churny). hostID captured at connect time.
+            onPrefixDiscovered: { [weak self] byte in
+                self?.persistLearnedPrefix(byte, hostID: hostID)
+            },
             // Route gesture bytes through the transport-aware send, NOT `rawWriter`
             // directly: `rawWriter` is only set on the SSH paths, so on Mosh/ET it is
             // nil and `rawWriter?.enqueue` silently dropped every gesture (device bug
@@ -2386,6 +2401,40 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             screen: screen,
             recoverLayout: recoverLayout)
         DebugLog.shared.log(.tmux, "plainTmux: controller installed session=\(name) recovery=\(recoverLayout != nil ? "sideChannel" : "blind")")
+    }
+
+    /// Persist a freshly-discovered tmux prefix byte as the host's `learnedPrefix`
+    /// ("C-a" form), so future resumes reuse it (in-band discovery cannot run inside a
+    /// restored, already-attached tmux). Writes only when the value CHANGES (self-healing
+    /// if the host's prefix changed server-side, but no needless save otherwise). Never
+    /// touches `prefixOverride` (the user's manual setting). No-op if the host id is
+    /// unknown, the byte is not a representable `C-<letter>`, or the store read fails.
+    private func persistLearnedPrefix(_ byte: UInt8, hostID: UUID?) {
+        guard let hostID else { return }
+        // Byte -> "C-<letter>": 0x01..0x1a map to a..z (inverse of parseTmuxPrefix).
+        guard byte >= 0x01, byte <= 0x1a else { return }
+        let letter = Character(UnicodeScalar(byte + 0x60))
+        let learned = "C-\(letter)"
+        guard let host = (try? AppStores.shared.hosts.host(id: hostID)) ?? nil else {
+            DebugLog.shared.log(.tmux, "plainTmux:learn skip host=\(hostID) not found")
+            return
+        }
+        var cfg = host.semicolyn.value ?? SemicolynConfig()
+        var tmux = cfg.tmux ?? TmuxConfig()
+        guard tmux.learnedPrefix != learned else {
+            DebugLog.shared.log(.tmux, "plainTmux:learn unchanged learned=\(learned) host=\(hostID)")
+            return
+        }
+        tmux.learnedPrefix = learned
+        cfg.tmux = tmux
+        var updated = host
+        updated.semicolyn = .explicit(cfg)
+        do {
+            try AppStores.shared.hosts.saveHost(updated)
+            DebugLog.shared.log(.tmux, "plainTmux:learn persisted learned=\(learned) host=\(hostID)")
+        } catch {
+            DebugLog.shared.log(.tmux, "plainTmux:learn save FAILED error=\(error)")
+        }
     }
 
     /// Reactive tmux-missing detector for Mosh/ET (see `attachMoshIfPossible`/

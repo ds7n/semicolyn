@@ -57,13 +57,22 @@ public struct TmuxConfig: Codable, Equatable, Sendable {
     public var useTmux: Bool?
     /// User-chosen tmux session name; nil = inherit (-> Defaults -> "semicolyn").
     public var sessionName: String?
-    /// User-chosen tmux prefix key override (e.g. "C-a"); nil = auto-discover.
+    /// User-chosen tmux prefix key override (e.g. "C-a"); nil = auto-discover. USER-set,
+    /// highest precedence; auto-learning never writes this field.
     public var prefixOverride: String?
+    /// The tmux prefix (e.g. "C-a") LEARNED automatically from in-band discovery on a
+    /// fresh connect, stored per-host so it can be reused on every later resume (where
+    /// in-band discovery cannot run: the restored screen is already inside attached tmux).
+    /// Distinct from `prefixOverride` (the user's manual setting): learning writes only
+    /// this, and `prefixOverride` still wins. nil = never discovered yet.
+    public var learnedPrefix: String?
 
-    public init(useTmux: Bool? = nil, sessionName: String? = nil, prefixOverride: String? = nil) {
+    public init(useTmux: Bool? = nil, sessionName: String? = nil,
+                prefixOverride: String? = nil, learnedPrefix: String? = nil) {
         self.useTmux = useTmux
         self.sessionName = sessionName
         self.prefixOverride = prefixOverride
+        self.learnedPrefix = learnedPrefix
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -71,6 +80,7 @@ public struct TmuxConfig: Codable, Equatable, Sendable {
         case attemptControlMode   // legacy key; decoded as a fallback, never encoded
         case sessionName
         case prefixOverride
+        case learnedPrefix
     }
 
     public init(from decoder: Decoder) throws {
@@ -83,6 +93,7 @@ public struct TmuxConfig: Codable, Equatable, Sendable {
         }
         self.sessionName = try c.decodeIfPresent(String.self, forKey: .sessionName)
         self.prefixOverride = try c.decodeIfPresent(String.self, forKey: .prefixOverride)
+        self.learnedPrefix = try c.decodeIfPresent(String.self, forKey: .learnedPrefix)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -90,6 +101,7 @@ public struct TmuxConfig: Codable, Equatable, Sendable {
         try c.encodeIfPresent(useTmux, forKey: .useTmux)
         try c.encodeIfPresent(sessionName, forKey: .sessionName)
         try c.encodeIfPresent(prefixOverride, forKey: .prefixOverride)
+        try c.encodeIfPresent(learnedPrefix, forKey: .learnedPrefix)
         // never encodes the legacy attemptControlMode key
     }
 }

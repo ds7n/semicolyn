@@ -48,11 +48,21 @@ final class PlainTmuxController {
     /// override configured", not "use C-b" (that fallback is `discoveredPrefix`'s
     /// default).
     private let prefixOverride: String?
+    /// The per-host AUTO-LEARNED tmux prefix string (e.g. "C-a"), from a prior fresh
+    /// connect's discovery, persisted on the host and passed in here. Used when this
+    /// session has not itself discovered (the resume case: in-band discovery can't run
+    /// inside attached tmux). Beaten by `prefixOverride`; beats this session's
+    /// `discoveredPrefix`. nil = nothing learned for this host yet.
+    private let learnedPrefix: String?
     /// The prefix byte discovered from the launch-time `tmux show -gv prefix`
-    /// sentinel (see `launchCommand()`/`noteLaunchOutput(_:)`). Defaults to C-b
-    /// (0x02, tmux's own default) until a sentinel is parsed, so gestures sent
-    /// before discovery completes still hit the common case correctly.
-    private var discoveredPrefix: UInt8 = 0x02
+    /// sentinel (see `launchCommand()`/`noteLaunchOutput(_:)`), or nil until a sentinel
+    /// is parsed. Only set on a fresh connect (a resumed session has no shell prompt to
+    /// run the probe). Lowest-precedence known source; `effectivePrefix` falls to C-b
+    /// when it and everything above are absent.
+    private var discoveredPrefix: UInt8?
+    /// Fired ONCE when `noteLaunchOutput` first parses a real prefix byte, so the VM can
+    /// persist it as the host's `learnedPrefix` for future resumes. nil if not wired.
+    private let onPrefixDiscovered: ((UInt8) -> Void)?
     /// Guards `noteLaunchOutput(_:)` so discovery only ever happens once: later
     /// launch-output chunks (e.g. the shell prompt after `tmux new -A` attaches)
     /// must never stomp the already-discovered byte.
@@ -64,12 +74,22 @@ final class PlainTmuxController {
     /// (`.tmuxStarted`) and would otherwise cut discovery off before the SEMICOLYN_PREFIX
     /// sentinel is parsed (device bug 2026-09-06: Mosh sent C-b on a C-a host). An
     /// explicit override needs no discovery, so it counts as already-resolved here.
-    var isPrefixResolved: Bool { prefixDiscovered || prefixOverride.flatMap(parseTmuxPrefix) != nil }
+    /// An explicit override OR a learned value means we already know the prefix without
+    /// in-band discovery; otherwise discovery must still land (the VM keeps feeding
+    /// `noteLaunchOutput` until it does).
+    var isPrefixResolved: Bool {
+        prefixDiscovered
+            || prefixOverride.flatMap(parseTmuxPrefix) != nil
+            || learnedPrefix.flatMap(parseTmuxPrefix) != nil
+    }
 
-    /// The prefix byte gestures should send: the per-host override if it parses,
-    /// else whatever was discovered (or the C-b default pre-discovery).
+    /// The prefix byte gestures should send, by precedence: manual override ->
+    /// auto-learned (per-host) -> this-session discovery -> C-b default. Single source
+    /// of truth is the pure `resolveTmuxPrefixByte`; a resumed session (no discovery)
+    /// gets the right byte from `learnedPrefix`.
     private var effectivePrefix: UInt8 {
-        prefixOverride.flatMap(parseTmuxPrefix) ?? discoveredPrefix
+        resolveTmuxPrefixByte(override: prefixOverride, learned: learnedPrefix,
+                              discovered: discoveredPrefix, fallback: 0x02)
     }
 
     /// - Parameters:
@@ -84,11 +104,15 @@ final class PlainTmuxController {
     ///   - recoverLayout: SSH/ET side-channel query, nil on Mosh (see class doc).
     init(sessionName: String,
         prefixOverride: String? = nil,
+        learnedPrefix: String? = nil,
+        onPrefixDiscovered: ((UInt8) -> Void)? = nil,
         sendInput: @escaping ([UInt8]) -> Void,
         screen: TerminalView,
         recoverLayout: (@Sendable () async -> (window: WindowID, layout: PaneLayout)?)? = nil) {
         self.sessionName = sessionName
         self.prefixOverride = prefixOverride
+        self.learnedPrefix = learnedPrefix
+        self.onPrefixDiscovered = onPrefixDiscovered
         self.sendInput = sendInput
         self.screen = screen
         self.recoverLayout = recoverLayout
@@ -134,19 +158,6 @@ final class PlainTmuxController {
         "printf 'SEMICOLYN_PREFIX=%s\\r' \"$(tmux show -gv prefix)\"; tmux new -A -s \(sessionName)"
     }
 
-    /// The prefix-discovery half of `launchCommand()` WITHOUT the `tmux new -A` attach.
-    /// Used on the Mosh state-resume reattach path, which must NOT relaunch tmux (the
-    /// session is already restored) but still needs to (re)discover the prefix: the
-    /// reattached controller starts with `discoveredPrefix` at the C-b default, so
-    /// without this a C-a (or any non-C-b) host's swipe/zoom gestures would be sent to
-    /// the wrong prefix and do nothing (device bug 2026-09-13). Read-only (`tmux show
-    /// -gv prefix`), prints the same `SEMICOLYN_PREFIX=` sentinel `noteLaunchOutput(_:)`
-    /// / `parseSemicolynPrefixSentinel` ingest, ending with a bare `\r` so it lands on
-    /// its own overwritable line inside the restored screen.
-    static func prefixProbeCommand() -> String {
-        "printf 'SEMICOLYN_PREFIX=%s\\r' \"$(tmux show -gv prefix)\""
-    }
-
     /// Scan accumulated launch-time output for the `SEMICOLYN_PREFIX=` sentinel
     /// printed by `launchCommand()` and, on the first successful parse, cache the
     /// discovered prefix byte. Idempotent: a no-op after the first successful
@@ -161,6 +172,9 @@ final class PlainTmuxController {
         discoveredPrefix = byte
         prefixDiscovered = true
         DebugLog.shared.log(.tmux, "plainTmux:prefix discovered raw=\(raw) byte=0x\(String(byte, radix: 16))")
+        // Persist per-host so every future resume (which can't run in-band discovery)
+        // reuses this. Fires once, only on a genuine fresh-connect discovery.
+        onPrefixDiscovered?(byte)
     }
 
     // MARK: - Gesture entry points

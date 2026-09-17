@@ -30,4 +30,26 @@ final class ResolveTmuxPrefixOverrideTests: XCTestCase {
     func testAbsentEverywhereIsNil() {
         XCTAssertNil(resolveTmuxPrefixOverride(host: host(), defaults: Defaults()))
     }
+
+    // learnedPrefix resolves from the HOST leaf only (learning is per-host; a
+    // defaults-level learned value would be meaningless across hosts with different prefixes).
+    func testLearnedPrefixFromHost() {
+        let h = host { $0.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(useTmux: true, learnedPrefix: "C-a"))) }
+        XCTAssertEqual(resolveTmuxLearnedPrefix(host: h), "C-a")
+    }
+
+    func testLearnedPrefixNilWhenAbsent() {
+        XCTAssertNil(resolveTmuxLearnedPrefix(host: host()))
+    }
+
+    // A defaults-level learnedPrefix is IGNORED (host-only): learning must never leak
+    // across hosts. Only the host's own learned value counts.
+    func testLearnedPrefixIgnoresDefaults() {
+        var h = host()
+        // Even though a (nonsensical) defaults learnedPrefix exists, the host has none -> nil.
+        _ = Defaults(semicolyn: .explicit(SemicolynConfig(tmux: TmuxConfig(learnedPrefix: "C-x"))))
+        XCTAssertNil(resolveTmuxLearnedPrefix(host: h))
+        h.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(learnedPrefix: "C-b")))
+        XCTAssertEqual(resolveTmuxLearnedPrefix(host: h), "C-b")
+    }
 }
