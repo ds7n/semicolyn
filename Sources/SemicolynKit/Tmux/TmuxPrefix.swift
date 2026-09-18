@@ -16,6 +16,23 @@ public func parseTmuxPrefix(_ raw: String) -> UInt8? {
     return a - 0x60                                      // 'a'(0x61) -> 0x01 ... 'z'(0x7a) -> 0x1a
 }
 
+/// The tmux prefix BYTE gestures should send, resolved by precedence:
+///   manual `override` (user-set) > auto-`learned` (per-host) > this-session `discovered`
+///   > `fallback` (C-b default).
+///
+/// `override` and `learned` are raw tmux strings ("C-a"); each is parsed and used only if
+/// it parses, so a typo/garbage value is IGNORED and resolution falls through to the next
+/// source rather than silently sending a wrong byte (which would break gestures). This is
+/// the single source of truth for the byte, so a resumed session (where in-band discovery
+/// cannot run) still gets the right prefix from the host's learned value.
+public func resolveTmuxPrefixByte(override: String?, learned: String?,
+                                  discovered: UInt8?, fallback: UInt8) -> UInt8 {
+    if let o = override, let b = parseTmuxPrefix(o) { return b }
+    if let l = learned, let b = parseTmuxPrefix(l) { return b }
+    if let d = discovered { return d }
+    return fallback
+}
+
 /// Extract `<value>` from `SEMICOLYN_PREFIX=<value>` in accumulated launch output.
 ///
 /// Uses the LAST occurrence of the marker: on Mosh/ET the launch command is typed into

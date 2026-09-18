@@ -174,6 +174,14 @@ public func resolveTmuxPrefixOverride(host: Host, defaults: Defaults) -> String?
     return nil
 }
 
+/// Resolve a per-host AUTO-LEARNED tmux prefix: the host leaf ONLY (learning is
+/// per-host, so a defaults-level value is deliberately ignored: different hosts have
+/// different prefixes). nil = never learned for this host yet.
+public func resolveTmuxLearnedPrefix(host: Host) -> String? {
+    if case .explicit(let c?) = host.semicolyn, let v = c.tmux?.learnedPrefix { return v }
+    return nil
+}
+
 /// Resolve whether OSC 52 clipboard writes are permitted (builtin default: true).
 public func resolveOsc52Allow(host: Host, defaults: Defaults) -> Bool {
     resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.osc52?.allow }, fallback: true)

@@ -89,4 +89,48 @@ final class TmuxConfigDecodeTests: XCTestCase {
         let s = String(data: data, encoding: .utf8)!
         XCTAssertFalse(s.contains("prefixOverride"))
     }
+
+    // Auto-learned prefix (populated by discovery, distinct from the manual override).
+    func testDecodesLearnedPrefix() throws {
+        let json = #"{"useTmux": true, "learnedPrefix": "C-a"}"#.data(using: .utf8)!
+        let c = try dec.decode(TmuxConfig.self, from: json)
+        XCTAssertEqual(c.learnedPrefix, "C-a")
+    }
+
+    func testAbsentLearnedPrefixIsNil() throws {
+        let json = #"{"useTmux": true}"#.data(using: .utf8)!
+        let c = try dec.decode(TmuxConfig.self, from: json)
+        XCTAssertNil(c.learnedPrefix)
+    }
+
+    // Back-compat: a host saved before learnedPrefix existed decodes with it nil.
+    func testLegacyHostDecodesWithNilLearnedPrefix() throws {
+        let json = #"{"attemptControlMode": true, "sessionName": "x"}"#.data(using: .utf8)!
+        let c = try dec.decode(TmuxConfig.self, from: json)
+        XCTAssertNil(c.learnedPrefix)
+    }
+
+    func testRoundTripLearnedPrefix() throws {
+        let original = TmuxConfig(useTmux: true, sessionName: "rt",
+                                  prefixOverride: nil, learnedPrefix: "C-a")
+        let back = try dec.decode(TmuxConfig.self, from: enc.encode(original))
+        XCTAssertEqual(back, original)
+        XCTAssertEqual(back.learnedPrefix, "C-a")
+    }
+
+    func testEncodeOmitsLearnedPrefixWhenAbsent() throws {
+        let c = TmuxConfig(useTmux: true, sessionName: "z")
+        let data = try enc.encode(c)
+        let s = String(data: data, encoding: .utf8)!
+        XCTAssertFalse(s.contains("learnedPrefix"))
+    }
+
+    // learnedPrefix and prefixOverride are INDEPENDENT fields (setting one leaves the other).
+    func testLearnedAndOverrideCoexist() throws {
+        let c = TmuxConfig(useTmux: true, sessionName: "s",
+                           prefixOverride: "C-b", learnedPrefix: "C-a")
+        let back = try dec.decode(TmuxConfig.self, from: enc.encode(c))
+        XCTAssertEqual(back.prefixOverride, "C-b")
+        XCTAssertEqual(back.learnedPrefix, "C-a")
+    }
 }
