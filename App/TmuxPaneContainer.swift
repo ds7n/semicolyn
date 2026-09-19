@@ -373,7 +373,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         isActivePane: { [weak self] in
                             self?.currentActivePane == pane
                         },
-                        isTmux: { true },
+                        // NOT the plain-tmux `isTmux:true` escape hatch: this container
+                        // already has real multi-pane focus (isActivePane/onSelectPane
+                        // above), so an active pane in an app-owned mode must still
+                        // yield (no stray arrow-key cursor walk into e.g. vim).
+                        isTmux: { false },
                         onSelectPane: { [weak self, weak view] in
                             guard let self else { return }
                             // Optimistic: move border + first responder locally now, before
