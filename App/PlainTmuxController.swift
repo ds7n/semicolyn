@@ -191,6 +191,40 @@ final class PlainTmuxController {
             "plainTmux:zoom pane=%\(model.activePane.raw) prefix=0x\(String(effectivePrefix, radix: 16)) key=z")
     }
 
+    /// Route a single tap on a tmux pane. With the remote's mouse mode ON, forward
+    /// an SGR mouse click at the tapped cell so tmux selects the EXACT pane (mouse
+    /// on verified on the host). With mouse OFF, cycle focus with `<prefix> o`
+    /// (best-effort; exact for a 2-pane split). No box-drawing border scraping.
+    /// `col`/`row` are 1-based cell coordinates (caller clamps to the grid).
+    func onTapPane(col: Int, row: Int, mouseModeOn: Bool) {
+        switch tapPaneRoute(mouseModeOn: mouseModeOn) {
+        case .forwardClick:
+            sendInput(sgrMouseClick(col: col, row: row))
+            DebugLog.shared.log(.tmux, "plainTmux:tapPane col=\(col) row=\(row) -> forwardClick")
+        case .cyclePrefix:
+            sendInput(prefixKeySequence(prefix: effectivePrefix, key: "o"))
+            needsRebuildAfterWindowSwitch = true
+            DebugLog.shared.log(.tmux,
+                "plainTmux:tapPane col=\(col) row=\(row) -> cycle prefix=0x\(String(effectivePrefix, radix: 16)) key=o")
+        }
+    }
+
+    /// Drive a pane/window action from the dpad long-press menu on the ACTIVE pane,
+    /// via the tmux prefix key (mirrors `onLongPressZoom`). Splits/new-window mark
+    /// the model needing-rebuild so the next tap re-syncs (blind on Mosh, like
+    /// `onSwitchWindow`). Zoom also toggles the tracked model.
+    func onWindowAction(_ action: WindowMenuAction) {
+        sendInput(prefixKeySequence(prefix: effectivePrefix, key: action.prefixKey))
+        switch action {
+        case .zoom:
+            model.applyZoomToggle()
+        case .splitHorizontal, .splitVertical, .newWindow, .closePane:
+            needsRebuildAfterWindowSwitch = true
+        }
+        DebugLog.shared.log(.tmux,
+            "plainTmux:windowAction \(action) prefix=0x\(String(effectivePrefix, radix: 16)) key=\(action.prefixKey)")
+    }
+
     /// Finger-drag / edge-swipe window switch. PHASE 1 LIMITATION: blind
     /// (`next-window`/`previous-window`), we do not track window ids/order, so we
     /// cannot target a specific window or know the new one's layout. Marks the
