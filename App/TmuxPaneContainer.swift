@@ -373,6 +373,7 @@ struct TmuxPaneContainer: UIViewRepresentable {
                         isActivePane: { [weak self] in
                             self?.currentActivePane == pane
                         },
+                        isTmux: { true },
                         onSelectPane: { [weak self, weak view] in
                             guard let self else { return }
                             // Optimistic: move border + first responder locally now, before

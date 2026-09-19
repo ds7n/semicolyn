@@ -175,7 +175,11 @@ struct TerminalScreen: UIViewRepresentable {
                 onPlaceCursor: { [weak coordinator = context.coordinator, weak terminal] col, row in
                     guard let terminal else { return }
                     if let plainTmux = coordinator?.vm?.plainTmux {
-                        plainTmux.onTapSelectPane(col: col, row: row)
+                        // Live mouse mode from the emulator (parses `?1000h` from the
+                        // stream regardless of the mode tracker): tmux mouse-on -> the
+                        // tap forwards as a click and tmux selects the exact pane.
+                        let mouseOn = terminal.getTerminal().mouseMode != .off
+                        plainTmux.onTapPane(col: col + 1, row: row + 1, mouseModeOn: mouseOn)
                     } else {
                         coordinator?.placeCursor(toCol: col, toRow: row, in: terminal)
                     }
@@ -186,6 +190,9 @@ struct TerminalScreen: UIViewRepresentable {
                 // focus-shift is needed on this screen either way.
                 isActivePane: { true },
                 onSelectPane: { },
+                isTmux: { [weak coordinator = context.coordinator] in
+                    coordinator?.vm?.plainTmux != nil
+                },
                 currentMode: { [weak coordinator = context.coordinator] in coordinator?.modeTracker.mode ?? .localScroll },
                 applicationCursorKeys: { [weak terminal] in terminal?.getTerminal().applicationCursor ?? false },
                 altScrollDecision: { [weak coordinator = context.coordinator] in

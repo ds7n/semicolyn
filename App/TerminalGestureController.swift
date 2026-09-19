@@ -43,6 +43,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         /// Focus THIS pane (tap on an inactive pane). Optimistically moves the
         /// accent border locally, then sends `select-pane -t %N`.
         let onSelectPane: () -> Void
+        /// Whether THIS pane is under tmux (plain tmux or `-CC`). Read fresh on
+        /// each tap; backs the `paneTapAction` coord-preserving tmux tap route
+        /// (an active tmux pane in an app-owned mode still delivers coords
+        /// instead of yielding, so the tap can be forwarded as a click/cycle).
+        let isTmux: () -> Bool
         /// The pane's current `InteractionMode`: snapshotted once at drag `.began`,
         /// and read fresh on each tap. The single source of truth for gesture routing.
         let currentMode: () -> InteractionMode
@@ -866,7 +871,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         switch paneTapAction(isActivePane: callbacks.isActivePane(),
                              mode: callbacks.currentMode(),
                              hasSelection: callbacks.hasSelection(),
-                             tapInsideSelection: tapInside) {
+                             tapInsideSelection: tapInside,
+                             isTmux: callbacks.isTmux()) {
         case .focusPane:
             callbacks.onSelectPane()
             DebugLog.shared.log(.gesture, "gesture:singleTap action=focus-pane")
