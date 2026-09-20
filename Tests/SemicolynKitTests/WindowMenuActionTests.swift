@@ -3,21 +3,25 @@
 import XCTest
 @testable import SemicolynKit
 
-/// Each window-menu action maps to tmux's default single-key prefix binding.
-/// These are load-bearing: a wrong key silently does the wrong tmux action.
+/// Each window-menu action maps to a tmux COMMAND (run via command mode
+/// `<prefix> : <command> Enter`), NOT a default key binding. Command mode is
+/// keybinding-independent, so it works even when the user's tmux config rebinds
+/// split/kill/etc. (device 2026-09-20: a config binding split to |/- meant the
+/// default %/" keys did nothing). No `-t` target = the active pane.
 final class WindowMenuActionTests: XCTestCase {
-    func testEachActionMapsToItsPrefixKey() {
-        XCTAssertEqual(WindowMenuAction.splitHorizontal.prefixKey, "%")
-        XCTAssertEqual(WindowMenuAction.splitVertical.prefixKey, "\"")
-        XCTAssertEqual(WindowMenuAction.closePane.prefixKey, "x")
-        XCTAssertEqual(WindowMenuAction.newWindow.prefixKey, "c")
-        XCTAssertEqual(WindowMenuAction.zoom.prefixKey, "z")
+    func testEachActionMapsToItsCommand() {
+        XCTAssertEqual(WindowMenuAction.splitHorizontal.command, "split-window -h")
+        XCTAssertEqual(WindowMenuAction.splitVertical.command, "split-window -v")
+        XCTAssertEqual(WindowMenuAction.closePane.command, "kill-pane")
+        XCTAssertEqual(WindowMenuAction.newWindow.command, "new-window")
+        XCTAssertEqual(WindowMenuAction.zoom.command, "resize-pane -Z")
     }
 
-    // Guard against a new case being added without a key (CaseIterable keeps this honest).
-    func testAllActionsHaveAKey() {
+    // Guard: every action yields a non-empty command (CaseIterable keeps this honest
+    // if a new case is added without a command mapping).
+    func testAllActionsHaveACommand() {
         for a in WindowMenuAction.allCases {
-            XCTAssertNotNil(a.prefixKey.asciiValue, "\(a) key must be ASCII")
+            XCTAssertFalse(a.command.isEmpty, "\(a) must map to a tmux command")
         }
     }
 }

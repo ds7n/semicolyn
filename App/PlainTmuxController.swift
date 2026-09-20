@@ -214,7 +214,10 @@ final class PlainTmuxController {
     /// the model needing-rebuild so the next tap re-syncs (blind on Mosh, like
     /// `onSwitchWindow`). Zoom also toggles the tracked model.
     func onWindowAction(_ action: WindowMenuAction) {
-        sendInput(prefixKeySequence(prefix: effectivePrefix, key: action.prefixKey))
+        // Command mode (`<prefix> : <cmd> Enter`), NOT a default key binding: works
+        // regardless of the user's tmux keybindings (device 2026-09-20: a config bound
+        // split to |/-, so the default %/" keys did nothing). No `-t` = active pane.
+        sendInput(prefixCommandSequence(prefix: effectivePrefix, command: action.command))
         switch action {
         case .zoom:
             model.applyZoomToggle()
@@ -222,7 +225,7 @@ final class PlainTmuxController {
             needsRebuildAfterWindowSwitch = true
         }
         DebugLog.shared.log(.tmux,
-            "plainTmux:windowAction \(action) prefix=0x\(String(effectivePrefix, radix: 16)) key=\(action.prefixKey)")
+            "plainTmux:windowAction \(action) prefix=0x\(String(effectivePrefix, radix: 16)) cmd=\(action.command)")
     }
 
     /// Finger-drag / edge-swipe window switch. PHASE 1 LIMITATION: blind
