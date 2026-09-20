@@ -41,6 +41,20 @@ final class TmuxCommandTests: XCTestCase {
         XCTAssertEqual(TmuxCommand.zoomPane(target: PaneID(raw: 4)), "resize-pane -Z -t %4")
     }
 
+    // No-target variants (act on the ACTIVE pane/window) for gesture sends that must
+    // not depend on the user's key bindings (command mode, device 2026-09-20).
+    func testZoomActivePaneNoTarget() {
+        XCTAssertEqual(TmuxCommand.zoomActivePane(), "resize-pane -Z")
+    }
+
+    func testSelectNextWindowNoTarget() {
+        XCTAssertEqual(TmuxCommand.selectWindowRelative(next: true), "next-window")
+    }
+
+    func testSelectPrevWindowNoTarget() {
+        XCTAssertEqual(TmuxCommand.selectWindowRelative(next: false), "previous-window")
+    }
+
     // MARK: split-window, divider-naming → tmux flag
 
     func testSplitSideBySideUsesHorizontalFlag() {
