@@ -288,19 +288,21 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         twoFingerTap.numberOfTouchesRequired = 2
         twoFingerTap.delegate = self
 
-        // Tap disambiguation. We DELIBERATELY do NOT make single-tap wait for double-tap
-        // to fail (device 2026-09-20: `singleTap.require(toFail: doubleTap)` made every
-        // single tap wait out the ~0.3s double-tap window before firing = the "sluggish
-        // tap" on pane-select). Single-tap now fires IMMEDIATELY. The cost: a double-tap
-        // fires single-tap FIRST (an extra pane-select click / cursor-place before the
-        // word-select). That is harmless and idempotent, the accepted trade-off for a
-        // snappy tap: pane-select re-selects the same pane, cursor-place is replaced by
-        // the double-tap's word-select, and a selection-clear is immediately superseded.
+        // Tap disambiguation. single-tap waits for double to fail (one tap-timeout
+        // window, ~0.3s), matching native iOS single-vs-double cost.
         //
-        // We also do NOT chain `doubleTap.require(toFail: tripleTap)` (build 116,
-        // 2026-08-07: stacking both windows made word-select ~0.63s late). double-tap
-        // fires at its own window; a third tap UPGRADES word->line select idempotently
-        // (`applyInclusiveSelection` replaces the range, `presentEditMenu` re-presents).
+        // We deliberately do NOT chain `doubleTap.require(toFail: tripleTap)`. Device
+        // measurement (build 116, 2026-08-07) showed that chain made EVERY double-tap
+        // wait out BOTH the double AND the triple window: touch-up -> word-select ran
+        // a consistent ~0.63s later (two stacked windows) vs native's ~0.3s (one). That
+        // is the "sluggish tap" the user hit; native/Blink don't stack the windows.
+        //
+        // Instead double-tap fires at its own window and a third tap UPGRADES the
+        // selection: tap-tap -> word-select + menu; a third tap -> tripleTap fires ->
+        // line-select + menu re-present. `applyInclusiveSelection` just replaces the
+        // range and `presentEditMenu` re-presents, so the upgrade is idempotent and the
+        // brief word->line change is imperceptible (the third tap lands within ~150ms).
+        singleTap.require(toFail: doubleTap)
 
         editMenu = UIEditMenuInteraction(delegate: self)
         view.addInteraction(editMenu)
