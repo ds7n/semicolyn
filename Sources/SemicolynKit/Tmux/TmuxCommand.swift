@@ -47,20 +47,6 @@ public enum TmuxCommand {
         "resize-pane -Z -t \(target.targetToken)"
     }
 
-    /// Toggle zoom on the ACTIVE pane (no `-t`). Used by the long-press zoom gesture
-    /// via command mode, so it does not depend on the user's `prefix z` key binding.
-    public static func zoomActivePane() -> String {
-        "resize-pane -Z"
-    }
-
-    /// Move to the next (`next-window`) or previous (`previous-window`) window in the
-    /// attached session (no `-t`: relative to the active window). Used by the
-    /// swipe-window gesture via command mode, so it does not depend on the user's
-    /// `prefix n`/`prefix p` key bindings.
-    public static func selectWindowRelative(next: Bool) -> String {
-        next ? "next-window" : "previous-window"
-    }
-
     /// Make `target` the active window.
     public static func selectWindow(target: WindowID) -> String {
         "select-window -t \(target.targetToken)"

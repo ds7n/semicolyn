@@ -185,11 +185,10 @@ final class PlainTmuxController {
     /// raw command text, so the keystroke lands as a real tmux binding instead of
     /// being typed into whatever program is running in the pane.
     func onLongPressZoom() {
-        // Command mode (not `prefix z`): keybinding-independent (device 2026-09-20).
-        sendInput(prefixCommandSequence(prefix: effectivePrefix, command: TmuxCommand.zoomActivePane()))
+        sendInput(prefixKeySequence(prefix: effectivePrefix, key: "z"))
         model.applyZoomToggle()
         DebugLog.shared.log(.tmux,
-            "plainTmux:zoom pane=%\(model.activePane.raw) prefix=0x\(String(effectivePrefix, radix: 16)) cmd=resize-pane -Z")
+            "plainTmux:zoom pane=%\(model.activePane.raw) prefix=0x\(String(effectivePrefix, radix: 16)) key=z")
     }
 
     /// Route a single tap on a tmux pane. With the remote's mouse mode ON, forward
@@ -203,12 +202,10 @@ final class PlainTmuxController {
             sendInput(sgrMouseClick(col: col, row: row))
             DebugLog.shared.log(.tmux, "plainTmux:tapPane col=\(col) row=\(row) -> forwardClick")
         case .cyclePrefix:
-            // Command mode (not `prefix o`): keybinding-independent (device 2026-09-20).
-            sendInput(prefixCommandSequence(prefix: effectivePrefix,
-                                            command: TmuxCommand.selectPaneRelative(next: true)))
+            sendInput(prefixKeySequence(prefix: effectivePrefix, key: "o"))
             needsRebuildAfterWindowSwitch = true
             DebugLog.shared.log(.tmux,
-                "plainTmux:tapPane col=\(col) row=\(row) -> cycle prefix=0x\(String(effectivePrefix, radix: 16)) cmd=select-pane -t +")
+                "plainTmux:tapPane col=\(col) row=\(row) -> cycle prefix=0x\(String(effectivePrefix, radix: 16)) key=o")
         }
     }
 
@@ -235,15 +232,14 @@ final class PlainTmuxController {
     /// (`next-window`/`previous-window`), we do not track window ids/order, so we
     /// cannot target a specific window or know the new one's layout. Marks the
     /// model needing-rebuild so the FIRST tap in the new window always recovers
-    /// rather than resolving against the old (now-wrong) window's rects. Sent via
-    /// command mode (`next-window`/`previous-window`), keybinding-independent so it
-    /// works even when the user's config rebinds `prefix n`/`p` (device 2026-09-20).
+    /// rather than resolving against the old (now-wrong) window's rects. Sent as
+    /// `<prefix> n`/`<prefix> p` (the default tmux bindings), never raw text.
     func onSwitchWindow(delta: Int) {
-        let command = TmuxCommand.selectWindowRelative(next: delta >= 0)
-        sendInput(prefixCommandSequence(prefix: effectivePrefix, command: command))
+        let key: Character = delta >= 0 ? "n" : "p"
+        sendInput(prefixKeySequence(prefix: effectivePrefix, key: key))
         needsRebuildAfterWindowSwitch = true
         DebugLog.shared.log(.tmux,
-            "plainTmux:switchWindow delta=\(delta) prefix=0x\(String(effectivePrefix, radix: 16)) cmd=\(command) (blind, next tap recovers)")
+            "plainTmux:switchWindow delta=\(delta) prefix=0x\(String(effectivePrefix, radix: 16)) key=\(key) (blind, next tap recovers)")
     }
 
     /// Tap-to-select-pane: validate the tracked model against the rendered grid,
@@ -294,12 +290,10 @@ final class PlainTmuxController {
     /// change (split/zoom/window-switch), per the design spec's Mosh fallback.
     private func recover(thenResolveTapAt col: Int, _ row: Int) {
         guard let recoverLayout else {
-            // Command mode (not `prefix o`): keybinding-independent (device 2026-09-20).
-            sendInput(prefixCommandSequence(prefix: effectivePrefix,
-                                            command: TmuxCommand.selectPaneRelative(next: true)))
+            sendInput(prefixKeySequence(prefix: effectivePrefix, key: "o"))
             needsRebuildAfterWindowSwitch = false
             DebugLog.shared.log(.tmux,
-                "plainTmux:recovery transport=mosh outcome=blind-cycle prefix=0x\(String(effectivePrefix, radix: 16)) cmd=select-pane -t +")
+                "plainTmux:recovery transport=mosh outcome=blind-cycle prefix=0x\(String(effectivePrefix, radix: 16)) key=o")
             return
         }
         // `PlainTmuxController` is @MainActor; a `Task` started from a @MainActor
