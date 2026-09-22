@@ -51,6 +51,24 @@ private func commandMatches(_ command: String, _ action: TmuxAction) -> Bool {
     case .newWindow:       return command.hasPrefix("new-window")
     case .nextWindow:      return command.hasPrefix("next-window")
     case .previousWindow:  return command.hasPrefix("previous-window")
-    case .cyclePane:       return command.hasPrefix("select-pane") && !hasFlag("-l")
+    case .cyclePane:       return isCyclingSelectPane(command)
     }
+}
+
+/// Whether `command` is a CYCLING `select-pane` (advance to the next pane, tmux
+/// default `o` -> `select-pane -t :.+`), as opposed to a directional MOVE
+/// (`-U`/`-D`/`-L`/`-R`, tmux default arrow keys) or a mark-swap (`-m`/`-M`) or
+/// the last-active toggle (`-l`). Directional/mark/toggle binds are listed before
+/// the cycle bind in a default config, so a plain `select-pane` prefix match would
+/// grab the wrong (directional) key; this narrows to the cycling form only.
+/// No `-t` at all still counts as a cycle (bare `select-pane` cycles by default).
+private func isCyclingSelectPane(_ command: String) -> Bool {
+    guard command.hasPrefix("select-pane") else { return false }
+    let toks = command.split(separator: " ").map(String.init)
+    let directionalOrMarkFlags: Set<String> = ["-U", "-D", "-L", "-R", "-l", "-m", "-M"]
+    guard !toks.contains(where: directionalOrMarkFlags.contains) else { return false }
+    guard let tIdx = toks.firstIndex(of: "-t") else { return true }
+    guard tIdx + 1 < toks.count else { return true }
+    let cyclingTargets: Set<String> = [":.+", "+", ":.-", "-"]
+    return cyclingTargets.contains(toks[tIdx + 1])
 }

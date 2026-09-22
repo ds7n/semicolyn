@@ -377,23 +377,30 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private var plainTmuxProbeResolved = false
     /// Whether Mosh/ET `onOutput` should keep accumulating launch output into
     /// `plainTmuxProbeBuffer`. The tmux-missing probe resolves on the first tmux
-    /// output (`.tmuxStarted`), but the SEMICOLYN_PREFIX prefix sentinel can arrive in
-    /// that same burst or just after, so accumulation must ALSO continue until the
-    /// controller has resolved its prefix (device bug 2026-09-06: coupling discovery to
+    /// output (`.tmuxStarted`), but the SEMICOLYN_PREFIX prefix sentinel and the
+    /// SEMICOLYN_KEYS_BEGIN/END action-keybinding block can arrive in that same burst or
+    /// just after, so accumulation must ALSO continue until the controller has resolved
+    /// BOTH the prefix AND the action keys (device bug 2026-09-06: coupling discovery to
     /// `plainTmuxProbeResolved` cut it off before the sentinel parsed -> Mosh sent C-b on
-    /// a C-a host). A raw non-tmux session that never armed the probe still short-circuits
-    /// on `plainTmuxProbeArmed`. Once BOTH the probe is resolved and the prefix is
-    /// resolved, accumulation stops for good.
+    /// a C-a host; a host with a persisted/overridden prefix resolves `isPrefixResolved`
+    /// on the first chunk, which would otherwise cut accumulation off before the
+    /// KEYS block landed and action-key discovery would never fire). A raw non-tmux
+    /// session that never armed the probe still short-circuits on `plainTmuxProbeArmed`.
+    /// Accumulation continues until prefix AND action-keys are resolved (or the cap),
+    /// not merely once the probe itself is resolved.
     private var shouldAccumulatePlainTmuxProbe: Bool {
         guard plainTmuxProbeArmed else { return false }
         if !plainTmuxProbeResolved { return true }
-        // Probe resolved: keep going only for prefix discovery, and only within a bounded
-        // window. The SEMICOLYN_PREFIX sentinel is printed by the first `printf` BEFORE
-        // `tmux new`, so it always lands in the first few KB; cap the post-resolve
-        // discovery tail so a shell that never emits it (non-POSIX login shell, discovery
-        // failure) cannot grow the buffer without limit. Past the cap, gestures use the
-        // C-b default / per-host override.
-        return plainTmux?.isPrefixResolved == false && plainTmuxProbeBuffer.utf8.count < 8192
+        // Probe resolved: keep going for prefix and/or action-key discovery, and only
+        // within a bounded window. The SEMICOLYN_PREFIX sentinel is printed by the first
+        // `printf` BEFORE `tmux new`, so it always lands in the first few KB; the
+        // SEMICOLYN_KEYS_BEGIN/END list-keys block is larger (~4-8KB), so the cap is
+        // raised accordingly. This bounds the post-resolve discovery tail so a shell
+        // that never emits it (non-POSIX login shell, discovery failure) cannot grow the
+        // buffer without limit. Past the cap, gestures use the C-b default / per-host
+        // override and no auto-learned action keys.
+        return (plainTmux?.isPrefixResolved == false || plainTmux?.isActionKeysResolved == false)
+            && plainTmuxProbeBuffer.utf8.count < 16384
     }
     /// Bounded watch (~2s) started when the in-band plain-tmux launch is sent;
     /// classifies the accumulated `plainTmuxProbeBuffer` on expiry if nothing
@@ -2320,8 +2327,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // optional-chain no-ops safely and the buffer persists. `noteLaunchOutput` is
             // idempotent (its `prefixDiscovered` guard), so repeated calls are cheap. Cap
             // growth so a long-lived exec can't grow the buffer unbounded once discovery
-            // is done or the sentinel simply never arrives.
-            if self.sshPrefixDiscoveryBuffer.utf8.count < 4096 {
+            // is done or the sentinel simply never arrives. The cap must be large enough
+            // to hold a full SEMICOLYN_KEYS_BEGIN/END list-keys block (~4-8KB), not just
+            // the much shorter SEMICOLYN_PREFIX sentinel.
+            if self.sshPrefixDiscoveryBuffer.utf8.count < 16384 {
                 self.sshPrefixDiscoveryBuffer += String(decoding: bytes, as: UTF8.self)
                 self.plainTmux?.noteLaunchOutput(self.sshPrefixDiscoveryBuffer)
             }

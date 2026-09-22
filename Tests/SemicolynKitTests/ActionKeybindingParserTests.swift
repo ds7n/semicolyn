@@ -63,4 +63,41 @@ final class ActionKeybindingParserTests: XCTestCase {
         XCTAssertNil(m[.zoom])
         XCTAssertEqual(m[.newWindow], "c")
     }
+
+    // Default config lists the directional select-pane binds (Up/Down/Left/Right)
+    // BEFORE the cycling `o` bind. First-match-wins must NOT grab a directional
+    // MOVE key for cyclePane; it must resolve to the cycling bind "o".
+    func testCyclePaneSkipsDirectionalBindsListedFirst() {
+        let out = """
+        bind-key    -T prefix       Up      select-pane -U
+        bind-key    -T prefix       Down    select-pane -D
+        bind-key    -T prefix       Left    select-pane -L
+        bind-key    -T prefix       Right   select-pane -R
+        bind-key    -T prefix       o       select-pane -t :.+
+        """
+        let m = parseActionKeybindings(out)
+        XCTAssertEqual(m[.cyclePane], "o")
+    }
+
+    // A cycling select-pane bound to a non-default key still resolves via its
+    // cycling target token, not by key identity.
+    func testCyclePaneMatchesCyclingTargetToken() {
+        let out = "bind-key    -T prefix       o    select-pane -t :.+"
+        let m = parseActionKeybindings(out)
+        XCTAssertEqual(m[.cyclePane], "o")
+    }
+
+    // Only directional select-pane binds present, no cycle bind: cyclePane must be
+    // ABSENT (nil), not silently mismapped to a directional key. Absent is safer:
+    // callers fall back to command-mode rather than sending the wrong direction.
+    func testCyclePaneAbsentWhenOnlyDirectionalBindsPresent() {
+        let out = """
+        bind-key    -T prefix       Up      select-pane -U
+        bind-key    -T prefix       Down    select-pane -D
+        bind-key    -T prefix       Left    select-pane -L
+        bind-key    -T prefix       Right   select-pane -R
+        """
+        let m = parseActionKeybindings(out)
+        XCTAssertNil(m[.cyclePane])
+    }
 }

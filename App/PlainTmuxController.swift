@@ -91,6 +91,14 @@ final class PlainTmuxController {
             || learnedPrefix.flatMap(parseTmuxPrefix) != nil
     }
 
+    /// Whether the launch-output action-keybinding (list-keys) block has been parsed
+    /// yet this session. The VM reads this alongside `isPrefixResolved` to keep feeding
+    /// `noteLaunchOutput(_:)` until the SEMICOLYN_KEYS_BEGIN/END block is captured,
+    /// independent of prefix resolution: a host with a persisted/overridden prefix
+    /// resolves `isPrefixResolved` on the very first chunk, which would otherwise cut
+    /// accumulation off before the keys block arrives and discovery would never fire.
+    var isActionKeysResolved: Bool { !discoveredActionKeys.isEmpty }
+
     /// The prefix byte gestures should send, by precedence: manual override ->
     /// auto-learned (per-host) -> this-session discovery -> C-b default. Single source
     /// of truth is the pure `resolveTmuxPrefixByte`; a resumed session (no discovery)
