@@ -321,6 +321,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// the learned prefix back onto the host record. Set alongside the prefix resolution
     /// at each connect site.
     private var hostIDForConnection: UUID?
+    /// Per-host learned action keybindings resolved at connect, passed to the
+    /// controller and reused on resume (mirror `tmuxLearnedPrefixForConnection`).
+    private var tmuxLearnedActionKeysForConnection: [TmuxAction: String] = [:]
     /// SSH-only accumulator for in-band prefix-key sentinel discovery. SSH launches
     /// plain tmux via `conn.openExec` (direct exec: only command stdout, no PTY echo),
     /// so unlike Mosh/ET it has no reactive probe buffer feeding `noteLaunchOutput`.
@@ -771,6 +774,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tmuxPrefixOverrideForConnection = nil
         tmuxLearnedPrefixForConnection = nil
         hostIDForConnection = nil
+        tmuxLearnedActionKeysForConnection = [:]
         sshPrefixDiscoveryBuffer = ""
         plainTmuxSessionNamePendingInstall = nil
         moshPlainTmuxLaunchSent = false
@@ -1128,6 +1132,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
                 self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
                 self.hostIDForConnection = host.id
+                self.tmuxLearnedActionKeysForConnection = mapActionKeys(resolveTmuxLearnedActionKeys(host: host))
                 self.plainTmuxSessionNamePendingInstall = name
                 self.installPlainTmuxControllerIfMounted()
                 if isStateResume {
@@ -1478,6 +1483,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
             self.hostIDForConnection = host.id
+            self.tmuxLearnedActionKeysForConnection = mapActionKeys(resolveTmuxLearnedActionKeys(host: host))
             try await attachPlainTmux(conn: conn)
         case .degrade(let reason):
             DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=DEGRADE(\(String(describing: reason))) -> raw shell")
@@ -1549,6 +1555,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
             self.hostIDForConnection = host.id
+            self.tmuxLearnedActionKeysForConnection = mapActionKeys(resolveTmuxLearnedActionKeys(host: host))
             DebugLog.shared.log(.lifecycle, "mosh: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         // Effective config for the argv (port range, server path, prediction mode).
@@ -1860,6 +1867,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
             self.hostIDForConnection = host.id
+            self.tmuxLearnedActionKeysForConnection = mapActionKeys(resolveTmuxLearnedActionKeys(host: host))
             DebugLog.shared.log(.lifecycle, "et: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         var tmuxRuntime: TmuxRuntime?
@@ -2389,6 +2397,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             onPrefixDiscovered: { [weak self] byte in
                 self?.persistLearnedPrefix(byte, hostID: hostID)
             },
+            persistedActionKeys: tmuxLearnedActionKeysForConnection,
+            onActionKeysDiscovered: { [weak self] keys in
+                self?.persistLearnedActionKeys(keys, hostID: hostID)
+            },
             // Route gesture bytes through the transport-aware send, NOT `rawWriter`
             // directly: `rawWriter` is only set on the SSH paths, so on Mosh/ET it is
             // nil and `rawWriter?.enqueue` silently dropped every gesture (device bug
@@ -2434,6 +2446,40 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             DebugLog.shared.log(.tmux, "plainTmux:learn persisted learned=\(learned) host=\(hostID)")
         } catch {
             DebugLog.shared.log(.tmux, "plainTmux:learn save FAILED error=\(error)")
+        }
+    }
+
+    /// Convert raw (rawValue-keyed) learned action keys resolved from host config into
+    /// the `TmuxAction`-keyed map the controller consumes. Unknown rawValues (e.g. from
+    /// a future app version's action set) are silently dropped.
+    private func mapActionKeys(_ raw: [String: String]) -> [TmuxAction: String] {
+        var m: [TmuxAction: String] = [:]
+        for (k, v) in raw { if let a = TmuxAction(rawValue: k) { m[a] = v } }
+        return m
+    }
+
+    /// Persist discovered action keybindings onto the host record so future resumes
+    /// reuse them. Overwrites (a fresh connect always re-discovers -> auto-heals a
+    /// config change). Writes only when changed. No-op if host id unknown / store fails.
+    private func persistLearnedActionKeys(_ keys: [TmuxAction: String], hostID: UUID?) {
+        guard let hostID, !keys.isEmpty else { return }
+        let raw = Dictionary(uniqueKeysWithValues: keys.map { ($0.key.rawValue, $0.value) })
+        guard let host = (try? AppStores.shared.hosts.host(id: hostID)) ?? nil else { return }
+        var cfg = host.semicolyn.value ?? SemicolynConfig()
+        var tmux = cfg.tmux ?? TmuxConfig()
+        guard tmux.learnedActionKeys != raw else {
+            DebugLog.shared.log(.tmux, "plainTmux:actionKeys unchanged host=\(hostID)")
+            return
+        }
+        tmux.learnedActionKeys = raw
+        cfg.tmux = tmux
+        var updated = host
+        updated.semicolyn = .explicit(cfg)
+        do {
+            try AppStores.shared.hosts.saveHost(updated)
+            DebugLog.shared.log(.tmux, "plainTmux:actionKeys persisted \(raw.count) host=\(hostID)")
+        } catch {
+            DebugLog.shared.log(.tmux, "plainTmux:actionKeys save FAILED error=\(error)")
         }
     }
 
