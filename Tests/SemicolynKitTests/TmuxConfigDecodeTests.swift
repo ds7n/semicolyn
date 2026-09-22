@@ -133,4 +133,32 @@ final class TmuxConfigDecodeTests: XCTestCase {
         XCTAssertEqual(back.prefixOverride, "C-b")
         XCTAssertEqual(back.learnedPrefix, "C-a")
     }
+
+    func testDecodesLearnedActionKeys() throws {
+        let json = #"{"useTmux": true, "learnedActionKeys": {"splitHorizontal": "|", "zoom": "z"}}"#.data(using: .utf8)!
+        let c = try dec.decode(TmuxConfig.self, from: json)
+        XCTAssertEqual(c.learnedActionKeys?["splitHorizontal"], "|")
+        XCTAssertEqual(c.learnedActionKeys?["zoom"], "z")
+    }
+
+    func testLegacyHostDecodesWithNilActionKeys() throws {
+        let json = #"{"attemptControlMode": true}"#.data(using: .utf8)!
+        let c = try dec.decode(TmuxConfig.self, from: json)
+        XCTAssertNil(c.learnedActionKeys)
+    }
+
+    func testRoundTripLearnedActionKeys() throws {
+        let original = TmuxConfig(useTmux: true, sessionName: "s",
+                                  prefixOverride: nil, learnedPrefix: "C-a",
+                                  learnedActionKeys: ["splitVertical": "-"])
+        let back = try dec.decode(TmuxConfig.self, from: enc.encode(original))
+        XCTAssertEqual(back, original)
+        XCTAssertEqual(back.learnedActionKeys?["splitVertical"], "-")
+    }
+
+    func testEncodeOmitsActionKeysWhenAbsent() throws {
+        let c = TmuxConfig(useTmux: true, sessionName: "z")
+        let s = String(data: try enc.encode(c), encoding: .utf8)!
+        XCTAssertFalse(s.contains("learnedActionKeys"))
+    }
 }

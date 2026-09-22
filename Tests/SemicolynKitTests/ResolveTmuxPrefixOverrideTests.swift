@@ -52,4 +52,13 @@ final class ResolveTmuxPrefixOverrideTests: XCTestCase {
         h.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(learnedPrefix: "C-b")))
         XCTAssertEqual(resolveTmuxLearnedPrefix(host: h), "C-b")
     }
+
+    func testLearnedActionKeysFromHost() {
+        let h = host { $0.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(useTmux: true, learnedActionKeys: ["zoom": "z"]))) }
+        XCTAssertEqual(resolveTmuxLearnedActionKeys(host: h)["zoom"], "z")
+    }
+
+    func testLearnedActionKeysEmptyWhenAbsent() {
+        XCTAssertTrue(resolveTmuxLearnedActionKeys(host: host()).isEmpty)
+    }
 }

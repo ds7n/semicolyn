@@ -66,13 +66,20 @@ public struct TmuxConfig: Codable, Equatable, Sendable {
     /// Distinct from `prefixOverride` (the user's manual setting): learning writes only
     /// this, and `prefixOverride` still wins. nil = never discovered yet.
     public var learnedPrefix: String?
+    /// Per-host AUTO-LEARNED tmux action keybindings (action rawValue -> key name,
+    /// e.g. "splitHorizontal": "|"), discovered from `list-keys` on a fresh connect
+    /// and reused on resume. nil = never discovered. Distinct from user config; a
+    /// fresh connect always overwrites it (auto-heals config changes).
+    public var learnedActionKeys: [String: String]?
 
     public init(useTmux: Bool? = nil, sessionName: String? = nil,
-                prefixOverride: String? = nil, learnedPrefix: String? = nil) {
+                prefixOverride: String? = nil, learnedPrefix: String? = nil,
+                learnedActionKeys: [String: String]? = nil) {
         self.useTmux = useTmux
         self.sessionName = sessionName
         self.prefixOverride = prefixOverride
         self.learnedPrefix = learnedPrefix
+        self.learnedActionKeys = learnedActionKeys
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -81,6 +88,7 @@ public struct TmuxConfig: Codable, Equatable, Sendable {
         case sessionName
         case prefixOverride
         case learnedPrefix
+        case learnedActionKeys
     }
 
     public init(from decoder: Decoder) throws {
@@ -94,6 +102,7 @@ public struct TmuxConfig: Codable, Equatable, Sendable {
         self.sessionName = try c.decodeIfPresent(String.self, forKey: .sessionName)
         self.prefixOverride = try c.decodeIfPresent(String.self, forKey: .prefixOverride)
         self.learnedPrefix = try c.decodeIfPresent(String.self, forKey: .learnedPrefix)
+        self.learnedActionKeys = try c.decodeIfPresent([String: String].self, forKey: .learnedActionKeys)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -102,6 +111,7 @@ public struct TmuxConfig: Codable, Equatable, Sendable {
         try c.encodeIfPresent(sessionName, forKey: .sessionName)
         try c.encodeIfPresent(prefixOverride, forKey: .prefixOverride)
         try c.encodeIfPresent(learnedPrefix, forKey: .learnedPrefix)
+        try c.encodeIfPresent(learnedActionKeys, forKey: .learnedActionKeys)
         // never encodes the legacy attemptControlMode key
     }
 }

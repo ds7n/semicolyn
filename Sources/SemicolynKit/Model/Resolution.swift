@@ -182,6 +182,13 @@ public func resolveTmuxLearnedPrefix(host: Host) -> String? {
     return nil
 }
 
+/// Resolve the per-host AUTO-LEARNED tmux action keybindings (action rawValue ->
+/// key name). Host leaf ONLY (learning is per-host). Empty when never learned.
+public func resolveTmuxLearnedActionKeys(host: Host) -> [String: String] {
+    if case .explicit(let c?) = host.semicolyn, let m = c.tmux?.learnedActionKeys { return m }
+    return [:]
+}
+
 /// Resolve whether OSC 52 clipboard writes are permitted (builtin default: true).
 public func resolveOsc52Allow(host: Host, defaults: Defaults) -> Bool {
     resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.osc52?.allow }, fallback: true)
