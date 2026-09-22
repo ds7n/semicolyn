@@ -21,9 +21,9 @@ import SemicolynKit
 @MainActor
 final class PlainTmuxController {
     /// Sends raw bytes to the remote (the transport write). Every gesture path
-    /// builds its bytes via the Kit prefix encoders (`prefixKeySequence`/
-    /// `prefixCommandSequence`) so tmux receives a real prefix keystroke, never
-    /// text typed into the pane's running program.
+    /// builds its bytes via `sendAction` (discovered/persisted key bytes or the
+    /// Kit `prefixCommandSequence` fallback) so tmux receives a real prefix
+    /// keystroke, never text typed into the pane's running program.
     private let sendInput: ([UInt8]) -> Void
     /// The raw single-pane terminal view feeding this session's rendered grid,
     /// used only to read cells for the on-tap border-drift check (`cellAt`).
@@ -67,6 +67,14 @@ final class PlainTmuxController {
     /// launch-output chunks (e.g. the shell prompt after `tmux new -A` attaches)
     /// must never stomp the already-discovered byte.
     private var prefixDiscovered = false
+    /// Per-host AUTO-LEARNED action keybindings (action -> key name) passed from the
+    /// host record; reused on resume (no in-place re-discovery). Beaten by this
+    /// session's `discoveredActionKeys`.
+    private let persistedActionKeys: [TmuxAction: String]
+    /// Action keybindings discovered THIS session from the launch-time list-keys block.
+    private var discoveredActionKeys: [TmuxAction: String] = [:]
+    /// Fired when the list-keys block is first parsed, so the VM persists per-host.
+    private let onActionKeysDiscovered: (([TmuxAction: String]) -> Void)?
 
     /// Whether the launch-output prefix has been discovered yet. The VM reads this to
     /// keep feeding `noteLaunchOutput(_:)` on Mosh/ET until discovery lands: there the
@@ -106,6 +114,8 @@ final class PlainTmuxController {
         prefixOverride: String? = nil,
         learnedPrefix: String? = nil,
         onPrefixDiscovered: ((UInt8) -> Void)? = nil,
+        persistedActionKeys: [TmuxAction: String] = [:],
+        onActionKeysDiscovered: (([TmuxAction: String]) -> Void)? = nil,
         sendInput: @escaping ([UInt8]) -> Void,
         screen: TerminalView,
         recoverLayout: (@Sendable () async -> (window: WindowID, layout: PaneLayout)?)? = nil) {
@@ -113,6 +123,8 @@ final class PlainTmuxController {
         self.prefixOverride = prefixOverride
         self.learnedPrefix = learnedPrefix
         self.onPrefixDiscovered = onPrefixDiscovered
+        self.persistedActionKeys = persistedActionKeys
+        self.onActionKeysDiscovered = onActionKeysDiscovered
         self.sendInput = sendInput
         self.screen = screen
         self.recoverLayout = recoverLayout
@@ -143,9 +155,12 @@ final class PlainTmuxController {
     /// Discovery+attach compound: `tmux show -gv prefix` is read-only (no
     /// `set`/`bind` mutation of the user's config), printed with a
     /// `SEMICOLYN_PREFIX=` sentinel and a bare `\r` (not `\n`) so it lands as its
-    /// own overwritable line; `tmux new -A` then attaches, and tmux's alt-screen
-    /// entry wipes that sentinel line from the visible terminal without us having
-    /// to clear it ourselves. See `noteLaunchOutput(_:)` for the ingest side.
+    /// own overwritable line; `tmux list-keys -T prefix` (also read-only) is then
+    /// printed between `SEMICOLYN_KEYS_BEGIN`/`SEMICOLYN_KEYS_END` sentinels so
+    /// gesture actions can be routed via the user's REAL bindings rather than
+    /// tmux's defaults; `tmux new -A` then attaches, and tmux's alt-screen entry
+    /// wipes all of this from the visible terminal without us having to clear it
+    /// ourselves. See `noteLaunchOutput(_:)` for the ingest side of both blocks.
     ///
     /// INVARIANT: two features depend on this compound printing the `SEMICOLYN_PREFIX=`
     /// sentinel: (1) prefix discovery, and (2) the Mosh cold-reattach liveness watchdog
@@ -155,7 +170,9 @@ final class PlainTmuxController {
     /// sentinel, update that watchdog's liveness signal or it will false-fallback on a
     /// live server.
     static func launchCommand(sessionName: String) -> String {
-        "printf 'SEMICOLYN_PREFIX=%s\\r' \"$(tmux show -gv prefix)\"; tmux new -A -s \(sessionName)"
+        "printf 'SEMICOLYN_PREFIX=%s\\r' \"$(tmux show -gv prefix)\"; " +
+        "printf 'SEMICOLYN_KEYS_BEGIN\\r'; tmux list-keys -T prefix; printf 'SEMICOLYN_KEYS_END\\r'; " +
+        "tmux new -A -s \(sessionName)"
     }
 
     /// Scan accumulated launch-time output for the `SEMICOLYN_PREFIX=` sentinel
@@ -167,28 +184,54 @@ final class PlainTmuxController {
     /// tmux-missing classification, since that is the call site that already
     /// owns the accumulated probe buffer.
     func noteLaunchOutput(_ buffer: String) {
-        guard !prefixDiscovered else { return }
-        guard let raw = parseSemicolynPrefixSentinel(buffer), let byte = parseTmuxPrefix(raw) else { return }
-        discoveredPrefix = byte
-        prefixDiscovered = true
-        DebugLog.shared.log(.tmux, "plainTmux:prefix discovered raw=\(raw) byte=0x\(String(byte, radix: 16))")
-        // Persist per-host so every future resume (which can't run in-band discovery)
-        // reuses this. Fires once, only on a genuine fresh-connect discovery.
-        onPrefixDiscovered?(byte)
+        if !prefixDiscovered,
+           let raw = parseSemicolynPrefixSentinel(buffer), let byte = parseTmuxPrefix(raw) {
+            discoveredPrefix = byte
+            prefixDiscovered = true
+            DebugLog.shared.log(.tmux, "plainTmux:prefix discovered raw=\(raw) byte=0x\(String(byte, radix: 16))")
+            // Persist per-host so every future resume (which can't run in-band discovery)
+            // reuses this. Fires once, only on a genuine fresh-connect discovery.
+            onPrefixDiscovered?(byte)
+        }
+        if discoveredActionKeys.isEmpty,
+           let block = sliceBetween(buffer, "SEMICOLYN_KEYS_BEGIN", "SEMICOLYN_KEYS_END") {
+            let parsed = parseActionKeybindings(block)
+            if !parsed.isEmpty {
+                discoveredActionKeys = parsed
+                DebugLog.shared.log(.tmux, "plainTmux:actionKeys discovered \(parsed.count) bindings")
+                onActionKeysDiscovered?(parsed)
+            }
+        }
     }
 
     // MARK: - Gesture entry points
 
+    /// Send `action` via its discovered/persisted key (prefix + key bytes) or, if no
+    /// key is known/encodable, the command-mode fallback. Single routing chokepoint.
+    private func sendAction(_ action: TmuxAction) {
+        switch resolveActionSend(action: action,
+                                 discovered: discoveredActionKeys[action],
+                                 persisted: persistedActionKeys[action]) {
+        case .key(let bytes):
+            sendInput([effectivePrefix] + bytes)
+            DebugLog.shared.log(.tmux,
+                "plainTmux:action \(action) via key prefix=0x\(String(effectivePrefix, radix: 16))")
+        case .commandMode(let cmd):
+            sendInput(prefixCommandSequence(prefix: effectivePrefix, command: cmd))
+            DebugLog.shared.log(.tmux,
+                "plainTmux:action \(action) via commandMode cmd=\(cmd)")
+        }
+    }
+
     /// Long-press: toggle zoom on the active pane. Deterministic, no recovery
     /// needed (we know our own active pane id from the tracked model). Routed
-    /// through the discovered/override prefix key (`<prefix> z`), never sent as
-    /// raw command text, so the keystroke lands as a real tmux binding instead of
+    /// through the discovered/persisted/default action key, never sent as raw
+    /// command text, so the keystroke lands as a real tmux binding instead of
     /// being typed into whatever program is running in the pane.
     func onLongPressZoom() {
-        sendInput(prefixKeySequence(prefix: effectivePrefix, key: "z"))
+        sendAction(.zoom)
         model.applyZoomToggle()
-        DebugLog.shared.log(.tmux,
-            "plainTmux:zoom pane=%\(model.activePane.raw) prefix=0x\(String(effectivePrefix, radix: 16)) key=z")
+        DebugLog.shared.log(.tmux, "plainTmux:zoom pane=%\(model.activePane.raw)")
     }
 
     /// Route a single tap on a tmux pane. With the remote's mouse mode ON, forward
@@ -202,41 +245,47 @@ final class PlainTmuxController {
             sendInput(sgrMouseClick(col: col, row: row))
             DebugLog.shared.log(.tmux, "plainTmux:tapPane col=\(col) row=\(row) -> forwardClick")
         case .cyclePrefix:
-            sendInput(prefixKeySequence(prefix: effectivePrefix, key: "o"))
+            sendAction(.cyclePane)
             needsRebuildAfterWindowSwitch = true
-            DebugLog.shared.log(.tmux,
-                "plainTmux:tapPane col=\(col) row=\(row) -> cycle prefix=0x\(String(effectivePrefix, radix: 16)) key=o")
+            DebugLog.shared.log(.tmux, "plainTmux:tapPane col=\(col) row=\(row) -> cycle")
         }
     }
 
     /// Drive a pane/window action from the dpad long-press menu on the ACTIVE pane,
-    /// via the tmux prefix key (mirrors `onLongPressZoom`). Splits/new-window mark
-    /// the model needing-rebuild so the next tap re-syncs (blind on Mosh, like
-    /// `onSwitchWindow`). Zoom also toggles the tracked model.
+    /// via the discovered/persisted/default action key (mirrors `onLongPressZoom`).
+    /// Splits/new-window mark the model needing-rebuild so the next tap re-syncs
+    /// (blind on Mosh, like `onSwitchWindow`). Zoom also toggles the tracked model.
     func onWindowAction(_ action: WindowMenuAction) {
-        sendInput(prefixKeySequence(prefix: effectivePrefix, key: action.prefixKey))
+        let tmuxAction: TmuxAction
+        switch action {
+        case .splitHorizontal: tmuxAction = .splitHorizontal
+        case .splitVertical:   tmuxAction = .splitVertical
+        case .closePane:       tmuxAction = .closePane
+        case .newWindow:       tmuxAction = .newWindow
+        case .zoom:            tmuxAction = .zoom
+        }
+        sendAction(tmuxAction)
         switch action {
         case .zoom:
             model.applyZoomToggle()
         case .splitHorizontal, .splitVertical, .newWindow, .closePane:
             needsRebuildAfterWindowSwitch = true
         }
-        DebugLog.shared.log(.tmux,
-            "plainTmux:windowAction \(action) prefix=0x\(String(effectivePrefix, radix: 16)) key=\(action.prefixKey)")
+        DebugLog.shared.log(.tmux, "plainTmux:windowAction \(action)")
     }
 
     /// Finger-drag / edge-swipe window switch. PHASE 1 LIMITATION: blind
     /// (`next-window`/`previous-window`), we do not track window ids/order, so we
     /// cannot target a specific window or know the new one's layout. Marks the
     /// model needing-rebuild so the FIRST tap in the new window always recovers
-    /// rather than resolving against the old (now-wrong) window's rects. Sent as
-    /// `<prefix> n`/`<prefix> p` (the default tmux bindings), never raw text.
+    /// rather than resolving against the old (now-wrong) window's rects. Routed via
+    /// `sendAction`, never raw text.
     func onSwitchWindow(delta: Int) {
-        let key: Character = delta >= 0 ? "n" : "p"
-        sendInput(prefixKeySequence(prefix: effectivePrefix, key: key))
+        let action: TmuxAction = delta >= 0 ? .nextWindow : .previousWindow
+        sendAction(action)
         needsRebuildAfterWindowSwitch = true
         DebugLog.shared.log(.tmux,
-            "plainTmux:switchWindow delta=\(delta) prefix=0x\(String(effectivePrefix, radix: 16)) key=\(key) (blind, next tap recovers)")
+            "plainTmux:switchWindow delta=\(delta) action=\(action) (blind, next tap recovers)")
     }
 
     /// Tap-to-select-pane: validate the tracked model against the rendered grid,
@@ -287,10 +336,9 @@ final class PlainTmuxController {
     /// change (split/zoom/window-switch), per the design spec's Mosh fallback.
     private func recover(thenResolveTapAt col: Int, _ row: Int) {
         guard let recoverLayout else {
-            sendInput(prefixKeySequence(prefix: effectivePrefix, key: "o"))
+            sendAction(.cyclePane)
             needsRebuildAfterWindowSwitch = false
-            DebugLog.shared.log(.tmux,
-                "plainTmux:recovery transport=mosh outcome=blind-cycle prefix=0x\(String(effectivePrefix, radix: 16)) key=o")
+            DebugLog.shared.log(.tmux, "plainTmux:recovery transport=mosh outcome=blind-cycle")
             return
         }
         // `PlainTmuxController` is @MainActor; a `Task` started from a @MainActor
@@ -331,4 +379,15 @@ private func cellScalar(at col: Int, row: Int, in view: TerminalView) -> Unicode
     let ch = cd.getCharacter()
     if ch == "\u{0}" || ch == " " { return nil }
     return ch.unicodeScalars.first
+}
+
+/// The substring strictly between the first `begin` marker and the first `end`
+/// marker that follows it, or nil if either marker is absent (a still-accumulating
+/// buffer where the block hasn't fully arrived yet). Used to extract the
+/// `SEMICOLYN_KEYS_BEGIN`/`SEMICOLYN_KEYS_END`-delimited `list-keys` block from
+/// launch-time output (see `noteLaunchOutput(_:)`).
+private func sliceBetween(_ text: String, _ begin: String, _ end: String) -> String? {
+    guard let beginRange = text.range(of: begin) else { return nil }
+    guard let endRange = text.range(of: end, range: beginRange.upperBound..<text.endIndex) else { return nil }
+    return String(text[beginRange.upperBound..<endRange.lowerBound])
 }
