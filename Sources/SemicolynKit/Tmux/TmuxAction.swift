@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-/// A plain-tmux gesture action. Its raw value is the stable key used in the
-/// per-host persisted action->key map; `command` is the command-mode FALLBACK
-/// (no `-t` = active pane) used only when no key binding is discovered.
+/// A plain-tmux gesture action. Each is bound at launch to a private escape sequence
+/// (see `TmuxGestureBindings.swift`); `command` is what that binding runs (no `-t` =
+/// the active pane).
 public enum TmuxAction: String, CaseIterable, Sendable {
     case splitHorizontal
     case splitVertical
@@ -14,7 +14,7 @@ public enum TmuxAction: String, CaseIterable, Sendable {
     case previousWindow
     case cyclePane
 
-    /// The tmux command this action performs (command-mode fallback string).
+    /// The tmux command this action's private binding runs.
     public var command: String {
         switch self {
         case .splitHorizontal: return "split-window -h"
