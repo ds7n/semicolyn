@@ -32,9 +32,10 @@ public extension TmuxAction {
 
     /// The private escape sequence for this action: `ESC [ <9000 + bindingSlot> ~`, e.g.
     /// `ESC [ 9900 ~`. It depends only on the PREFERRED slot number, even when the
-    /// launch registered it in `fallbackBindingSlot`. Real keys only use small numbers in this form (<= 34, plus
-    /// 200/201 for bracketed paste), so no keypress produces these. Must reach tmux in
-    /// ONE transport write: tmux does not match the sequence if its bytes are split.
+    /// launch registered it in `fallbackBindingSlot`. Real keys only use small numbers in
+    /// this form (<= 34, plus 200/201 for bracketed paste), so no keypress produces these.
+    /// Must reach tmux in ONE transport write: tmux does not match the sequence if its
+    /// bytes are split.
     var gestureSequence: [UInt8] { Array("\u{1b}[\(9000 + bindingSlot)~".utf8) }
 }
 
