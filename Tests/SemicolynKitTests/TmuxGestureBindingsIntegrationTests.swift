@@ -108,19 +108,34 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         try waitUntil("split in reused session") { try self.paneCount() == 2 }
     }
 
-    /// A slot the user already uses is left untouched; only that one gesture backs off.
-    func testUserOccupiedSlotIsLeftAloneAndOnlyThatGestureBacksOff() throws {
+    /// A preferred slot the user already uses is left untouched; the gesture claims its
+    /// fallback slot instead, so it still works and its bytes never reach the pane.
+    func testUserOccupiedSlotIsLeftAloneAndGestureUsesFallbackSlot() throws {
         try sh(#"tmux -f /dev/null new-session -d -s semicolyn \; set -s 'user-keys[900]' "$(printf '\033[1;9Z')""#)
         try launchInner()
         XCTAssertTrue(try sh("tmux show -sv 'user-keys[900]'").hasSuffix("[1;9Z"))
-        XCTAssertFalse(try sh("tmux list-keys -T root User900 2>&1").contains("split-window"))
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[800]'"), #"\033[9900~"#)
+        XCTAssertTrue(try sh("tmux list-keys -T root User800 2>&1").contains("split-window"))
 
+        try runCatInPane()
         try send(.splitHorizontal)
-        Thread.sleep(forTimeInterval: 0.5)
-        XCTAssertEqual(try paneCount(), 1)
+        try waitUntil("split via fallback slot") { try self.paneCount() == 2 }
+        XCTAssertFalse(try sh("tmux capture-pane -p -t semicolyn:0.0").contains("[9900~"))
+    }
 
-        try send(.newWindow)
-        try waitUntil("other gestures still bound") { try self.windowCount() == 2 }
+    /// The documented residual: when BOTH the preferred and fallback slots hold user
+    /// values, the action is unbound and its raw sequence reaches the foreground program.
+    func testDoubleOccupiedSlotLeaksSequenceToPane() throws {
+        try sh(#"tmux -f /dev/null new-session -d -s semicolyn \; set -s 'user-keys[900]' "$(printf '\033[1;9Z')" \; set -s 'user-keys[800]' "$(printf '\033[1;9Y')""#)
+        try launchInner()
+        XCTAssertTrue(try sh("tmux show -sv 'user-keys[800]'").hasSuffix("[1;9Y"))
+
+        try runCatInPane()
+        try send(.splitHorizontal)
+        try waitUntil("raw sequence echoed by cat -v") {
+            try self.sh("tmux capture-pane -p -t semicolyn:0.0").contains("^[[9900~")
+        }
+        XCTAssertEqual(try paneCount(), 1)
     }
 
     /// Reconnect re-runs the launch against the same server: still exactly 8 bindings,
@@ -181,6 +196,7 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         posix_spawn_file_actions_init(&fileActions)
         posix_spawn_file_actions_adddup2(&fileActions, outFd, 1)
         posix_spawn_file_actions_adddup2(&fileActions, outFd, 2)
+        posix_spawn_file_actions_addclose(&fileActions, outFd)
         defer { posix_spawn_file_actions_destroy(&fileActions) }
 
         let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(script), nil]
@@ -212,6 +228,16 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
                + shellQuoted("env -u TMUX " + launch))
         try waitUntil("inner client attached") {
             try self.sh("tmux list-clients -t semicolyn 2>/dev/null") != ""
+        }
+    }
+
+    /// Type `cat -v` into the inner pane and wait until it is the foreground program, so
+    /// any gesture bytes tmux does NOT consume show up in the pane as `^[[...~`.
+    private func runCatInPane() throws {
+        try sh("tmux -L outer send-keys -t outer -l 'cat -v'")
+        try sh("tmux -L outer send-keys -t outer Enter")
+        try waitUntil("cat -v is the foreground program") {
+            try self.inner("#{pane_current_command}") == "cat"
         }
     }
 
