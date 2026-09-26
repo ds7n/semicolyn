@@ -247,7 +247,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// while a suspend is pending, exactly as `resumeFailure != nil` does for the banner.
     var moshSuspendedForResume = false
     /// State-resume liveness plumbing. On a STATE-resume (blob replay) we do NOT re-send
-    /// `tmux new -A`, so the SEMICOLYN_PREFIX sentinel the fresh-relaunch watchdog keys
+    /// `tmux new -A`, so the SEMICOLYN_LAUNCH sentinel the fresh-relaunch watchdog keys
     /// off is never printed. Instead reattachMosh forces a full repaint (Ctrl-^ Ctrl-L),
     /// and the server's repaint output crossing `moshStateResumeLivenessFloorBytes` proves
     /// the re-home is live (`moshStateResumeSawServerOutput`) and cancels the watchdog. If
@@ -308,30 +308,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// The resolved tmux session name for the current connection, computed once at
     /// connect time and reused by attach + the reattach/start-new banner actions.
     private var tmuxSessionNameForConnection = builtInTmuxSessionName
-    /// Per-host/default prefix-key override for plain tmux, resolved once at connect
-    /// time alongside `tmuxSessionNameForConnection` and consumed by
-    /// `installPlainTmuxControllerIfNeeded`. `nil` means no override: the controller
-    /// falls back to in-band sentinel discovery, then C-b.
-    private var tmuxPrefixOverrideForConnection: String?
-    /// Per-host AUTO-LEARNED prefix, resolved at connect time alongside the override and
-    /// passed to `installPlainTmuxControllerIfNeeded`. Lets a RESUMED session (which can't
-    /// run in-band discovery) send the right prefix. nil = never learned for this host.
-    private var tmuxLearnedPrefixForConnection: String?
-    /// The host id for the current connection, retained so `onPrefixDiscovered` can write
-    /// the learned prefix back onto the host record. Set alongside the prefix resolution
-    /// at each connect site.
-    private var hostIDForConnection: UUID?
-    /// Per-host learned action keybindings resolved at connect, passed to the
-    /// controller and reused on resume (mirror `tmuxLearnedPrefixForConnection`).
-    private var tmuxLearnedActionKeysForConnection: [TmuxAction: String] = [:]
-    /// SSH-only accumulator for in-band prefix-key sentinel discovery. SSH launches
-    /// plain tmux via `conn.openExec` (direct exec: only command stdout, no PTY echo),
-    /// so unlike Mosh/ET it has no reactive probe buffer feeding `noteLaunchOutput`.
-    /// This persistent accumulator (fed from `output.onHarvestBytes` in `attachPlainTmux`)
-    /// carries the sentinel bytes so `PlainTmuxController.noteLaunchOutput` can discover
-    /// the prefix once the controller is installed. Growth is capped (see the feed site);
-    /// reset in `teardown()`.
-    private var sshPrefixDiscoveryBuffer = ""
     private var lastPassword: String?
     private(set) var session: ShellSession?
     /// Serializes raw-PTY keystroke writes (FIFO under channel back-pressure).
@@ -376,31 +352,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// and `evaluatePlainTmuxProbe` becomes a no-op. Reset in `teardown()`.
     private var plainTmuxProbeResolved = false
     /// Whether Mosh/ET `onOutput` should keep accumulating launch output into
-    /// `plainTmuxProbeBuffer`. The tmux-missing probe resolves on the first tmux
-    /// output (`.tmuxStarted`), but the SEMICOLYN_PREFIX prefix sentinel and the
-    /// SEMICOLYN_KEYS_BEGIN/END action-keybinding block can arrive in that same burst or
-    /// just after, so accumulation must ALSO continue until the controller has resolved
-    /// BOTH the prefix AND the action keys (device bug 2026-09-06: coupling discovery to
-    /// `plainTmuxProbeResolved` cut it off before the sentinel parsed -> Mosh sent C-b on
-    /// a C-a host; a host with a persisted/overridden prefix resolves `isPrefixResolved`
-    /// on the first chunk, which would otherwise cut accumulation off before the
-    /// KEYS block landed and action-key discovery would never fire). A raw non-tmux
-    /// session that never armed the probe still short-circuits on `plainTmuxProbeArmed`.
-    /// Accumulation continues until prefix AND action-keys are resolved (or the cap),
-    /// not merely once the probe itself is resolved.
+    /// `plainTmuxProbeBuffer`: while the tmux-missing probe is unresolved, and after that
+    /// until the launch sentinel has been seen (the Mosh cold-reattach liveness signal can
+    /// trail the probe's 2s "assume started" timer). Bounded so a shell that never prints
+    /// the sentinel cannot grow the buffer without limit. A raw non-tmux session that never
+    /// armed the probe short-circuits on `plainTmuxProbeArmed`.
     private var shouldAccumulatePlainTmuxProbe: Bool {
         guard plainTmuxProbeArmed else { return false }
         if !plainTmuxProbeResolved { return true }
-        // Probe resolved: keep going for prefix and/or action-key discovery, and only
-        // within a bounded window. The SEMICOLYN_PREFIX sentinel is printed by the first
-        // `printf` BEFORE `tmux new`, so it always lands in the first few KB; the
-        // SEMICOLYN_KEYS_BEGIN/END list-keys block is larger (~4-8KB), so the cap is
-        // raised accordingly. This bounds the post-resolve discovery tail so a shell
-        // that never emits it (non-POSIX login shell, discovery failure) cannot grow the
-        // buffer without limit. Past the cap, gestures use the C-b default / per-host
-        // override and no auto-learned action keys.
-        return (plainTmux?.isPrefixResolved == false || plainTmux?.isActionKeysResolved == false)
-            && plainTmuxProbeBuffer.utf8.count < 16384
+        return !containsPlainTmuxLaunchSentinel(plainTmuxProbeBuffer)
+            && plainTmuxProbeBuffer.utf8.count < 8192
     }
     /// Bounded watch (~2s) started when the in-band plain-tmux launch is sent;
     /// classifies the accumulated `plainTmuxProbeBuffer` on expiry if nothing
@@ -778,11 +739,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tmux?.stop()
         tmux = nil
         plainTmux = nil
-        tmuxPrefixOverrideForConnection = nil
-        tmuxLearnedPrefixForConnection = nil
-        hostIDForConnection = nil
-        tmuxLearnedActionKeysForConnection = [:]
-        sshPrefixDiscoveryBuffer = ""
         plainTmuxSessionNamePendingInstall = nil
         moshPlainTmuxLaunchSent = false
         etPlainTmuxLaunchSent = false
@@ -1048,13 +1004,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             }
             // Feed the reactive tmux-missing probe on reattach too (the re-launched
             // `tmux new -A -s <name>` in onFirstFrame arms it), mirroring the fresh path.
-            // Keep accumulating until BOTH the probe and the prefix discovery resolve.
+            // Keep accumulating per `shouldAccumulatePlainTmuxProbe`.
             guard self.shouldAccumulatePlainTmuxProbe else { return }
             self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
             self.evaluatePlainTmuxProbe()
             // Liveness proof for the cold-reattach dead-server watchdog: the
-            // SEMICOLYN_PREFIX sentinel is printed ONLY when the server actually EXECUTES
-            // our in-band relaunch (`printf 'SEMICOLYN_PREFIX=%s...'; tmux new -A`). It
+            // SEMICOLYN_LAUNCH sentinel is printed ONLY when the server actually EXECUTES
+            // our in-band relaunch (the launch script's sentinel printf; tmux new -A). It
             // can never appear in mosh's restored-frame paint (which is local, last-known
             // screen state), so its presence proves the re-homed server is ALIVE.
             // Keying off the sentinel (not "any output after launch-sent") avoids the
@@ -1063,10 +1019,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // from `plainTmuxProbeResolved`, which the probe's 2s "assume started" timer
             // flips with no server response.
             if !self.moshReattachSawServerOutput,
-               parseSemicolynPrefixSentinel(self.plainTmuxProbeBuffer) != nil {
+               containsPlainTmuxLaunchSentinel(self.plainTmuxProbeBuffer) {
                 self.moshReattachSawServerOutput = true
                 self.moshReattachWatchdog?.cancel(); self.moshReattachWatchdog = nil
-                DebugLog.shared.log(.connect, "resume:reattachMosh SEMICOLYN_PREFIX seen → server alive, reattach confirmed")
+                DebugLog.shared.log(.connect, "resume:reattachMosh SEMICOLYN_LAUNCH seen → server alive, reattach confirmed")
             }
         }
         sess.onFirstFrame = { [weak self] in
@@ -1131,15 +1087,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // 2026-09-04: "Mosh reconnect did not work").
             if let name = record.tmuxSessionName, isValidTmuxSessionName(name) {
                 self.tmuxSessionNameForConnection = name
-                // Restore the per-host/default prefix-key override on reattach: teardown
-                // cleared it to nil, and without re-resolving it a reattached Mosh session
-                // would ignore a configured override and fall back to sentinel/C-b. Load
-                // defaults the same way the other connect sites do.
-                let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
-                self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
-                self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
-                self.hostIDForConnection = host.id
-                self.tmuxLearnedActionKeysForConnection = mapActionKeys(resolveTmuxLearnedActionKeys(host: host))
                 self.plainTmuxSessionNamePendingInstall = name
                 self.installPlainTmuxControllerIfMounted()
                 if isStateResume {
@@ -1148,14 +1095,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     // relaunch (blob already cleared above; Ctrl-L redraw + watchdog were
                     // issued unconditionally above, before this tmux-name branch).
                     //
-                    // NO in-band prefix probe here: the restored screen is already inside
-                    // attached tmux (no shell prompt), so a probe `printf` is typed into the
-                    // running pane and never executes (device bug 2026-09-13, Issue B). The
-                    // controller instead resolves the prefix from the host's LEARNED value
-                    // (passed via installPlainTmuxControllerIfMounted -> learnedPrefix),
-                    // populated on a prior fresh connect. If nothing was ever learned it
-                    // falls back to C-b, and the next fresh connect learns it.
-                    DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip relaunch, prefix from learned/override (no probe)")
+                    // No relaunch: the restored screen is already inside attached tmux,
+                    // and the private gesture bindings persist on the tmux server from the
+                    // original launch, so gestures keep working without re-running it.
+                    DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip relaunch (bindings persist on server)")
                 } else {
                     self.moshPlainTmuxLaunchSent = true
                     let launch = PlainTmuxController.launchCommand(sessionName: name)
@@ -1199,7 +1142,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     /// Arm the fresh-relaunch dead-server liveness watchdog: after re-sending
     /// `tmux new -A` on a reattach WITHOUT restored state, require REAL server output
-    /// (the SEMICOLYN_PREFIX sentinel, set in onOutput) within 4s. If none arrives the
+    /// (the SEMICOLYN_LAUNCH sentinel, set in onOutput) within 4s. If none arrives the
     /// stored mosh-server is unreachable -> fall back to a fresh bootstrap connect.
     /// NOT armed on the state-resume path (blob replay is its own success signal).
     private func armMoshReattachWatchdog(host: Host) {
@@ -1235,7 +1178,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     }
 
     /// Arm the STATE-resume dead-server liveness watchdog (Important-3 safety net).
-    /// Unlike the fresh-relaunch watchdog, a state-resume prints no SEMICOLYN_PREFIX
+    /// Unlike the fresh-relaunch watchdog, a state-resume prints no SEMICOLYN_LAUNCH
     /// sentinel (we skip `tmux new -A`), so it uses a different signal: reattachMosh forces
     /// a full repaint with Ctrl-^ Ctrl-L, and the server's repaint OUTPUT crossing
     /// `moshStateResumeLivenessFloorBytes` (in onOutput) sets `moshStateResumeSawServerOutput`
@@ -1487,10 +1430,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         switch tmuxLaunchDecision(useTmux: useTmux, versionProbe: probe) {
         case .attach:
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
-            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
-            self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
-            self.hostIDForConnection = host.id
-            self.tmuxLearnedActionKeysForConnection = mapActionKeys(resolveTmuxLearnedActionKeys(host: host))
             try await attachPlainTmux(conn: conn)
         case .degrade(let reason):
             DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=DEGRADE(\(String(describing: reason))) -> raw shell")
@@ -1559,10 +1498,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let useTmux = resolveUseTmux(host: host, defaults: defaults)
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
-            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
-            self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
-            self.hostIDForConnection = host.id
-            self.tmuxLearnedActionKeysForConnection = mapActionKeys(resolveTmuxLearnedActionKeys(host: host))
             DebugLog.shared.log(.lifecycle, "mosh: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         // Effective config for the argv (port range, server path, prediction mode).
@@ -1608,9 +1543,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // pass in `onOutput` is a no-op.)
             sess.onOutput = { [weak self] data in
                 self?.output.onOutput(data: data)
-                // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`) AND
-                // prefix discovery: accumulate while armed and until BOTH the probe and
-                // the prefix are resolved (the sentinel can trail the first tmux output).
+                // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`): accumulate
+                // per `shouldAccumulatePlainTmuxProbe`.
                 guard let self, self.shouldAccumulatePlainTmuxProbe else { return }
                 self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
                 self.evaluatePlainTmuxProbe()
@@ -1638,7 +1572,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // the controller against the stashed view, so `vm.plainTmux != nil` and
                 // the swipe/zoom/tap gestures route through it (device bug 2026-09-04:
                 // Mosh gestures never installed -> swipe fell through to alt-screen
-                // scroll). `recoverLayout` resolves to nil (Mosh has no side channel).
+                // scroll).
                 if useTmux, let self, !self.moshPlainTmuxLaunchSent,
                    isValidTmuxSessionName(self.tmuxSessionNameForConnection) {
                     self.moshPlainTmuxLaunchSent = true
@@ -1871,10 +1805,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let etControlMode = false
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
-            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
-            self.tmuxLearnedPrefixForConnection = resolveTmuxLearnedPrefix(host: host)
-            self.hostIDForConnection = host.id
-            self.tmuxLearnedActionKeysForConnection = mapActionKeys(resolveTmuxLearnedActionKeys(host: host))
             DebugLog.shared.log(.lifecycle, "et: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         var tmuxRuntime: TmuxRuntime?
@@ -1930,9 +1860,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             } else {
                 self.output.onOutput(data: data)
             }
-            // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`) AND prefix
-            // discovery: accumulate while armed and until BOTH the probe and the prefix
-            // are resolved (the SEMICOLYN_PREFIX sentinel can trail the first tmux output).
+            // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`): accumulate
+            // per `shouldAccumulatePlainTmuxProbe`.
             guard self.shouldAccumulatePlainTmuxProbe else { return }
             self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
             self.evaluatePlainTmuxProbe()
@@ -1950,11 +1879,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // Install the gesture controller against the already-mounted view HERE (the
             // in-band launch happens after `TerminalScreen.makeUIView`'s one-time install
             // already no-op'd, so relying on makeUIView never installs it: device bug
-            // 2026-09-04). `recoverLayout` resolves via `self.connection`, which IS
-            // reachable here (ET's bootstrap `openExec` and this session share the same
-            // underlying `Connection`, see `queryPlainTmuxLayout`), so ET plain-tmux gets
-            // the SAME side-channel `list-windows` recovery SSH does, not the Mosh blind
-            // fallback.
+            // 2026-09-04).
             if useTmux, !self.etPlainTmuxLaunchSent,
                isValidTmuxSessionName(self.tmuxSessionNameForConnection) {
                 self.etPlainTmuxLaunchSent = true
@@ -2294,9 +2219,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `RawTerminalContainer` need no structural change, only a gesture-callback
     /// wiring choice made at `makeUIView` time (see `TerminalScreen`). The
     /// `PlainTmuxController` itself is built lazily by `TerminalScreen.makeUIView`
-    /// once the `TerminalView` exists (`installPlainTmuxControllerIfNeeded`),
-    /// because it needs that view's live grid + `getCharData` for the on-tap
-    /// border-drift check; this method only launches the session and wires bytes.
+    /// once the `TerminalView` mounts (`installPlainTmuxControllerIfNeeded`), which
+    /// is only a mount signal now (no discovery, no view access); this method only
+    /// launches the session and wires bytes.
     private func attachPlainTmux(conn: Connection) async throws {
         DebugLog.shared.log(.lifecycle, "attachPlainTmux: ENTER session=\(tmuxSessionNameForConnection)")
         guard isValidTmuxSessionName(tmuxSessionNameForConnection) else {
@@ -2315,25 +2240,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tmuxState = nil   // plain tmux never populates the -CC control-mode state
         plainTmuxSessionNamePendingInstall = tmuxSessionNameForConnection
         output.onHarvestBytes = { [weak self] bytes in
-            guard let self else { return }
-            self.passwordDetector.noteOutput(bytes)
-            // SSH-only in-band prefix discovery. `openExec` output does NOT echo (direct
-            // exec, only command stdout), so the `SEMICOLYN_PREFIX=<value>` sentinel from
-            // the launch printf appears exactly once and cleanly. Accumulate into the
-            // PERSISTENT buffer (not a per-chunk string) so a later call once the lazily
-            // installed controller exists still sees the full sentinel. `plainTmux` may be
-            // nil for the first few chunks (installed by `TerminalScreen.makeUIView` once
-            // `plainTmuxSessionNamePendingInstall`, set just below, is picked up); the
-            // optional-chain no-ops safely and the buffer persists. `noteLaunchOutput` is
-            // idempotent (its `prefixDiscovered` guard), so repeated calls are cheap. Cap
-            // growth so a long-lived exec can't grow the buffer unbounded once discovery
-            // is done or the sentinel simply never arrives. The cap must be large enough
-            // to hold a full SEMICOLYN_KEYS_BEGIN/END list-keys block (~4-8KB), not just
-            // the much shorter SEMICOLYN_PREFIX sentinel.
-            if self.sshPrefixDiscoveryBuffer.utf8.count < 16384 {
-                self.sshPrefixDiscoveryBuffer += String(decoding: bytes, as: UTF8.self)
-                self.plainTmux?.noteLaunchOutput(self.sshPrefixDiscoveryBuffer)
-            }
+            self?.passwordDetector.noteOutput(bytes)
         }
         state = .shell
         DebugLog.shared.log(.lifecycle, "attachPlainTmux: exec opened, state=.shell, awaiting tmux output")
@@ -2367,129 +2274,20 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         installPlainTmuxControllerIfNeeded(screen: view)
     }
 
-    /// Build and retain `PlainTmuxController` for the just-mounted raw `TerminalView`,
-    /// consuming `plainTmuxSessionNamePendingInstall`. Idempotent: a second call
-    /// (e.g. a SwiftUI `makeUIView` re-invocation) is a no-op once `plainTmux` is set.
-    /// SSH and ET side-channel recovery (`recoverLayout`) re-queries `list-windows`
-    /// on a fresh one-shot exec over the SAME retained `connection`: for SSH plain
-    /// tmux that's the very connection tmux was launched on; for ET it's the
-    /// underlying SSH `Connection` that bootstrapped ET (ET's own bootstrap exec
-    /// already proved a second `openExec` on it reaches the same host, and tmux's
-    /// server-daemon model means any client on that host, ET's login shell or a
-    /// fresh SSH exec, can query the same named session), so ET gets the SAME
-    /// recovery SSH does. Mosh is explicitly EXCLUDED (`isMoshActive` guard) even
-    /// though `self.connection` is technically still set (Mosh's `Connection` is a
-    /// bootstrap-only artifact used once to spawn `mosh-server`; treating it as a
-    /// persistent side channel for the whole roaming Mosh session's lifetime is
-    /// unproven for Phase 1), so `recoverLayout` stays nil off-Mosh's raw fallback:
-    /// `PlainTmuxController` falls back to the blind cycle for every Mosh recovery.
+    /// Build and retain `PlainTmuxController` once the raw `TerminalView` has mounted,
+    /// consuming `plainTmuxSessionNamePendingInstall`. Idempotent: a second call (e.g. a
+    /// SwiftUI `makeUIView` re-invocation) is a no-op once `plainTmux` is set. `screen` is
+    /// only the mount signal; the controller needs no view access.
     func installPlainTmuxControllerIfNeeded(screen: TerminalView) {
         guard plainTmux == nil, let name = plainTmuxSessionNamePendingInstall else { return }
         plainTmuxSessionNamePendingInstall = nil
-        let recoverLayout: (@Sendable () async -> (window: WindowID, layout: PaneLayout)?)? = {
-            guard !isMoshActive, let conn = self.connection else { return nil }
-            return { [weak self] in
-                guard let self else { return nil }
-                return await self.queryPlainTmuxLayout(conn: conn)
-            }
-        }()
-        let learned = tmuxLearnedPrefixForConnection
-        let hostID = hostIDForConnection
         plainTmux = PlainTmuxController(
             sessionName: name,
-            prefixOverride: tmuxPrefixOverrideForConnection,
-            learnedPrefix: learned,
-            // On a genuine fresh-connect discovery, persist the byte as the host's
-            // learnedPrefix so every future resume (which cannot run in-band discovery
-            // inside attached tmux) reuses it. Skip the write if it already matches what
-            // is stored (self-healing but not churny). hostID captured at connect time.
-            onPrefixDiscovered: { [weak self] byte in
-                self?.persistLearnedPrefix(byte, hostID: hostID)
-            },
-            persistedActionKeys: tmuxLearnedActionKeysForConnection,
-            onActionKeysDiscovered: { [weak self] keys in
-                self?.persistLearnedActionKeys(keys, hostID: hostID)
-            },
             // Route gesture bytes through the transport-aware send, NOT `rawWriter`
-            // directly: `rawWriter` is only set on the SSH paths, so on Mosh/ET it is
-            // nil and `rawWriter?.enqueue` silently dropped every gesture (device bug
-            // 2026-09-06: Mosh discovered the prefix and logged correct `prefix=0x1`
-            // sends, but the bytes never reached the session). `sendTerminalInput`
-            // routes to moshSession.writeInput / etSession.send / rawWriter as
-            // appropriate; for plain tmux the `-CC` `tmux` runtime is always nil, so it
-            // never takes the send-keys branch.
-            sendInput: { [weak self] bytes in self?.sendTerminalInput(bytes) },
-            screen: screen,
-            recoverLayout: recoverLayout)
-        DebugLog.shared.log(.tmux, "plainTmux: controller installed session=\(name) recovery=\(recoverLayout != nil ? "sideChannel" : "blind")")
-    }
-
-    /// Persist a freshly-discovered tmux prefix byte as the host's `learnedPrefix`
-    /// ("C-a" form), so future resumes reuse it (in-band discovery cannot run inside a
-    /// restored, already-attached tmux). Writes only when the value CHANGES (self-healing
-    /// if the host's prefix changed server-side, but no needless save otherwise). Never
-    /// touches `prefixOverride` (the user's manual setting). No-op if the host id is
-    /// unknown, the byte is not a representable `C-<letter>`, or the store read fails.
-    private func persistLearnedPrefix(_ byte: UInt8, hostID: UUID?) {
-        guard let hostID else { return }
-        // Byte -> "C-<letter>": 0x01..0x1a map to a..z (inverse of parseTmuxPrefix).
-        guard byte >= 0x01, byte <= 0x1a else { return }
-        let letter = Character(UnicodeScalar(byte + 0x60))
-        let learned = "C-\(letter)"
-        guard let host = (try? AppStores.shared.hosts.host(id: hostID)) ?? nil else {
-            DebugLog.shared.log(.tmux, "plainTmux:learn skip host=\(hostID) not found")
-            return
-        }
-        var cfg = host.semicolyn.value ?? SemicolynConfig()
-        var tmux = cfg.tmux ?? TmuxConfig()
-        guard tmux.learnedPrefix != learned else {
-            DebugLog.shared.log(.tmux, "plainTmux:learn unchanged learned=\(learned) host=\(hostID)")
-            return
-        }
-        tmux.learnedPrefix = learned
-        cfg.tmux = tmux
-        var updated = host
-        updated.semicolyn = .explicit(cfg)
-        do {
-            try AppStores.shared.hosts.saveHost(updated)
-            DebugLog.shared.log(.tmux, "plainTmux:learn persisted learned=\(learned) host=\(hostID)")
-        } catch {
-            DebugLog.shared.log(.tmux, "plainTmux:learn save FAILED error=\(error)")
-        }
-    }
-
-    /// Convert raw (rawValue-keyed) learned action keys resolved from host config into
-    /// the `TmuxAction`-keyed map the controller consumes. Unknown rawValues (e.g. from
-    /// a future app version's action set) are silently dropped.
-    private func mapActionKeys(_ raw: [String: String]) -> [TmuxAction: String] {
-        var m: [TmuxAction: String] = [:]
-        for (k, v) in raw { if let a = TmuxAction(rawValue: k) { m[a] = v } }
-        return m
-    }
-
-    /// Persist discovered action keybindings onto the host record so future resumes
-    /// reuse them. Overwrites (a fresh connect always re-discovers -> auto-heals a
-    /// config change). Writes only when changed. No-op if host id unknown / store fails.
-    private func persistLearnedActionKeys(_ keys: [TmuxAction: String], hostID: UUID?) {
-        guard let hostID, !keys.isEmpty else { return }
-        let raw = Dictionary(uniqueKeysWithValues: keys.map { ($0.key.rawValue, $0.value) })
-        guard let host = (try? AppStores.shared.hosts.host(id: hostID)) ?? nil else { return }
-        var cfg = host.semicolyn.value ?? SemicolynConfig()
-        var tmux = cfg.tmux ?? TmuxConfig()
-        guard tmux.learnedActionKeys != raw else {
-            DebugLog.shared.log(.tmux, "plainTmux:actionKeys unchanged host=\(hostID)")
-            return
-        }
-        tmux.learnedActionKeys = raw
-        cfg.tmux = tmux
-        var updated = host
-        updated.semicolyn = .explicit(cfg)
-        do {
-            try AppStores.shared.hosts.saveHost(updated)
-            DebugLog.shared.log(.tmux, "plainTmux:actionKeys persisted \(raw.count) host=\(hostID)")
-        } catch {
-            DebugLog.shared.log(.tmux, "plainTmux:actionKeys save FAILED error=\(error)")
-        }
+            // directly: `rawWriter` is only set on the SSH paths, so on Mosh/ET it is nil
+            // and gestures would be silently dropped (device bug 2026-09-06).
+            sendInput: { [weak self] bytes in self?.sendTerminalInput(bytes) })
+        DebugLog.shared.log(.tmux, "plainTmux: controller installed session=\(name)")
     }
 
     /// Reactive tmux-missing detector for Mosh/ET (see `attachMoshIfPossible`/
@@ -2502,14 +2300,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// is already live (fed by the same `output.onOutput` this buffer reads from),
     /// so no separate raw-shell attach is needed here.
     private func evaluatePlainTmuxProbe() {
-        // Feed the accumulated probe buffer to the controller (if installed yet) so
-        // it can scan for the SEMICOLYN_PREFIX sentinel emitted by the discovery
-        // compound in `PlainTmuxController.launchCommand`. `noteLaunchOutput` is
-        // idempotent, so repeated calls across ticks are safe; on transports where
-        // the controller installs after output has already started accumulating
-        // (Mosh/ET, gated on `onFirstFrame`), the buffer still holds the sentinel
-        // bytes from the start, so the next tick after install still discovers it.
-        plainTmux?.noteLaunchOutput(plainTmuxProbeBuffer)
         guard !plainTmuxProbeResolved else { return }
         switch classifyTmuxLaunch(output: plainTmuxProbeBuffer) {
         case .tmuxMissing:
@@ -2526,40 +2316,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         case .inconclusive:
             break   // keep accumulating until the watchdog window expires
         }
-    }
-
-    /// SSH/ET side-channel recovery query: run `list-windows -F "..."` on a fresh
-    /// one-shot exec over the retained connection, parse it, and return the ACTIVE
-    /// window's id + layout (nil if the exec failed, produced nothing, or no window
-    /// was flagged active). Mirrors `probeTmuxVersion`'s one-shot-exec race pattern.
-    private func queryPlainTmuxLayout(conn: Connection) async -> (window: WindowID, layout: PaneLayout)? {
-        let sink = TerminalShellOutput()
-        var captured: [UInt8] = []
-        sink.onBytes = { captured.append(contentsOf: $0) }
-        let done = AsyncStream<Void> { cont in
-            sink.onExit = { _ in cont.yield(); cont.finish() }
-        }
-        let probeSession = try? await conn.openExec(command: TmuxCommand.listWindowsForLayout(),
-                                                     term: "xterm-256color", cols: 80, rows: 24, output: sink)
-        guard probeSession != nil else {
-            DebugLog.shared.log(.tmux, "plainTmux:recoveryQuery exec FAILED to open → nil")
-            return nil
-        }
-        defer { if let probeSession { Task { try? await probeSession.close() } } }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { for await _ in done { break } }
-            group.addTask { try? await Task.sleep(nanoseconds: 2_000_000_000) }
-            await group.next(); group.cancelAll()
-        }
-        let text = String(decoding: captured, as: UTF8.self)
-        let lines = text.split(separator: "\n").map(String.init)
-        let windows = parseWindowListing(lines)
-        guard let active = windows.first(where: { $0.active }) else {
-            DebugLog.shared.log(.tmux, "plainTmux:recoveryQuery parsed=\(windows.count) noActiveWindow → nil")
-            return nil
-        }
-        DebugLog.shared.log(.tmux, "plainTmux:recoveryQuery parsed=\(windows.count) active=@\(active.id.raw)")
-        return (window: active.id, layout: active.layout)
     }
 
     // MARK: - Crash recovery + banner actions
