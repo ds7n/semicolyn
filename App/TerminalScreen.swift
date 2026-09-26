@@ -143,14 +143,15 @@ struct TerminalScreen: UIViewRepresentable {
         terminal.addGestureRecognizer(restoreTap)
 
         // If `attachPlainTmux` launched a plain-tmux session for this connection
-        // (per-host/default `resolveUseTmux`), build the gesture controller against
-        // THIS freshly created `TerminalView` now (it needs the live grid +
-        // `getCharData` for the on-tap border-drift check). No-op (and
-        // `vm.plainTmux` stays nil) when tmux is off or this is a raw-PTY/Mosh
-        // screen, so the callbacks below fall through to the unchanged raw no-ops.
-        // Stash the mounted view so a transport that launches plain tmux AFTER this
-        // mount (Mosh/ET, in-band on onFirstFrame) can install the gesture controller
-        // against it (SSH installs right here since its pending name is already set).
+        // (per-host/default `resolveUseTmux`), build the gesture controller now;
+        // `screen` is only the mount signal, the controller only needs the
+        // transport-aware send closure. No-op (and `vm.plainTmux` stays nil) when
+        // tmux is off or no plain-tmux launch is pending yet, so the callbacks
+        // below fall through to the unchanged raw no-ops. Stash the mounted view
+        // so a transport that launches plain tmux AFTER this mount (Mosh/ET,
+        // in-band on `onFirstFrame`) can install the controller later via
+        // `installPlainTmuxControllerIfMounted()` (SSH installs right here since
+        // its pending name is already set).
         vm.setMountedTerminalView(terminal)
         vm.installPlainTmuxControllerIfNeeded(screen: terminal)
 
@@ -175,7 +176,11 @@ struct TerminalScreen: UIViewRepresentable {
                 onPlaceCursor: { [weak coordinator = context.coordinator, weak terminal] col, row in
                     guard let terminal else { return }
                     if let plainTmux = coordinator?.vm?.plainTmux {
-                        plainTmux.onTapSelectPane(col: col, row: row)
+                        // Live mouse mode from the emulator (parses `?1000h` from the
+                        // stream regardless of the mode tracker): tmux mouse-on -> the
+                        // tap forwards as a click and tmux selects the exact pane.
+                        let mouseOn = terminal.getTerminal().mouseMode != .off
+                        plainTmux.onTapPane(col: col + 1, row: row + 1, mouseModeOn: mouseOn)
                     } else {
                         coordinator?.placeCursor(toCol: col, toRow: row, in: terminal)
                     }
@@ -186,6 +191,9 @@ struct TerminalScreen: UIViewRepresentable {
                 // focus-shift is needed on this screen either way.
                 isActivePane: { true },
                 onSelectPane: { },
+                isTmux: { [weak coordinator = context.coordinator] in
+                    coordinator?.vm?.plainTmux != nil
+                },
                 currentMode: { [weak coordinator = context.coordinator] in coordinator?.modeTracker.mode ?? .localScroll },
                 applicationCursorKeys: { [weak terminal] in terminal?.getTerminal().applicationCursor ?? false },
                 altScrollDecision: { [weak coordinator = context.coordinator] in

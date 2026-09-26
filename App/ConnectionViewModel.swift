@@ -6,6 +6,17 @@ import UIKit
 import SemicolynKit
 import SemicolynSSHCoreFFI
 
+/// Byte floor that separates mosh's ~13B restore-time terminal-open sequence from the
+/// real full-screen repaint our forced Ctrl-^ Ctrl-L provokes, for the state-resume
+/// liveness check (see `ConnectionViewModel.onOutput`). On restore mosh emits only the
+/// terminal-open sequence (a couple dozen bytes) up front; a live server's forced
+/// repaint is larger even for a bare shell prompt (cursor positioning + the prompt
+/// string + SGR easily exceed this). 64 bytes is comfortably above the open sequence
+/// and below any real repaint. Fails SAFE: a dead/unreachable server produces no
+/// repaint, so cumulative output never crosses the floor and the watchdog does a
+/// harmless fresh reconnect rather than a false "alive".
+private let moshStateResumeLivenessFloorBytes = 64
+
 /// Crash-banner presentation state (degraded-mode spec). One case today.
 enum CrashBannerState: Equatable { case tmuxEnded }
 
@@ -227,6 +238,26 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// e.g. the watchdog attaches SSH, then a queued `onEnd` would otherwise clobber
     /// it with a spurious crash banner. Reset in `teardown()` with the rest of Mosh state.
     private var moshResolved = false
+    /// True from app-background suspend (`suspendMoshForBackground`) until the warm
+    /// foreground re-home starts (`resumeMoshOnForegroundIfNeeded`). The suspend tears
+    /// the live mosh session down and flips `state` to `.idle` so the foreground guard
+    /// (`guard state == .idle`) passes, BUT the SessionView cover must NOT dismiss on
+    /// that `.idle` (it would drop us to the host list and the in-place re-home would
+    /// never run). SessionView's `.onChange(state)` reads this and suppresses `dismiss()`
+    /// while a suspend is pending, exactly as `resumeFailure != nil` does for the banner.
+    var moshSuspendedForResume = false
+    /// State-resume liveness plumbing. On a STATE-resume (blob replay) we do NOT re-send
+    /// the plain-tmux launch (attach-or-create), so the SEMICOLYN_LAUNCH sentinel the fresh-relaunch watchdog keys
+    /// off is never printed. Instead reattachMosh forces a full repaint (Ctrl-^ Ctrl-L),
+    /// and the server's repaint output crossing `moshStateResumeLivenessFloorBytes` proves
+    /// the re-home is live (`moshStateResumeSawServerOutput`) and cancels the watchdog. If
+    /// no repaint arrives (dead/unreachable server), the watchdog does a fresh bootstrap
+    /// connect instead of a frozen restored screen (Important-3 safety net). Reset in
+    /// `teardown()` and on each `armMoshStateResumeWatchdog`.
+    private var moshStateResumeSawServerOutput = false
+    /// Cumulative onOutput bytes since the state-resume onFirstFrame, compared against the
+    /// liveness floor (see the onOutput closure). Reset per reattach.
+    private var moshStateResumeBytesSinceFirstFrame = 0
     /// ET connect watchdog: fails the connect if the session shows no life (no
     /// onFirstFrame, no onEnd) within the window. Cancelled by either callback.
     private var etWatchdog: Task<Void, Never>?
@@ -277,19 +308,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// The resolved tmux session name for the current connection, computed once at
     /// connect time and reused by attach + the reattach/start-new banner actions.
     private var tmuxSessionNameForConnection = builtInTmuxSessionName
-    /// Per-host/default prefix-key override for plain tmux, resolved once at connect
-    /// time alongside `tmuxSessionNameForConnection` and consumed by
-    /// `installPlainTmuxControllerIfNeeded`. `nil` means no override: the controller
-    /// falls back to in-band sentinel discovery, then C-b.
-    private var tmuxPrefixOverrideForConnection: String?
-    /// SSH-only accumulator for in-band prefix-key sentinel discovery. SSH launches
-    /// plain tmux via `conn.openExec` (direct exec: only command stdout, no PTY echo),
-    /// so unlike Mosh/ET it has no reactive probe buffer feeding `noteLaunchOutput`.
-    /// This persistent accumulator (fed from `output.onHarvestBytes` in `attachPlainTmux`)
-    /// carries the sentinel bytes so `PlainTmuxController.noteLaunchOutput` can discover
-    /// the prefix once the controller is installed. Growth is capped (see the feed site);
-    /// reset in `teardown()`.
-    private var sshPrefixDiscoveryBuffer = ""
     private var lastPassword: String?
     private(set) var session: ShellSession?
     /// Serializes raw-PTY keystroke writes (FIFO under channel back-pressure).
@@ -304,7 +322,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// (`output.onBytes`/`terminal.feed`); this only holds the gesture-command
     /// controller.
     private(set) var plainTmux: PlainTmuxController?
-    /// True once the plain-tmux in-band launch (`tmux new -A -s <name>\n`) has
+    /// True once the plain-tmux in-band launch (attach-or-create) has
     /// been sent for the current Mosh session (idempotency guard: `onFirstFrame`
     /// is documented once-only per `MoshSession`, but this flag makes the send
     /// itself robust to any future re-fire, mirroring `etControlLaunchSent`'s
@@ -334,24 +352,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// and `evaluatePlainTmuxProbe` becomes a no-op. Reset in `teardown()`.
     private var plainTmuxProbeResolved = false
     /// Whether Mosh/ET `onOutput` should keep accumulating launch output into
-    /// `plainTmuxProbeBuffer`. The tmux-missing probe resolves on the first tmux
-    /// output (`.tmuxStarted`), but the SEMICOLYN_PREFIX prefix sentinel can arrive in
-    /// that same burst or just after, so accumulation must ALSO continue until the
-    /// controller has resolved its prefix (device bug 2026-09-06: coupling discovery to
-    /// `plainTmuxProbeResolved` cut it off before the sentinel parsed -> Mosh sent C-b on
-    /// a C-a host). A raw non-tmux session that never armed the probe still short-circuits
-    /// on `plainTmuxProbeArmed`. Once BOTH the probe is resolved and the prefix is
-    /// resolved, accumulation stops for good.
+    /// `plainTmuxProbeBuffer`: while the tmux-missing probe is unresolved, and after that
+    /// until the launch sentinel has been seen (the Mosh cold-reattach liveness signal can
+    /// trail the probe's 2s "assume started" timer). Bounded at 16384 bytes so a shell that
+    /// never prints the sentinel cannot grow the buffer without limit, while leaving room
+    /// for a large restored-frame paint that lands BEFORE the sentinel (a smaller cap could
+    /// stop accumulating first and cut the reattach liveness check off early). A raw
+    /// non-tmux session that never armed the probe short-circuits on `plainTmuxProbeArmed`.
     private var shouldAccumulatePlainTmuxProbe: Bool {
         guard plainTmuxProbeArmed else { return false }
         if !plainTmuxProbeResolved { return true }
-        // Probe resolved: keep going only for prefix discovery, and only within a bounded
-        // window. The SEMICOLYN_PREFIX sentinel is printed by the first `printf` BEFORE
-        // `tmux new`, so it always lands in the first few KB; cap the post-resolve
-        // discovery tail so a shell that never emits it (non-POSIX login shell, discovery
-        // failure) cannot grow the buffer without limit. Past the cap, gestures use the
-        // C-b default / per-host override.
-        return plainTmux?.isPrefixResolved == false && plainTmuxProbeBuffer.utf8.count < 8192
+        return !containsPlainTmuxLaunchSentinel(plainTmuxProbeBuffer)
+            && plainTmuxProbeBuffer.utf8.count < 16384
     }
     /// Bounded watch (~2s) started when the in-band plain-tmux launch is sent;
     /// classifies the accumulated `plainTmuxProbeBuffer` on expiry if nothing
@@ -710,6 +722,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         moshReattachWatchdog?.cancel(); moshReattachWatchdog = nil
         moshReattachSawServerOutput = false
         moshResolved = false
+        moshStateResumeSawServerOutput = false
+        moshStateResumeBytesSinceFirstFrame = 0
+        moshSuspendedForResume = false
         moshSession?.stop()
         moshSession = nil
         moshFirstFrameSeen = false
@@ -726,8 +741,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tmux?.stop()
         tmux = nil
         plainTmux = nil
-        tmuxPrefixOverrideForConnection = nil
-        sshPrefixDiscoveryBuffer = ""
         plainTmuxSessionNamePendingInstall = nil
         moshPlainTmuxLaunchSent = false
         etPlainTmuxLaunchSent = false
@@ -790,7 +803,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `resolveTmuxSessionName` is a DETERMINISTIC function of `host`/`defaults`
     /// (no randomness, see `Resolution.swift`), so a later `resumeRawReconnect` →
     /// `connect(savedHost:)` re-derives the SAME name and re-enters the SAME gate
-    /// (`attachSSHShell`) that launched it, `tmux new -A -s <name>` then reattaches
+    /// (`attachSSHShell`) that launched it, the plain-tmux launch (attach-or-create) then reattaches
     /// the still-running session either way. This flag exists purely so the
     /// captured record's `tmuxSessionName` metadata is accurate for anything that
     /// inspects it (diagnostics, the `resume:capture` log line's `tmux=` field), not
@@ -905,6 +918,36 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
     }
 
+    /// On warm foreground (app kept in memory), if we suspended a mosh session on
+    /// background (a state blob was persisted) and no live shell is up, re-home from
+    /// the blob via the same cold-reattach path. Closes the warm-reopen gap (the
+    /// cold-launch resume sweep runs only in HostListView.onAppear). isWarm:false is
+    /// intentional: we want .coldReattach (blob-aware reattachMosh), not .reforeground
+    /// (no handler; suspend already tore the local session down).
+    /// Returns true if it kicked off an in-place re-home (state driven back to
+    /// `.shell`); false if there was nothing to resume. SessionView uses the return to
+    /// decide whether to dismiss a suspended-but-not-resumed cover.
+    @discardableResult
+    func resumeMoshOnForegroundIfNeeded() -> Bool {
+        // Clear the suspend guard unconditionally on foreground: from here on the
+        // SessionView cover may dismiss on `.idle` again (a stale flag would wrongly
+        // pin a genuinely-finished session's cover open). `resumeColdReattach` below
+        // drives `state` back to `.shell` on a successful re-home before any dismiss
+        // can observe the cleared flag against `.idle`.
+        let wasSuspended = moshSuspendedForResume
+        moshSuspendedForResume = false
+        guard state == .idle else { return false }
+        let action = AppStores.shared.resume.resumeOnLaunch(isWarm: false)
+        guard case let .coldReattach(record) = action else {
+            DebugLog.shared.log(.connect, "resume:foreground no coldReattach action=\(String(describing: action)) wasSuspended=\(wasSuspended)")
+            return false
+        }
+        guard let host = (try? AppStores.shared.hosts.host(id: record.hostID)) ?? nil else { return false }
+        DebugLog.shared.log(.connect, "resume:foreground re-home host=\(host.label)")
+        resumeColdReattach(host: host, record: record)
+        return true
+    }
+
     /// Rebuild a Mosh session directly from a stored record + MOSH_KEY. mosh-client
     /// needs a NUMERIC IP (AI_NUMERICHOST), so resolve the stored host again.
     private func reattachMosh(host: Host, record: ResumableSession, key: Data) {
@@ -914,8 +957,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             failResume(host: host, record: record, secret: key, reason: "couldn't resolve host")
             return
         }
+        let blob = (try? AppStores.shared.moshState.get(sessionID: record.sessionID)) ?? nil
+        let isStateResume = (blob?.isEmpty == false)
+        DebugLog.shared.log(.connect,
+            "resume:reattachMosh mode=\(isStateResume ? "state-resume" : "fresh-relaunch") blob=\(blob?.count ?? 0)B")
         let sess = MoshSession(ip: ip, port: String(record.port), key: keyStr,
-                               cols: 80, rows: 24, predictMode: "adaptive")
+                               cols: 80, rows: 24, predictMode: "adaptive",
+                               encodedState: isStateResume ? blob : nil)
         // Mosh callbacks are dispatched to the main queue (MoshSession.h). These mirror
         // the fresh-attach closures' isolation pattern (bare `self.` access), which the
         // App target already compiles: the Obj-C block property is inferred main-actor
@@ -924,15 +972,47 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onOutput = { [weak self] data in
             guard let self else { return }
             self.output.onOutput(data: data)
-            // Feed the reactive tmux-missing probe on reattach too (the re-launched
-            // `tmux new -A -s <name>` in onFirstFrame arms it), mirroring the fresh path.
-            // Keep accumulating until BOTH the probe and the prefix discovery resolve.
+            // STATE-resume liveness (chunk-count discriminator, NOT a time gate).
+            // Wire evidence (2026-09-10 tcpdump): mosh renders the restored screen from
+            // LOCAL blob state SYNCHRONOUSLY at onFirstFrame, delivered as the FIRST
+            // onOutput chunk. Every SUBSEQUENT chunk is a forward diff driven by an
+            // inbound server datagram (the re-homed server's replay lands in the first
+            // ~0.4s, interleaved with the paint) so the 2nd chunk onward proves a live
+            // re-home. The previous 0.6s "restore settled" wall-clock timer discarded
+            // exactly this proof: the server's real diffs arrived BEFORE 0.6s, then mosh
+            // went into its ~3s idle heartbeat, so the post-settle window landed in a
+            // silent gap and the watchdog false-fired a needless fresh reconnect (the
+            // ~4s reconnect lag; device-confirmed). Counting chunks is immune to mosh's
+            // idle cadence. Checked BEFORE the plain-tmux-probe guard below (state-resume
+            // never arms that probe). Distinct from the fresh-relaunch sentinel path.
+            if isStateResume, !self.moshStateResumeSawServerOutput {
+                // LIVENESS via the forced repaint. On restore mosh writes only a ~13B
+                // terminal-open sequence up front (it never paints the restored screen; see
+                // the Ctrl-^ Ctrl-L rationale in reattachMosh). We then send Ctrl-^ Ctrl-L,
+                // which makes the server emit the FULL screen repaint. So on the state-resume
+                // path there is NO large "restored paint" chunk to discount: the first
+                // SUBSTANTIAL output is the forced repaint = proof the server answered. We
+                // accumulate bytes and confirm once cumulative output crosses a small floor
+                // that the ~13B open sequence alone cannot reach but any real repaint (even a
+                // bare shell prompt's) does. Fails SAFE: a dead/unreachable server produces
+                // no repaint -> floor never crossed -> the 4s watchdog does a fresh reconnect
+                // (harmless), never a frozen screen.
+                self.moshStateResumeBytesSinceFirstFrame += data.count
+                if self.moshStateResumeBytesSinceFirstFrame > moshStateResumeLivenessFloorBytes {
+                    self.moshStateResumeSawServerOutput = true
+                    self.moshReattachWatchdog?.cancel(); self.moshReattachWatchdog = nil
+                    DebugLog.shared.log(.connect, "resume:reattachMosh state-resume repaint output \(self.moshStateResumeBytesSinceFirstFrame)B > floor → alive, confirmed")
+                }
+            }
+            // Feed the reactive tmux-missing probe on reattach too (the re-sent
+            // plain-tmux launch (attach-or-create) in onFirstFrame arms it), mirroring the fresh path.
+            // Keep accumulating per `shouldAccumulatePlainTmuxProbe`.
             guard self.shouldAccumulatePlainTmuxProbe else { return }
             self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
             self.evaluatePlainTmuxProbe()
             // Liveness proof for the cold-reattach dead-server watchdog: the
-            // SEMICOLYN_PREFIX sentinel is printed ONLY when the server actually EXECUTES
-            // our in-band relaunch (`printf 'SEMICOLYN_PREFIX=%s...'; tmux new -A`). It
+            // SEMICOLYN_LAUNCH sentinel is printed ONLY when the server actually EXECUTES
+            // our in-band relaunch (the plain-tmux launch script's sentinel printf). It
             // can never appear in mosh's restored-frame paint (which is local, last-known
             // screen state), so its presence proves the re-homed server is ALIVE.
             // Keying off the sentinel (not "any output after launch-sent") avoids the
@@ -941,10 +1021,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // from `plainTmuxProbeResolved`, which the probe's 2s "assume started" timer
             // flips with no server response.
             if !self.moshReattachSawServerOutput,
-               parseSemicolynPrefixSentinel(self.plainTmuxProbeBuffer) != nil {
+               containsPlainTmuxLaunchSentinel(self.plainTmuxProbeBuffer) {
                 self.moshReattachSawServerOutput = true
                 self.moshReattachWatchdog?.cancel(); self.moshReattachWatchdog = nil
-                DebugLog.shared.log(.connect, "resume:reattachMosh SEMICOLYN_PREFIX seen → server alive, reattach confirmed")
+                DebugLog.shared.log(.connect, "resume:reattachMosh SEMICOLYN_LAUNCH seen → server alive, reattach confirmed")
             }
         }
         sess.onFirstFrame = { [weak self] in
@@ -953,65 +1033,87 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // and drop the in-memory failure copy.
             DebugLog.shared.log(.connect, "resume:reattachMosh onFirstFrame → live")
             self.resumeInMemory = nil
+            if isStateResume {
+                // Clear the one-shot state blob on EVERY state-resume reattach, independent
+                // of whether this record has a tmux session name. If this only ran inside
+                // the tmux-name branch below, a state-resume of a non-tmux mosh session
+                // would never clear it; a kill before the next background-triggered
+                // suspendMoshForBackground() overwrites it would then replay a now-stale
+                // Restoration::Context (old crypto seq) on the FOLLOWING reattach, causing
+                // the exact server-desync class ("floods stale addr, zero uplink") this
+                // feature exists to fix.
+                DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: clearing one-shot blob")
+                try? AppStores.shared.moshState.clear(sessionID: record.sessionID)
+                // Important-3 safety net: a state-resume paints the restored screen from
+                // LOCAL state and fires onFirstFrame off that paint, so "live" here does
+                // NOT prove the re-homed server is reachable. If the blob is stale or the
+                // server is gone, mosh sits in "Nothing received from server" and NEVER
+                // pthread_exits (no onEnd) -> a permanently frozen restored screen.
+                //
+                // FORCE A FULL REPAINT so the restored screen actually draws AND the
+                // liveness check has real output to observe. ROOT CAUSE (vendored mosh,
+                // wire+source confirmed 2026-09-13): on RESTORE, mosh reconstructs the true
+                // server screen but only writes the minimal DIFF against its `local_framebuffer`
+                // (iosclient.cc:320, `new_frame(!repaint_requested, ...)`), which on restore is
+                // still BLANK and `repaint_requested` is never set (the upstream `resume()`
+                // repaint line is commented out, iosclient.cc:85). We reattach into a fresh
+                // BLANK SwiftTerm, so the restored screen is never painted (only a ~13B
+                // terminal-open sequence) and an idle session emits nothing further -> frozen
+                // screen + the watchdog false-fires a fresh reconnect (device: "instant then
+                // full reconnect").
+                //
+                // mosh's `Ctrl-^ Ctrl-L` (escape-key then 0x0c) sets `repaint_requested = true`
+                // (iosclient.cc:377-378, gated on the escape prefix; the BARE-0x0c handler is
+                // commented out at :471), forcing `new_frame` to emit the ENTIRE server screen
+                // as a fresh paint. That both draws the restored screen for the user AND
+                // guarantees a non-empty output chunk that trips the byte-floor liveness check.
+                // escape_key defaults to 0x1e with escape_requires_lf=false, so the two-byte
+                // 0x1e 0x0c needs no preceding LF (same family as our suspend 0x1e 0x1a and
+                // quit 0x1e 0x2e sequences). App-side only, no vendored-mosh change.
+                DebugLog.shared.log(.connect, "resume:reattachMosh state-resume: send Ctrl-^ Ctrl-L to force a full repaint")
+                sess.writeInput(Data([0x1e, 0x0c]))
+                // Arm the liveness watchdog: the paint is the FIRST onOutput chunk; a live
+                // re-homed server's redraw output is subsequent chunks past the paint
+                // ceiling, which sets moshStateResumeSawServerOutput and cancels this
+                // watchdog. On timeout (no server output), fall back to a fresh bootstrap
+                // connect. Armed for EVERY state-resume since the freeze afflicts both
+                // tmux and non-tmux sessions.
+                self.armMoshStateResumeWatchdog(host: host)
+            }
             // If the resumed record was a plain-tmux session, RE-LAUNCH tmux in-band and
             // install the gesture controller, exactly like the fresh Mosh path. The
             // reattached login shell is a fresh shell (Mosh reattach re-execs the login
-            // shell), so `tmux new -A -s <name>` (-A = attach-if-exists) lands back in the
+            // shell), so the plain-tmux launch (attach-or-create) lands back in the
             // persisted session and the swipe/zoom/tap gestures work again. Without this,
             // a cold reattach came back as a bare shell with no gestures (device bug
             // 2026-09-04: "Mosh reconnect did not work").
             if let name = record.tmuxSessionName, isValidTmuxSessionName(name) {
                 self.tmuxSessionNameForConnection = name
-                // Restore the per-host/default prefix-key override on reattach: teardown
-                // cleared it to nil, and without re-resolving it a reattached Mosh session
-                // would ignore a configured override and fall back to sentinel/C-b. Load
-                // defaults the same way the other connect sites do.
-                let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
-                self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
-                self.moshPlainTmuxLaunchSent = true
-                let launch = PlainTmuxController.launchCommand(sessionName: name)
-                DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux in-band launch \(launch.prefix(60))")
                 self.plainTmuxSessionNamePendingInstall = name
                 self.installPlainTmuxControllerIfMounted()
-                self.plainTmuxProbeArmed = true
-                self.plainTmuxProbeBuffer = ""
-                self.plainTmuxProbeResolved = false
-                self.plainTmuxProbeWatchdog?.cancel()
-                self.plainTmuxProbeWatchdog = Task { [weak self] in
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    guard let self, !self.plainTmuxProbeResolved else { return }
-                    self.plainTmuxProbeResolved = true
-                    DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux probe window expired inconclusive → assume started")
-                }
-                sess.writeInput(Data((launch + "\n").utf8))
-                // Arm the dead-server liveness watchdog: the re-home paints the restored
-                // frame + fires onFirstFrame off LOCAL state, so "live" here does NOT mean
-                // the server is reachable. Require REAL output in response to the relaunch
-                // (set `moshReattachSawServerOutput` in onOutput) within the window; if none
-                // arrives the stored mosh-server is gone -> fall back to a fresh bootstrap
-                // connect (spawns a new server, provably works) instead of a frozen screen.
-                self.moshReattachSawServerOutput = false
-                self.moshReattachWatchdog?.cancel()
-                self.moshReattachWatchdog = Task { [weak self] in
-                    try? await Task.sleep(nanoseconds: 4_000_000_000)   // 4s liveness window
-                    guard let self, !Task.isCancelled, !self.moshReattachSawServerOutput else { return }
-                    // Mutual exclusion with onEnd (shared moshResolved flag): claim the
-                    // resolution so a late onEnd can't also fire a banner over the fresh
-                    // connect we are about to start.
-                    if self.moshResolved { return }
-                    self.moshResolved = true
-                    DebugLog.shared.log(.connect, "resume:reattachMosh NO live server output in 4s → stored mosh-server dead, fresh reconnect")
-                    self.moshSession?.stop(); self.moshSession = nil
-                    self.moshReattachWatchdog = nil
-                    // Leave `.shell` first: `connect(savedHost:)` IGNORES the call while
-                    // state is `.shell`/`.connecting` (its re-entry guard), and reattach
-                    // left us in `.shell`. Flip to `.idle` so the fresh connect proceeds;
-                    // `connect` immediately tears down + flips to `.connecting`.
-                    self.state = .idle
-                    // Full fresh connect (SSH auth -> new mosh bootstrap) using stored
-                    // creds, the same entry the host list uses; password "" defers to the
-                    // saved key/credential resolution.
-                    self.connect(savedHost: host, password: "")
+                if isStateResume {
+                    // State-resume restored the attached-tmux screen verbatim, so re-sending
+                    // the plain-tmux launch would re-run inside the restored session. Skip
+                    // it: the private gesture bindings persist on the tmux server from the
+                    // original launch, so gestures keep working. (Blob already cleared and
+                    // the Ctrl-L redraw + watchdog issued above, before this branch.)
+                    DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip relaunch (bindings persist on server)")
+                } else {
+                    self.moshPlainTmuxLaunchSent = true
+                    let launch = PlainTmuxController.launchCommand(sessionName: name)
+                    DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux in-band launch \(launch.prefix(60))")
+                    self.plainTmuxProbeArmed = true
+                    self.plainTmuxProbeBuffer = ""
+                    self.plainTmuxProbeResolved = false
+                    self.plainTmuxProbeWatchdog?.cancel()
+                    self.plainTmuxProbeWatchdog = Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        guard let self, !self.plainTmuxProbeResolved else { return }
+                        self.plainTmuxProbeResolved = true
+                        DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux probe window expired inconclusive → assume started")
+                    }
+                    sess.writeInput(Data((launch + "\n").utf8))
+                    self.armMoshReattachWatchdog(host: host)
                 }
             }
             self.captureResume(host: host, transport: .mosh,
@@ -1037,6 +1139,90 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         state = .shell
     }
 
+    /// Arm the fresh-relaunch dead-server liveness watchdog: after re-sending
+    /// the plain-tmux launch (attach-or-create) on a reattach WITHOUT restored state, require REAL server output
+    /// (the SEMICOLYN_LAUNCH sentinel, set in onOutput) within 4s. If none arrives the
+    /// stored mosh-server is unreachable -> fall back to a fresh bootstrap connect.
+    /// NOT armed on the state-resume path (blob replay is its own success signal).
+    private func armMoshReattachWatchdog(host: Host) {
+        // Arm the dead-server liveness watchdog: the re-home paints the restored
+        // frame + fires onFirstFrame off LOCAL state, so "live" here does NOT mean
+        // the server is reachable. Require REAL output in response to the relaunch
+        // (set `moshReattachSawServerOutput` in onOutput) within the window; if none
+        // arrives the stored mosh-server is gone -> fall back to a fresh bootstrap
+        // connect (spawns a new server, provably works) instead of a frozen screen.
+        moshReattachSawServerOutput = false
+        moshReattachWatchdog?.cancel()
+        moshReattachWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)   // 4s liveness window
+            guard let self, !Task.isCancelled, !self.moshReattachSawServerOutput else { return }
+            // Mutual exclusion with onEnd (shared moshResolved flag): claim the
+            // resolution so a late onEnd can't also fire a banner over the fresh
+            // connect we are about to start.
+            if self.moshResolved { return }
+            self.moshResolved = true
+            DebugLog.shared.log(.connect, "resume:reattachMosh NO live server output in 4s → stored mosh-server dead, fresh reconnect")
+            self.moshSession?.stop(); self.moshSession = nil
+            self.moshReattachWatchdog = nil
+            // Leave `.shell` first: `connect(savedHost:)` IGNORES the call while
+            // state is `.shell`/`.connecting` (its re-entry guard), and reattach
+            // left us in `.shell`. Flip to `.idle` so the fresh connect proceeds;
+            // `connect` immediately tears down + flips to `.connecting`.
+            self.state = .idle
+            // Full fresh connect (SSH auth -> new mosh bootstrap) using stored
+            // creds, the same entry the host list uses; password "" defers to the
+            // saved key/credential resolution.
+            self.connect(savedHost: host, password: "")
+        }
+    }
+
+    /// Arm the STATE-resume dead-server liveness watchdog (Important-3 safety net).
+    /// Unlike the fresh-relaunch watchdog, a state-resume prints no SEMICOLYN_LAUNCH
+    /// sentinel (we skip the plain-tmux launch), so it uses a different signal: reattachMosh forces
+    /// a full repaint with Ctrl-^ Ctrl-L, and the server's repaint OUTPUT crossing
+    /// `moshStateResumeLivenessFloorBytes` (in onOutput) sets `moshStateResumeSawServerOutput`
+    /// and cancels this watchdog. If no repaint arrives within the window (the server is
+    /// unreachable, or the stored port is dead), fall back to a fresh bootstrap connect
+    /// (spawns a new server) instead of a frozen restored screen. Reuses `moshReattachWatchdog`
+    /// (only one reattach watchdog is ever live at a time) and the shared `moshResolved`
+    /// mutual-exclusion with onEnd.
+    ///
+    /// WHY A FORCED REPAINT (device + wire evidence, 2026-09-13): on RESTORE mosh writes only
+    /// a ~13B terminal-open sequence and then, for an idle screen, nothing more (it diffs
+    /// against a blank local framebuffer and never repaints; see the Ctrl-^ Ctrl-L rationale
+    /// in reattachMosh). So there is no server output to observe and the watchdog would
+    /// false-fire on every resume. Forcing the repaint gives both the user their restored
+    /// screen and this watchdog a real output signal.
+    ///
+    /// TRADEOFF: a genuinely-alive server that somehow produces no repaint output within the
+    /// window would be misjudged dead and trigger a needless fresh reconnect. That reconnect
+    /// is non-destructive (re-attaches the SAME persisted session, losing only mosh's local
+    /// predictive echo), so a false positive costs a reconnect, never data.
+    private func armMoshStateResumeWatchdog(host: Host) {
+        moshStateResumeSawServerOutput = false
+        moshStateResumeBytesSinceFirstFrame = 0
+        moshReattachWatchdog?.cancel()
+        // Liveness = onOutput bytes crossing moshStateResumeLivenessFloorBytes: the forced
+        // Ctrl-^ Ctrl-L repaint makes the server emit the full screen, which clears the
+        // floor and sets moshStateResumeSawServerOutput. If nothing crosses the floor inside
+        // the window, the stored server is dead / unreachable -> fresh bootstrap.
+        moshReattachWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)   // 4s post-onFirstFrame window
+            guard let self, !Task.isCancelled, !self.moshStateResumeSawServerOutput else { return }
+            // Mutual exclusion with onEnd (shared moshResolved flag): claim the
+            // resolution so a late onEnd can't also fire a banner over the fresh connect.
+            if self.moshResolved { return }
+            self.moshResolved = true
+            DebugLog.shared.log(.connect, "resume:reattachMosh state-resume no repaint output in 4s → stored mosh-server dead/blob stale, fresh reconnect")
+            self.moshSession?.stop(); self.moshSession = nil
+            self.moshReattachWatchdog = nil
+            // Leave `.shell` first (connect() ignores the call while `.shell`), same as
+            // the fresh-relaunch watchdog; connect() then tears down + flips to
+            // `.connecting`, which also resets the state-resume flags via teardown().
+            self.state = .idle
+            self.connect(savedHost: host, password: "")
+        }
+    }
 
     /// Handle a failed cold reattach: clear the persisted record (dead token) but keep
     /// the reattach info IN MEMORY so the banner's Retry works, then show the banner.
@@ -1243,7 +1429,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         switch tmuxLaunchDecision(useTmux: useTmux, versionProbe: probe) {
         case .attach:
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
-            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             try await attachPlainTmux(conn: conn)
         case .degrade(let reason):
             DebugLog.shared.log(.lifecycle, "attachSSHShell: decision=DEGRADE(\(String(describing: reason))) -> raw shell")
@@ -1253,7 +1438,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // Connected edge (raw SSH / gesture-tmux over SSH): a raw SSH session is
         // client-side, so it resumes by PROMPTING (transport = .ssh, no secret). The
         // tmux session name always rides so a confirmed fresh reconnect lands back
-        // in the same session via `tmux new -A -s <name>`.
+        // in the same session via the plain-tmux launch (attach-or-create).
         // Runs on the main actor (async method on a @MainActor class), no wrap needed.
         captureResume(host: host, transport: .ssh,
                       endpoint: (host: host.hostName, port: resolvePort(host: host, defaults: defaults)),
@@ -1304,7 +1489,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // pre-frame exec channel over Mosh to probe `tmux -V` the way SSH's
         // `probeTmuxVersion` does (Mosh's bootstrap exec only ever runs
         // `mosh-server`), so the launch is UNCONDITIONAL whenever `useTmux` is on:
-        // if tmux isn't installed remotely, `tmux new -A -s <name>` fails visibly
+        // if tmux isn't installed remotely, the plain-tmux launch fails visibly
         // at the shell (same user-facing behavior as typing a bad command), no
         // different from a user who typed it themselves. Reactive detection
         // (`evaluatePlainTmuxProbe` below) watches the first output and degrades
@@ -1312,7 +1497,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let useTmux = resolveUseTmux(host: host, defaults: defaults)
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
-            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             DebugLog.shared.log(.lifecycle, "mosh: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         // Effective config for the argv (port range, server path, prediction mode).
@@ -1358,9 +1542,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // pass in `onOutput` is a no-op.)
             sess.onOutput = { [weak self] data in
                 self?.output.onOutput(data: data)
-                // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`) AND
-                // prefix discovery: accumulate while armed and until BOTH the probe and
-                // the prefix are resolved (the sentinel can trail the first tmux output).
+                // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`): accumulate
+                // per `shouldAccumulatePlainTmuxProbe`.
                 guard let self, self.shouldAccumulatePlainTmuxProbe else { return }
                 self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
                 self.evaluatePlainTmuxProbe()
@@ -1375,7 +1558,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self?.moshWatchdog?.cancel(); self?.moshWatchdog = nil
                 DebugLog.shared.log(.connect, "mosh: watchdog cancelled (onFirstFrame)")
                 // Mosh has no launch-command argument (attaches a login shell), so
-                // send `tmux new -A -s <name>\n` IN-BAND now that frames are
+                // send the plain-tmux launch (attach-or-create) IN-BAND now that frames are
                 // flowing, exactly like ET's `-CC` in-band launch (PR #123). Guarded by
                 // `moshPlainTmuxLaunchSent` (idempotency; `onFirstFrame` is documented
                 // once-only, but this makes the send itself robust either way).
@@ -1388,7 +1571,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // the controller against the stashed view, so `vm.plainTmux != nil` and
                 // the swipe/zoom/tap gestures route through it (device bug 2026-09-04:
                 // Mosh gestures never installed -> swipe fell through to alt-screen
-                // scroll). `recoverLayout` resolves to nil (Mosh has no side channel).
+                // scroll).
                 if useTmux, let self, !self.moshPlainTmuxLaunchSent,
                    isValidTmuxSessionName(self.tmuxSessionNameForConnection) {
                     self.moshPlainTmuxLaunchSent = true
@@ -1603,7 +1786,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                              keepaliveSecs: config.keepaliveSecs)
 
         // ET, like Mosh, attaches a login shell with no launch-command argument, so
-        // "launch plain tmux" means sending `tmux new -A -s <name>\n` IN-BAND once
+        // "launch plain tmux" means sending the plain-tmux launch (attach-or-create) IN-BAND once
         // the stream is up (see `onFirstFrame` below), the same in-band shape `-CC`
         // used to use (PR #123), just a different launch string and no
         // `TmuxRuntime`/pane routing. `-CC` is RETIRED as a user-selectable
@@ -1621,7 +1804,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let etControlMode = false
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
-            self.tmuxPrefixOverrideForConnection = resolveTmuxPrefixOverride(host: host, defaults: defaults)
             DebugLog.shared.log(.lifecycle, "et: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
         var tmuxRuntime: TmuxRuntime?
@@ -1677,9 +1859,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             } else {
                 self.output.onOutput(data: data)
             }
-            // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`) AND prefix
-            // discovery: accumulate while armed and until BOTH the probe and the prefix
-            // are resolved (the SEMICOLYN_PREFIX sentinel can trail the first tmux output).
+            // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`): accumulate
+            // per `shouldAccumulatePlainTmuxProbe`.
             guard self.shouldAccumulatePlainTmuxProbe else { return }
             self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
             self.evaluatePlainTmuxProbe()
@@ -1697,11 +1878,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // Install the gesture controller against the already-mounted view HERE (the
             // in-band launch happens after `TerminalScreen.makeUIView`'s one-time install
             // already no-op'd, so relying on makeUIView never installs it: device bug
-            // 2026-09-04). `recoverLayout` resolves via `self.connection`, which IS
-            // reachable here (ET's bootstrap `openExec` and this session share the same
-            // underlying `Connection`, see `queryPlainTmuxLayout`), so ET plain-tmux gets
-            // the SAME side-channel `list-windows` recovery SSH does, not the Mosh blind
-            // fallback.
+            // 2026-09-04).
             if useTmux, !self.etPlainTmuxLaunchSent,
                isValidTmuxSessionName(self.tmuxSessionNameForConnection) {
                 self.etPlainTmuxLaunchSent = true
@@ -2041,9 +2218,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `RawTerminalContainer` need no structural change, only a gesture-callback
     /// wiring choice made at `makeUIView` time (see `TerminalScreen`). The
     /// `PlainTmuxController` itself is built lazily by `TerminalScreen.makeUIView`
-    /// once the `TerminalView` exists (`installPlainTmuxControllerIfNeeded`),
-    /// because it needs that view's live grid + `getCharData` for the on-tap
-    /// border-drift check; this method only launches the session and wires bytes.
+    /// once the `TerminalView` mounts (`installPlainTmuxControllerIfNeeded`), which
+    /// is only a mount signal now (no discovery, no view access); this method only
+    /// launches the session and wires bytes.
     private func attachPlainTmux(conn: Connection) async throws {
         DebugLog.shared.log(.lifecycle, "attachPlainTmux: ENTER session=\(tmuxSessionNameForConnection)")
         guard isValidTmuxSessionName(tmuxSessionNameForConnection) else {
@@ -2062,23 +2239,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         tmuxState = nil   // plain tmux never populates the -CC control-mode state
         plainTmuxSessionNamePendingInstall = tmuxSessionNameForConnection
         output.onHarvestBytes = { [weak self] bytes in
-            guard let self else { return }
-            self.passwordDetector.noteOutput(bytes)
-            // SSH-only in-band prefix discovery. `openExec` output does NOT echo (direct
-            // exec, only command stdout), so the `SEMICOLYN_PREFIX=<value>` sentinel from
-            // the launch printf appears exactly once and cleanly. Accumulate into the
-            // PERSISTENT buffer (not a per-chunk string) so a later call once the lazily
-            // installed controller exists still sees the full sentinel. `plainTmux` may be
-            // nil for the first few chunks (installed by `TerminalScreen.makeUIView` once
-            // `plainTmuxSessionNamePendingInstall`, set just below, is picked up); the
-            // optional-chain no-ops safely and the buffer persists. `noteLaunchOutput` is
-            // idempotent (its `prefixDiscovered` guard), so repeated calls are cheap. Cap
-            // growth so a long-lived exec can't grow the buffer unbounded once discovery
-            // is done or the sentinel simply never arrives.
-            if self.sshPrefixDiscoveryBuffer.utf8.count < 4096 {
-                self.sshPrefixDiscoveryBuffer += String(decoding: bytes, as: UTF8.self)
-                self.plainTmux?.noteLaunchOutput(self.sshPrefixDiscoveryBuffer)
-            }
+            self?.passwordDetector.noteOutput(bytes)
         }
         state = .shell
         DebugLog.shared.log(.lifecycle, "attachPlainTmux: exec opened, state=.shell, awaiting tmux output")
@@ -2112,67 +2273,32 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         installPlainTmuxControllerIfNeeded(screen: view)
     }
 
-    /// Build and retain `PlainTmuxController` for the just-mounted raw `TerminalView`,
-    /// consuming `plainTmuxSessionNamePendingInstall`. Idempotent: a second call
-    /// (e.g. a SwiftUI `makeUIView` re-invocation) is a no-op once `plainTmux` is set.
-    /// SSH and ET side-channel recovery (`recoverLayout`) re-queries `list-windows`
-    /// on a fresh one-shot exec over the SAME retained `connection`: for SSH plain
-    /// tmux that's the very connection tmux was launched on; for ET it's the
-    /// underlying SSH `Connection` that bootstrapped ET (ET's own bootstrap exec
-    /// already proved a second `openExec` on it reaches the same host, and tmux's
-    /// server-daemon model means any client on that host, ET's login shell or a
-    /// fresh SSH exec, can query the same named session), so ET gets the SAME
-    /// recovery SSH does. Mosh is explicitly EXCLUDED (`isMoshActive` guard) even
-    /// though `self.connection` is technically still set (Mosh's `Connection` is a
-    /// bootstrap-only artifact used once to spawn `mosh-server`; treating it as a
-    /// persistent side channel for the whole roaming Mosh session's lifetime is
-    /// unproven for Phase 1), so `recoverLayout` stays nil off-Mosh's raw fallback:
-    /// `PlainTmuxController` falls back to the blind cycle for every Mosh recovery.
+    /// Build and retain `PlainTmuxController` once the raw `TerminalView` has mounted,
+    /// consuming `plainTmuxSessionNamePendingInstall`. Idempotent: a second call (e.g. a
+    /// SwiftUI `makeUIView` re-invocation) is a no-op once `plainTmux` is set. `screen` is
+    /// only the mount signal; the controller needs no view access.
     func installPlainTmuxControllerIfNeeded(screen: TerminalView) {
         guard plainTmux == nil, let name = plainTmuxSessionNamePendingInstall else { return }
         plainTmuxSessionNamePendingInstall = nil
-        let recoverLayout: (@Sendable () async -> (window: WindowID, layout: PaneLayout)?)? = {
-            guard !isMoshActive, let conn = self.connection else { return nil }
-            return { [weak self] in
-                guard let self else { return nil }
-                return await self.queryPlainTmuxLayout(conn: conn)
-            }
-        }()
         plainTmux = PlainTmuxController(
             sessionName: name,
-            prefixOverride: tmuxPrefixOverrideForConnection,
             // Route gesture bytes through the transport-aware send, NOT `rawWriter`
-            // directly: `rawWriter` is only set on the SSH paths, so on Mosh/ET it is
-            // nil and `rawWriter?.enqueue` silently dropped every gesture (device bug
-            // 2026-09-06: Mosh discovered the prefix and logged correct `prefix=0x1`
-            // sends, but the bytes never reached the session). `sendTerminalInput`
-            // routes to moshSession.writeInput / etSession.send / rawWriter as
-            // appropriate; for plain tmux the `-CC` `tmux` runtime is always nil, so it
-            // never takes the send-keys branch.
-            sendInput: { [weak self] bytes in self?.sendTerminalInput(bytes) },
-            screen: screen,
-            recoverLayout: recoverLayout)
-        DebugLog.shared.log(.tmux, "plainTmux: controller installed session=\(name) recovery=\(recoverLayout != nil ? "sideChannel" : "blind")")
+            // directly: `rawWriter` is only set on the SSH paths, so on Mosh/ET it is nil
+            // and gestures would be silently dropped (device bug 2026-09-06).
+            sendInput: { [weak self] bytes in self?.sendTerminalInput(bytes) })
+        DebugLog.shared.log(.tmux, "plainTmux: controller installed session=\(name)")
     }
 
     /// Reactive tmux-missing detector for Mosh/ET (see `attachMoshIfPossible`/
     /// `attachET`): those transports attach a login shell with no pre-frame exec
     /// channel, so tmux viability can only be checked by watching the first
-    /// output after the in-band `tmux new -A -s <name>` launch. Classifies the
+    /// output after the in-band plain-tmux launch (attach-or-create). Classifies the
     /// accumulated `plainTmuxProbeBuffer` via the pure Kit detector
     /// (`classifyTmuxLaunch`) and resolves at most once per session.
     /// `.tmuxMissing` tears down the gesture layer only, the raw shell underneath
     /// is already live (fed by the same `output.onOutput` this buffer reads from),
     /// so no separate raw-shell attach is needed here.
     private func evaluatePlainTmuxProbe() {
-        // Feed the accumulated probe buffer to the controller (if installed yet) so
-        // it can scan for the SEMICOLYN_PREFIX sentinel emitted by the discovery
-        // compound in `PlainTmuxController.launchCommand`. `noteLaunchOutput` is
-        // idempotent, so repeated calls across ticks are safe; on transports where
-        // the controller installs after output has already started accumulating
-        // (Mosh/ET, gated on `onFirstFrame`), the buffer still holds the sentinel
-        // bytes from the start, so the next tick after install still discovers it.
-        plainTmux?.noteLaunchOutput(plainTmuxProbeBuffer)
         guard !plainTmuxProbeResolved else { return }
         switch classifyTmuxLaunch(output: plainTmuxProbeBuffer) {
         case .tmuxMissing:
@@ -2189,40 +2315,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         case .inconclusive:
             break   // keep accumulating until the watchdog window expires
         }
-    }
-
-    /// SSH/ET side-channel recovery query: run `list-windows -F "..."` on a fresh
-    /// one-shot exec over the retained connection, parse it, and return the ACTIVE
-    /// window's id + layout (nil if the exec failed, produced nothing, or no window
-    /// was flagged active). Mirrors `probeTmuxVersion`'s one-shot-exec race pattern.
-    private func queryPlainTmuxLayout(conn: Connection) async -> (window: WindowID, layout: PaneLayout)? {
-        let sink = TerminalShellOutput()
-        var captured: [UInt8] = []
-        sink.onBytes = { captured.append(contentsOf: $0) }
-        let done = AsyncStream<Void> { cont in
-            sink.onExit = { _ in cont.yield(); cont.finish() }
-        }
-        let probeSession = try? await conn.openExec(command: TmuxCommand.listWindowsForLayout(),
-                                                     term: "xterm-256color", cols: 80, rows: 24, output: sink)
-        guard probeSession != nil else {
-            DebugLog.shared.log(.tmux, "plainTmux:recoveryQuery exec FAILED to open → nil")
-            return nil
-        }
-        defer { if let probeSession { Task { try? await probeSession.close() } } }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { for await _ in done { break } }
-            group.addTask { try? await Task.sleep(nanoseconds: 2_000_000_000) }
-            await group.next(); group.cancelAll()
-        }
-        let text = String(decoding: captured, as: UTF8.self)
-        let lines = text.split(separator: "\n").map(String.init)
-        let windows = parseWindowListing(lines)
-        guard let active = windows.first(where: { $0.active }) else {
-            DebugLog.shared.log(.tmux, "plainTmux:recoveryQuery parsed=\(windows.count) noActiveWindow → nil")
-            return nil
-        }
-        DebugLog.shared.log(.tmux, "plainTmux:recoveryQuery parsed=\(windows.count) active=@\(active.id.raw)")
-        return (window: active.id, layout: active.layout)
     }
 
     // MARK: - Crash recovery + banner actions
@@ -2297,6 +2389,63 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     func flushPredictor() {
         guard let predictor, let learnedStore else { return }
         Task { let s = await predictor.snapshotState(); try? learnedStore.save(s) }
+    }
+
+    /// On app-background, suspend the live mosh session (Ctrl-^ Ctrl-Z), capture the
+    /// serialized transport-state blob, and persist it so a reopen can re-home to the
+    /// still-alive server at the correct sequence. Wrapped in a background task so
+    /// iOS's ~5s suspension budget can't cut the capture/write short.
+    func suspendMoshForBackground() {
+        guard let sess = moshSession else { return }
+        let sid = sessionID
+        var bgTask: UIBackgroundTaskIdentifier = .invalid
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "mosh-suspend") {
+            UIApplication.shared.endBackgroundTask(bgTask)
+            bgTask = .invalid
+        }
+        // The blob capture must NOT depend on `moshSession` staying non-nil: this
+        // block captures `sid` (not `self.moshSession`) and calls the store directly,
+        // so niling moshSession below is safe for the persist.
+        sess.onEncodedState = { blob in
+            do {
+                try AppStores.shared.moshState.put(blob, sessionID: sid)
+                DebugLog.shared.log(.connect, "mosh:suspend captured+persisted blob=\(blob.count)B sid=\(sid)")
+            } catch {
+                DebugLog.shared.log(.connect, "mosh:suspend persist FAILED error=\(error)")
+            }
+            if bgTask != .invalid {
+                UIApplication.shared.endBackgroundTask(bgTask)
+                bgTask = .invalid
+            }
+        }
+        // suspendForResume sends Ctrl-^ Ctrl-Z, and mosh SUSPEND makes the vendored
+        // client pthread_exit SYNCHRONOUSLY inside mosh_main, so runMoshLoop's own
+        // teardown (fclose + fireEnd) NEVER runs. suspendForResume therefore drives
+        // the session's teardown itself (via -stop, which nils onEnd), so onEnd will
+        // NOT fire here to flip us off `.shell`. We must do the VM-side transition
+        // ourselves, or warm-foreground's `guard state == .idle` in
+        // resumeMoshOnForegroundIfNeeded() fails and no re-home happens (frozen
+        // terminal on reopen, the feature's primary case).
+        sess.suspendForResume()
+        DebugLog.shared.log(.connect, "mosh:suspend sent Ctrl-^ Ctrl-Z sid=\(sid)")
+        // Cancel any in-flight mosh watchdogs/probes for this now-suspended session so
+        // they can't fire against the torn-down session (mirrors teardown()'s subset).
+        moshWatchdog?.cancel(); moshWatchdog = nil
+        moshReattachWatchdog?.cancel(); moshReattachWatchdog = nil
+        moshReattachSawServerOutput = false
+        moshResolved = false
+        plainTmuxProbeWatchdog?.cancel(); plainTmuxProbeWatchdog = nil
+        // Drop the live session handle + leave `.shell`. onEncodedState above (already
+        // captured `sid`) still fires on the main queue independently of this, so the
+        // blob is persisted regardless of niling moshSession. On `.active`,
+        // resumeMoshOnForegroundIfNeeded() now finds `state == .idle` and re-homes.
+        // Set moshSuspendedForResume BEFORE flipping to `.idle` so SessionView's
+        // `.onChange(state)` sees it and suppresses the dismiss-on-idle (otherwise the
+        // cover drops to the host list and the in-place foreground re-home never runs).
+        moshSuspendedForResume = true
+        moshSession = nil
+        state = .idle
+        DebugLog.shared.log(.connect, "mosh:suspend torn down → .idle (warm-foreground will re-home)")
     }
 
     /// Forget the most-recently-typed line's un-graduated tokens (surgical L7 tool).

@@ -55,38 +55,15 @@ final class TmuxConfigDecodeTests: XCTestCase {
         XCTAssertEqual(back, original)
     }
 
-    func testDecodesPrefixOverride() throws {
-        let json = #"{"useTmux": true, "prefixOverride": "C-a"}"#.data(using: .utf8)!
+    /// Hosts saved by older builds carry the removed prefix/learning keys. They must still
+    /// decode (keeping the real fields) and the dead keys must be dropped on re-save.
+    func testRemovedPrefixAndLearningKeysDecodeAndAreDroppedOnEncode() throws {
+        let json = #"{"useTmux": true, "sessionName": "w", "prefixOverride": "C-a", "learnedPrefix": "C-a", "learnedActionKeys": {"splitHorizontal": "|"}}"#.data(using: .utf8)!
         let c = try dec.decode(TmuxConfig.self, from: json)
-        XCTAssertEqual(c.prefixOverride, "C-a")
-    }
-
-    func testAbsentPrefixOverrideIsNil() throws {
-        let json = #"{"useTmux": true}"#.data(using: .utf8)!
-        let c = try dec.decode(TmuxConfig.self, from: json)
-        XCTAssertNil(c.prefixOverride)
-    }
-
-    func testLegacyHostStillDecodesWithNilPrefix() throws {
-        // A pre-existing host JSON (attemptControlMode legacy key) must still decode,
-        // prefixOverride absent -> nil.
-        let json = #"{"attemptControlMode": true, "sessionName": "x"}"#.data(using: .utf8)!
-        let c = try dec.decode(TmuxConfig.self, from: json)
-        XCTAssertEqual(c.useTmux, true)
-        XCTAssertNil(c.prefixOverride)
-    }
-
-    func testRoundTripPrefixOverride() throws {
-        let original = TmuxConfig(useTmux: true, sessionName: "rt", prefixOverride: "C-a")
-        let back = try dec.decode(TmuxConfig.self, from: enc.encode(original))
-        XCTAssertEqual(back, original)
-        XCTAssertEqual(back.prefixOverride, "C-a")
-    }
-
-    func testEncodeOmitsPrefixOverrideWhenAbsent() throws {
-        let c = TmuxConfig(useTmux: true, sessionName: "z")
-        let data = try enc.encode(c)
-        let s = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(c, TmuxConfig(useTmux: true, sessionName: "w"))
+        let s = String(data: try enc.encode(c), encoding: .utf8)!
         XCTAssertFalse(s.contains("prefixOverride"))
+        XCTAssertFalse(s.contains("learnedPrefix"))
+        XCTAssertFalse(s.contains("learnedActionKeys"))
     }
 }

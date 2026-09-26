@@ -383,6 +383,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
                             // Then tell tmux; the echoed layout confirms via apply().
                             self.onSelectPane(pane)
                         },
+                        // NOT the plain-tmux `isTmux:true` escape hatch: this container
+                        // already has real multi-pane focus (isActivePane/onSelectPane
+                        // above), so an active pane in an app-owned mode must still
+                        // yield (no stray arrow-key cursor walk into e.g. vim). Order
+                        // matches the Callbacks struct (isTmux after onSelectPane).
+                        isTmux: { false },
                         currentMode: { [weak self] in self?.modeTracker.mode(for: pane) ?? .localScroll },
                         applicationCursorKeys: { [weak view] in view?.getTerminal().applicationCursor ?? false },
                         altScrollDecision: { [weak self] in

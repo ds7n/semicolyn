@@ -23,7 +23,8 @@ public enum PaneTapAction: Equatable, Sendable {
 public func paneTapAction(isActivePane: Bool,
                           mode: InteractionMode,
                           hasSelection: Bool,
-                          tapInsideSelection: Bool) -> PaneTapAction {
+                          tapInsideSelection: Bool,
+                          isTmux: Bool = false) -> PaneTapAction {
     guard isActivePane else { return .focusPane }
     // A live selection's tap-to-(re-summon/clear) applies in every mode, before the
     // app-owned yield: double-tap can create a selection on the alt-screen too.
@@ -34,6 +35,8 @@ public func paneTapAction(isActivePane: Bool,
     case .localScroll:
         return .active(tapAction(hasSelection: false, tapInsideSelection: false))
     case .appOwnsInput, .mouseReporting:
-        return .yield
+        // Under tmux the tap must reach tmux (forward click / cycle), so deliver it
+        // with coords via the placeCursor path instead of yielding to the app.
+        return isTmux ? .active(.placeCursor) : .yield
     }
 }
