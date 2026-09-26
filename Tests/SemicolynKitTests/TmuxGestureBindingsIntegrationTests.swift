@@ -143,36 +143,59 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
 
     /// Run `script` under /bin/sh with tmux isolated to `dir`. Output goes to a file, not a
     /// Pipe: a forked tmux server can inherit a pipe's write end and block a read forever.
+    ///
+    /// Spawns via raw `posix_spawn` + an exclusive `waitpid`, NOT `Foundation.Process`.
+    /// Verified on this toolchain (swift:6.1 on Linux): both `Process.waitUntilExit()` and
+    /// `Process.isRunning` hang forever once the spawned command leaves a live descendant
+    /// behind (confirmed with an isolated repro, `sh -c "sleep 1000 & true"`, no tmux
+    /// involved -- exactly what `tmux ... new-session -d` does on purpose, to keep the
+    /// server running), while a raw `waitpid` on the same pid reaps it within
+    /// milliseconds. So the bug is in Foundation's own termination bookkeeping, not specific
+    /// to `waitUntilExit()`; routing this pid through `Process` at all -- even just to read
+    /// `isRunning` -- means Foundation's internal reaper can also try to `waitpid` it,
+    /// racing our own call (the loser gets ECHILD once the zombie is already reaped, an
+    /// ambiguous "did it exit or did something else eat it" state). Posix-spawning directly
+    /// means Foundation never tracks this pid at all, so our `waitpid` is the only reaper
+    /// and there is no race to reason about.
     @discardableResult
     private func sh(_ script: String) throws -> String {
         let outPath = dir + "/out-" + UUID().uuidString
-        FileManager.default.createFile(atPath: outPath, contents: nil)
-        let out = try FileHandle(forWritingTo: URL(fileURLWithPath: outPath))
+        _ = FileManager.default.createFile(atPath: outPath, contents: nil)
+        let outFd = open(outPath, O_WRONLY)
+        precondition(outFd >= 0, "open(\(outPath)) failed: \(String(cString: strerror(errno)))")
         defer {
-            try? out.close()
+            close(outFd)
             try? FileManager.default.removeItem(atPath: outPath)
         }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", script]
+
         var env = ProcessInfo.processInfo.environment
         env["TMUX_TMPDIR"] = dir
         env["HOME"] = dir
         env["LANG"] = "C.UTF-8"   // tmux refuses non-UTF-8 locales on some builds
         env.removeValue(forKey: "TMUX")
-        p.environment = env
-        p.standardOutput = out
-        p.standardError = out
-        try p.run()
-        // NOT `p.waitUntilExit()`: on this toolchain (swift:6.1 on Linux) Foundation's
-        // Process termination detection hangs forever once the spawned command leaves a
-        // live descendant behind (exactly what `tmux ... new-session -d` does on purpose,
-        // to keep the server running) -- confirmed by isolated repro against a plain
-        // `sh -c "sleep 1000 & true"` with no tmux involved. A raw `waitpid` on the direct
-        // child's pid is unaffected: it reaps that pid the moment it exits, regardless of
-        // any grandchildren still running.
+        var envp: [UnsafeMutablePointer<CChar>?] = env.map { strdup("\($0.key)=\($0.value)") }
+        envp.append(nil)
+        defer { envp.forEach { free($0) } }
+
+        var fileActions = posix_spawn_file_actions_t()
+        posix_spawn_file_actions_init(&fileActions)
+        posix_spawn_file_actions_adddup2(&fileActions, outFd, 1)
+        posix_spawn_file_actions_adddup2(&fileActions, outFd, 2)
+        defer { posix_spawn_file_actions_destroy(&fileActions) }
+
+        let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(script), nil]
+        defer { argv.forEach { free($0) } }
+
+        var pid: pid_t = 0
+        let spawnResult = posix_spawn(&pid, "/bin/sh", &fileActions, nil, argv, envp)
+        precondition(spawnResult == 0, "posix_spawn failed: \(String(cString: strerror(spawnResult)))")
+
         var status: Int32 = 0
-        while waitpid(p.processIdentifier, &status, 0) == -1 && errno == EINTR {}
+        while true {
+            let r = waitpid(pid, &status, 0)
+            if r == pid { break }
+            precondition(r == -1 && errno == EINTR, "waitpid(\(pid)) failed: r=\(r) errno=\(errno)")
+        }
         return try String(contentsOfFile: outPath, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
