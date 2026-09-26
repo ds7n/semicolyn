@@ -247,7 +247,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// while a suspend is pending, exactly as `resumeFailure != nil` does for the banner.
     var moshSuspendedForResume = false
     /// State-resume liveness plumbing. On a STATE-resume (blob replay) we do NOT re-send
-    /// `tmux new -A`, so the SEMICOLYN_LAUNCH sentinel the fresh-relaunch watchdog keys
+    /// the plain-tmux launch (attach-or-create), so the SEMICOLYN_LAUNCH sentinel the fresh-relaunch watchdog keys
     /// off is never printed. Instead reattachMosh forces a full repaint (Ctrl-^ Ctrl-L),
     /// and the server's repaint output crossing `moshStateResumeLivenessFloorBytes` proves
     /// the re-home is live (`moshStateResumeSawServerOutput`) and cancels the watchdog. If
@@ -322,7 +322,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// (`output.onBytes`/`terminal.feed`); this only holds the gesture-command
     /// controller.
     private(set) var plainTmux: PlainTmuxController?
-    /// True once the plain-tmux in-band launch (`tmux new -A -s <name>\n`) has
+    /// True once the plain-tmux in-band launch (attach-or-create) has
     /// been sent for the current Mosh session (idempotency guard: `onFirstFrame`
     /// is documented once-only per `MoshSession`, but this flag makes the send
     /// itself robust to any future re-fire, mirroring `etControlLaunchSent`'s
@@ -354,14 +354,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Whether Mosh/ET `onOutput` should keep accumulating launch output into
     /// `plainTmuxProbeBuffer`: while the tmux-missing probe is unresolved, and after that
     /// until the launch sentinel has been seen (the Mosh cold-reattach liveness signal can
-    /// trail the probe's 2s "assume started" timer). Bounded so a shell that never prints
-    /// the sentinel cannot grow the buffer without limit. A raw non-tmux session that never
-    /// armed the probe short-circuits on `plainTmuxProbeArmed`.
+    /// trail the probe's 2s "assume started" timer). Bounded at 16384 bytes so a shell that
+    /// never prints the sentinel cannot grow the buffer without limit, while leaving room
+    /// for a large restored-frame paint that lands BEFORE the sentinel (a smaller cap could
+    /// stop accumulating first and cut the reattach liveness check off early). A raw
+    /// non-tmux session that never armed the probe short-circuits on `plainTmuxProbeArmed`.
     private var shouldAccumulatePlainTmuxProbe: Bool {
         guard plainTmuxProbeArmed else { return false }
         if !plainTmuxProbeResolved { return true }
         return !containsPlainTmuxLaunchSentinel(plainTmuxProbeBuffer)
-            && plainTmuxProbeBuffer.utf8.count < 8192
+            && plainTmuxProbeBuffer.utf8.count < 16384
     }
     /// Bounded watch (~2s) started when the in-band plain-tmux launch is sent;
     /// classifies the accumulated `plainTmuxProbeBuffer` on expiry if nothing
@@ -801,7 +803,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `resolveTmuxSessionName` is a DETERMINISTIC function of `host`/`defaults`
     /// (no randomness, see `Resolution.swift`), so a later `resumeRawReconnect` →
     /// `connect(savedHost:)` re-derives the SAME name and re-enters the SAME gate
-    /// (`attachSSHShell`) that launched it, `tmux new -A -s <name>` then reattaches
+    /// (`attachSSHShell`) that launched it, the plain-tmux launch (attach-or-create) then reattaches
     /// the still-running session either way. This flag exists purely so the
     /// captured record's `tmuxSessionName` metadata is accurate for anything that
     /// inspects it (diagnostics, the `resume:capture` log line's `tmux=` field), not
@@ -1002,15 +1004,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     DebugLog.shared.log(.connect, "resume:reattachMosh state-resume repaint output \(self.moshStateResumeBytesSinceFirstFrame)B > floor → alive, confirmed")
                 }
             }
-            // Feed the reactive tmux-missing probe on reattach too (the re-launched
-            // `tmux new -A -s <name>` in onFirstFrame arms it), mirroring the fresh path.
+            // Feed the reactive tmux-missing probe on reattach too (the re-sent
+            // plain-tmux launch (attach-or-create) in onFirstFrame arms it), mirroring the fresh path.
             // Keep accumulating per `shouldAccumulatePlainTmuxProbe`.
             guard self.shouldAccumulatePlainTmuxProbe else { return }
             self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
             self.evaluatePlainTmuxProbe()
             // Liveness proof for the cold-reattach dead-server watchdog: the
             // SEMICOLYN_LAUNCH sentinel is printed ONLY when the server actually EXECUTES
-            // our in-band relaunch (the launch script's sentinel printf; tmux new -A). It
+            // our in-band relaunch (the plain-tmux launch script's sentinel printf). It
             // can never appear in mosh's restored-frame paint (which is local, last-known
             // screen state), so its presence proves the re-homed server is ALIVE.
             // Keying off the sentinel (not "any output after launch-sent") avoids the
@@ -1081,7 +1083,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // If the resumed record was a plain-tmux session, RE-LAUNCH tmux in-band and
             // install the gesture controller, exactly like the fresh Mosh path. The
             // reattached login shell is a fresh shell (Mosh reattach re-execs the login
-            // shell), so `tmux new -A -s <name>` (-A = attach-if-exists) lands back in the
+            // shell), so the plain-tmux launch (attach-or-create) lands back in the
             // persisted session and the swipe/zoom/tap gestures work again. Without this,
             // a cold reattach came back as a bare shell with no gestures (device bug
             // 2026-09-04: "Mosh reconnect did not work").
@@ -1090,14 +1092,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self.plainTmuxSessionNamePendingInstall = name
                 self.installPlainTmuxControllerIfMounted()
                 if isStateResume {
-                    // State-resume restored the attached-tmux screen verbatim; re-sending
-                    // `tmux new -A` would re-run inside the restored session. Skip the
-                    // relaunch (blob already cleared above; Ctrl-L redraw + watchdog were
-                    // issued unconditionally above, before this tmux-name branch).
-                    //
-                    // No relaunch: the restored screen is already inside attached tmux,
-                    // and the private gesture bindings persist on the tmux server from the
-                    // original launch, so gestures keep working without re-running it.
+                    // State-resume restored the attached-tmux screen verbatim, so re-sending
+                    // the plain-tmux launch would re-run inside the restored session. Skip
+                    // it: the private gesture bindings persist on the tmux server from the
+                    // original launch, so gestures keep working. (Blob already cleared and
+                    // the Ctrl-L redraw + watchdog issued above, before this branch.)
                     DebugLog.shared.log(.tmux, "resume:reattachMosh state-resume: skip relaunch (bindings persist on server)")
                 } else {
                     self.moshPlainTmuxLaunchSent = true
@@ -1141,7 +1140,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     }
 
     /// Arm the fresh-relaunch dead-server liveness watchdog: after re-sending
-    /// `tmux new -A` on a reattach WITHOUT restored state, require REAL server output
+    /// the plain-tmux launch (attach-or-create) on a reattach WITHOUT restored state, require REAL server output
     /// (the SEMICOLYN_LAUNCH sentinel, set in onOutput) within 4s. If none arrives the
     /// stored mosh-server is unreachable -> fall back to a fresh bootstrap connect.
     /// NOT armed on the state-resume path (blob replay is its own success signal).
@@ -1179,7 +1178,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     /// Arm the STATE-resume dead-server liveness watchdog (Important-3 safety net).
     /// Unlike the fresh-relaunch watchdog, a state-resume prints no SEMICOLYN_LAUNCH
-    /// sentinel (we skip `tmux new -A`), so it uses a different signal: reattachMosh forces
+    /// sentinel (we skip the plain-tmux launch), so it uses a different signal: reattachMosh forces
     /// a full repaint with Ctrl-^ Ctrl-L, and the server's repaint OUTPUT crossing
     /// `moshStateResumeLivenessFloorBytes` (in onOutput) sets `moshStateResumeSawServerOutput`
     /// and cancels this watchdog. If no repaint arrives within the window (the server is
@@ -1439,7 +1438,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // Connected edge (raw SSH / gesture-tmux over SSH): a raw SSH session is
         // client-side, so it resumes by PROMPTING (transport = .ssh, no secret). The
         // tmux session name always rides so a confirmed fresh reconnect lands back
-        // in the same session via `tmux new -A -s <name>`.
+        // in the same session via the plain-tmux launch (attach-or-create).
         // Runs on the main actor (async method on a @MainActor class), no wrap needed.
         captureResume(host: host, transport: .ssh,
                       endpoint: (host: host.hostName, port: resolvePort(host: host, defaults: defaults)),
@@ -1490,7 +1489,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // pre-frame exec channel over Mosh to probe `tmux -V` the way SSH's
         // `probeTmuxVersion` does (Mosh's bootstrap exec only ever runs
         // `mosh-server`), so the launch is UNCONDITIONAL whenever `useTmux` is on:
-        // if tmux isn't installed remotely, `tmux new -A -s <name>` fails visibly
+        // if tmux isn't installed remotely, the plain-tmux launch fails visibly
         // at the shell (same user-facing behavior as typing a bad command), no
         // different from a user who typed it themselves. Reactive detection
         // (`evaluatePlainTmuxProbe` below) watches the first output and degrades
@@ -1559,7 +1558,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self?.moshWatchdog?.cancel(); self?.moshWatchdog = nil
                 DebugLog.shared.log(.connect, "mosh: watchdog cancelled (onFirstFrame)")
                 // Mosh has no launch-command argument (attaches a login shell), so
-                // send `tmux new -A -s <name>\n` IN-BAND now that frames are
+                // send the plain-tmux launch (attach-or-create) IN-BAND now that frames are
                 // flowing, exactly like ET's `-CC` in-band launch (PR #123). Guarded by
                 // `moshPlainTmuxLaunchSent` (idempotency; `onFirstFrame` is documented
                 // once-only, but this makes the send itself robust either way).
@@ -1787,7 +1786,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                              keepaliveSecs: config.keepaliveSecs)
 
         // ET, like Mosh, attaches a login shell with no launch-command argument, so
-        // "launch plain tmux" means sending `tmux new -A -s <name>\n` IN-BAND once
+        // "launch plain tmux" means sending the plain-tmux launch (attach-or-create) IN-BAND once
         // the stream is up (see `onFirstFrame` below), the same in-band shape `-CC`
         // used to use (PR #123), just a different launch string and no
         // `TmuxRuntime`/pane routing. `-CC` is RETIRED as a user-selectable
@@ -2293,7 +2292,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Reactive tmux-missing detector for Mosh/ET (see `attachMoshIfPossible`/
     /// `attachET`): those transports attach a login shell with no pre-frame exec
     /// channel, so tmux viability can only be checked by watching the first
-    /// output after the in-band `tmux new -A -s <name>` launch. Classifies the
+    /// output after the in-band plain-tmux launch (attach-or-create). Classifies the
     /// accumulated `plainTmuxProbeBuffer` via the pure Kit detector
     /// (`classifyTmuxLaunch`) and resolves at most once per session.
     /// `.tmuxMissing` tears down the gesture layer only, the raw shell underneath

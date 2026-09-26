@@ -18,19 +18,17 @@ final class PlainTmuxController {
     private let sessionName: String
 
     /// - Parameters:
-    ///   - sessionName: validated by the caller (`isValidTmuxSessionName`) before
-    ///     `launchCommand()` is ever sent; stored as-is.
+    ///   - sessionName: validated by the caller (`isValidTmuxSessionName`) before the
+    ///     launch command is ever sent; stored as-is.
     ///   - sendInput: raw-byte write to the connected transport.
     init(sessionName: String, sendInput: @escaping ([UInt8]) -> Void) {
         self.sessionName = sessionName
         self.sendInput = sendInput
     }
 
-    /// The launch command for this session (see `launchCommand(sessionName:)`).
-    func launchCommand() -> String { Self.launchCommand(sessionName: sessionName) }
-
-    /// Static form, usable before a controller exists (`ConnectionViewModel` sends the
-    /// launch before the `TerminalView` mounts). Single source of truth is the Kit builder.
+    /// The launch command for a session. Static, so usable before a controller exists
+    /// (`ConnectionViewModel` sends the launch before the `TerminalView` mounts). Single
+    /// source of truth is the Kit builder.
     ///
     /// INVARIANT: the command prints `plainTmuxLaunchSentinel`; the Mosh cold-reattach
     /// liveness watchdog (`ConnectionViewModel.reattachMosh`) treats its arrival as proof
@@ -61,7 +59,7 @@ final class PlainTmuxController {
         case .forwardClick:
             sendInput(sgrMouseClick(col: col, row: row))
             DebugLog.shared.log(.tmux, "plainTmux:tapPane col=\(col) row=\(row) -> forwardClick")
-        case .cyclePrefix:
+        case .cyclePane:
             sendAction(.cyclePane)
             DebugLog.shared.log(.tmux, "plainTmux:tapPane col=\(col) row=\(row) -> cycle")
         }
