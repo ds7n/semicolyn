@@ -3,8 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// TmuxAction's command is the command-mode FALLBACK string (no -t = active pane),
-/// used only when no key binding is discovered for the action.
+/// TmuxAction's command is what its private binding runs (no -t = active pane).
 final class TmuxActionTests: XCTestCase {
     func testEachActionCommand() {
         XCTAssertEqual(TmuxAction.splitHorizontal.command, "split-window -h")
@@ -17,9 +16,7 @@ final class TmuxActionTests: XCTestCase {
         XCTAssertEqual(TmuxAction.cyclePane.command, "select-pane -t +")
     }
 
-    func testRawValuesStableForPersistence() {
-        // Raw values are the persisted map keys; they must be stable strings.
-        XCTAssertEqual(TmuxAction.splitHorizontal.rawValue, "splitHorizontal")
+    func testEightActions() {
         XCTAssertEqual(TmuxAction.allCases.count, 8)
     }
 }

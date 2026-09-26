@@ -143,14 +143,15 @@ struct TerminalScreen: UIViewRepresentable {
         terminal.addGestureRecognizer(restoreTap)
 
         // If `attachPlainTmux` launched a plain-tmux session for this connection
-        // (per-host/default `resolveUseTmux`), build the gesture controller against
-        // THIS freshly created `TerminalView` now (it needs the live grid +
-        // `getCharData` for the on-tap border-drift check). No-op (and
-        // `vm.plainTmux` stays nil) when tmux is off or this is a raw-PTY/Mosh
-        // screen, so the callbacks below fall through to the unchanged raw no-ops.
-        // Stash the mounted view so a transport that launches plain tmux AFTER this
-        // mount (Mosh/ET, in-band on onFirstFrame) can install the gesture controller
-        // against it (SSH installs right here since its pending name is already set).
+        // (per-host/default `resolveUseTmux`), build the gesture controller now;
+        // `screen` is only the mount signal, the controller only needs the
+        // transport-aware send closure. No-op (and `vm.plainTmux` stays nil) when
+        // tmux is off or no plain-tmux launch is pending yet, so the callbacks
+        // below fall through to the unchanged raw no-ops. Stash the mounted view
+        // so a transport that launches plain tmux AFTER this mount (Mosh/ET,
+        // in-band on `onFirstFrame`) can install the controller later via
+        // `installPlainTmuxControllerIfMounted()` (SSH installs right here since
+        // its pending name is already set).
         vm.setMountedTerminalView(terminal)
         vm.installPlainTmuxControllerIfNeeded(screen: terminal)
 
