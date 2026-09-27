@@ -4,7 +4,7 @@ import SwiftUI
 
 /// The MVP entry screen: a connect form that, on success, swaps to the live
 /// terminal. Host, port, user, and password are entered each launch (no
-/// persistence yet — wiring the built `HostStore` is the next slice).
+/// persistence yet, wiring the built `HostStore` is the next slice).
 struct ConnectView: View {
     @StateObject private var vm = ConnectionViewModel()
     @State private var host = ""
@@ -19,7 +19,8 @@ struct ConnectView: View {
                            session: vm.session,
                            osc52Allowed: vm.osc52Allowed,
                            onTitle: { [weak vm] t in vm?.terminalTitle = t },
-                           vm: vm)
+                           vm: vm,
+                           keyboardFocusRequestToken: vm.keyboardFocusRequestToken)
                 .ignoresSafeArea(.container, edges: .bottom)
         } else {
             form

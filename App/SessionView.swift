@@ -158,7 +158,8 @@ struct SessionView: View {
                                    onSSHLink: { [weak vm] url in vm?.presentSSHLink(url) },
                                    vm: vm,
                                    keybarSettings: AppStores.shared.keybarSettings,
-                                   hardwareKeyboardConnected: hardwareKeyboard.isConnected)
+                                   hardwareKeyboardConnected: hardwareKeyboard.isConnected,
+                                   keyboardFocusRequestToken: vm.keyboardFocusRequestToken)
                         .overlay(alignment: .top) {
                             if let reason = vm.degraded {
                                 DegradedBanner(reason: reason) { vm.degraded = nil }

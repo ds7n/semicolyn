@@ -39,6 +39,11 @@ struct TerminalScreen: UIViewRepresentable {
     var keybarSettings: KeybarSettingsStore = AppStores.shared.keybarSettings
     /// Whether a hardware keyboard is connected (drives the keybar's compact/hidden mode).
     var hardwareKeyboardConnected: Bool = false
+    /// `vm.keyboardFocusRequestToken`, passed BY VALUE: SwiftUI only re-runs `updateUIView`
+    /// when this representable's inputs change, and `vm` is the same reference across a token
+    /// bump, so reading the token through `vm` alone never fired on sheet dismiss (device
+    /// build 173: the request ran only when the app later backgrounded).
+    var keyboardFocusRequestToken: Int = 0
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(send: send, session: session, settings: settings, theme: theme, osc52Allowed: osc52Allowed, onTitle: onTitle)
@@ -47,7 +52,7 @@ struct TerminalScreen: UIViewRepresentable {
         c.vm = vm
         // Only a focus request made AFTER this terminal mounted should act (a remount
         // with a stale token must not re-present on its first pass).
-        c.lastFocusRequestToken = vm.keyboardFocusRequestToken
+        c.lastFocusRequestToken = keyboardFocusRequestToken
         // Build + retain the keybar audio-feedback accessory for this terminal.
         c.keybarAccessory = KeybarInputAccessory(vm: vm, keybarSettings: keybarSettings,
                                                  theme: theme,
@@ -264,8 +269,8 @@ struct TerminalScreen: UIViewRepresentable {
         // decision forces a reload in that case (same fix as TmuxPaneContainer, PR #128,
         // which the raw/plain-tmux screen never got: device build 172). Act only on a NEW
         // token so repeated SwiftUI passes never thrash.
-        if vm.keyboardFocusRequestToken != context.coordinator.lastFocusRequestToken {
-            context.coordinator.lastFocusRequestToken = vm.keyboardFocusRequestToken
+        if keyboardFocusRequestToken != context.coordinator.lastFocusRequestToken {
+            context.coordinator.lastFocusRequestToken = keyboardFocusRequestToken
             let action = keyboardRestoreAction(isFirstResponder: terminal.isFirstResponder,
                                                keyboardVisible: false)
             context.coordinator.apply(action, to: terminal, reason: "focusRequest")
