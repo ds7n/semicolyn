@@ -112,6 +112,9 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private var doubleTap: UITapGestureRecognizer!
     private var tripleTap: UITapGestureRecognizer!
     private var longPress: UILongPressGestureRecognizer!
+    /// When the last single tap was delivered (`CACurrentMediaTime`), so plain-tmux can tell
+    /// a fresh tap from the follow-up taps of a double/triple tap (`isFollowUpTap`).
+    private var lastSingleTapAt: CFTimeInterval?
     private var twoFingerTap: UITapGestureRecognizer!
     private var editMenu: UIEditMenuInteraction!
     /// OUR alt-screen drag pan. Enabled ONLY while the pane is in `.appOwnsInput`
@@ -302,7 +305,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // line-select + menu re-present. `applyInclusiveSelection` just replaces the
         // range and `presentEditMenu` re-presents, so the upgrade is idempotent and the
         // brief word->line change is imperceptible (the third tap lands within ~150ms).
-        singleTap.require(toFail: doubleTap)
+        //
+        // The single-vs-double dependency is NOT set statically here: it is decided per
+        // touch in `gestureRecognizer(_:shouldRequireFailureOf:)`. A raw shell keeps the
+        // wait (tap = cursor placement). Plain tmux drops it so pane select fires on
+        // finger-up (device build 174: ~0.4-0.5s touch-to-click), per Apple's "stackable
+        // taps" guidance and SwiftTerm's own default; `handleSingleTap` then ignores the
+        // follow-up taps of a double/triple tap (`isFollowUpTap`).
 
         editMenu = UIEditMenuInteraction(delegate: self)
         view.addInteraction(editMenu)
@@ -850,6 +859,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     @objc private func handleSingleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
+        // Plain tmux: single taps fire without waiting out the double-tap window, so a
+        // double/triple tap also delivers its 2nd/3rd tap here. Only the first may act: a
+        // follow-up would send tmux a second click (its own double-click binding enters
+        // copy-mode) or clear the word the double-tap just selected.
+        let now = CACurrentMediaTime()
+        let previousTapAt = lastSingleTapAt
+        lastSingleTapAt = now
+        if callbacks.isTmux(), isFollowUpTap(at: now, previousTapAt: previousTapAt) {
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=skip reason=followUpTap dt=\(String(format: "%.3f", now - (previousTapAt ?? now)))")
+            return
+        }
         // A tap always raises the keyboard. We replaced SwiftTerm's own tap recognizer
         // (which called `becomeFirstResponder`), and PR #90's `editingInteractionConfiguration
         // = .none` suppressed the system tap-to-focus, so nothing re-presented the keyboard
@@ -1056,6 +1076,16 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// grabbed); otherwise `handlePan` is dead weight and must not block the pan.
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRequireFailureOf other: UIGestureRecognizer) -> Bool {
+        // Single tap vs double tap / long press, decided per touch (see the note in
+        // `installOurRecognizers`). Raw shell: wait out the double tap (tap = cursor place).
+        // Plain tmux: no double-tap wait (instant pane select), but DO wait for the long
+        // press to fail, so a held touch that zooms never also clicks on release (device
+        // build 174: zoom then a stray pane click from one touch). A quick tap is not
+        // delayed: the long press fails the moment the finger lifts.
+        if g === singleTap {
+            if other === doubleTap { return !callbacks.isTmux() }
+            if other === longPress { return callbacks.isTmux() }
+        }
         if other === handlePan, role(of: g) == .scrollPan || role(of: g) == .switchPan {
             return terminalView?.hasActiveSelection == true
         }
