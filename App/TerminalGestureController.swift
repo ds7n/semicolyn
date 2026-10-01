@@ -265,8 +265,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                 if let switchPan {
                     gr.require(toFail: switchPan)
                 }
+                if let altScreenPan {
+                    gr.require(toFail: altScreenPan)
+                }
                 DebugLog.shared.log(.gesture,
-                    "selectionPan subordinated (delegate+require-fail vs scrollPan+switchPan)")
+                    "selectionPan subordinated (delegate+require-fail vs scrollPan+switchPan+altScreenPan)")
             }
         }
     }
@@ -1013,20 +1016,16 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// Linux-tested decision (`gesturesMayRecognizeSimultaneously`). The scroll pan is
     /// the terminal view's inherited `UIScrollView.panGestureRecognizer`, NOT one of
     /// ours; identity-match it. `longPress` is ours; pinch is a `UIPinchGestureRecognizer`
-    /// installed by the mount; everything else is a tap or unmodeled.
-    ///
-    /// NOTE: `handlePan` has no dedicated `GestureRole` case (Task 6 is scoped to this
-    /// file only, adding a case means also touching `GestureSimultaneity.swift`), so it
-    /// maps to `.other` here and its exclusivity vs `scrollPan`/`switchPan` is handled
-    /// directly in the two delegate methods below (identity-checked ahead of the
-    /// Kit-policy fallback), NOT via `gesturesMayRecognizeSimultaneously`. Documented
-    /// deviation from the "mirror the role/ours pattern" instruction, see task report.
+    /// installed by the mount; everything else is a tap or unmodeled. `handlePan` has its
+    /// own role so ALL drag-ownership rules live in the Kit policy (device build 175: the
+    /// old App-local handlePan special case covered scroll/switch but not the alt-screen
+    /// pan, so a handle drag inside tmux also switched windows).
     private func role(of g: UIGestureRecognizer) -> GestureRole {
         if g === terminalView?.panGestureRecognizer { return .scrollPan }
         if g === altScreenPan { return .altScreenPan }
         if g === switchPan { return .switchPan }
         if g === longPress { return .longPress }
-        if g === handlePan { return .other }
+        if g === handlePan { return .handlePan }
         if g is UIPinchGestureRecognizer { return .pinch }
         if g is UITapGestureRecognizer { return .tap }
         // A pan that is neither the inherited scroll pan, our alt-screen pan, our handle
@@ -1042,19 +1041,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     // coexists with the 1-finger pan/taps, but the long-press must NOT co-recognize
     // with the scroll pan, otherwise a moving-finger drag was treated as a held-touch
     // text selection (device trace 2026-07-13: every drag started a selection). Making
-    // that one pairing exclusive lets the pan cancel the long-press on movement.
-    //
-    // `handlePan` is excluded from `scrollPan`/`switchPan` directly here (ahead of the
-    // Kit policy call), the App-local mirror of the `.selectionPan`/`.scrollPan` Kit
-    // exclusion, since `handlePan` has no Kit role (see `role(of:)`).
+    // that one pairing exclusive lets the pan cancel the long-press on movement. The
+    // handle drag is exclusive with every content drag owner, the long-press and the
+    // selection pan (all in Kit, derived from `GestureRole.isContentDragOwner`).
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        if isHandlePanVsScrollOrSwitch(g, other) { return false }
         return gesturesMayRecognizeSimultaneously(role(of: g), role(of: other))
     }
 
-    /// Make SwiftTerm's selection/mouse pan *lose* to the native scroll pan, AND make
-    /// `scrollPan`/`switchPan` lose to OUR `handlePan`.
+    /// Make SwiftTerm's selection/mouse pan *lose* to every content drag owner, AND make
+    /// every content drag owner (scroll / switch / alt-screen pan) lose to OUR `handlePan`
+    /// while a selection exists. The rules are Kit's `gestureMustWaitForFailure`.
     ///
     /// `shouldRecognizeSimultaneouslyWith == false` only stops two pans from co-recognizing;
     /// it does not decide WHICH wins. For the selection pan (an unwanted hijacker) we want
@@ -1086,21 +1083,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             if other === doubleTap { return !callbacks.isTmux() }
             if other === longPress { return callbacks.isTmux() }
         }
-        if other === handlePan, role(of: g) == .scrollPan || role(of: g) == .switchPan {
-            return terminalView?.hasActiveSelection == true
-        }
-        guard role(of: g) == .selectionPan else { return false }
-        return role(of: other) == .scrollPan || role(of: other) == .switchPan
-    }
-
-    /// True when `(g, other)` is the `handlePan` vs `scrollPan`/`switchPan` pairing in
-    /// either order, the App-local exclusion `role(of:)`/Kit policy can't express because
-    /// `handlePan` maps to `.other` (see `role(of:)`).
-    private func isHandlePanVsScrollOrSwitch(_ g: UIGestureRecognizer, _ other: UIGestureRecognizer) -> Bool {
-        let pair = Set([ObjectIdentifier(g), ObjectIdentifier(other)])
-        guard let handlePan, let scrollPan = terminalView?.panGestureRecognizer, let switchPan else { return false }
-        return pair == Set([ObjectIdentifier(handlePan), ObjectIdentifier(scrollPan)])
-            || pair == Set([ObjectIdentifier(handlePan), ObjectIdentifier(switchPan)])
+        return gestureMustWaitForFailure(role(of: g), of: role(of: other),
+                                         hasActiveSelection: terminalView?.hasActiveSelection == true)
     }
 }
 
