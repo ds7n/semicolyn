@@ -277,22 +277,27 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private func installOurRecognizers(on view: TerminalView) {
         singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
         singleTap.delegate = self
+        singleTap.name = "ours.singleTap"
 
         doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
         doubleTap.delegate = self
+        doubleTap.name = "ours.doubleTap"
 
         tripleTap = UITapGestureRecognizer(target: self, action: #selector(handleTripleTap(_:)))
         tripleTap.numberOfTapsRequired = 3
         tripleTap.delegate = self
+        tripleTap.name = "ours.tripleTap"
 
         longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
         longPress.minimumPressDuration = 0.5
         longPress.delegate = self
+        longPress.name = "ours.longPress"
 
         twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap(_:)))
         twoFingerTap.numberOfTouchesRequired = 2
         twoFingerTap.delegate = self
+        twoFingerTap.name = "ours.twoFingerTap"
 
         // Tap disambiguation. single-tap waits for double to fail (one tap-timeout
         // window, ~0.3s), matching native iOS single-vs-double cost.
@@ -325,10 +330,12 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // false` has parked the native pan and this is the only live drag-owner.
         altScreenPan = UIPanGestureRecognizer(target: self, action: #selector(handleAltScreenPan(_:)))
         altScreenPan.delegate = self
+        altScreenPan.name = "ours.altScreenPan"
         altScreenPan.isEnabled = false
 
         switchPan = UIPanGestureRecognizer(target: self, action: #selector(handleSwitchPan(_:)))
         switchPan.delegate = self
+        switchPan.name = "ours.switchPan"
         // Enabled at install (NOT via modeTracker.onChange, which fires only on a mode CHANGE
         // and so never fires for a fresh pane that starts in .localScroll: the exact bug).
         // The mount then toggles it on mode transitions via `setSwitchPanEnabled`.
@@ -347,6 +354,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // drag off the handles falls through to scroll.
         handlePan = UIPanGestureRecognizer(target: self, action: #selector(handleHandlePan(_:)))
         handlePan.delegate = self
+        handlePan.name = "ours.handlePan"
         handlePan.isEnabled = false
 
         ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap, altScreenPan, switchPan, handlePan]

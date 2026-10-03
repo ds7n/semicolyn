@@ -148,6 +148,7 @@ struct TerminalScreen: UIViewRepresentable {
             action: #selector(Coordinator.handleRestoreTap(_:))
         )
         restoreTap.cancelsTouchesInView = false
+        restoreTap.name = "ours.restoreTap"
         terminal.addGestureRecognizer(restoreTap)
 
         // If `attachPlainTmux` launched a plain-tmux session for this connection
