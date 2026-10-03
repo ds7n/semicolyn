@@ -84,17 +84,24 @@ public func gesturesMayRecognizeSimultaneously(_ a: GestureRole, _ b: GestureRol
     return true
 }
 
-/// Whether recognizer `g` must wait for `other` to fail before it may begin.
+/// Whether recognizer `g` must wait for `other` to fail before it may begin. Only one rule:
+/// SwiftTerm's selection pan waits for every content drag owner, so a plain drag scrolls /
+/// swipes instead of selecting.
 ///
-/// - A content drag owner waits for the handle drag, but ONLY while a selection exists
-///   (handles on screen). The handle drag self-cancels off a handle, so the wait costs only
-///   the recognition window; with no selection it would stall the pan for nothing (device
-///   build 117 lost native scrolling that way).
-/// - SwiftTerm's selection pan always waits for every content drag owner, so a plain drag
-///   scrolls / swipes instead of selecting.
-public func gestureMustWaitForFailure(_ g: GestureRole, of other: GestureRole,
-                                      hasActiveSelection: Bool) -> Bool {
-    if g.isContentDragOwner && other == .handlePan { return hasActiveSelection }
-    if g == .selectionPan && other.isContentDragOwner { return true }
-    return false
+/// Content drag owners deliberately do NOT wait for the handle drag (device build 176: that
+/// wait broke every swipe after a selection, because the handle drag begins and then cancels
+/// itself off a handle, which cancels whatever waits on it). Handle-vs-content ownership is
+/// decided at touch-down by `dragMayBegin` instead.
+public func gestureMustWaitForFailure(_ g: GestureRole, of other: GestureRole) -> Bool {
+    g == .selectionPan && other.isContentDragOwner
+}
+
+/// Whether a drag recognizer may begin, given whether the touch STARTED on a selection
+/// handle. A touch that starts on a handle belongs to the handle drag alone; any other
+/// touch belongs to the content drag owners (scroll / window swipe / alt-screen). Every other
+/// role is unaffected. Decided once at touch-down, so no recognizer ever waits on another.
+public func dragMayBegin(_ role: GestureRole, touchStartsOnHandle: Bool) -> Bool {
+    if role == .handlePan { return touchStartsOnHandle }
+    if role.isContentDragOwner { return !touchStartsOnHandle }
+    return true
 }

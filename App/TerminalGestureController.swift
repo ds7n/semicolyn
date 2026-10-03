@@ -702,20 +702,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// OUR selection-handle drag pan. `.began` hit-tests the two endpoint handle circles
     /// (via `SemicolynKit.hitTestHandle`, generous `slop` since a fingertip is much
     /// bigger than the handle glyph) and immediately CANCELS if the touch isn't on
-    /// either, so a plain content drag is unaffected (falls through to `scrollPan`/
-    /// `switchPan`, which were made to wait on this recognizer's failure, see
-    /// `gestureRecognizer(_:shouldRequireFailureOf:)`). `.changed` re-sets the selection
+    /// either. Normally it never even begins off a handle: `gestureRecognizerShouldBegin`
+    /// awards the drag at touch-down (handle -> this pan, anything else -> the content pans),
+    /// so this hit-test is a backstop. `.changed` re-sets the selection
     /// with the anchored end fixed and the dragged end following the finger's cell
     /// (absolute row), normalized via `SemicolynKit.orderedSelection` so the selection
     /// never inverts mid-drag. `.ended` presents the edit menu (Copy/Paste), matching
     /// the double/triple-tap handlers.
     @objc private func handleHandlePan(_ g: UIPanGestureRecognizer) {
-        // Deviation from the brief's snippet (a bare `return` here): `scrollPan`/`switchPan`
-        // are required to fail against this recognizer (see `shouldRequireFailureOf`), so a
-        // bare `return` on `.began` would leave this recognizer stuck in `.began` (UIKit has
-        // already transitioned its state before invoking the target/action) with nothing to
-        // release the pans waiting on it, PERMANENTLY blocking scroll/switch on any pane
-        // with no active selection. Force-cancel via the isEnabled bounce (same proven idiom
+        // A bare `return` on `.began` would leave this recognizer stuck in `.began` (UIKit
+        // has already transitioned its state before invoking the target/action), owning the
+        // touch for the rest of the drag. Force-cancel via the isEnabled bounce (same proven idiom
         // `beginDrag` uses on `longPress`, see its comment above): writing `g.state =
         // .cancelled` directly on a stock, non-subclassed UIPanGestureRecognizer is not
         // reliably honored by UIKit's arbitration engine and may not release a recognizer
@@ -741,7 +738,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
         switch g.state {
         case .began:
-            // Compute each endpoint's on-screen rect from the STORED selection positions.
+            // Hit-test where the touch STARTED (the same point `gestureRecognizerShouldBegin`
+            // used to award this drag to the handle), not where the pan crossed its threshold.
             guard let ends = currentSelectionEnds(in: view) else {
                 // Force-cancel via isEnabled bounce, not `g.state = .cancelled` (see the
                 // no-active-selection guard above for why).
@@ -749,15 +747,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                 g.isEnabled = true
                 return
             }
-            let startRect = cellRect(col: ends.start.col, row: ends.start.row, cellW: cellW, cellH: cellH, in: view)
-            let endRect   = cellRect(col: ends.end.col,   row: ends.end.row,   cellW: cellW, cellH: cellH, in: view)
-            draggingEnd = SemicolynKit.hitTestHandle(
-                point: SelectionHandlePoint(x: Double(p.x), y: Double(p.y)),
-                startRect: SelectionHandleRect(x: Double(startRect.origin.x), y: Double(startRect.origin.y),
-                                               width: Double(startRect.width), height: Double(startRect.height)),
-                endRect: SelectionHandleRect(x: Double(endRect.origin.x), y: Double(endRect.origin.y),
-                                             width: Double(endRect.width), height: Double(endRect.height)),
-                slop: 22)
+            draggingEnd = selectionHandle(at: touchStartPoint(of: g, in: view), in: view)
             if draggingEnd == nil {
                 // not a handle: let content own it (isEnabled bounce, see above)
                 g.isEnabled = false
@@ -1010,7 +1000,53 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         editMenu.presentEditMenu(with: config)
     }
 
+    /// Where a pan's touch STARTED: its current location minus its accumulated translation.
+    private func touchStartPoint(of pan: UIPanGestureRecognizer, in view: UIView) -> CGPoint {
+        let p = pan.location(in: view)
+        let t = pan.translation(in: view)
+        return CGPoint(x: p.x - t.x, y: p.y - t.y)
+    }
+
+    /// The selection handle (start/end) under `point`, or nil when there is no active
+    /// selection or the point is off both handles. Fingertip-generous `slop`.
+    private func selectionHandle(at point: CGPoint, in view: TerminalView) -> SelectionEnd? {
+        guard view.hasActiveSelection, let ends = currentSelectionEnds(in: view) else { return nil }
+        let term = view.getTerminal()
+        let cols = max(term.cols, 1), rows = max(term.rows, 1)
+        // Same true-cell-height rule as `handleHandlePan`: prefer `caretFrame` (one true cell).
+        let caret = view.caretFrame
+        let cellW = caret.width  > 0 ? caret.width  : view.bounds.width  / CGFloat(cols)
+        let cellH = caret.height > 0 ? caret.height : view.bounds.height / CGFloat(rows)
+        let startRect = cellRect(col: ends.start.col, row: ends.start.row, cellW: cellW, cellH: cellH, in: view)
+        let endRect   = cellRect(col: ends.end.col,   row: ends.end.row,   cellW: cellW, cellH: cellH, in: view)
+        return SemicolynKit.hitTestHandle(
+            point: SelectionHandlePoint(x: Double(point.x), y: Double(point.y)),
+            startRect: SelectionHandleRect(x: Double(startRect.origin.x), y: Double(startRect.origin.y),
+                                           width: Double(startRect.width), height: Double(startRect.height)),
+            endRect: SelectionHandleRect(x: Double(endRect.origin.x), y: Double(endRect.origin.y),
+                                         width: Double(endRect.width), height: Double(endRect.height)),
+            slop: 22)
+    }
+
     // MARK: UIGestureRecognizerDelegate
+
+    /// Award a one-finger drag at touch-down: a touch that STARTS on a selection handle
+    /// belongs to the handle drag alone; any other touch to the content drag owners
+    /// (scroll / window swipe / alt-screen). Kit's `dragMayBegin` decides. Replaces making
+    /// the content pans wait for the handle drag, which broke every swipe after a selection
+    /// (device build 176: the handle drag begins-then-cancels off a handle, cancelling its
+    /// dependents). Other recognizers are not gated.
+    func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+        let r = role(of: g)
+        guard r == .handlePan || r.isContentDragOwner,
+              let pan = g as? UIPanGestureRecognizer, let view = terminalView else { return true }
+        let onHandle = selectionHandle(at: touchStartPoint(of: pan, in: view), in: view) != nil
+        let mayBegin = dragMayBegin(r, touchStartsOnHandle: onHandle)
+        if !mayBegin {
+            DebugLog.shared.log(.gesture, "gesture:shouldBegin role=\(r) onHandle=\(onHandle) -> false")
+        }
+        return mayBegin
+    }
 
     /// Map a recognizer to its pure `GestureRole` so the simultaneity policy is a
     /// Linux-tested decision (`gesturesMayRecognizeSimultaneously`). The scroll pan is
@@ -1049,9 +1085,9 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         return gesturesMayRecognizeSimultaneously(role(of: g), role(of: other))
     }
 
-    /// Make SwiftTerm's selection/mouse pan *lose* to every content drag owner, AND make
-    /// every content drag owner (scroll / switch / alt-screen pan) lose to OUR `handlePan`
-    /// while a selection exists. The rules are Kit's `gestureMustWaitForFailure`.
+    /// Make SwiftTerm's selection/mouse pan *lose* to every content drag owner (Kit's
+    /// `gestureMustWaitForFailure`). Handle-vs-content drag ownership is NOT a wait; it is
+    /// decided at touch-down in `gestureRecognizerShouldBegin` (see the history below).
     ///
     /// `shouldRecognizeSimultaneouslyWith == false` only stops two pans from co-recognizing;
     /// it does not decide WHICH wins. For the selection pan (an unwanted hijacker) we want
@@ -1083,8 +1119,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
             if other === doubleTap { return !callbacks.isTmux() }
             if other === longPress { return callbacks.isTmux() }
         }
-        return gestureMustWaitForFailure(role(of: g), of: role(of: other),
-                                         hasActiveSelection: terminalView?.hasActiveSelection == true)
+        return gestureMustWaitForFailure(role(of: g), of: role(of: other))
     }
 }
 

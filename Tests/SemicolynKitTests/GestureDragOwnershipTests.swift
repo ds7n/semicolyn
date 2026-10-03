@@ -40,31 +40,51 @@ final class GestureDragOwnershipTests: XCTestCase {
         XCTAssertTrue(gesturesMayRecognizeSimultaneously(.handlePan, .pinch))
     }
 
-    func testEveryDragOwnerWaitsForHandleDragOnlyWhileASelectionExists() {
+    /// Device build 176: making drag owners WAIT for the handle drag broke every swipe
+    /// after a selection (the handle drag begins-then-cancels off a handle, which cancels
+    /// its dependents). Ownership is decided at touch-down instead, so no owner ever waits.
+    func testNoDragOwnerWaitsForTheHandleDrag() {
         for owner in owners {
-            XCTAssertTrue(gestureMustWaitForFailure(owner, of: .handlePan, hasActiveSelection: true), "\(owner)")
-            XCTAssertFalse(gestureMustWaitForFailure(owner, of: .handlePan, hasActiveSelection: false), "\(owner)")
+            XCTAssertFalse(gestureMustWaitForFailure(owner, of: .handlePan), "\(owner)")
+        }
+    }
+
+    func testTouchStartingOnAHandleIsClaimedOnlyByTheHandleDrag() {
+        XCTAssertTrue(dragMayBegin(.handlePan, touchStartsOnHandle: true))
+        for owner in owners {
+            XCTAssertFalse(dragMayBegin(owner, touchStartsOnHandle: true), "\(owner)")
+        }
+    }
+
+    func testTouchStartingOffAHandleIsClaimedOnlyByContentDragOwners() {
+        XCTAssertFalse(dragMayBegin(.handlePan, touchStartsOnHandle: false))
+        for owner in owners {
+            XCTAssertTrue(dragMayBegin(owner, touchStartsOnHandle: false), "\(owner)")
+        }
+    }
+
+    /// Recognizers that are neither the handle drag nor a content drag owner are not gated.
+    func testOtherRolesAreNeverGatedByHandleOwnership() {
+        for role in GestureRole.allCases where role != .handlePan && !role.isContentDragOwner {
+            for onHandle in [true, false] {
+                XCTAssertTrue(dragMayBegin(role, touchStartsOnHandle: onHandle), "\(role) onHandle=\(onHandle)")
+            }
         }
     }
 
     func testSelectionPanWaitsForEveryDragOwner() {
         for owner in owners {
-            XCTAssertTrue(gestureMustWaitForFailure(.selectionPan, of: owner, hasActiveSelection: false), "\(owner)")
+            XCTAssertTrue(gestureMustWaitForFailure(.selectionPan, of: owner), "\(owner)")
         }
     }
 
-    /// Exhaustive: no pair outside the two rules above imposes a wait (an accidental wait
+    /// Exhaustive: no pair outside the selection-pan rule above imposes a wait (an accidental wait
     /// stalls a recognizer; device build 117 lost native scrolling that way).
     func testNoOtherPairImposesAWait() {
         for g in GestureRole.allCases {
             for other in GestureRole.allCases {
-                let ownerWaitsOnHandle = g.isContentDragOwner && other == .handlePan
-                let selectionWaitsOnOwner = g == .selectionPan && other.isContentDragOwner
-                if ownerWaitsOnHandle || selectionWaitsOnOwner { continue }
-                for selection in [true, false] {
-                    XCTAssertFalse(gestureMustWaitForFailure(g, of: other, hasActiveSelection: selection),
-                                   "\(g) waits on \(other) (selection=\(selection))")
-                }
+                if g == .selectionPan && other.isContentDragOwner { continue }
+                XCTAssertFalse(gestureMustWaitForFailure(g, of: other), "\(g) waits on \(other)")
             }
         }
     }
