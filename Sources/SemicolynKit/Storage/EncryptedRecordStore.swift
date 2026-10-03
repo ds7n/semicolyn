@@ -15,6 +15,7 @@ public enum RecordType: String, Codable, Sendable, CaseIterable {
     case defaults
     case identity
     case resumableSession
+    case moshState
 }
 
 /// Seals `Codable` records with `RecordEnvelope` (AES-256-GCM) over any

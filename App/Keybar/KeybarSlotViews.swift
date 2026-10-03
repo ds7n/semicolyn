@@ -94,7 +94,7 @@ extension View {
 }
 
 /// Modifier slot: tap=arm Ctrl (one-shot), swipe-up=Alt, swipe-down=Shift.
-/// A single tap recognizer — no double-tap sibling — so the arm fires the instant
+/// A single tap recognizer, no double-tap sibling, so the arm fires the instant
 /// the finger lifts (a `count:2` sibling forced SwiftUI to wait out the
 /// double-tap window first, which felt laggy).
 struct ModifierSlotView: View {
@@ -120,8 +120,8 @@ struct ModifierSlotView: View {
 }
 
 /// Esc pill: tap=Esc; swipe-left/right = prev/next window; long-press opens the
-/// Settings tree (4d wires the Settings→Keybar leaf; the full unified picker —
-/// windows/hosts/recent — is a later slice). The dim `≡` glyph hints at the
+/// Settings tree (4d wires the Settings→Keybar leaf; the full unified picker,
+/// windows/hosts/recent, is a later slice). The dim `≡` glyph hints at the
 /// extra gestures (keybar-customization spec "Esc pill → Visual").
 struct EscPillView: View {
     let vm: ConnectionViewModel
@@ -214,7 +214,7 @@ struct CustomSlotView: View {
     }
 }
 
-/// A dim placeholder for a slot whose library entry is missing (orphaned id) —
+/// A dim placeholder for a slot whose library entry is missing (orphaned id),
 /// defensive only; the store prunes references on delete.
 struct MissingSlotView: View {
     @Environment(\.theme) private var theme
@@ -237,6 +237,7 @@ struct PadView: View {
     @State private var heldSince: Date?                 // set on the first crossing; nil = not held
     @State private var lastTranslation: CGSize = .zero  // latest dx/dy, updated every onChanged
     @State private var repeatTimer: Timer?
+    @State private var showWindowMenu = false
 
     var body: some View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
@@ -256,6 +257,22 @@ struct PadView: View {
                 }
                 .onEnded { _ in stopRepeat() }
         )
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.4)
+                .onEnded { _ in
+                    guard vm.plainTmux != nil else { return }
+                    DebugLog.shared.log(.keybar, "keybar:dpad longPress -> window menu")
+                    showWindowMenu = true
+                }
+        )
+        .confirmationDialog("Pane", isPresented: $showWindowMenu, titleVisibility: .visible) {
+            Button("Split Right") { vm.plainTmux?.onWindowAction(.splitHorizontal) }
+            Button("Split Down") { vm.plainTmux?.onWindowAction(.splitVertical) }
+            Button("New Window") { vm.plainTmux?.onWindowAction(.newWindow) }
+            Button("Zoom Toggle") { vm.plainTmux?.onWindowAction(.zoom) }
+            Button("Close Pane", role: .destructive) { vm.plainTmux?.onWindowAction(.closePane) }
+            Button("Cancel", role: .cancel) { }
+        }
     }
 
     /// Fire the arrow for the current thumb direction.
