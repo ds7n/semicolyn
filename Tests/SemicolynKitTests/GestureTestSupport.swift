@@ -21,3 +21,41 @@ func gestureContext(screen: GestureScreen = .plainTmux,
 
 func gp(_ x: Double, _ y: Double) -> GesturePoint { GesturePoint(x: x, y: y) }
 func gc(_ col: Int, _ row: Int) -> GestureCell { GestureCell(col: col, row: row) }
+
+/// Drives a `GestureEngine` with one context and collects every intent in order.
+struct GestureDriver {
+    var engine = GestureEngine()
+    var context: GestureContext
+    private(set) var intents: [GestureIntent] = []
+
+    init(_ context: GestureContext) { self.context = context }
+
+    @discardableResult
+    mutating func send(_ phase: TouchPhase, _ x: Double, _ y: Double, at t: Double, touches: Int = 1) -> [GestureIntent] {
+        let out = engine.handle(TouchEvent(phase: phase, point: gp(x, y), time: t, touchCount: touches),
+                                context: context)
+        intents += out
+        return out
+    }
+    @discardableResult mutating func down(_ x: Double, _ y: Double, at t: Double, touches: Int = 1) -> [GestureIntent] { send(.down, x, y, at: t, touches: touches) }
+    @discardableResult mutating func move(_ x: Double, _ y: Double, at t: Double, touches: Int = 1) -> [GestureIntent] { send(.move, x, y, at: t, touches: touches) }
+    /// `remaining` = touches still down AFTER this lift (0 for the last finger).
+    @discardableResult mutating func up(_ x: Double, _ y: Double, at t: Double, remaining: Int = 0) -> [GestureIntent] { send(.up, x, y, at: t, touches: remaining) }
+    @discardableResult
+    mutating func tick(at t: Double) -> [GestureIntent] {
+        let out = engine.tick(at: t)
+        intents += out
+        return out
+    }
+    /// Tick at every deadline until the engine is idle (nextDeadline nil) or `limit` passes.
+    /// Returns the time of the last tick.
+    @discardableResult
+    mutating func drainTicks(limit: Double = 30) -> Double {
+        var last = 0.0
+        while let d = engine.nextDeadline, d <= limit {
+            last = d
+            tick(at: d)
+        }
+        return last
+    }
+}
