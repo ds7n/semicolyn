@@ -23,14 +23,10 @@ final class PaneTerminalView: TerminalView {
     /// mouse-mode transition with this view's emulator terminal.
     var onModeRelevantChange: ((ModeRelevantEvent, Terminal) -> Void)?
 
-    /// Full geometry on EVERY layout, in BOTH the raw-SSH (`TerminalScreen`) and tmux -CC
-    /// (`TmuxPaneContainer`) paths, this is the shared pane view for both. The `.geometry`
-    /// diagnostic previously only fired in the -CC container's `layoutSubviews`, so the WORKING
-    /// raw path emitted nothing to diff against (a raw-mode tmux window switch doesn't change
-    /// SwiftTerm's grid, so `sizeChanged` never fired either). Logging here captures the raw
-    /// path continuously so its terminal placement (no keybar gap) can be compared field-for-
-    /// field with the -CC path's (the ~56px keybar gap). `geo:pane` = this view; correlate with
-    /// the surrounding `transport=RAW` vs `geo:layout` lines to know which mode produced it.
+    /// Full geometry on EVERY layout for the single terminal view (`TerminalScreen`). A tmux
+    /// window switch doesn't change SwiftTerm's grid, so `sizeChanged` never fires for it;
+    /// logging here captures the terminal's placement continuously. `geo:pane` = this view;
+    /// correlate with the surrounding `transport=` and `geo:layout` lines.
     override func layoutSubviews() {
         super.layoutSubviews()
         guard DebugLog.shared.isEnabled(.geometry) else { return }

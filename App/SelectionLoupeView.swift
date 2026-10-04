@@ -5,7 +5,7 @@ import SemicolynKit
 
 /// A floating circular magnifier shown while dragging a selection handle. It snapshots the
 /// region of the terminal under the finger, scales it up, and tracks the finger, clamped
-/// inside the pane. Snapshotting is throttled so the tmux -CC repaint stream cannot choke it.
+/// inside the pane. Snapshotting is throttled so a heavy repaint stream cannot choke it.
 final class SelectionLoupeView: UIView {
     private let magnification: CGFloat = 1.4
     private let diameter: CGFloat = 110
@@ -66,7 +66,7 @@ final class SelectionLoupeView: UIView {
         // `self.center` is interpreted in `self.superview`'s space (= host), which is
         // terminal's SIBLING space, not terminal's own space: they differ by
         // `terminal.frame.origin`, nonzero for any pane not at the container's
-        // top-left (every pane but one in a multi-pane tmux -CC layout). Convert
+        // top-left. Convert
         // content -> host space before assigning, or the loupe renders offset from
         // the finger by the pane's origin.
         self.center = host.convert(contentCenter, from: terminal)

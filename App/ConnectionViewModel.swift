@@ -37,9 +37,9 @@ enum SessionSheet: Identifiable {
     }
 }
 
-/// Drives the one MVP flow: connect → password auth → probe tmux → attach
-/// control mode or degrade to a raw-PTY shell.
-/// Retains the live `Connection`, `ShellSession`, and optionally `TmuxRuntime`.
+/// Drives the one MVP flow: connect → password auth → probe tmux → launch plain
+/// tmux or degrade to a raw-PTY shell.
+/// Retains the live `Connection`, `ShellSession`, and optionally `PlainTmuxController`.
 @MainActor
 final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     enum State: Equatable {
@@ -73,11 +73,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     @Published var pendingPrompt: HostKeyPrompt?
     /// Set by a Cmd-shortcut to ask `SessionView` to present a modal (Phase 4e).
     @Published var presentedSheet: SessionSheet?
-    /// Non-nil when we fell back from control mode; consumed by Task 6 to show
-    /// an amber banner explaining why tmux wasn't used.
+    /// Non-nil when we fell back from tmux to a raw shell; drives the amber banner
+    /// explaining why tmux wasn't used.
     @Published var degraded: DegradeReason?
-    /// Non-nil while attached to tmux control mode; nil in raw-PTY mode.
-    @Published var tmuxState: TmuxSessionState?
     /// Non-nil when a cold Mosh/ET resume reattach failed: carries the host label for
     /// the failure banner ("Couldn't resume <host>."). The persisted record is already
     /// cleared; `resumeInMemory` holds the reattach info so the banner's Retry works.
@@ -99,17 +97,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Whether OSC 52 clipboard writes are permitted for the active session.
     /// Resolved from `resolveOsc52Allow` at connect time; read by the terminal views.
     private(set) var osc52Allowed: Bool = true
-    /// Per-pane engaged context (process name) for the keybar (Phase 4). Empty in
-    /// raw-PTY mode. Re-derived from the runtime whenever a poll changes a pane.
-    /// GATED: only reports a process that is on the keybar promotion allowlist
-    /// (`knownProcesses`), so `claude`/`bash`/most shells resolve to nil here.
-    @Published private(set) var paneContexts: [PaneID: String] = [:]
-    /// Per-pane RAW foreground command (un-gated: ANY process, not just the keybar
-    /// allowlist), for the predictor's prose-vs-CLI bias. Populated alongside
-    /// `paneContexts` from `runtime.paneRawCommand`. Keeps the keybar's gated
-    /// `paneContexts` semantics untouched while giving the predictor the real
-    /// foreground process (e.g. `claude`, `python`, `bash`).
-    private var paneRawContexts: [PaneID: String] = [:]
     /// Predictor-strip suggestion state, split into its own observable slice so a
     /// suggestion recompute invalidates only the predictor-strip views (Plan B §B1).
     let predictorVM = PredictorViewModel()
@@ -150,58 +137,22 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// so the whole line is learned or dropped as a unit per the detector verdict.
     private var pendingLineTokens: [CommittedToken] = []
 
-    /// Bundled promotion sets (user override is a 4d concern).
-    private let promotionRegistry = PromotionRegistry.bundledDefault
     /// Fn-layer state for the active pane. Published so the keybar re-renders the
     /// Fn slot and the F-key layer.
     @Published private(set) var fnState = FnState()
-    private let autoFnProcesses = AutoFnCatalog.bundled
-
-    /// The active pane's promotion set (empty when its context is unknown or
-    /// there is no active pane). Drives the keybar's bronze promotion slots.
-    var activePromotions: [PromotionSlot] {
-        guard let win = tmuxState?.activeWindow,
-              let pane = tmuxState?.window(win)?.activePane,
-              let process = paneContexts[pane],
-              let set = promotionRegistry.set(for: process) else { return [] }
-        return set.promote
-    }
-    /// Set when tmux crashed mid-session and we dropped to a raw shell on the same
-    /// connection. The crash banner persists until the user acts.
+    /// Set when the Mosh session crashed or ended mid-session (its exit path). The
+    /// crash banner persists until the user acts (Reconnect).
     @Published var crashBanner: CrashBannerState?
-    /// DIAGNOSTIC (temporary, tmux blank-panes investigation): the latest one-line
-    /// summary of what the tmux runtime sees on attach. Rendered as a small overlay
-    /// in the connected view. Remove with the rest of the diagnostic once root-caused.
-    @Published var tmuxDiag: String?
     /// Bumped when the app wants the active terminal to re-claim first responder
-    /// (e.g. returning from the Settings sheet, which resigned it). The pane
-    /// container / raw terminal observes this and calls `becomeFirstResponder()`.
+    /// (e.g. returning from the Settings sheet, which resigned it). The raw
+    /// terminal observes this and calls `becomeFirstResponder()`.
     @Published private(set) var keyboardFocusRequestToken: Int = 0
-    /// PaneID → live SwiftTerm view, populated by TmuxPaneContainer as panes appear.
-    private var paneViews: [PaneID: TerminalView] = [:]
-    /// PaneID → its last-seen OSC 0/2 title, so the window title can follow the active
-    /// pane across switches rather than being clobbered by whichever pane emits last.
-    private var paneLastTitles: [PaneID: String] = [:]
-    private var pendingPaneBytes: [PaneID: [UInt8]] = [:]   // bytes that arrived before the view registered
-    /// Panes that currently exist in the active window's visible layout.
-    /// Bytes for panes NOT in this set are dropped rather than buffered (bounds memory).
-    private var renderablePanes: Set<PaneID> = []
-    /// tmux's `#{alternate_on}` truth for a pane at attach, from
-    /// `TmuxRuntime.onAltScreenReconcile`. May arrive before the pane's `TerminalView` exists
-    /// (the query reply races pane creation), so it's held here and consumed by
-    /// `TmuxPaneContainer` (the owner of `PaneModeTracker`) when the pane mounts.
-    private var pendingAltScreenOverrides: [PaneID: Bool] = [:]
-    /// Set by `TmuxPaneContainer` (the `PaneModeTracker` owner) so a late-arriving
-    /// `onAltScreenReconcile` (reply lands AFTER this pane's TerminalView already
-    /// mounted) is still applied instead of only being consumed via
-    /// `takeAltScreenOverride` at creation time.
-    var altScreenOverrideReady: ((PaneID, Bool, TerminalView) -> Void)?
 
     private var promptContinuation: CheckedContinuation<Bool, Never>?
 
     private var connection: Connection?
     /// Non-nil while a Mosh session is driving the terminal (mutually exclusive
-    /// with `tmux`). Retained so teardown can shut the UDP loop down.
+    /// with `etSession`). Retained so teardown can shut the UDP loop down.
     private var moshSession: MoshSession?
     /// True once the current Mosh session has delivered its first output frame (the
     /// UDP handshake completed). Gates `onEnd`: a pre-first-frame exit falls back to
@@ -277,25 +228,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// cleans up silently (no `.failed`, no banner). Reset at connect-start (NOT in
     /// `teardown()`, which runs before the async `onEnd` and would clear it too early).
     private var etUserDisconnecting = false
-    /// True once the ET `-CC` in-band `tmux -CC …` launch has been sent for the
-    /// current session (idempotency guard: `onFirstFrame` is once-only but ET can
-    /// re-fire across a roam). Reset in `teardown()`.
-    private var etControlLaunchSent = false
-    /// The `tmux -CC new-session …` command to send in-band once the ET stream is
-    /// up. Built ONCE at attach (`makeStartCommand()` is stateful and one-shot) and
-    /// stashed here for `onFirstFrame` to send. Nil on the raw ET path / after
-    /// `teardown()`.
-    private var etControlStartCommand: String?
-    /// ET `-CC` control-mode watchdog: armed right after the in-band `tmux -CC …`
-    /// launch is sent (`onFirstFrame`); fails the session if tmux never emits `%begin`
-    /// (no remote tmux, or a version without control mode) within the window. Cancelled
-    /// by `onControlReady` (attach edge) or any teardown. Distinct from `etWatchdog`,
-    /// which guards the ET STREAM (first-frame), not the tmux handshake.
-    private var etControlWatchdog: Task<Void, Never>?
-    /// True once the tmux control-mode handshake landed (`onControlReady`). The
-    /// control watchdog's cancel-condition and a guard so a late timer can't clobber
-    /// an already-attached session. Reset in `teardown()`.
-    private var etControlReady = false
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -311,28 +243,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private var lastPassword: String?
     private(set) var session: ShellSession?
     /// Serializes raw-PTY keystroke writes (FIFO under channel back-pressure).
-    /// Only used in raw mode; tmux mode writes through `TmuxRuntime`'s own writer.
+    /// Used by the SSH raw and plain-tmux paths (Mosh/ET write to their own session).
     private var rawWriter: SerialByteWriter?
-    /// Non-nil while a tmux control-mode session is active.
-    private var tmux: TmuxRuntime?
-    /// Non-nil while the gesture-driven PLAIN tmux route is active (no `-CC`),
-    /// driven per-host/default by `resolveUseTmux`. Mutually exclusive with
-    /// `tmux`: exactly one of the two tmux paths is ever set for a session. The
-    /// byte stream rides the same raw single-terminal path as `rawWriter`
-    /// (`output.onBytes`/`terminal.feed`); this only holds the gesture-command
-    /// controller.
+    /// Non-nil while the gesture-driven plain tmux route is active, driven
+    /// per-host/default by `resolveUseTmux`. The byte stream rides the same raw
+    /// single-terminal path as `rawWriter` (`output.onBytes`/`terminal.feed`);
+    /// this only holds the gesture-command controller.
     private(set) var plainTmux: PlainTmuxController?
     /// True once the plain-tmux in-band launch (attach-or-create) has
     /// been sent for the current Mosh session (idempotency guard: `onFirstFrame`
     /// is documented once-only per `MoshSession`, but this flag makes the send
-    /// itself robust to any future re-fire, mirroring `etControlLaunchSent`'s
-    /// existing pattern for the `-CC` in-band launch). Reset in `teardown()`.
+    /// itself robust to any future re-fire). Reset in `teardown()`.
     private var moshPlainTmuxLaunchSent = false
     /// Same idempotency guard as `moshPlainTmuxLaunchSent`, for the ET plain-tmux
-    /// route (kept separate from `-CC`'s `etControlLaunchSent`: the two launch
-    /// routes are mutually exclusive per session, driven by `resolveUseTmux`, but
-    /// use distinct flags so neither path's reset touches the other's state).
-    /// Reset in `teardown()`.
+    /// route (a distinct flag so neither transport's reset touches the other's
+    /// state). Reset in `teardown()`.
     private var etPlainTmuxLaunchSent = false
     /// True once a plain-tmux in-band launch has actually been SENT for the
     /// current Mosh/ET session (mirrors `moshPlainTmuxLaunchSent`/
@@ -369,8 +294,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// classifies the accumulated `plainTmuxProbeBuffer` on expiry if nothing
     /// resolved it sooner. Cancelled on resolution or `teardown()`.
     private var plainTmuxProbeWatchdog: Task<Void, Never>?
-    /// Seeds each tmux pane's scrollback history (capture-pane) before live output.
-    private var historySeeder: PaneHistorySeeder?
     /// Shared output sink; the terminal view wires `onBytes` to render into itself.
     let output = TerminalShellOutput()
 
@@ -425,20 +348,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         DebugLog.shared.log(.input, "input:keyboard bytes=\(bytes.count)")
     }
 
-    /// Route terminal keystrokes: through tmux `send-keys` when control mode is
-    /// attached, else straight to the raw-PTY channel.
+    /// Route terminal keystrokes to the active transport: the ET stream, the Mosh
+    /// session, else the raw-PTY channel.
     func sendTerminalInput(_ bytes: [UInt8]) {
         // ── SACRED PATH ─────────────────────────────────────────────────────────
         // The transport write is the FIRST thing that happens, nothing (not even a
         // string interpolation) runs ahead of it. Do NOT add work above this block.
         let signpost = PerfSignposts.input.beginInterval("send")
-        // `tmux` is checked BEFORE `etSession`: on the ET `-CC` path BOTH are set,
-        // and control-mode input must go through tmux `send-keys` (routed to the
-        // active pane), NOT raw into the ET stream. Raw ET (no control mode) has
-        // `tmux == nil`, so it still falls through to `etSession.send`.
-        if let tmux {
-            tmux.sendInput(bytes)
-        } else if let etSession {
+        if let etSession {
             etSession.send(Data(bytes))
         } else if let moshSession {
             moshSession.writeInput(Data(bytes))
@@ -450,11 +367,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // `log` is an @autoclosure that is a no-op unless diagnostics is enabled, so
         // this string is not even built in normal use. Structure only (byte count),
         // never content: this line sees every keystroke including secrets.
-        // Mirror the dispatch order above: tmux wins when present (ET `-CC` reads
-        // "TMUX/ET"), then raw ET, then Mosh, then raw PTY.
-        let transport = tmux != nil
-            ? (etSession != nil ? "TMUX/ET" : "TMUX")
-            : (etSession != nil ? "ET" : (moshSession != nil ? "MOSH" : "RAW"))
+        // Mirror the dispatch order above: ET, then Mosh, then raw PTY.
+        let transport = etSession != nil ? "ET" : (moshSession != nil ? "MOSH" : "RAW")
         DebugLog.shared.log(.input, decisionLine(
             "input:dispatch",
             inputs: [("bytes", "\(bytes.count)")],
@@ -463,127 +377,31 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         observePredictorInput(bytes)
     }
 
-    /// DECCKM (application-cursor-keys) state of the active pane's terminal, or
-    /// false if unavailable. Best-effort SwiftTerm read (cf. the mouse-mode poll).
+    /// DECCKM (application-cursor-keys) state of the active pane's terminal.
+    /// Only the removed -CC path registered pane views; plain tmux and raw shell
+    /// have none, so this is false (unchanged behavior). Pointing it at the
+    /// mounted terminal is a separate follow-up.
     private func activePaneApplicationCursor() -> Bool {
-        guard let win = tmuxState?.activeWindow,
-              let pane = tmuxState?.window(win)?.activePane,
-              let tv = paneViews[pane] else { return false }
-        return tv.getTerminal().applicationCursor
+        false
     }
 
-    /// The `TerminalView` the user is currently typing into: the tmux active
-    /// pane, or, in a raw (non-tmux) session, the single registered pane.
-    /// Nil until a pane is registered. Used by the L1 echo oracle.
+    /// The `TerminalView` the user is currently typing into (L1 echo oracle and the
+    /// predictor's alt-screen check).
+    /// Only the removed -CC path registered pane views; plain tmux and raw shell have
+    /// none, so this is nil (unchanged behavior). Pointing it at the mounted terminal
+    /// is a separate follow-up.
     private func activePaneView() -> TerminalView? {
-        if let win = tmuxState?.activeWindow,
-           let pane = tmuxState?.window(win)?.activePane,
-           let tv = paneViews[pane] {
-            return tv
-        }
-        // Raw session: exactly one pane view once registered.
-        return paneViews.count == 1 ? paneViews.first?.value : nil
+        nil
     }
 
-    // MARK: - Pane registry + tmux commands
+    // MARK: - tmux
 
-    /// Called by TmuxPaneContainer when a pane's view is created. Seeds history for
-    /// the pane, then flushes any bytes that arrived before the view existed,
-    /// THROUGH the seeder, so that pre-view output is buffered by `PaneSeedState`
-    /// (it's `.seeding` after `paneDidAppear`) and replayed AFTER the captured
-    /// history, preserving the history-before-live-output ordering. Feeding the
-    /// pending bytes directly here would race the async capture and land live output
-    /// on-screen before history (then an out-of-order scrollback-clear).
-    func registerPane(_ pane: PaneID, _ view: TerminalView) {
-        paneViews[pane] = view
-        historySeeder?.paneDidAppear(pane)
-        if let buffered = pendingPaneBytes[pane] {
-            pendingPaneBytes[pane] = nil
-            let toFeed = historySeeder?.routeOutput(pane, buffered) ?? buffered
-            if !toFeed.isEmpty { view.feed(byteArray: toFeed[...]) }
-        }
-        DebugLog.shared.log(.seed, "scroll:postseed pane=%\(pane.raw) contentSize=\(view.contentSize)")
-    }
-
-    func unregisterPane(_ pane: PaneID) {
-        paneViews[pane] = nil
-        pendingPaneBytes[pane] = nil
-        paneLastTitles[pane] = nil
-        pendingAltScreenOverrides[pane] = nil
-        // Drop the pane's seed state so a window-switch remount re-seeds from scratch, exactly
-        // like a first connect: the fresh view's `registerPane` → `paneDidAppear` issues ONE
-        // `capture-pane`. Without this the state persists `.seeded` and the remount either
-        // renders blank (skipped capture) or, with the old `apply()` recapture, double-fed the
-        // history → the keybar gap on switched-to windows (device 2026-07-26).
-        historySeeder?.forgetSeedState(pane)
-    }
-
-    /// The attach-time `#{alternate_on}` truth queued for `pane` (if the query reply
-    /// arrived before or after this pane mounted), consumed once by
-    /// `TmuxPaneContainer` right after it creates the pane's `TerminalView`.
-    func takeAltScreenOverride(for pane: PaneID) -> Bool? {
-        pendingAltScreenOverrides.removeValue(forKey: pane)
-    }
-
-    /// Publish an OSC 0/2 title from a tmux pane, keyed to the active pane: cache it
-    /// per-pane and only surface the *active* pane's title so a background pane can't
-    /// clobber what the user is looking at (`titleToPublish`).
-    func setTmuxTitle(from view: TerminalView, _ title: String) {
-        guard let pane = paneViews.first(where: { $0.value === view })?.key else { return }
-        paneLastTitles[pane] = title
-        let active = tmuxState?.activeWindow.flatMap { tmuxState?.window($0)?.activePane }
-        if let published = titleToPublish(source: pane, active: active, title: title) {
-            terminalTitle = published
-        }
-    }
-
-    func selectWindow(_ id: WindowID) {
-        DebugLog.shared.log(.tmux, "tmux:selectWindow id=@\(id.raw) activeBefore=\(tmuxState?.activeWindow.map { "@\($0.raw)" } ?? "nil")")
-        tmux?.selectWindow(id)
-    }
-
-    /// Toggle zoom on the active pane (Pad tap). No-op in raw-PTY mode.
-    func zoomActivePane() { tmux?.zoomActivePane() }
-
-    /// Focus a pane by tapping it (tap-to-focus). No-op in raw-PTY mode.
-    func selectPane(_ pane: PaneID) { tmux?.selectPane(target: pane) }
-
-    /// Esc-pill swipe-right: next tmux window (wraps). No-op with <2 windows.
-    func selectNextWindow() { stepWindow(+1) }
-    /// Esc-pill swipe-left: previous tmux window (wraps).
-    func selectPrevWindow() { stepWindow(-1) }
-
-    private func stepWindow(_ delta: Int) {
-        guard let state = tmuxState,
-              let active = state.activeWindow,
-              let idx = state.windows.firstIndex(where: { $0.id == active }),
-              let next = stepIndex(current: idx, delta: delta, count: state.windows.count)
-        else { return }
-        selectWindow(state.windows[next].id)
-    }
-
-    /// Finger-drag window-switch commit: step one window WITH WRAP (matches the drag
-    /// reveal's `neighborWindow(of:delta:)`, which wraps). No-op with <2 windows or in
-    /// raw-PTY mode. Replaces the old clamped one-shot swipe commit (which disagreed
-    /// with the wrapping reveal, causing an edge-commit no-op + bounce-back).
-    func selectAdjacentWindowWrapping(_ delta: Int) { stepWindow(delta) }
-
-    /// True when the active tmux session has more than one window (drives horizontal
-    /// drag = window switch vs. scroll fall-through). The Phase-1 plain-tmux route
-    /// (`plainTmux`) tracks no window count (blind switch, see `PlainTmuxController`
-    /// doc), so it always reports true while active: the drag-switch gesture must
-    /// stay live even though we cannot confirm >1 window ahead of a swipe.
-    var isMultiWindowTmux: Bool { plainTmux != nil || (tmuxState?.windows.count ?? 0) > 1 }
-
-    /// The window `delta` steps from `id` in window-list order, wrapping at the ends.
-    /// nil with fewer than 2 windows. Matches the wrap the esc-pill switch uses.
-    func neighborWindow(of id: WindowID, delta: Int) -> WindowID? {
-        guard let windows = tmuxState?.windows, windows.count > 1,
-              let idx = windows.firstIndex(where: { $0.id == id }) else { return nil }
-        let n = windows.count
-        let next = ((idx + delta) % n + n) % n
-        return windows[next].id
-    }
+    /// True while the plain tmux route is active (drives horizontal drag = window
+    /// switch vs. scroll fall-through). The plain-tmux route (`plainTmux`) tracks
+    /// no window count (blind switch, see `PlainTmuxController` doc), so it always
+    /// reports true while active: the drag-switch gesture must stay live even
+    /// though we cannot confirm >1 window ahead of a swipe.
+    var isMultiWindowTmux: Bool { plainTmux != nil }
 
     /// Whether the in-progress input line looks like a password/secret entry, per
     /// `passwordDetector`'s verdict (used ONLY to gate diagnostic key-content logging,
@@ -591,38 +409,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// reads the detector directly).
     func currentLineIsPassword() -> Bool { !passwordDetector.shouldLearnCommittedLine() }
 
-    /// Single-tap cursor placement inside a tmux pane: emit arrow keys from the pane's
-    /// current cursor to the tapped cell (reuses the pure encoders). Routes through the
-    /// active pane's tmux send path (`sendTerminalInput`, which dispatches to
-    /// `TmuxRuntime.sendInput` while `tmux` is set).
-    func placeTmuxCursor(_ view: TerminalView, toCol: Int, toRow: Int) {
-        let term = view.getTerminal()
-        let cur = term.getCursorLocation()   // .x = col, .y = row
-        let appCursor = term.applicationCursor
-        let runs = cursorTapArrows(fromCol: cur.x, fromRow: cur.y, toCol: toCol, toRow: toRow)
-        var bytes: [UInt8] = []
-        for run in runs { bytes += encodeArrowRun(run, applicationCursorKeys: appCursor) }
-        guard !bytes.isEmpty else { return }
-        sendTerminalInput(bytes)
-    }
-
     // MARK: - Hardware-keyboard commands (Phase 4e)
 
     /// Dispatches a resolved hardware-keyboard command to its action. Window/pane
-    /// commands no-op in raw-PTY mode (no `tmux`); presentation commands publish a
+    /// commands are currently no-ops; presentation commands publish a
     /// `presentedSheet` intent for `SessionView`.
     func perform(_ command: KeyboardCommand) {
         DebugLog.shared.log(.input, "input:command \(command)")
         switch command {
-        case .newWindow:           tmux?.newWindow()
-        case .closeWindow:         tmux?.closeActiveWindow()
-        case .switchWindow(let n): switchToWindow(index: n)
-        case .prevWindow:          selectPrevWindow()
-        case .nextWindow:          selectNextWindow()
-        case .prevPane:            tmux?.selectPaneRelative(next: false)
-        case .nextPane:            tmux?.selectPaneRelative(next: true)
-        case .splitVertical:       tmux?.splitActivePane(direction: .sideBySide)
-        case .splitHorizontal:     tmux?.splitActivePane(direction: .stacked)
+        case .newWindow, .closeWindow, .switchWindow, .prevWindow, .nextWindow,
+             .prevPane, .nextPane, .splitVertical, .splitHorizontal:
+            break   // window/pane commands: removed with -CC (plain-tmux rewire is a follow-up)
         case .clearScreen:         sendTerminalInput([0x0c])              // Ctrl-L
         case .paste:               pasteFromClipboard()
         case .reconnect:           reconnect()
@@ -632,12 +429,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         case .tips:                presentedSheet = .tips
         case .copy:                break   // SwiftTerm handles ⌘C natively on the hardware path
         }
-    }
-
-    /// Switch to the 1-based Nth tmux window (`⌘1…⌘9`); out-of-range is a no-op.
-    private func switchToWindow(index: Int) {
-        guard let windows = tmuxState?.windows, index >= 1, index <= windows.count else { return }
-        selectWindow(windows[index - 1].id)
     }
 
     /// Paste the system clipboard's text into the terminal (`⌘V`, hardware path).
@@ -656,45 +447,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         connect(savedHost: host, password: lastPassword ?? "")
     }
 
-    /// Push the tmux client size so it re-tiles. The grid is computed accurately by
-    /// `TmuxPaneContainer` (container bounds ÷ measured cell), debounced there.
-    func setTmuxClientSize(cols: Int, rows: Int) {
-        tmux?.setClientSize(cols: cols, rows: rows)
-        // ET `-CC`: tmux runs inside ET's outer PTY, so the PTY must be resized too,
-        // or tmux's client size (from `refresh-client -C`) fights the PTY's winsize.
-        // No-op on SSH `-CC` (etSession == nil) and on raw ET (tmux == nil, this
-        // isn't called). Mosh can't run `-CC`, so no Mosh case here.
-        etSession?.setWindowSizeCols(UInt16(cols), rows: UInt16(rows), width: 0, height: 0)
-    }
-
-    /// The RAW foreground command for `pane` from the tmux context poll (the pane's
-    /// `pane_current_command`), read from the runtime's COMPLETE map. Used by the
-    /// alt-scroll decider for the pane under the finger. This reads the raw current
-    /// command, NOT the keybar's debounced/known-only `engagedContext`: the latter is
-    /// gated to the keybar's promotion apps (vim/less/python/…), which EXCLUDE
-    /// claude/gemini/codex/qwen, so it returned nil for a Claude pane and the drag fell
-    /// back to arrows instead of PgUp/PgDn (device trace 2026-07-16, Bug 1). The raw
-    /// command is also un-debounced, so a drag works the instant the first poll lands.
-    func tmuxPaneCommand(_ pane: PaneID) -> String? { tmux?.paneRawCommand(pane) }
-
-    /// Re-query tmux's `#{alternate_on}` for all panes. Called by the pane container when a
-    /// window-switch/reattach re-creates panes, so each fresh pane's tracked alt-screen state
-    /// is re-seeded authoritatively (via `onAltScreenReconcile`) instead of the unreliable
-    /// live emulator flag (Bug 2, 2026-07-16). No-op if not attached.
-    func requeryAltScreenState() { tmux?.requeryAlternateOn() }
-
     /// Ask the active terminal to re-show the keyboard + keybar. Safe to call when
     /// already first responder (the container no-ops in that case).
     func requestKeyboardFocus() {
         keyboardFocusRequestToken &+= 1
         DebugLog.shared.log(.input, "key:requestKeyboardFocus token=\(keyboardFocusRequestToken)")
-    }
-
-    /// A pane's terminal row count changed (SwiftTerm `sizeChanged` → tmux resize landed).
-    /// Bottom-align it if it's a freshly-seeded pane whose viewport the resize stranded short of
-    /// the true bottom (the switched-window keybar gap; geometry log 2026-07-26). No-op otherwise.
-    func paneRowsDidChange(_ pane: PaneID, settledRows: Int) {
-        historySeeder?.bottomAlignAfterResize(pane, settledRows: settledRows)
     }
 
     // MARK: - Teardown
@@ -732,14 +489,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         etWatchdog?.cancel(); etWatchdog = nil
         etResolved = false
         etFirstFrameSeen = false
-        etControlLaunchSent = false
-        etControlStartCommand = nil
-        etControlWatchdog?.cancel(); etControlWatchdog = nil
-        etControlReady = false
         etSession?.close()
         etSession = nil
-        tmux?.stop()
-        tmux = nil
         plainTmux = nil
         plainTmuxSessionNamePendingInstall = nil
         moshPlainTmuxLaunchSent = false
@@ -748,18 +499,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         plainTmuxProbeBuffer = ""
         plainTmuxProbeResolved = false
         plainTmuxProbeWatchdog?.cancel(); plainTmuxProbeWatchdog = nil
-        paneContexts = [:]
-        paneRawContexts = [:]
         fnState.reset()
         rawWriter?.finish()
         rawWriter = nil
         session = nil
         connection = nil
-        tmuxState = nil
         crashBanner = nil
-        paneViews.removeAll()
-        pendingPaneBytes.removeAll()
-        renderablePanes.removeAll()
         flushPredictor()
         // Drop the render + harvest closures so late bytes from the old session
         // can't feed a torn-down terminal view or a cleared predictor. Both are
@@ -789,17 +534,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     // MARK: - Connection resume
 
-    /// Whether the active session is driving tmux control mode (a `-CC` session),
-    /// so the resume record carries the tmux session name for `new-session -A -s`.
-    private var isTmuxControlMode: Bool { tmux != nil }
-
-    /// Whether the active session is on EITHER tmux path (`-CC` or the Phase-1
-    /// gesture-driven plain-tmux route), i.e. whether a resume record should carry
-    /// `tmuxSessionNameForConnection` at all. A plain-tmux SSH session is captured
+    /// Whether the active session is on the gesture-driven plain-tmux route, i.e.
+    /// whether a resume record should carry `tmuxSessionNameForConnection` at all.
+    /// A plain-tmux SSH session is captured
     /// as a bare raw-SSH `.promptRaw` record either way (see `resumeDecision`,
     /// which branches purely on `record.transport`, never on `tmuxSessionName`),
     /// but `tmuxSessionNameForConnection` is exactly the name `attachPlainTmux`
-    /// launched with (set right before it runs, mirroring the `-CC` branch), and
+    /// launched with (set right before it runs), and
     /// `resolveTmuxSessionName` is a DETERMINISTIC function of `host`/`defaults`
     /// (no randomness, see `Resolution.swift`), so a later `resumeRawReconnect` →
     /// `connect(savedHost:)` re-derives the SAME name and re-enters the SAME gate
@@ -808,12 +549,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// captured record's `tmuxSessionName` metadata is accurate for anything that
     /// inspects it (diagnostics, the `resume:capture` log line's `tmux=` field), not
     /// because the resume-READ path branches on it.
-    private var isTmuxSession: Bool { isTmuxControlMode || plainTmux != nil }
+    private var isTmuxSession: Bool { plainTmux != nil }
 
     /// Persist a resumable record at a transport's connected edge. Raw SSH passes
     /// `secret: nil` (it reconnects fresh after a prompt); Mosh/ET pass their reattach
-    /// credential. The tmux session name rides for a `-CC` session OR the Phase-1
-    /// plain-tmux session (`isTmuxSession`). SECURITY: the secret goes straight to
+    /// credential. The tmux session name rides for a plain-tmux session
+    /// (`isTmuxSession`). SECURITY: the secret goes straight to
     /// the store; it is never logged here or in the coordinator.
     private func captureResume(host: Host, transport: Transport,
                                endpoint: (host: String, port: Int), secret: Data?) {
@@ -1134,7 +875,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                             reason: reason ?? "reattach ended")
         }
         moshSession = sess
-        tmuxState = nil
         sess.start()
         state = .shell
     }
@@ -1401,7 +1141,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         connection = conn
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
-        tmuxState = nil   // raw mode: single-terminal path
         output.onHarvestBytes = { [weak self] bytes in
             guard let self else { return }
             // Feed output to the password-prompt gate only. We deliberately no longer
@@ -1414,15 +1153,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         state = .shell
     }
 
-    /// Probe tmux on the authenticated connection and attach the tmux control-mode
-    /// session or fall back to a degraded raw shell. This is the shared SSH tail of
+    /// Probe tmux on the authenticated connection and launch plain tmux or fall
+    /// back to a degraded raw shell. This is the shared SSH tail of
     /// both `connect` methods, factored out so the Mosh pre-frame fallback can re-run
     /// it on the SAME retained connection (see `attachMoshIfPossible`).
     private func attachSSHShell(conn: Connection, host: Host, defaults: Defaults) async throws {
-        // Gesture-driven plain tmux (no `-CC`) is now the only tmux route: whether
-        // to attempt it at all is a per-host/default choice (`resolveUseTmux`), not
-        // a debug gate. The `-CC` stack (`attachTmux`/`TmuxRuntime`) stays in the
-        // tree, dead-until-Phase-2, but this path never calls it.
+        // Gesture-driven plain tmux is the only tmux route: whether to attempt it
+        // at all is a per-host/default choice (`resolveUseTmux`), not a debug gate.
         let useTmux = resolveUseTmux(host: host, defaults: defaults)
         let probe = useTmux ? await probeTmuxVersion(conn: conn) : nil
         DebugLog.shared.log(.lifecycle, "attachSSHShell: useTmux=\(useTmux) probe=\(probe ?? "nil")")
@@ -1485,7 +1222,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // Mosh attaches a LOGIN SHELL (no launch-command argument, unlike SSH's
         // `openExec`), so "launch plain tmux" means sending the launch string
         // IN-BAND once the first frame is up (`sess.onFirstFrame` below), the same
-        // shape PR #123 used to send `tmux -CC …` in-band on ET. There is no
+        // in-band shape ET uses. There is no
         // pre-frame exec channel over Mosh to probe `tmux -V` the way SSH's
         // `probeTmuxVersion` does (Mosh's bootstrap exec only ever runs
         // `mosh-server`), so the launch is UNCONDITIONAL whenever `useTmux` is on:
@@ -1559,7 +1296,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 DebugLog.shared.log(.connect, "mosh: watchdog cancelled (onFirstFrame)")
                 // Mosh has no launch-command argument (attaches a login shell), so
                 // send the plain-tmux launch (attach-or-create) IN-BAND now that frames are
-                // flowing, exactly like ET's `-CC` in-band launch (PR #123). Guarded by
+                // flowing, exactly like ET's in-band launch. Guarded by
                 // `moshPlainTmuxLaunchSent` (idempotency; `onFirstFrame` is documented
                 // once-only, but this makes the send itself robust either way).
                 // Install the gesture controller NOW against the already-mounted view.
@@ -1674,7 +1411,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             sess.start()
             moshSession = sess
             connection = conn
-            tmuxState = nil
             moshWatchdog = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 10_000_000_000)   // 10s watchdog window
                 guard !Task.isCancelled, let self else { return }
@@ -1787,78 +1523,26 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
         // ET, like Mosh, attaches a login shell with no launch-command argument, so
         // "launch plain tmux" means sending the plain-tmux launch (attach-or-create) IN-BAND once
-        // the stream is up (see `onFirstFrame` below), the same in-band shape `-CC`
-        // used to use (PR #123), just a different launch string and no
-        // `TmuxRuntime`/pane routing. `-CC` is RETIRED as a user-selectable
-        // destination (design: "resolved true -> the gesture path ... -CC is
-        // UNREACHABLE from this setting"): `resolveUseTmux` is now the SOLE
-        // gesture-vs-plain-shell toggle, so `etControlMode` is unconditionally
-        // false, the `-CC` branch immediately below never runs and its dead code
-        // (`TmuxRuntime`/`ETSessionSink` routing) is left in place only until the
-        // Phase 2 deletion pass. ET can't pre-probe `tmux -V` (etserver spawns the
+        // the stream is up (see `onFirstFrame` below). `resolveUseTmux` is the SOLE
+        // gesture-vs-plain-shell toggle. ET can't pre-probe `tmux -V` (etserver spawns the
         // login shell; there is no pre-shell exec), so like Mosh the launch is
         // UNCONDITIONAL whenever `useTmux` is on; reactive detection
         // (`evaluatePlainTmuxProbe` below) watches the first output and degrades
         // gracefully if tmux isn't actually installed remotely.
         let useTmux = resolveUseTmux(host: host, defaults: defaults)
-        let etControlMode = false
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
             DebugLog.shared.log(.lifecycle, "et: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional in-band launch on first frame)")
         }
-        var tmuxRuntime: TmuxRuntime?
-        if etControlMode {
-            self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
-            let rt = makeConfiguredTmuxRuntime(conn: conn)
-            // Build the launch command ONCE and stash it. `makeStartCommand()` is
-            // STATEFUL: it flips the controller lifecycle .idle → .attaching and
-            // returns nil on every later call, so it MUST be called exactly once (the
-            // SSH path calls it once too). Calling it a second time in `onFirstFrame`
-            // was the "single cursor, no panes" bug: the second call returned nil, so
-            // the in-band launch never fired and the ET shell sat at a raw prompt.
-            // A nil result here means a bad resolved session name (a Defaults value can
-            // be invalid) → degrade to a raw ET shell. The stashed command is sent
-            // in-band from `onFirstFrame`.
-            if let startCmd = rt.makeStartCommand() {
-                self.etControlStartCommand = startCmd
-                rt.session = nil                               // ET retains its own session
-                rt.setWriteSink(ETSessionSink(session: sess))  // control-mode writes ride ET
-                tmuxRuntime = rt
-                // RETAIN the runtime NOW (not in onFirstFrame): the local `tmuxRuntime`
-                // goes out of scope when `attachET` returns. `self.tmux` is the only
-                // strong ref that keeps it alive until the first ET frame arrives, and
-                // it's also what the output/first-frame closures read to route bytes.
-                // Setting it early is safe: every `tmux?.…` read is guarded, and
-                // `sendInput` drops (no activePane) until tmux emits its first state.
-                self.tmux = rt
-                DebugLog.shared.log(.lifecycle, "et: control-mode ON → tmux -CC in-band, session=\(tmuxSessionNameForConnection)")
-            } else {
-                DebugLog.shared.log(.lifecycle, "et: makeStartCommand nil (bad session name) → raw ET shell")
-                self.historySeeder = nil
-                tmuxRuntime = nil
-            }
-        }
 
-        // Route ET output. On the `-CC` path, bytes go into the `TmuxRuntime`
-        // (control-mode parse → per-pane fan-out). On the raw path, through the SAME
-        // buffered entry point the Mosh path uses (`output.onOutput`): the
-        // `PendingOutputBuffer` behind `onOutput` replays on sink-install, so an
-        // early frame (before SwiftUI's `makeUIView` installs the render sink) isn't
-        // silently dropped.
+        // Route ET output through the SAME buffered entry point the Mosh path uses
+        // (`output.onOutput`): the `PendingOutputBuffer` behind `onOutput` replays on
+        // sink-install, so an early frame (before SwiftUI's `makeUIView` installs the
+        // render sink) isn't silently dropped.
         etResolved = false
-        etControlLaunchSent = false
-        // Fixed at attach: `-CC` routes ET bytes into the runtime (retained by
-        // `self.tmux`); raw ET routes to the buffered `output.onOutput`. Reading
-        // `self.tmux` inside the closure keeps a single source of truth (routing
-        // stops cleanly if the runtime is torn down mid-session).
-        let etIsControlMode = tmuxRuntime != nil
         sess.onOutput = { [weak self] data in
             guard let self else { return }
-            if etIsControlMode, let tmux = self.tmux {
-                tmux.ingest([UInt8](data))
-            } else {
-                self.output.onOutput(data: data)
-            }
+            self.output.onOutput(data: data)
             // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`): accumulate
             // per `shouldAccumulatePlainTmuxProbe`.
             guard self.shouldAccumulatePlainTmuxProbe else { return }
@@ -1872,9 +1556,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.etWatchdog?.cancel(); self.etWatchdog = nil
             DebugLog.shared.log(.transport, "et: onFirstFrame, stream up; watchdog cancelled")
             self.state = .shell
-            // Plain-tmux in-band launch, mutually exclusive with the `-CC` in-band
-            // launch below (`etControlMode` is unconditionally false now, so
-            // `etIsControlMode`/`self.tmux` are never set here).
+            // Plain-tmux in-band launch.
             // Install the gesture controller against the already-mounted view HERE (the
             // in-band launch happens after `TerminalScreen.makeUIView`'s one-time install
             // already no-op'd, so relying on makeUIView never installs it: device bug
@@ -1910,8 +1592,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             }
             // Connected edge: persist the resume record. Runs AFTER the plain-tmux install
             // above (so `isTmuxSession` reads `plainTmux != nil` and the tmux session name
-            // rides the record, matching the Mosh path) and BEFORE the `-CC` early-return
-            // guard below (so a raw-ET path still captures). Reattach endpoint is the ET
+            // rides the record, matching the Mosh path). Reattach endpoint is the ET
             // server (config.host + TCP port); secret is the IDPASSKEY (`<id>/<passkey>`,
             // the wire form parseETIDPASSKEY reads). NOTE: ET has no cold-reattach today,
             // so the tmux name on an ET record is diagnostics-only for now; capturing it
@@ -1919,36 +1600,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.captureResume(host: host, transport: .et,
                                endpoint: (host: config.host, port: Int(config.port)),
                                secret: Data("\(serverCred.id)/\(serverCred.passkey)".utf8))
-            // ET `-CC`: the stream is up (login shell ready), so NOW launch tmux
-            // control mode in-band by "typing" `tmux -CC new-session …\n`. Guarded
-            // to fire exactly once (onFirstFrame is already once-only, but ET may
-            // re-fire across a roam; the flag makes it idempotent). The runtime was
-            // already published to `self.tmux` at attach so input (`send-keys`) and
-            // resize (`refresh-client`) route through control mode.
-            guard etIsControlMode, let tmux = self.tmux, !self.etControlLaunchSent,
-                  let startCmd = self.etControlStartCommand else { return }
-            self.etControlLaunchSent = true
-            DebugLog.shared.log(.tmux, "et: in-band launch \(startCmd.prefix(60))")
-            tmux.sendRawLaunch(Array((startCmd + "\n").utf8))
-            tmux.startContextPolling()
-            // Arm the control-mode watchdog: if tmux never emits %begin (no remote
-            // tmux, or a version without control mode), no `onControlReady` ever
-            // fires and the pane container would stay empty forever. On timeout,
-            // fail with a banner (user decision: no silent fallback). Cancelled by
-            // `onControlReady` or any teardown.
-            self.etControlReady = false
-            self.etControlWatchdog = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 5_000_000_000)   // 5s
-                guard !Task.isCancelled, let self, !self.etControlReady else { return }
-                switch etControlModeDecision(handshakeSeen: false) {
-                case .ready:
-                    return   // unreachable (guarded above); belt-and-braces
-                case .failedNoControlMode(let msg):
-                    DebugLog.shared.log(.tmux, "et -CC: control-mode watchdog fired (no %begin in 5s) → .failed")
-                    self.teardown()
-                    self.state = .failed(msg)
-                }
-            }
         }
         sess.onState = { raw in
             DebugLog.shared.log(.transport, "et: state=\(mapETState(Int32(raw)))")
@@ -1956,11 +1607,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onEnd = { [weak self] reason in
             guard let self else { return }
             self.etWatchdog?.cancel(); self.etWatchdog = nil
-            // The stream ended, so the control-mode handshake will never arrive.
-            // Cancel the control watchdog here too: the `.handshakeFailed` branch
-            // below does NOT call teardown(), so it would otherwise fire a spurious
-            // second `.failed` ~5s later.
-            self.etControlWatchdog?.cancel(); self.etControlWatchdog = nil
             // User-initiated disconnect (the "x" button): `disconnect()` already tore the
             // session down and drove state to .idle. This async onEnd must NOT run the
             // failure path (teardown() reset etFirstFrameSeen, so etExitDecision would
@@ -2031,188 +1677,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         etSession?.setWindowSizeCols(UInt16(cols), rows: UInt16(rows), width: 0, height: 0)
     }
 
-    /// Reconcile Fn auto-engage with the active pane's foreground process.
-    private func refreshFnAutoEngage() {
-        let process: String? = {
-            guard let win = tmuxState?.activeWindow,
-                  let pane = tmuxState?.window(win)?.activePane else { return nil }
-            return paneContexts[pane]
-        }()
-        if let process, autoFnProcesses.contains(process) {
-            fnState.autoEngage()
-        } else {
-            fnState.autoDisengage()
-        }
-    }
-
-    /// Build a `TmuxRuntime` for the current connection and wire ALL of its
-    /// transport-agnostic callbacks (pane output, structural state, contexts,
-    /// alt-screen reconcile, exit, diagnostic) + the history seeder. Everything
-    /// here is byte-level and identical whether the control stream rides SSH or ET,
-    /// so both `attachTmux` (SSH `-CC`) and `attachET`'s control-mode branch (ET
-    /// `-CC`) call this, then attach their own byte source + write sink. `conn` is
-    /// captured by the crash-recovery closure only.
-    private func makeConfiguredTmuxRuntime(conn: Connection) -> TmuxRuntime {
-        let runtime = TmuxRuntime(sessionName: tmuxSessionNameForConnection)
-        let seeder = PaneHistorySeeder(
-            runtime: runtime,
-            scrollbackLines: { AppStores.shared.terminalSettings.settings.scrollbackLines },
-            viewForPane: { [weak self] pane in self?.paneViews[pane] })
-        self.historySeeder = seeder
-        runtime.onPaneBytes = { [weak self] pane, bytes in
-            guard let self else { return }
-            if let view = self.paneViews[pane] {
-                let toFeed = self.historySeeder?.routeOutput(pane, bytes) ?? bytes
-                if !toFeed.isEmpty { view.feed(byteArray: toFeed[...]) }
-            } else if self.renderablePanes.contains(pane) {
-                self.pendingPaneBytes[pane, default: []].append(contentsOf: bytes)
-            } else {
-                // Pane not in the visible layout, drop to prevent unbounded
-                // buffering, and don't harvest output the user can't see.
-                return
-            }
-            // Feed output to the password-prompt gate only. We deliberately no longer
-            // harvest free terminal output as suggestion candidates, that pulled the
-            // shell prompt (Starship) into suggestions. Suggestions now source from
-            // typed-command echo (record) + seed only. (predictor-suggestion-hygiene spec, Fix 1.)
-            self.passwordDetector.noteOutput(bytes)
-        }
-        runtime.onStateChanged = { [weak self] state in
-            guard let self else { return }
-            let live = Set(
-                (state.activeWindow.flatMap { state.window($0) }?.visibleLayout?.panes.map(\.pane)) ?? []
-            )
-            self.renderablePanes = live
-            DebugLog.shared.log(.tmux, "onStateChanged: wins=\(state.windows.count) active=\(state.activeWindow.map(String.init(describing:)) ?? "nil") panes=\(live.count)")
-            self.pendingPaneBytes = self.pendingPaneBytes.filter { live.contains($0.key) }
-            let oldActive = self.tmuxState?.activeWindow.flatMap { self.tmuxState?.window($0)?.activePane }
-            self.tmuxState = state
-            DebugLog.shared.log(.tmux, "tmux:activeWindow=\(state.activeWindow.map { "@\($0.raw)" } ?? "nil") wins=\(state.windows.count)")
-            let newActive = state.activeWindow.flatMap { state.window($0)?.activePane }
-            if oldActive != newActive {
-                // Active pane changed (e.g. ⌘]), re-publish the new active pane's
-                // last-known title so the window title isn't left stale.
-                self.terminalTitle = titleOnActiveChange(active: newActive, lastTitles: self.paneLastTitles)
-            }
-            self.refreshFnAutoEngage()
-        }
-        runtime.onContextsChanged = { [weak self, weak runtime] in
-            guard let self, let runtime else { return }
-            var map: [PaneID: String] = [:]
-            var rawMap: [PaneID: String] = [:]
-            for pane in self.renderablePanes {
-                if let ctx = runtime.paneContext(pane) { map[pane] = ctx }
-                // Un-gated raw command for the predictor (any process, e.g. claude/bash).
-                if let raw = runtime.paneRawCommand(pane) { rawMap[pane] = raw }
-            }
-            // Context-map update trace (audit 2026-07-19: Bug-1 dragged-pane-absent was
-            // undiagnosable). Log the INPUTS (renderable pane set) and what CHANGED vs the
-            // prior map, so a missing pane's absence is visible in the trace.
-            let old = self.paneContexts
-            let added = map.keys.filter { old[$0] == nil }.map { "%\($0.raw)" }.sorted()
-            let removed = old.keys.filter { map[$0] == nil }.map { "%\($0.raw)" }.sorted()
-            let changed = map.keys.filter { old[$0] != nil && old[$0] != map[$0] }
-                .map { "%\($0.raw)" }.sorted()
-            DebugLog.shared.log(.tmux, decisionLine(
-                "tmux:contexts",
-                inputs: [("renderable", "\(self.renderablePanes.count)")],
-                outputs: [("panes", "\(map.count)"),
-                          ("added", added.isEmpty ? "none" : added.joined(separator: ",")),
-                          ("removed", removed.isEmpty ? "none" : removed.joined(separator: ",")),
-                          ("changed", changed.isEmpty ? "none" : changed.joined(separator: ","))],
-                reason: "list-panes-reply"))
-            self.paneContexts = map
-            self.paneRawContexts = rawMap
-            self.refreshFnAutoEngage()
-        }
-        runtime.onExit = { [weak self] reason in
-            DebugLog.shared.log(.lifecycle, "tmux onExit: reason=\(reason ?? "nil") → .failed")
-            // Session ended (mid-flight): clear the resume record. This path drives
-            // .failed (not teardown), so clear here.
-            self?.clearResume()
-            self?.state = .failed(reason ?? "tmux session ended")
-        }
-        // Control mode is genuinely up (first %begin, the .attaching→.attached edge).
-        // Cancels the ET `-CC` control-mode watchdog so a present-but-slow tmux is not
-        // failed. Inert on the SSH `-CC` path (no control watchdog is ever armed there,
-        // and nothing reads `etControlReady`); fires once per attach.
-        runtime.onControlReady = { [weak self] in
-            guard let self else { return }
-            self.etControlReady = true
-            self.etControlWatchdog?.cancel(); self.etControlWatchdog = nil
-            DebugLog.shared.log(.tmux, "tmux control ready (%begin) → control-mode watchdog cancelled")
-        }
-        // A pane already on the alternate screen before this -CC client attached
-        // never emits `?1049h` for us to observe live, so `PaneModeTracker` would
-        // otherwise misjudge it as `.localScroll`. Queue tmux's `#{alternate_on}`
-        // truth here; `TmuxPaneContainer` (the modeTracker owner) applies it via
-        // `takeAltScreenOverride` right after the pane's TerminalView is created;
-        // this covers both orderings (query reply before or after pane mount).
-        runtime.onAltScreenReconcile = { [weak self] pane, isAlt in
-            guard let self else { return }
-            if let view = self.paneViews[pane] {
-                // Pane already mounted: apply immediately, do NOT queue (a queued copy
-                // would be replayed against a later remount of a reused PaneID after
-                // tmux window-switch churn, misapplying a stale fact).
-                self.altScreenOverrideReady?(pane, isAlt, view)
-            } else {
-                // Reply arrived before the pane's TerminalView exists: queue for
-                // `takeAltScreenOverride` to drain at mount.
-                self.pendingAltScreenOverrides[pane] = isAlt
-            }
-        }
-        // DIAGNOSTIC (temporary): surface what the runtime sees on attach so a blank
-        // pane grid on device is self-explaining. Remove with the rest of the diag.
-        runtime.onDiagnostic = { [weak self] summary in self?.tmuxDiag = summary }
-        return runtime
-    }
-
-    private func attachTmux(conn: Connection) async throws {
-        DebugLog.shared.log(.lifecycle, "attachTmux: ENTER session=\(tmuxSessionNameForConnection)")
-        // Self-narrating anchor for a device trace: build + session so a pasted log
-        // fragment is self-locating (paired with the per-drag decision lines).
-        // No clean transport symbol is in scope here (attachTmux runs for both
-        // SSH-from-start and post-mosh-fallback SSH; moshSession is already nil
-        // by the time this executes), so that field is intentionally omitted.
-        let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
-        DebugLog.shared.log(.lifecycle,
-            "=== session-start build=\(build) session=\(tmuxSessionNameForConnection) ===")
-        let runtime = makeConfiguredTmuxRuntime(conn: conn)
-        guard let startCmd = runtime.makeStartCommand() else {
-            // Controller couldn't build a start command (e.g. an invalid resolved
-            // session name, which a Defaults-level value can be, since the Defaults
-            // editor has no per-field validation). Surface it via the degraded
-            // banner instead of silently dropping to a raw shell everywhere.
-            DebugLog.shared.log(.lifecycle, "attachTmux: makeStartCommand nil (bad session name) → degraded raw shell")
-            degraded = .couldNotStart
-            try await openRawShell(conn: conn)
-            return
-        }
-        let sink = TerminalShellOutput()
-        sink.onBytes = { [weak runtime] bytes in runtime?.ingest(bytes) }
-        sink.onExit = { [weak self, weak runtime] exit in
-            guard let self else { return }
-            // A clean %exit is already handled by runtime.onExit (session ended).
-            // An unexpected EOF while the connection is alive is a tmux crash:
-            // drop to a raw shell on the same conn and raise the persistent banner.
-            if let runtime, case .crashed = classifyTmuxClosure(lifecycle: runtime.lifecycle) {
-                Task { await self.recoverFromTmuxCrash(conn: conn) }
-            }
-        }
-        DebugLog.shared.log(.tmux, "attachTmux: openExec startCmd=\(startCmd.prefix(60))")
-        let sess = try await conn.openExec(command: startCmd, term: "xterm-256color",
-                                           cols: 80, rows: 24, output: sink)
-        runtime.session = sess                                  // retain for lifecycle
-        runtime.setWriteSink(ShellSessionSink(session: sess))   // drive the writer over SSH
-        connection = conn
-        session = sess
-        self.tmux = runtime   // retain to keep control mode alive
-        state = .shell
-        DebugLog.shared.log(.lifecycle, "attachTmux: exec opened, tmux SET, state=.shell, awaiting tmux output")
-        runtime.startContextPolling()
-    }
-
-    /// Launch PLAIN tmux (no `-CC`, driven per-host/default by `resolveUseTmux`)
+    /// Launch PLAIN tmux (driven per-host/default by `resolveUseTmux`)
     /// and feed its byte stream through the SAME raw single-terminal path
     /// `openRawShell` uses (`output`/`rawWriter`), so `TerminalScreen`/
     /// `RawTerminalContainer` need no structural change, only a gesture-callback
@@ -2236,7 +1701,6 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         connection = conn
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
-        tmuxState = nil   // plain tmux never populates the -CC control-mode state
         plainTmuxSessionNamePendingInstall = tmuxSessionNameForConnection
         output.onHarvestBytes = { [weak self] bytes in
             self?.passwordDetector.noteOutput(bytes)
@@ -2317,61 +1781,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
     }
 
-    // MARK: - Crash recovery + banner actions
-
-    /// Tmux crashed: reuse the live connection for a raw shell, then show the
-    /// persistent crash banner. If the connection is also gone, surface a failure.
-    private func recoverFromTmuxCrash(conn: Connection) async {
-        DebugLog.shared.log(.lifecycle, "recoverFromTmuxCrash: tmux crashed → raw shell on live conn")
-        tmux?.stop(); tmux = nil
-        do {
-            try await openRawShell(conn: conn)   // sets session/rawWriter, tmuxState=nil, state=.shell
-            paneContexts = [:]
-            paneRawContexts = [:]
-            fnState.reset()
-            paneViews.removeAll()
-            pendingPaneBytes.removeAll()
-            renderablePanes.removeAll()
-            DebugLog.shared.log(.lifecycle, "recoverFromTmuxCrash: raw shell up → crash banner")
-            crashBanner = .tmuxEnded
-        } catch {
-            DebugLog.shared.log(.lifecycle, "recoverFromTmuxCrash: raw shell THREW \(String(describing: error)) → .failed")
-            clearResume()   // terminal error after the connected edge: clear the record
-            state = .failed("tmux ended and the connection is no longer reachable.")
-        }
-    }
-
-    /// Banner action, reattach control mode on the live connection. `-CC
-    /// new-session -A` attaches to the server-side session if it survived, else
-    /// creates a fresh one.
-    func reattachTmux() {
-        DebugLog.shared.log(.lifecycle, "reattachTmux: conn=\(connection == nil ? "NIL" : "alive") tmux=\(tmux == nil ? "nil" : "SET") rawWriter=\(rawWriter == nil ? "nil" : "SET") tmuxState=\(tmuxState == nil ? "nil" : "set")")
-        guard let conn = connection else { DebugLog.shared.log(.lifecycle, "reattachTmux: ABORT no connection"); return }
-        crashBanner = nil
-        Task {
-            do { try await attachTmux(conn: conn) }
-            catch { DebugLog.shared.log(.lifecycle, "reattachTmux: attach THREW → .failed"); clearResume(); state = .failed("Could not reattach: the connection is no longer reachable.") }
-        }
-    }
-
-    /// Banner action, start a fresh tmux. Same `-CC new-session -A` path; if the
-    /// old session somehow survived this reattaches to it (acceptable for v1,
-    /// distinct fresh-session naming is a follow-up).
-    func startNewTmux() {
-        guard let conn = connection else {
-            DebugLog.shared.log(.lifecycle, "startNewTmux: ABORT no connection")
-            return
-        }
-        crashBanner = nil
-        Task {
-            do { try await attachTmux(conn: conn) }
-            catch {
-                DebugLog.shared.log(.lifecycle, "startNewTmux: attach THREW → .failed")
-                clearResume()   // terminal error after the connected edge: clear the record
-                state = .failed("Could not start tmux: the connection is no longer reachable.")
-            }
-        }
-    }
+    // MARK: - Banner actions
 
     /// Banner action, stay in degraded raw-shell mode for the rest of the session.
     func dismissCrashBanner() { crashBanner = nil }
@@ -2605,14 +2015,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
         // Build the prediction context from signals the VM already holds. Any signal
         // that is not cheaply available stays nil (the bias treats nil as abstain).
-        // Use the UN-GATED raw process (paneRawContexts), not the keybar-gated
-        // paneContexts, so common foreground processes like `claude`/`bash` are seen
-        // by the prose-vs-CLI bias (the gated map excludes them by design).
-        let process: String? = {
-            guard let win = tmuxState?.activeWindow,
-                  let pane = tmuxState?.window(win)?.activePane else { return nil }
-            return paneRawContexts[pane]
-        }()
+        // No foreground-process signal on the plain tmux / raw paths (the per-pane
+        // process poll went with -CC), so the process abstains.
+        let process: String? = nil
         let isAlt = activePaneView()?.getTerminal().isCurrentBufferAlternate
         let ctx = PredictionContext(foregroundProcess: process,
                                     isAlternateScreen: isAlt,

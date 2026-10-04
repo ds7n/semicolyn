@@ -25,7 +25,7 @@ final class ResumeCoordinator {
     /// Persist (or refresh) the resumable record for a session that just reached
     /// its connected edge. `secret` is the transport reattach credential (Mosh
     /// `MOSH_KEY`, ET `IDPASSKEY`); nil for raw SSH (which always reconnects fresh
-    /// after a prompt). `tmuxSessionName` is non-nil only for a tmux `-CC` session.
+    /// after a prompt). `tmuxSessionName` is non-nil only for a plain-tmux session.
     func captureConnected(sessionID: UUID, host: Host, transport: Transport,
                           endpoint: (host: String, port: Int), secret: Data?,
                           tmuxSessionName: String?) {

@@ -7,11 +7,11 @@ import SemicolynKit
 
 /// Wraps SwiftTerm's UIKit `TerminalView` for SwiftUI. Output bytes from the
 /// Rust PTY (via `TerminalShellOutput.onBytes`) are fed into the terminal;
-/// user input goes out through the `send` closure (which routes to tmux
-/// send-keys or raw-PTY write depending on the active session mode).
+/// user input goes out through the `send` closure (which routes to the active
+/// transport: ET, Mosh, or the raw-PTY write).
 struct TerminalScreen: UIViewRepresentable {
-    /// Called with raw keystroke/paste bytes. In tmux mode this routes through
-    /// `TmuxRuntime.sendInput`; in raw-PTY mode it writes directly to the channel.
+    /// Called with raw keystroke/paste bytes. Routes through the VM's transport-aware
+    /// `sendTerminalInput` (ET stream, Mosh session, or the raw-PTY channel).
     let send: ([UInt8]) -> Void
     let output: TerminalShellOutput
     /// The live session is retained here for resize notifications only.
@@ -64,7 +64,6 @@ struct TerminalScreen: UIViewRepresentable {
         let terminal = PaneTerminalView(frame: .zero)
         // Raw single-terminal path: `RawTerminalContainer` owns the child's frame height
         // (window-space `rawTerminalChildHeight`, PR #122), so the child must NOT self-inset.
-        // The -CC path (`TmuxPaneContainer`) insets its panes itself.
         terminal.terminalDelegate = context.coordinator
         // Event-driven InteractionMode: recompute on every alt-screen / mouse-mode
         // transition (single-pane mount → nil key), then refresh the dot immediately.
@@ -92,7 +91,7 @@ struct TerminalScreen: UIViewRepresentable {
             // Device bug 2026-09-06: this handler flipped only altPan and left switchPan
             // enabled (its install default in .localScroll), so entering .appOwnsInput
             // left BOTH switch pans live -> both recognized one finger -> the window
-            // switch committed twice per swipe (mirror TmuxPaneContainer's paired flip).
+            // switch committed twice per swipe (hence the paired flip).
             coordinator?.gestureController?.setAltScreenPanEnabled(mode == .appOwnsInput)
             coordinator?.gestureController?.setSwitchPanEnabled(mode != .appOwnsInput)
         }
@@ -267,8 +266,8 @@ struct TerminalScreen: UIViewRepresentable {
         // Re-present the keyboard when the VM requests focus (the keybar's Settings sheet
         // closing). Presenting that sheet from the keybar (an inputAccessoryView) hides the
         // keyboard WITHOUT resigning first responder, so a plain become is a no-op; the
-        // decision forces a reload in that case (same fix as TmuxPaneContainer, PR #128,
-        // which the raw/plain-tmux screen never got: device build 172). Act only on a NEW
+        // decision forces a reload in that case (same fix as the removed -CC pane container,
+        // PR #128, which the raw/plain-tmux screen never got: device build 172). Act only on a NEW
         // token so repeated SwiftUI passes never thrash.
         if keyboardFocusRequestToken != context.coordinator.lastFocusRequestToken {
             context.coordinator.lastFocusRequestToken = keyboardFocusRequestToken
@@ -515,12 +514,10 @@ struct TerminalScreen: UIViewRepresentable {
                 // sizing concern that must capture on device without a manual toggle (#D).
                 DebugLog.shared.log(.tmux,
                     "sizing:raw bounds=\(Int(source.bounds.width))x\(Int(source.bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) kbH=\(String(format: "%.1f", kbH)) grid=\(newCols)x\(newRows)")
-                // Full geometry for the RAW path, mirroring `TmuxPaneContainer`'s `geo:layout`,
-                // so the WORKING raw render (no keybar gap) can be diffed field-for-field against
-                // the gapping -CC path. Raw reports SwiftTerm's OWN self-measured grid and never
-                // subtracts the keybar (the terminal fills its view, keybar floats over it); -CC
-                // shrinks the pane by kbH. This line exposes exactly how raw places the same
-                // TerminalView so the divergence is visible, not inferred (device 2026-07-27).
+                // Full geometry for the RAW path (`geo:layout`). Raw reports SwiftTerm's OWN
+                // self-measured grid and never subtracts the keybar (the terminal fills its
+                // view, keybar floats over it). This line exposes exactly how raw places the
+                // TerminalView so layout issues are visible, not inferred (device 2026-07-27).
                 if DebugLog.shared.isEnabled(.geometry) {
                     let f = source.frame, co = source.contentOffset, cs = source.contentSize
                     let ci = source.contentInset, ai = source.adjustedContentInset
