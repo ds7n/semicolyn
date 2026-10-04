@@ -158,7 +158,7 @@ public struct GestureEngine: Sendable {
             return scroll(to: e, start: start, emitted: emitted, samples: samples, context: ctx)
         case let .twoFinger(startTime, start, moved, ctx):
             state = .twoFinger(startTime: startTime, start: start,
-                               moved: moved || e.point.distance(to: start) >= GestureThresholds.longPressSlop,
+                               moved: moved || (e.touchCount >= 2 && e.point.distance(to: start) >= GestureThresholds.longPressSlop),
                                context: ctx)
             return []
         case .idle, .longPressed, .flinging:

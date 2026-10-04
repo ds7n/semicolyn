@@ -183,11 +183,13 @@ final class GestureEngineDragTests: XCTestCase {
     func testVelocityUsesOnlyTheLastTenthOfASecond() {
         var d = GestureDriver(gestureContext())
         d.down(100, 100, at: 0.0)
-        d.move(100, 400, at: 0.05)       // fast early movement
+        d.move(100, 200, at: 0.02)       // scrolling begins
+        d.move(100, 400, at: 0.05)       // fast movement inside the scroll (~348 pt/s untrimmed)
         d.move(100, 401, at: 0.5)        // then nearly still
         d.move(100, 402, at: 0.6)
         d.up(100, 402, at: 0.6)
         XCTAssertEqual(d.engine.stateName, "idle")   // 10 pt/s over the last 0.1s: no fling
+        XCTAssertNil(d.engine.nextDeadline)
     }
 
     /// Review Focus 1: the touch that stops a fling is not a tap.
@@ -227,6 +229,17 @@ final class GestureEngineDragTests: XCTestCase {
         d.move(230, 220, at: 1.1, touches: 2)            // centroid moved >= 10
         d.up(230, 220, at: 1.2, remaining: 1)
         XCTAssertEqual(d.up(230, 220, at: 1.3, remaining: 0), [])
+    }
+
+    /// After one finger lifts, the remaining finger's jitter reports its own position, not the
+    /// centroid; it must not count as movement.
+    func testRemainingFingerJitterDoesNotCancelTwoFingerTap() {
+        var d = GestureDriver(gestureContext(selection: sel))
+        d.down(180, 200, at: 1.0)
+        d.down(200, 200, at: 1.05, touches: 2)
+        d.up(200, 200, at: 1.2, remaining: 1)
+        d.move(180, 200, at: 1.22, touches: 1)
+        XCTAssertEqual(d.up(180, 200, at: 1.3, remaining: 0), [.showMenu(gp(180, 200))])
     }
 
     func testSlowTwoFingerTouchIsNotATap() {
