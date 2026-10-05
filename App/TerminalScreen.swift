@@ -150,10 +150,12 @@ struct TerminalScreen: UIViewRepresentable {
                 guard let coordinator, let terminal else { return nil }
                 return coordinator.gestureContext(for: terminal, selection: executor?.selection)
             },
-            onIntents: { [weak executor] intents, from, to in
+            onIntents: { [weak executor] intents, from, to, reason in
                 if !intents.isEmpty || from != to {
-                    DebugLog.shared.log(.gesture, "gesture:intent \(intents) state=\(from)->\(to)")
+                    DebugLog.shared.log(.gesture, "gesture:intent \(intents) state=\(from)->\(to) reason=\(reason)")
                 }
+                // A drag that starts scrolling logs its scroll route once, at its first emit.
+                if from != to, to == "scrolling" { executor?.logNextScrollRoute = true }
                 executor?.perform(intents)
             })
         terminal.addGestureRecognizer(recognizer)
@@ -432,21 +434,29 @@ struct TerminalScreen: UIViewRepresentable {
         func gestureContext(for terminal: TerminalView, selection: GestureSelection?) -> GestureContext {
             let term = terminal.getTerminal()
             let cols = max(term.cols, 1), rows = max(term.rows, 1)
-            // True cell size: caretFrame is exactly one cell; bounds/rows overestimates.
+            // True cell height: caretFrame is exactly one cell tall; bounds/rows overestimates.
+            // NOT its width: SwiftTerm widens the caret to cellW * columnWidth on a wide (CJK)
+            // cursor cell. Cell width = SwiftTerm's own computeFontDimensions width: the "W"
+            // advance of the terminal font, snapped to the pixel grid (UIScreen.main.scale,
+            // as SwiftTerm's iOS backingScaleFactor). Falls back to bounds/cols.
             let caret = terminal.caretFrame
-            let cellW = caret.width > 0 ? caret.width : terminal.bounds.width / CGFloat(cols)
+            let scale = UIScreen.main.scale
+            let advance = ("W" as NSString).size(withAttributes: [.font: terminal.font]).width
+            let cellW = advance > 0 ? max(1, (advance * scale).rounded() / scale)
+                                    : terminal.bounds.width / CGFloat(cols)
             let cellH = caret.height > 0 ? caret.height : terminal.bounds.height / CGFloat(rows)
             let mode = modeTracker.mode
             let keys = currentAltScrollDecision().keys
             let gain = (mode == .localScroll || keys == .wheel) ? 1.0 : AltScreenScroll.scrollGain
             return GestureContext(
-                screen: vm?.plainTmux != nil ? .plainTmux : .rawShell,
+                screen: GestureScreen(plainTmuxAttached: vm?.plainTmux != nil, mode: mode),
                 mode: mode == .localScroll ? .local : .app,
                 appMouseOn: term.mouseMode != .off,
                 multiWindow: vm?.isMultiWindowTmux ?? false,
                 selection: terminal.hasActiveSelection ? selection : nil,
                 cellWidth: Double(cellW), cellHeight: Double(cellH),
                 cols: cols, rows: rows, topRow: term.getTopVisibleRow(),
+                contentOffsetY: Double(terminal.contentOffset.y),
                 viewWidth: Double(terminal.bounds.width), scrollGain: gain)
         }
 

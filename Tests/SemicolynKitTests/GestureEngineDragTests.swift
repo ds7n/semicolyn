@@ -79,10 +79,19 @@ final class GestureEngineDragTests: XCTestCase {
         d.down(300, 100, at: 1.0)
         d.move(280, 100, at: 1.02)
         d.move(240, 100, at: 1.05)
-        XCTAssertEqual(d.up(240, 100, at: 1.05), [.switchWindow(delta: +1)])    // ~1333 pt/s
+        XCTAssertEqual(d.up(240, 100, at: 1.05), [.switchWindow(delta: +1)])    // -60pt / 0.05s = -1200 pt/s
         var right = GestureDriver(gestureContext())
         right.down(100, 100, at: 1.0); right.move(120, 100, at: 1.02); right.move(160, 100, at: 1.05)
         XCTAssertEqual(right.up(160, 100, at: 1.05), [.switchWindow(delta: -1)])
+    }
+
+    /// A fast flick with ONE move past the dead zone: velocity is measured from the touch-down
+    /// sample, -50pt / 0.02s = -2500 pt/s, so it commits (50pt alone is far below 40%).
+    func testOneMoveFlickCommitsFromTheTouchDownSample() {
+        var d = GestureDriver(gestureContext())
+        d.down(300, 100, at: 1.0)
+        d.move(250, 100, at: 1.016)
+        XCTAssertEqual(d.up(250, 100, at: 1.02), [.switchWindow(delta: +1)])
     }
 
     func testAxisRatioBoundary() {
@@ -168,6 +177,21 @@ final class GestureEngineDragTests: XCTestCase {
         let expectedFling = Int(ScrollMomentum(velocity: 2000).offset(at: last - 0.1) / 20)
         XCTAssertEqual(total - dragLines, expectedFling)  // no lost or duplicated lines
         XCTAssertGreaterThan(expectedFling, 30)
+    }
+
+    /// A one-move scroll flick flings: velocity 40pt / 0.03s from the touch-down sample.
+    func testOneMoveScrollFlickFlings() {
+        var d = GestureDriver(gestureContext())
+        d.down(100, 100, at: 0.0)
+        XCTAssertEqual(d.move(100, 140, at: 0.02), [.scroll(lines: 2, at: gc(10, 107))])
+        XCTAssertEqual(d.up(100, 140, at: 0.03), [])
+        XCTAssertEqual(d.engine.stateName, "flinging")
+        let last = d.drainTicks()
+        XCTAssertEqual(d.engine.stateName, "idle")
+        let total = d.intents.reduce(0) { if case let .scroll(n, _) = $1 { return $0 + n }; return $0 }
+        let expectedFling = Int(ScrollMomentum(velocity: 40.0 / 0.03).offset(at: last - 0.03) / 20)
+        XCTAssertEqual(expectedFling, 22)   // ~(1333 / 2.80) * (1 - 70 / 1333) = ~450pt over 20pt rows
+        XCTAssertEqual(total - 2, expectedFling)
     }
 
     func testSlowReleaseDoesNotFling() {

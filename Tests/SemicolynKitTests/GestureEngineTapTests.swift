@@ -144,6 +144,43 @@ final class GestureEngineTapTests: XCTestCase {
         XCTAssertEqual(moved.up(65, 45, at: 1.6), [.restoreKeyboard, .tap(gc(5, 102))])
     }
 
+    // MARK: tmux off screen
+
+    /// Plain tmux attached but off screen (detached / exited to the login shell, or a Mosh
+    /// host without tmux) yields a (rawShell, local) context: no immediate tmux tap, no zoom,
+    /// no window swipe. A horizontal drag scrolls instead.
+    func testTmuxOffScreenBehavesLikeTheRawShell() {
+        let ctx = gestureContext(screen: GestureScreen(plainTmuxAttached: true, mode: .localScroll),
+                                 mode: .local, multiWindow: true)
+        var tap = GestureDriver(ctx)
+        tap.down(55, 45, at: 1.0)
+        XCTAssertEqual(tap.up(55, 45, at: 1.1), [.restoreKeyboard])          // held, not immediate
+        XCTAssertEqual(tap.engine.nextDeadline, 1.1 + 0.35)
+
+        var hold = GestureDriver(ctx)
+        hold.down(55, 45, at: 1.0)
+        XCTAssertEqual(hold.tick(at: 1.5), [])                                // no zoom
+        hold.up(55, 45, at: 1.8); hold.drainTicks()
+        XCTAssertEqual(hold.intents, [])
+
+        var swipe = GestureDriver(ctx)
+        swipe.down(300, 100, at: 1.0)
+        swipe.move(100, 100, at: 1.02)
+        XCTAssertEqual(swipe.engine.stateName, "scrolling")
+        XCTAssertEqual(swipe.up(100, 100, at: 1.03), [])
+        XCTAssertFalse(swipe.intents.contains { if case .switchWindow = $0 { return true }; return false })
+    }
+
+    // MARK: content offset
+
+    /// The tap row comes from content space: with a 5pt partial-row phase (offset 1995),
+    /// viewport y 24 is content y 2019, row 100 (viewport-only mapping said 101).
+    func testTapRowUsesTheContentOffset() {
+        var d = GestureDriver(gestureContext(contentOffsetY: 1995))
+        d.down(55, 24, at: 1.0)
+        XCTAssertEqual(d.up(55, 24, at: 1.1), [.restoreKeyboard, .tap(gc(5, 100))])
+    }
+
     func testIdleHasNoDeadline() {
         XCTAssertNil(GestureEngine().nextDeadline)
         XCTAssertEqual(GestureEngine().stateName, "idle")

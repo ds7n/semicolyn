@@ -28,6 +28,9 @@ final class GestureIntentExecutor: NSObject {
     private lazy var loupe: SelectionLoupeView? = SelectionLoupeView()
     /// Inclusive selection, absolute rows; nil when none.
     private(set) var selection: GestureSelection?
+    /// Set when a new drag starts scrolling; the drag's first scroll emit logs its route
+    /// (and the alt-scroll decision when it sends bytes), then clears it.
+    var logNextScrollRoute = true
 
     init(terminal: TerminalView, hooks: Hooks) {
         self.terminal = terminal
@@ -78,29 +81,51 @@ final class GestureIntentExecutor: NSObject {
             loupe?.hide()
             if showMenu { presentMenu(at: p, in: view) }
         case let .switchWindow(delta):
-            hooks.plainTmux()?.onSwitchWindow(delta: delta)
+            onScreenTmux()?.onSwitchWindow(delta: delta)
         case let .scroll(lines, cell):
             scroll(lines, at: cell, in: view)
         case .zoom:
-            hooks.plainTmux()?.onLongPressZoom()
+            onScreenTmux()?.onLongPressZoom()
         }
+    }
+
+    /// The plain-tmux controller only while tmux is ON SCREEN (the one Kit rule,
+    /// `GestureScreen(plainTmuxAttached:mode:)`, shared with the gesture context). A detached
+    /// or exited tmux (or a Mosh host without tmux) leaves the controller set with the shell
+    /// back on its normal screen; tmux sequences there would land at the prompt.
+    private func onScreenTmux() -> PlainTmuxController? {
+        guard let tmux = hooks.plainTmux(),
+              GestureScreen(plainTmuxAttached: true, mode: hooks.mode()) == .plainTmux else { return nil }
+        return tmux
+    }
+
+    /// True when SwiftTerm's viewport is at the live bottom (not scrolled back into history).
+    /// `canScroll` is false on the alternate screen or with no scrollback (always live);
+    /// otherwise `scrollPosition` is 1 exactly when `yDisp` reached the bottom.
+    private func isAtLiveBottom(_ view: TerminalView) -> Bool {
+        !view.canScroll || view.scrollPosition >= 1
     }
 
     // MARK: tap
 
-    /// Plain tmux: click / pane cycle. Raw `localScroll`: place the cursor. Raw app with the
-    /// mouse on: SGR click. Coordinates are clamped to the CURRENT grid (the engine clamped
-    /// against the touch-down snapshot, which output may have moved since).
+    /// tmux on screen: click / pane cycle. Raw `localScroll`: place the cursor, only at the
+    /// live bottom (the cursor is relative to the live screen while `viewportRow` is relative
+    /// to the scrolled-back viewport, so scrolled back N lines the arrows would overshoot by
+    /// N). Raw app with the mouse on: SGR click. Coordinates are clamped to the CURRENT grid
+    /// (the engine clamped against the touch-down snapshot, which output may have moved since).
     private func tap(_ cell: GestureCell, in view: TerminalView) {
         let term = view.getTerminal()
         let col = min(max(0, cell.col), max(term.cols - 1, 0))
         let viewportRow = min(max(0, cell.row - term.getTopVisibleRow()), max(term.rows - 1, 0))
-        if let tmux = hooks.plainTmux() {
+        if let tmux = onScreenTmux() {
             tmux.onTapPane(col: col + 1, row: viewportRow + 1, mouseModeOn: term.mouseMode != .off)
             return
         }
         if hooks.mode() == .localScroll {
-            hooks.placeCursor(col, viewportRow)
+            let live = isAtLiveBottom(view)
+            DebugLog.shared.log(.gesture, "gesture:tap route=placeCursor live=\(live) col=\(col) row=\(viewportRow)"
+                + (live ? "" : " -> skip reason=scrolledBack"))
+            if live { hooks.placeCursor(col, viewportRow) }
         } else if term.mouseMode != .off {
             hooks.sendBytes(sgrMouseClick(col: col + 1, row: viewportRow + 1))
         }
@@ -108,18 +133,29 @@ final class GestureIntentExecutor: NSObject {
 
     // MARK: scroll
 
-    /// Positive `lines` = finger moved down = older content. Raw shell on its normal screen
-    /// scrolls SwiftTerm's scrollback; everything else sends wheel / arrow / page-key bytes.
+    /// Positive `lines` = finger moved down = older content. Routes on the mode alone: the
+    /// normal screen (`localScroll`, including plain tmux detached back to the shell) scrolls
+    /// SwiftTerm's scrollback; everything else (tmux on screen, alt-screen apps, app mouse)
+    /// sends wheel / arrow / page-key bytes.
     private func scroll(_ lines: Int, at cell: GestureCell, in view: TerminalView) {
         guard lines != 0 else { return }
-        if hooks.plainTmux() == nil, hooks.mode() == .localScroll {
+        if hooks.mode() == .localScroll {
+            if logNextScrollRoute {
+                logNextScrollRoute = false
+                DebugLog.shared.log(.gesture, "gesture:scroll route=scrollback reason=localScroll")
+            }
             if lines > 0 { view.scrollUp(lines: lines) } else { view.scrollDown(lines: -lines) }
             return
         }
         let term = view.getTerminal()
         let col = min(max(1, cell.col + 1), max(term.cols, 1))
         let row = min(max(1, cell.row - term.getTopVisibleRow() + 1), max(term.rows, 1))
-        let keys = hooks.altScrollDecision().keys
+        let decision = hooks.altScrollDecision()
+        if logNextScrollRoute {
+            logNextScrollRoute = false
+            DebugLog.shared.log(.gesture, "gesture:scroll route=bytes imode=\(hooks.mode()) appCursor=\(term.applicationCursor) \(decision.logLine)")
+        }
+        let keys = decision.keys
         for run in arrowEvents(cols: 0, rows: -lines) {   // finger down -> up runs (older)
             let bytes: [UInt8]
             switch keys {

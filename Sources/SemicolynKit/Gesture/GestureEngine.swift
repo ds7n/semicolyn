@@ -35,6 +35,9 @@ public struct GestureEngine: Sendable {
     private var lastTapTime: Double?
     private var lastTapPoint: GesturePoint?
     private var pendingTap: PendingTap?
+    /// Why the last `handle(_:context:)` / `tick(at:)` call did what it did: the `reason=` of
+    /// the App's `gesture:intent` decision line (e.g. `axisLock:swipe`, `tap:2`, `commit`).
+    public private(set) var lastReason = "none"
 
     public init() {}
 
@@ -78,11 +81,13 @@ public struct GestureEngine: Sendable {
         if let pending = pendingTap, time >= pending.deadline {
             pendingTap = nil
             out.append(.tap(pending.cell))
+            lastReason = "tap:held"
         }
         switch state {
         case let .pressed(_, startTime, _, eligible, _, ctx)
             where eligible && time - startTime >= GestureThresholds.longPressDuration:
             state = .longPressed
+            lastReason = "longPress"
             resetTapSequence()
             if ctx.screen == .plainTmux { out.append(.zoom) }
         case let .flinging(velocity, startTime, _, emitted, at, ctx):
@@ -92,6 +97,7 @@ public struct GestureEngine: Sendable {
             if step.delta != 0 { out.append(.scroll(lines: step.delta, at: at)) }
             if momentum.isFinished(at: t) {
                 state = .idle
+                lastReason = "flingEnd"
             } else {
                 state = .flinging(velocity: velocity, startTime: startTime, lastTick: time,
                                   emitted: step.emitted, at: at, context: ctx)
@@ -111,6 +117,7 @@ public struct GestureEngine: Sendable {
                 out.append(.endSelectionDrag(last, showMenu: false))
             }
             if case .twoFinger = state { return out }   // a third finger: keep the two-finger touch
+            lastReason = "twoFinger"
             pendingTap = nil
             resetTapSequence()
             state = .twoFinger(startTime: e.time, start: e.point, moved: false, context: ctx)
@@ -118,6 +125,7 @@ public struct GestureEngine: Sendable {
         }
         let stoppedFling: Bool = { if case .flinging = state { return true }; return false }()
         let handle = GestureGeometry.handle(at: e.point, in: ctx)
+        lastReason = stoppedFling ? "flingStop" : handle == nil ? "down" : "down:handle"
         state = .pressed(start: e.point, startTime: e.time, handle: handle,
                          longPressEligible: handle == nil && !stoppedFling,
                          stoppedFling: stoppedFling, context: ctx)
@@ -131,32 +139,45 @@ public struct GestureEngine: Sendable {
             if let handle, let selection = ctx.selection, distance >= GestureThresholds.deadZone {
                 let anchor = handle == .start ? selection.end : selection.start
                 state = .draggingHandle(anchor: anchor, last: e.point, context: ctx)
+                lastReason = "handle"
                 return [Self.selectionIntent(anchor: anchor, point: e.point, context: ctx)]
             }
             switch DragAxisLock.resolve(dx: e.point.x - start.x, dy: e.point.y - start.y,
                                         isMultiWindowTmux: ctx.screen == .plainTmux && ctx.multiWindow) {
             case .pending:
+                lastReason = "deadZone"
                 state = .pressed(start: start, startTime: startTime, handle: handle,
                                  longPressEligible: eligible && distance < GestureThresholds.longPressSlop,
                                  stoppedFling: stoppedFling, context: ctx)
                 return []
             case .switchWindow:
-                state = .swiping(start: start, samples: [Sample(time: e.time, point: e.point)], context: ctx)
+                // Seed the velocity samples with the touch-down point: a fast flick may have
+                // only one move past the dead zone before release.
+                lastReason = "axisLock:swipe"
+                state = .swiping(start: start,
+                                 samples: [Sample(time: startTime, point: start), Sample(time: e.time, point: e.point)],
+                                 context: ctx)
                 return []
             case .scroll:
-                return scroll(to: e, start: start, emitted: 0, samples: [], context: ctx)
+                lastReason = "axisLock:scroll"
+                return scroll(to: e, start: start, emitted: 0,
+                              samples: [Sample(time: startTime, point: start)], context: ctx)
             }
         case let .draggingHandle(anchor, _, ctx):
             state = .draggingHandle(anchor: anchor, last: e.point, context: ctx)
+            lastReason = "handle"
             return [Self.selectionIntent(anchor: anchor, point: e.point, context: ctx)]
         case let .swiping(start, samples, ctx):
+            lastReason = "swipe"
             state = .swiping(start: start,
                              samples: Self.trim(samples + [Sample(time: e.time, point: e.point)], now: e.time),
                              context: ctx)
             return []
         case let .scrolling(start, emitted, samples, ctx):
+            lastReason = "scroll"
             return scroll(to: e, start: start, emitted: emitted, samples: samples, context: ctx)
         case let .twoFinger(startTime, start, moved, ctx):
+            lastReason = "twoFinger:move"
             state = .twoFinger(startTime: startTime, start: start,
                                moved: moved || (e.touchCount >= 2 && e.point.distance(to: start) >= GestureThresholds.longPressSlop),
                                context: ctx)
@@ -170,20 +191,30 @@ public struct GestureEngine: Sendable {
         switch state {
         case let .pressed(start, _, _, _, stoppedFling, ctx):
             state = .idle
-            return stoppedFling ? [] : tapReleased(at: start, time: e.time, context: ctx)
+            if stoppedFling {
+                lastReason = "flingStop"
+                return []
+            }
+            return tapReleased(at: start, time: e.time, context: ctx)
         case .longPressed:
             state = .idle
+            lastReason = "longPressEnd"
             return []
         case .draggingHandle:
             state = .idle
+            lastReason = "handleRelease"
             return [.endSelectionDrag(e.point, showMenu: true)]
         case let .swiping(start, samples, ctx):
             state = .idle
             let all = Self.trim(samples + [Sample(time: e.time, point: e.point)], now: e.time)
             switch SwitchCommitDecision.resolve(dx: e.point.x - start.x, width: ctx.viewWidth,
                                                 velocity: Self.velocity(all).x) {
-            case let .commit(delta): return [.switchWindow(delta: delta)]
-            case .springBack: return []
+            case let .commit(delta):
+                lastReason = "commit"
+                return [.switchWindow(delta: delta)]
+            case .springBack:
+                lastReason = "springBack"
+                return []
             }
         case let .scrolling(start, emitted, samples, ctx):
             let out = scroll(to: e, start: start, emitted: emitted, samples: samples, context: ctx)
@@ -191,18 +222,25 @@ public struct GestureEngine: Sendable {
             let v = Self.velocity(finalSamples).y
             if ScrollMomentum(velocity: v).isFinished(at: 0) {
                 state = .idle
+                lastReason = "scrollEnd"
             } else {
+                lastReason = "fling"
                 state = .flinging(velocity: v, startTime: e.time, lastTick: e.time, emitted: 0,
                                   at: GestureGeometry.cell(at: e.point, in: ctx), context: ctx)
             }
             return out
         case let .twoFinger(startTime, _, moved, ctx):
-            guard e.touchCount == 0 else { return [] }   // another finger is still down
+            guard e.touchCount == 0 else {               // another finger is still down
+                lastReason = "twoFinger:lift"
+                return []
+            }
             state = .idle
             if !moved, ctx.selection != nil,
                e.time - startTime <= GestureThresholds.twoFingerTapMaxDuration {
+                lastReason = "twoFingerTap"
                 return [.showMenu(e.point)]
             }
+            lastReason = "twoFinger:end"
             return []
         case .idle, .flinging:
             return []
@@ -213,11 +251,13 @@ public struct GestureEngine: Sendable {
         switch state {
         case let .draggingHandle(_, last, _):
             state = .idle
+            lastReason = "cancel"
             return [.endSelectionDrag(last, showMenu: false)]
         case .flinging:
             return []   // no finger owns a fling
         default:
             state = .idle
+            lastReason = "cancel"
             return []
         }
     }
@@ -280,6 +320,7 @@ public struct GestureEngine: Sendable {
         tapCount = continues ? tapCount + 1 : 1
         lastTapTime = t
         lastTapPoint = p
+        lastReason = "tap:\(tapCount)"
         let cell = GestureGeometry.cell(at: p, in: ctx)
         switch tapCount {
         case 1:

@@ -12,14 +12,15 @@ import SemicolynKit
 @MainActor
 final class TerminalTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
     private let makeContext: () -> GestureContext?
-    private let onIntents: ([GestureIntent], _ from: String, _ to: String) -> Void
+    /// Intents plus the engine transition they came from and the engine's `lastReason`.
+    private let onIntents: ([GestureIntent], _ from: String, _ to: String, _ reason: String) -> Void
     private var engine = GestureEngine()
     private var context: GestureContext?
     private var active: Set<UITouch> = []
     private var displayLink: CADisplayLink?
 
     init(makeContext: @escaping () -> GestureContext?,
-         onIntents: @escaping ([GestureIntent], _ from: String, _ to: String) -> Void) {
+         onIntents: @escaping ([GestureIntent], _ from: String, _ to: String, _ reason: String) -> Void) {
         self.makeContext = makeContext
         self.onIntents = onIntents
         super.init(target: nil, action: nil)
@@ -49,7 +50,11 @@ final class TerminalTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDel
     // MARK: touches
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        if active.isEmpty { context = makeContext() }   // snapshot once per touch sequence
+        if active.isEmpty {
+            context = makeContext()   // snapshot once per touch sequence
+            // Logged next to the `touch` replay lines so a device log replays with its context.
+            if let context { DebugLog.shared.log(.gesture, context.logLine) }
+        }
         active.formUnion(touches)
         feed(.down, point: currentPoint(), time: event.timestamp, count: active.count)
     }
@@ -93,7 +98,7 @@ final class TerminalTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDel
         DebugLog.shared.log(.gesture, event.replayLine)
         let from = engine.stateName
         let intents = engine.handle(event, context: ctx)
-        onIntents(intents, from, engine.stateName)
+        onIntents(intents, from, engine.stateName, engine.lastReason)
         scheduleTimer()
     }
 
@@ -113,7 +118,9 @@ final class TerminalTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDel
         if let deadline = engine.nextDeadline, now >= deadline {
             let from = engine.stateName
             let intents = engine.tick(at: now)
-            if !intents.isEmpty || from != engine.stateName { onIntents(intents, from, engine.stateName) }
+            if !intents.isEmpty || from != engine.stateName {
+                onIntents(intents, from, engine.stateName, engine.lastReason)
+            }
         }
         scheduleTimer()
     }
