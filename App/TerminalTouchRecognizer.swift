@@ -10,7 +10,7 @@ import SemicolynKit
 /// executor. A display-link timer runs only while the engine has a deadline (long press,
 /// a held single tap, fling frames).
 @MainActor
-final class TerminalTouchRecognizer: UIGestureRecognizer {
+final class TerminalTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
     private let makeContext: () -> GestureContext?
     private let onIntents: ([GestureIntent], _ from: String, _ to: String) -> Void
     private var engine = GestureEngine()
@@ -27,6 +27,17 @@ final class TerminalTouchRecognizer: UIGestureRecognizer {
         delaysTouchesBegan = false
         delaysTouchesEnded = false
         name = "ours.touchEngine"
+        // Its own delegate, so it always recognizes simultaneously with every other
+        // recognizer: when the pinch begins, UIKit must not force this recognizer to fail
+        // mid-sequence (it observes; the second finger already cancels one-finger gestures
+        // inside the engine).
+        delegate = self
+    }
+
+    /// Never excluded by (or excluding) another recognizer: see `delegate = self` in `init`.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
     }
 
     /// Invalidate the timer (call when the terminal is torn down; the display link retains us).
@@ -62,8 +73,14 @@ final class TerminalTouchRecognizer: UIGestureRecognizer {
     }
 
     /// Only clears per-sequence bookkeeping: the engine (multi-tap memory, fling) persists.
+    /// If UIKit resets us while a sequence is still in flight (forced to fail by another
+    /// recognizer), feed the engine a `.cancel` first so it is never stranded in `pressed`
+    /// (where its deadline could fire a spurious long-press zoom).
     override func reset() {
         super.reset()
+        if !active.isEmpty, context != nil {
+            feed(.cancel, point: currentPoint(), time: CACurrentMediaTime(), count: 0)
+        }
         active.removeAll()
         context = nil
     }

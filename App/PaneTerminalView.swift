@@ -86,9 +86,7 @@ final class PaneTerminalView: TerminalView {
     // owned by UIKit, not by SwiftTerm and not by us. That stack grabbed the single-finger
     // drag and drew a SYSTEM-tinted selection (a DIFFERENT color than SwiftTerm's own
     // double/triple-tap selection, device report, build 43) while the terminal's inherited
-    // `UIScrollView` pan never even began (zero `gr:scrollPan began` logs). Our
-    // `GestureSimultaneity` policy and `sweep2` only touch SwiftTerm's OWN pans, so they
-    // can't reach these.
+    // `UIScrollView` pan never even began (zero `gr:scrollPan began` logs).
     //
     // Primary fix: `editingInteractionConfiguration = .none`, the documented public
     // `UIResponder` opt-out (iOS 13+) for system editing/selection interaction gestures on
@@ -97,68 +95,24 @@ final class PaneTerminalView: TerminalView {
         .none
     }
 
-    // Belt-and-suspenders + instrumentation: every recognizer UIKit adds arrives through
-    // `addGestureRecognizer`. Log each one (class + owning-delegate class, gated on
-    // `.gesture`) so a device trace is DEFINITIVE about what grabbed the drag, and disable
-    // any that a text-interaction delegate owns in case `.none` doesn't cover the
-    // single-finger selection drag on this iOS. Our own recognizers and the inherited
-    // scroll pan aren't added with a text-interaction delegate, so they're unaffected.
+    // Single gesture engine (spec 2026-10-04): every touch goes through OUR
+    // `TerminalTouchRecognizer` (plus the stock pinch). Every other tap, long-press and pan
+    // recognizer, SwiftTerm's own (including the selection / mouse pans it re-creates each
+    // time tmux re-sends mouse mode, device build 179) and UIKit's scroll-view and
+    // text-interaction ones, is disabled the moment it is added, so nothing can compete.
     override func addGestureRecognizer(_ gestureRecognizer: UIGestureRecognizer) {
         super.addGestureRecognizer(gestureRecognizer)
-
         let grClass = String(describing: type(of: gestureRecognizer))
         let delegateClass = gestureRecognizer.delegate.map { String(describing: type(of: $0)) } ?? "nil"
-        let traceID = GestureTracer.shared.attach(to: gestureRecognizer)
-        DebugLog.shared.log(.gesture, "addGR: #\(traceID) \(grClass) delegate=\(delegateClass)")
-
-        // The recognizer classes are private, so match on the delegate class name, the
-        // only public signal. Conservative substring match tolerant of UIKit renames.
-        if delegateClass.contains("UITextInteraction")
+        let ours = gestureRecognizer is TerminalTouchRecognizer || gestureRecognizer is UIPinchGestureRecognizer
+        let competes = gestureRecognizer is UITapGestureRecognizer
+            || gestureRecognizer is UILongPressGestureRecognizer
+            || gestureRecognizer is UIPanGestureRecognizer
+            || grClass.hasPrefix("UIScrollView")
+            || delegateClass.contains("TextInteraction")
             || delegateClass.contains("TextSelection")
-            || delegateClass.contains("TextInteraction") {
-            gestureRecognizer.isEnabled = false
-            DebugLog.shared.log(.gesture, "addGR: DISABLED native text-interaction recognizer \(grClass)")
-        }
+        if !ours && competes { gestureRecognizer.isEnabled = false }
+        DebugLog.shared.log(.gesture, "addGR: \(grClass) delegate=\(delegateClass) disabled=\(!ours && competes)")
     }
 }
 
-/// Diagnostic only (no behavior change): attached as an extra target to EVERY recognizer
-/// added to a terminal view, including SwiftTerm's lazily-created selection/mouse pans that
-/// we never see otherwise, and logs each one that WINS a touch (began / recognized / ended /
-/// cancelled; `.changed` skipped to keep the log readable). Each recognizer gets a stable
-/// `#id` (also printed by `addGR`), plus its `name` when we set one, so a device trace shows
-/// exactly which recognizer owned each touch.
-@MainActor
-final class GestureTracer: NSObject {
-    static let shared = GestureTracer()
-    private var ids: [ObjectIdentifier: Int] = [:]
-    private var nextID = 1
-
-    /// Attach the trace target to `gr` and return its stable id.
-    func attach(to gr: UIGestureRecognizer) -> Int {
-        let key = ObjectIdentifier(gr)
-        if let id = ids[key] { return id }
-        let id = nextID
-        nextID += 1
-        ids[key] = id
-        gr.addTarget(self, action: #selector(trace(_:)))
-        return id
-    }
-
-    @objc private func trace(_ gr: UIGestureRecognizer) {
-        let state: String
-        switch gr.state {
-        case .began: state = "began"
-        case .ended: state = "ended/recognized"
-        case .cancelled: state = "cancelled"
-        case .failed: state = "failed"
-        default: return   // .changed / .possible: too noisy, carries no ownership info
-        }
-        let id = ids[ObjectIdentifier(gr)].map(String.init) ?? "?"
-        let label = gr.name ?? String(describing: type(of: gr))
-        let delegateClass = gr.delegate.map { String(describing: type(of: $0)) } ?? "nil"
-        let p = gr.location(in: gr.view)
-        DebugLog.shared.log(.gesture,
-            "gr:trace #\(id) \(label) state=\(state) enabled=\(gr.isEnabled) delegate=\(delegateClass) loc=(\(Int(p.x)),\(Int(p.y)))")
-    }
-}

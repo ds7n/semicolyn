@@ -70,30 +70,10 @@ struct TerminalScreen: UIViewRepresentable {
         terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] _, term in
             coordinator?.modeTracker.recompute(terminal: term, altSource: .rawLive)
         }
-        // Flip drag/tap ownership on a mode transition (replaces the init-time
-        // dot-only closure, also refreshes the dot alongside). `isScrollEnabled`
-        // parks SwiftTerm's native pan in `appOwnsInput`.
-        //
-        // `allowMouseReporting` is ON ONLY in `.mouseReporting`. It must be OFF in
-        // `.appOwnsInput`: with it on, SwiftTerm forwards the finger drag to the app as
-        // SGR mouse events BEFORE our `handleScrollViewPan` can translate it into arrow
-        // keys, so the alt-screen drag→arrows path never runs and Claude/vim panes don't
-        // scroll (device trace, build 44: a drag emitted 98 SGR mouse sends, 0 arrows).
-        // The spec's "tap→mouse in appOwnsInput" is subordinate to drag→arrows here, since
-        // a single SwiftTerm boolean governs both and drag-scroll is the primary need.
-        context.coordinator.modeTracker.onChange = { [weak coordinator = context.coordinator, weak terminal] _, mode in
+        // Mode now only drives the mouse dot and the gesture context; recognizers are
+        // never toggled. (Replaces the init-time dot-only closure.)
+        context.coordinator.modeTracker.onChange = { [weak coordinator = context.coordinator] _, mode in
             coordinator?.mouseDot.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
-            terminal?.isScrollEnabled = (mode == .localScroll)
-            terminal?.allowMouseReporting = (mode == .mouseReporting)
-            // Our alt-screen drag pan owns the drag in `.appOwnsInput` (where the native
-            // scroll pan above is parked); OUR switch pan owns it in the other modes.
-            // BOTH must flip in lockstep so exactly one switch-owner is live per mode.
-            // Device bug 2026-09-06: this handler flipped only altPan and left switchPan
-            // enabled (its install default in .localScroll), so entering .appOwnsInput
-            // left BOTH switch pans live -> both recognized one finger -> the window
-            // switch committed twice per swipe (hence the paired flip).
-            coordinator?.gestureController?.setAltScreenPanEnabled(mode == .appOwnsInput)
-            coordinator?.gestureController?.setSwitchPanEnabled(mode != .appOwnsInput)
         }
         // Prime once at mount so a terminal that starts on the alt-screen (reattach
         // into a running vim/Claude) is correct from frame one.
@@ -128,28 +108,6 @@ struct TerminalScreen: UIViewRepresentable {
         )
         terminal.addGestureRecognizer(pinch)
 
-        // Our own `TerminalGestureController` (installed below) owns the pan/tap/
-        // long-press touch map; SwiftTerm's built-in recognizers are disabled by its
-        // sweep. `allowMouseReporting = false` here is the pre-mode-tracker default;
-        // `modeTracker.onChange` (wired above) flips it to `true` on transition into
-        // `.mouseReporting`/`.appOwnsInput` so SwiftTerm forwards mouse events, and the
-        // controller reads `currentMode()` to route drag/tap accordingly.
-        terminal.allowMouseReporting = false
-
-        // Restore the keyboard (and, with it, the keybar, which now rides as the
-        // terminal's inputAccessoryView, PR #66) after it's been dismissed. A tap only
-        // re-claims first responder when the terminal is NOT already first responder;
-        // when the keyboard is up this recognizer no-ops and SwiftTerm's own tap
-        // (cursor placement) works normally. `cancelsTouchesInView = false` so the tap
-        // still reaches SwiftTerm.
-        let restoreTap = UITapGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleRestoreTap(_:))
-        )
-        restoreTap.cancelsTouchesInView = false
-        restoreTap.name = "ours.restoreTap"
-        terminal.addGestureRecognizer(restoreTap)
-
         // If `attachPlainTmux` launched a plain-tmux session for this connection
         // (per-host/default `resolveUseTmux`), build the gesture controller now;
         // `screen` is only the mount signal, the controller only needs the
@@ -163,79 +121,44 @@ struct TerminalScreen: UIViewRepresentable {
         vm.setMountedTerminalView(terminal)
         vm.installPlainTmuxControllerIfNeeded(screen: terminal)
 
-        // Install our own gesture layer (replaces SwiftTerm's built-in tap/scrub/select).
-        // Raw PTY: no tmux, so horizontal drag falls through to scroll and long-press
-        // zoom is a no-op. Plain tmux (useTmux ON): the same callbacks route
-        // through `vm.plainTmux` instead, so window-switch/zoom/tap-select drive
-        // gesture-issued tmux commands (`PlainTmuxController`) rather than no-ops /
-        // raw arrow-key cursor placement.
-        let gestureController = TerminalGestureController(
-            terminalView: terminal,
-            callbacks: .init(
-                isMultiWindowTmux: { [weak coordinator = context.coordinator] in
-                    coordinator?.vm?.isMultiWindowTmux ?? false
-                },
-                onSwitchWindow: { [weak coordinator = context.coordinator] delta in
-                    coordinator?.vm?.plainTmux?.onSwitchWindow(delta: delta)
-                },
-                onLongPressZoom: { [weak coordinator = context.coordinator] in
-                    coordinator?.vm?.plainTmux?.onLongPressZoom()
-                },
-                onPlaceCursor: { [weak coordinator = context.coordinator, weak terminal] col, row in
-                    guard let terminal else { return }
-                    if let plainTmux = coordinator?.vm?.plainTmux {
-                        // Live mouse mode from the emulator (parses `?1000h` from the
-                        // stream regardless of the mode tracker): tmux mouse-on -> the
-                        // tap forwards as a click and tmux selects the exact pane.
-                        let mouseOn = terminal.getTerminal().mouseMode != .off
-                        plainTmux.onTapPane(col: col + 1, row: row + 1, mouseModeOn: mouseOn)
-                    } else {
-                        coordinator?.placeCursor(toCol: col, toRow: row, in: terminal)
-                    }
-                },
-                // Raw shell / plain tmux both have exactly one CLIENT-side pane
-                // registry entry here (the raw single-terminal path never tracks
-                // multiple `TerminalView`s), always active, so no tmux select-pane
-                // focus-shift is needed on this screen either way.
-                isActivePane: { true },
-                onSelectPane: { },
-                isTmux: { [weak coordinator = context.coordinator] in
-                    coordinator?.vm?.plainTmux != nil
-                },
-                currentMode: { [weak coordinator = context.coordinator] in coordinator?.modeTracker.mode ?? .localScroll },
-                applicationCursorKeys: { [weak terminal] in terminal?.getTerminal().applicationCursor ?? false },
-                altScrollDecision: { [weak coordinator = context.coordinator] in
-                    MainActor.assumeIsolated {
-                        let mode = AppStores.shared.terminalSettings.settings.altScrollMode
-                        // Raw/mosh single pane: no tmux pane_current_command.
-                        let title = coordinator?.vm?.terminalTitle
-                        return altScrollDecision(mode: mode, paneCommand: nil,
-                                                 windowTitle: title, registry: .bundledDefault)
-                    }
-                },
-                sendBytes: { [weak coordinator = context.coordinator] bytes in coordinator?.send(bytes) },
-                hasSelection: { [weak terminal] in terminal?.selectionActive ?? false },
-                clearSelection: { [weak terminal] in terminal?.selectNone() },
-                // Finger-drag window-switch commit: routes to `PlainTmuxController`
-                // when plain tmux is active (gated by `isMultiWindowTmux` above,
-                // which only reports true then); a no-op raw-PTY/Mosh screen (no
-                // tmux windows to switch).
-                onDragCommit: { [weak coordinator = context.coordinator] delta in
-                    coordinator?.vm?.plainTmux?.onSwitchWindow(delta: delta)
+        // Single gesture engine (spec 2026-10-04): fixed configuration, no runtime flips.
+        // Native scrolling and SwiftTerm's mouse forwarding are off for good; the engine
+        // scrolls (SwiftTerm scrollUp/Down or wheel/arrow bytes) and forwards clicks itself.
+        terminal.isScrollEnabled = false
+        terminal.allowMouseReporting = false
+        terminal.delaysContentTouches = false
+        let coordinator = context.coordinator
+        let executor = GestureIntentExecutor(terminal: terminal, hooks: .init(
+            plainTmux: { [weak coordinator] in coordinator?.vm?.plainTmux },
+            mode: { [weak coordinator] in coordinator?.modeTracker.mode ?? .localScroll },
+            altScrollDecision: { [weak coordinator] in coordinator?.currentAltScrollDecision()
+                ?? altScrollDecision(mode: AppStores.shared.terminalSettings.settings.altScrollMode,
+                                     paneCommand: nil, windowTitle: nil, registry: .bundledDefault) },
+            sendBytes: { [weak coordinator] bytes in coordinator?.send(bytes) },
+            placeCursor: { [weak coordinator, weak terminal] col, row in
+                guard let terminal else { return }
+                coordinator?.placeCursor(toCol: col, toRow: row, in: terminal)
+            },
+            restoreKeyboard: { [weak coordinator, weak terminal] in
+                guard let coordinator, let terminal else { return }
+                let action = keyboardRestoreAction(isFirstResponder: terminal.isFirstResponder,
+                                                   keyboardVisible: coordinator.keybarAccessory?.window != nil)
+                coordinator.apply(action, to: terminal, reason: "tap")
+            }))
+        let recognizer = TerminalTouchRecognizer(
+            makeContext: { [weak coordinator, weak terminal, weak executor] in
+                guard let coordinator, let terminal else { return nil }
+                return coordinator.gestureContext(for: terminal, selection: executor?.selection)
+            },
+            onIntents: { [weak executor] intents, from, to in
+                if !intents.isEmpty || from != to {
+                    DebugLog.shared.log(.gesture, "gesture:intent \(intents) state=\(from)->\(to)")
                 }
-            )
-        )
-        context.coordinator.gestureController = gestureController
-        // The controller's sweep disabled all pre-existing recognizers (SwiftTerm's +
-        // ours-that-aren't). Re-enable the app's own pinch and keyboard-restore taps.
-        pinch.isEnabled = true
-        restoreTap.isEnabled = true
-        // Sync our alt-screen pan to the CURRENT mode: the mode was primed above (line
-        // ~81) BEFORE this controller existed, so a terminal that mounts already on the
-        // alternate screen (reattach into a running vim/Claude) needs its pan enabled
-        // now, `onChange` only fires on a future transition, not the prime.
-        gestureController.setAltScreenPanEnabled(context.coordinator.modeTracker.mode == .appOwnsInput)
-        gestureController.setSwitchPanEnabled(context.coordinator.modeTracker.mode != .appOwnsInput)
+                executor?.perform(intents)
+            })
+        terminal.addGestureRecognizer(recognizer)
+        coordinator.executor = executor
+        coordinator.touchRecognizer = recognizer
         MainActor.assumeIsolated {
             DebugLog.shared.log(.seed, "scroll:init isScrollEnabled=\(terminal.isScrollEnabled) nativePan=\(terminal.panGestureRecognizer.isEnabled) contentSize=\(terminal.contentSize) offset=\(terminal.contentOffset)")
         }
@@ -258,7 +181,7 @@ struct TerminalScreen: UIViewRepresentable {
         // Claim keyboard focus ONCE when the view first lands in a window (so the
         // on-screen keyboard + keybar accessory appear). We don't re-claim on later
         // passes; a user who dismisses the keyboard is not fought here. Re-showing it
-        // after dismissal is the job of `handleRestoreTap` (tap the terminal).
+        // after dismissal is a tap: the gesture engine's `restoreKeyboard` intent.
         if !context.coordinator.didInitialFocus, terminal.window != nil {
             context.coordinator.didInitialFocus = true
             terminal.becomeFirstResponder()
@@ -292,6 +215,13 @@ struct TerminalScreen: UIViewRepresentable {
         }
         // Update mouse-active dot visibility and selection gesture state.
         context.coordinator.updateMouseDot(from: terminal)
+    }
+
+    /// Tear down the gesture engine's display-link timer (it retains the recognizer) and
+    /// the executor's edit-menu interaction and loupe.
+    static func dismantleUIView(_ uiView: RawTerminalContainer, coordinator: Coordinator) {
+        coordinator.touchRecognizer?.stopTimers()
+        coordinator.executor?.detach()
     }
 
     /// Bridges SwiftTerm's delegate callbacks to the SSH session.
@@ -334,13 +264,15 @@ struct TerminalScreen: UIViewRepresentable {
         /// True once we've claimed keyboard focus the first time (on the first
         /// `updateUIView` after the view is in a window, so `becomeFirstResponder` can
         /// succeed). We don't re-claim on later passes (a user who dismisses the
-        /// keyboard isn't fought); `handleRestoreTap` re-shows it on a tap instead.
+        /// keyboard isn't fought); a tap re-shows it instead, through the gesture
+        /// engine's `restoreKeyboard` intent.
         var didInitialFocus = false
         /// Last `vm.keyboardFocusRequestToken` acted on, so `updateUIView` can tell a NEW
         /// focus request apart from a repeated SwiftUI pass.
         var lastFocusRequestToken = 0
-        /// Retains the gesture layer for this terminal (replaces SwiftTerm's built-ins).
-        var gestureController: TerminalGestureController?
+        /// The single gesture engine's executor and recognizer (spec 2026-10-04).
+        var executor: GestureIntentExecutor?
+        var touchRecognizer: TerminalTouchRecognizer?
         /// Tracks this pane's `InteractionMode`, recomputed from `PaneTerminalView`'s
         /// `bufferActivated`/`mouseModeChanged` overrides (event-driven, replaces the
         /// old render-time poll in `updateMouseDot`).
@@ -370,10 +302,8 @@ struct TerminalScreen: UIViewRepresentable {
             super.init()
             halo.configure(color: UIColor(Color(theme.bell.edge)))
             // Refresh the dot immediately on a mode transition, rather than waiting
-            // for the next SwiftUI `updateUIView` pass. The isScrollEnabled/
-            // allowMouseReporting ownership flip is wired in `makeUIView` (needs the
-            // `TerminalView`, which doesn't exist yet at coordinator-init time) and
-            // REPLACES this closure with one that also does the dot refresh.
+            // for the next SwiftUI `updateUIView` pass. `makeUIView` replaces this
+            // closure with an equivalent dot-only one.
             modeTracker.onChange = { [weak self] _, mode in
                 self?.mouseDot.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
             }
@@ -430,20 +360,10 @@ struct TerminalScreen: UIViewRepresentable {
             }
         }
 
-        /// Re-show the keyboard (and the keybar accessory) after it was hidden. Acts when
-        /// the terminal lost focus, OR still has focus but the keyboard is hidden (the
-        /// keybar accessory is detached from any window: device build 172, where every tap
-        /// logged `fr=true` and the old `!isFirstResponder` check never fired). When the
-        /// keyboard is up this no-ops and the tap reaches the terminal as usual (this
-        /// recognizer has `cancelsTouchesInView = false`).
-        @objc func handleRestoreTap(_ recognizer: UITapGestureRecognizer) {
-            guard let terminal = recognizer.view as? TerminalView else { return }
-            let action = keyboardRestoreAction(isFirstResponder: terminal.isFirstResponder,
-                                               keyboardVisible: keybarAccessory?.window != nil)
-            apply(action, to: terminal, reason: "tap")
-        }
-
-        /// Carry out a `KeyboardRestoreAction` on `terminal` and log the decision.
+        /// Carry out a `KeyboardRestoreAction` on `terminal` and log the decision. Used by
+        /// the focus-request path and the gesture engine's `restoreKeyboard` hook (a tap
+        /// restores the keyboard when the terminal lost focus or the keyboard is hidden,
+        /// device build 172).
         func apply(_ action: KeyboardRestoreAction, to terminal: TerminalView, reason: String) {
             switch action {
             case .none:
@@ -494,9 +414,40 @@ struct TerminalScreen: UIViewRepresentable {
         }
 
         /// Send raw bytes to the remote via the same path as keystrokes/paste
-        /// (`onSend`). Used by the gesture controller's alt-screen arrow-key stream.
+        /// (`onSend`). Used by the gesture engine's wheel / arrow / click byte streams.
         func send(_ bytes: [UInt8]) {
             onSend(bytes)
+        }
+
+        /// The alt-screen scroll decision for this terminal (raw / plain-tmux single pane: no
+        /// tmux pane command; the window title feeds the registry).
+        @MainActor
+        func currentAltScrollDecision() -> AltScrollDecision {
+            altScrollDecision(mode: AppStores.shared.terminalSettings.settings.altScrollMode,
+                              paneCommand: nil, windowTitle: vm?.terminalTitle, registry: .bundledDefault)
+        }
+
+        /// Snapshot everything the gesture engine needs at touch-down.
+        @MainActor
+        func gestureContext(for terminal: TerminalView, selection: GestureSelection?) -> GestureContext {
+            let term = terminal.getTerminal()
+            let cols = max(term.cols, 1), rows = max(term.rows, 1)
+            // True cell size: caretFrame is exactly one cell; bounds/rows overestimates.
+            let caret = terminal.caretFrame
+            let cellW = caret.width > 0 ? caret.width : terminal.bounds.width / CGFloat(cols)
+            let cellH = caret.height > 0 ? caret.height : terminal.bounds.height / CGFloat(rows)
+            let mode = modeTracker.mode
+            let keys = currentAltScrollDecision().keys
+            let gain = (mode == .localScroll || keys == .wheel) ? 1.0 : AltScreenScroll.scrollGain
+            return GestureContext(
+                screen: vm?.plainTmux != nil ? .plainTmux : .rawShell,
+                mode: mode == .localScroll ? .local : .app,
+                appMouseOn: term.mouseMode != .off,
+                multiWindow: vm?.isMultiWindowTmux ?? false,
+                selection: terminal.hasActiveSelection ? selection : nil,
+                cellWidth: Double(cellW), cellHeight: Double(cellH),
+                cols: cols, rows: rows, topRow: term.getTopVisibleRow(),
+                viewWidth: Double(terminal.bounds.width), scrollGain: gain)
         }
 
         // Grid resize (rotation, layout) → remote window-change, debounced.
@@ -554,11 +505,8 @@ struct TerminalScreen: UIViewRepresentable {
         /// Update the mouse-dot *visual* from the event-driven `modeTracker` (no
         /// longer polls terminal state here, `PaneTerminalView`'s
         /// `bufferActivated`/`mouseModeChanged` overrides keep `modeTracker` current).
-        /// `isScrollEnabled` / `allowMouseReporting` ownership flips live in
-        /// `modeTracker.onChange` (see `makeUIView`), not here, this used to also
-        /// reassign `allowMouseReporting` on every SwiftUI `updateUIView` pass, which
-        /// would have clobbered the `onChange` flip's `.mouseReporting` case back to
-        /// `false` on the very next render.
+        /// `isScrollEnabled` / `allowMouseReporting` are fixed `false` at mount (the
+        /// gesture engine owns scrolling and clicks); nothing here touches them.
         ///
         /// Called from `updateUIView` on each SwiftUI pass.
         func updateMouseDot(from terminalView: TerminalView) {
