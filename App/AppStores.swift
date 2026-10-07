@@ -35,6 +35,10 @@ final class AppStores {
     /// same `@MainActor` confinement as the other stores (it is not `Sendable`, its
     /// deps aren't). The App-side `ResumeCoordinator` wraps it.
     let resumableSessions: ResumableSessionStore
+    /// The `EncryptedRecordStore` backing `resumableSessions` (same blob backend +
+    /// record key). Held so `moshState` can share the identical instance rather than
+    /// re-deriving a second store over the same key.
+    private let encryptedRecords: EncryptedRecordStore
     /// Terminal rendering preferences (font, cursor, scrollback).
     let terminalSettings = TerminalSettingsStore()
     /// User keybar customization (slot layout + reverse-bar direction), persisted.
@@ -48,6 +52,9 @@ final class AppStores {
     /// capture edge (`ConnectionViewModel`), the launch-resume flow (`HostListView`),
     /// and the banner/prompt (`SessionView`) all read/write one store.
     private(set) lazy var resume = ResumeCoordinator(store: resumableSessions)
+    /// Encrypted, device-local store for the latest mosh transport-state blob per
+    /// session (crypto seq + screen). Shares the record store + key with `resume`.
+    private(set) lazy var moshState = MoshStateBlobStore(records: encryptedRecords)
     /// Base Application Support directory (`…/semicolyn/`). Retained so store
     /// factory methods can build sub-paths without repeating the FileManager call.
     private let baseDirectory: URL
@@ -112,8 +119,9 @@ final class AppStores {
         // iCloud Keychain). `resumeSecret/<uuid>` accounts live in a distinct item space
         // (sync vs non-sync are separate query domains), so there is no collision.
         let resumeSecrets = KeychainSecretStore(synchronizable: false)
+        self.encryptedRecords = EncryptedRecordStore(backend: blobs, key: key)
         self.resumableSessions = ResumableSessionStore(
-            records: EncryptedRecordStore(backend: blobs, key: key),
+            records: encryptedRecords,
             secrets: resumeSecrets,
             hostExists: { hostID in
                 MainActor.assumeIsolated {

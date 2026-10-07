@@ -39,12 +39,20 @@ struct TerminalScreen: UIViewRepresentable {
     var keybarSettings: KeybarSettingsStore = AppStores.shared.keybarSettings
     /// Whether a hardware keyboard is connected (drives the keybar's compact/hidden mode).
     var hardwareKeyboardConnected: Bool = false
+    /// `vm.keyboardFocusRequestToken`, passed BY VALUE: SwiftUI only re-runs `updateUIView`
+    /// when this representable's inputs change, and `vm` is the same reference across a token
+    /// bump, so reading the token through `vm` alone never fired on sheet dismiss (device
+    /// build 173: the request ran only when the app later backgrounded).
+    var keyboardFocusRequestToken: Int = 0
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(send: send, session: session, settings: settings, theme: theme, osc52Allowed: osc52Allowed, onTitle: onTitle)
         c.onSSHLink = onSSHLink
         c.onResize = onResize
         c.vm = vm
+        // Only a focus request made AFTER this terminal mounted should act (a remount
+        // with a stale token must not re-present on its first pass).
+        c.lastFocusRequestToken = keyboardFocusRequestToken
         // Build + retain the keybar audio-feedback accessory for this terminal.
         c.keybarAccessory = KeybarInputAccessory(vm: vm, keybarSettings: keybarSettings,
                                                  theme: theme,
@@ -140,17 +148,19 @@ struct TerminalScreen: UIViewRepresentable {
             action: #selector(Coordinator.handleRestoreTap(_:))
         )
         restoreTap.cancelsTouchesInView = false
+        restoreTap.name = "ours.restoreTap"
         terminal.addGestureRecognizer(restoreTap)
 
         // If `attachPlainTmux` launched a plain-tmux session for this connection
-        // (per-host/default `resolveUseTmux`), build the gesture controller against
-        // THIS freshly created `TerminalView` now (it needs the live grid +
-        // `getCharData` for the on-tap border-drift check). No-op (and
-        // `vm.plainTmux` stays nil) when tmux is off or this is a raw-PTY/Mosh
-        // screen, so the callbacks below fall through to the unchanged raw no-ops.
-        // Stash the mounted view so a transport that launches plain tmux AFTER this
-        // mount (Mosh/ET, in-band on onFirstFrame) can install the gesture controller
-        // against it (SSH installs right here since its pending name is already set).
+        // (per-host/default `resolveUseTmux`), build the gesture controller now;
+        // `screen` is only the mount signal, the controller only needs the
+        // transport-aware send closure. No-op (and `vm.plainTmux` stays nil) when
+        // tmux is off or no plain-tmux launch is pending yet, so the callbacks
+        // below fall through to the unchanged raw no-ops. Stash the mounted view
+        // so a transport that launches plain tmux AFTER this mount (Mosh/ET,
+        // in-band on `onFirstFrame`) can install the controller later via
+        // `installPlainTmuxControllerIfMounted()` (SSH installs right here since
+        // its pending name is already set).
         vm.setMountedTerminalView(terminal)
         vm.installPlainTmuxControllerIfNeeded(screen: terminal)
 
@@ -175,7 +185,11 @@ struct TerminalScreen: UIViewRepresentable {
                 onPlaceCursor: { [weak coordinator = context.coordinator, weak terminal] col, row in
                     guard let terminal else { return }
                     if let plainTmux = coordinator?.vm?.plainTmux {
-                        plainTmux.onTapSelectPane(col: col, row: row)
+                        // Live mouse mode from the emulator (parses `?1000h` from the
+                        // stream regardless of the mode tracker): tmux mouse-on -> the
+                        // tap forwards as a click and tmux selects the exact pane.
+                        let mouseOn = terminal.getTerminal().mouseMode != .off
+                        plainTmux.onTapPane(col: col + 1, row: row + 1, mouseModeOn: mouseOn)
                     } else {
                         coordinator?.placeCursor(toCol: col, toRow: row, in: terminal)
                     }
@@ -186,6 +200,9 @@ struct TerminalScreen: UIViewRepresentable {
                 // focus-shift is needed on this screen either way.
                 isActivePane: { true },
                 onSelectPane: { },
+                isTmux: { [weak coordinator = context.coordinator] in
+                    coordinator?.vm?.plainTmux != nil
+                },
                 currentMode: { [weak coordinator = context.coordinator] in coordinator?.modeTracker.mode ?? .localScroll },
                 applicationCursorKeys: { [weak terminal] in terminal?.getTerminal().applicationCursor ?? false },
                 altScrollDecision: { [weak coordinator = context.coordinator] in
@@ -246,6 +263,18 @@ struct TerminalScreen: UIViewRepresentable {
         if !context.coordinator.didInitialFocus, terminal.window != nil {
             context.coordinator.didInitialFocus = true
             terminal.becomeFirstResponder()
+        }
+        // Re-present the keyboard when the VM requests focus (the keybar's Settings sheet
+        // closing). Presenting that sheet from the keybar (an inputAccessoryView) hides the
+        // keyboard WITHOUT resigning first responder, so a plain become is a no-op; the
+        // decision forces a reload in that case (same fix as TmuxPaneContainer, PR #128,
+        // which the raw/plain-tmux screen never got: device build 172). Act only on a NEW
+        // token so repeated SwiftUI passes never thrash.
+        if keyboardFocusRequestToken != context.coordinator.lastFocusRequestToken {
+            context.coordinator.lastFocusRequestToken = keyboardFocusRequestToken
+            let action = keyboardRestoreAction(isFirstResponder: terminal.isFirstResponder,
+                                               keyboardVisible: false)
+            context.coordinator.apply(action, to: terminal, reason: "focusRequest")
         }
         // Refresh halo color when theme changes.
         context.coordinator.halo.configure(color: UIColor(Color(theme.bell.edge)))
@@ -308,6 +337,9 @@ struct TerminalScreen: UIViewRepresentable {
         /// succeed). We don't re-claim on later passes (a user who dismisses the
         /// keyboard isn't fought); `handleRestoreTap` re-shows it on a tap instead.
         var didInitialFocus = false
+        /// Last `vm.keyboardFocusRequestToken` acted on, so `updateUIView` can tell a NEW
+        /// focus request apart from a repeated SwiftUI pass.
+        var lastFocusRequestToken = 0
         /// Retains the gesture layer for this terminal (replaces SwiftTerm's built-ins).
         var gestureController: TerminalGestureController?
         /// Tracks this pane's `InteractionMode`, recomputed from `PaneTerminalView`'s
@@ -399,17 +431,33 @@ struct TerminalScreen: UIViewRepresentable {
             }
         }
 
-        /// Re-show the keyboard (and the keybar accessory) after the user has dismissed
-        /// it. Only acts when the terminal is NOT already first responder, when the
-        /// keyboard is up, this no-ops and SwiftTerm's own tap (cursor placement) is
-        /// unaffected (this recognizer has `cancelsTouchesInView = false`).
+        /// Re-show the keyboard (and the keybar accessory) after it was hidden. Acts when
+        /// the terminal lost focus, OR still has focus but the keyboard is hidden (the
+        /// keybar accessory is detached from any window: device build 172, where every tap
+        /// logged `fr=true` and the old `!isFirstResponder` check never fired). When the
+        /// keyboard is up this no-ops and the tap reaches the terminal as usual (this
+        /// recognizer has `cancelsTouchesInView = false`).
         @objc func handleRestoreTap(_ recognizer: UITapGestureRecognizer) {
             guard let terminal = recognizer.view as? TerminalView else { return }
-            if !terminal.isFirstResponder {
-                let ok = terminal.becomeFirstResponder()
-                // @objc gesture callbacks are delivered on the main thread but are a
-                // nonisolated context; hop onto the main actor for the @MainActor logger.
-                MainActor.assumeIsolated { DebugLog.shared.log(.input, "key:firstResponder becomeFirstResponder=\(ok) isFirstResponder=\(terminal.isFirstResponder)") }
+            let action = keyboardRestoreAction(isFirstResponder: terminal.isFirstResponder,
+                                               keyboardVisible: keybarAccessory?.window != nil)
+            apply(action, to: terminal, reason: "tap")
+        }
+
+        /// Carry out a `KeyboardRestoreAction` on `terminal` and log the decision.
+        func apply(_ action: KeyboardRestoreAction, to terminal: TerminalView, reason: String) {
+            switch action {
+            case .none:
+                return
+            case .becomeFirstResponder:
+                terminal.becomeFirstResponder()
+            case .reloadInputViews:
+                terminal.reloadInputViews()
+            }
+            // UIKit callbacks arrive on the main thread but some callers are nonisolated
+            // contexts; hop onto the main actor for the @MainActor logger.
+            MainActor.assumeIsolated {
+                DebugLog.shared.log(.input, "key:restore reason=\(reason) action=\(action) isFirstResponder=\(terminal.isFirstResponder)")
             }
         }
 

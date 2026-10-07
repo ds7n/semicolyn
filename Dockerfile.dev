@@ -8,9 +8,10 @@ FROM swift:6.1
 
 # Rust toolchain via rustup. curl/build-essential round out the C toolchain
 # that aws-lc-rs / cc-rs need in later phases.
+# tmux: real-tmux integration tests for the plain-tmux gesture bindings.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        curl ca-certificates build-essential pkg-config \
+        curl ca-certificates build-essential pkg-config tmux \
     && rm -rf /var/lib/apt/lists/*
 
 ENV RUSTUP_HOME=/usr/local/rustup \

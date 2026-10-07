@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-/// Classification of the first output seen after an in-band `tmux new -A -s <name>`
-/// launch over a transport that cannot pre-probe (Mosh/ET). The App accumulates the
+/// Classification of the first output seen after the in-band plain-tmux launch
+/// (attach-or-create) over a transport that cannot pre-probe (Mosh/ET). The App accumulates the
 /// watch window's bytes and passes the whole accumulation; the timeout/window policy
 /// lives in the App (inconclusive at expiry -> assume started).
 public enum TmuxLaunchProbe: Equatable, Sendable {

@@ -37,8 +37,12 @@ jobs:
     container: swift:6.1   # same toolchain as Dockerfile.dev
     steps:
       - uses: actions/checkout@v4
+      - name: install tmux (real-tmux gesture-binding integration tests)
+        run: apt-get update && apt-get install -y --no-install-recommends tmux
       - name: swift test
         run: swift test   # SemicolynKit/SeedKit only; the macOS FFI targets are #if os(macOS)
+        env:
+          SEMICOLYN_REQUIRE_TMUX: "1"   # fail, don't skip, if tmux is missing
 
   # ---- Linux fast loop: Rust SSH core (unit + sshd integration) ----
   linux-rust:

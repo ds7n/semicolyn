@@ -173,10 +173,11 @@ struct TmuxPaneContainer: UIViewRepresentable {
             let holder = uiView.panes.values.first { $0.isFirstResponder }
             let target = holder ?? coord.currentActivePane.flatMap { uiView.panes[$0] }
             if let target {
-                if target.isFirstResponder {
-                    target.reloadInputViews()   // re-present keyboard, no resign -> no layout collapse
-                } else {
-                    target.becomeFirstResponder()
+                // Forced reload when the holder still has focus: no resign -> no layout collapse.
+                switch keyboardRestoreAction(isFirstResponder: target.isFirstResponder, keyboardVisible: false) {
+                case .none: break
+                case .becomeFirstResponder: target.becomeFirstResponder()
+                case .reloadInputViews: target.reloadInputViews()
                 }
             }
             DebugLog.shared.log(.tmux, "pane focus-request token=\(coord.lastFocusRequestToken) reloaded=\(holder != nil) fr=\(target?.isFirstResponder ?? false)")
@@ -383,6 +384,12 @@ struct TmuxPaneContainer: UIViewRepresentable {
                             // Then tell tmux; the echoed layout confirms via apply().
                             self.onSelectPane(pane)
                         },
+                        // NOT the plain-tmux `isTmux:true` escape hatch: this container
+                        // already has real multi-pane focus (isActivePane/onSelectPane
+                        // above), so an active pane in an app-owned mode must still
+                        // yield (no stray arrow-key cursor walk into e.g. vim). Order
+                        // matches the Callbacks struct (isTmux after onSelectPane).
+                        isTmux: { false },
                         currentMode: { [weak self] in self?.modeTracker.mode(for: pane) ?? .localScroll },
                         applicationCursorKeys: { [weak view] in view?.getTerminal().applicationCursor ?? false },
                         altScrollDecision: { [weak self] in

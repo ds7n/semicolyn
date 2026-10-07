@@ -17,6 +17,14 @@ final class TmuxLaunchProbeTests: XCTestCase {
     func testBusyboxNotFoundIsMissing() {
         XCTAssertEqual(classifyTmuxLaunch(output: "/bin/sh: tmux: not found\n"), .tmuxMissing)
     }
+    /// Exact output of `plainTmuxLaunchCommand` with no tmux on PATH (its early
+    /// `exec tmux`), captured from dash and bash-as-sh: sentinel, CR, one diagnostic.
+    func testLaunchScriptExecNotFoundIsMissing() {
+        XCTAssertEqual(classifyTmuxLaunch(output: "SEMICOLYN_LAUNCH\rsh: 1: exec: tmux: not found\n"),
+                       .tmuxMissing)
+        XCTAssertEqual(classifyTmuxLaunch(output: "SEMICOLYN_LAUNCH\rsh: line 1: exec: tmux: not found\n"),
+                       .tmuxMissing)
+    }
 
     // --- .tmuxStarted: alt-screen enter (tmux takes the alt-screen on attach) ---
     func testAltScreenEnterIsStarted() {

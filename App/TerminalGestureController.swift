@@ -43,6 +43,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         /// Focus THIS pane (tap on an inactive pane). Optimistically moves the
         /// accent border locally, then sends `select-pane -t %N`.
         let onSelectPane: () -> Void
+        /// Whether THIS pane is under tmux (plain tmux or `-CC`). Read fresh on
+        /// each tap; backs the `paneTapAction` coord-preserving tmux tap route
+        /// (an active tmux pane in an app-owned mode still delivers coords
+        /// instead of yielding, so the tap can be forwarded as a click/cycle).
+        let isTmux: () -> Bool
         /// The pane's current `InteractionMode`: snapshotted once at drag `.began`,
         /// and read fresh on each tap. The single source of truth for gesture routing.
         let currentMode: () -> InteractionMode
@@ -107,6 +112,9 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private var doubleTap: UITapGestureRecognizer!
     private var tripleTap: UITapGestureRecognizer!
     private var longPress: UILongPressGestureRecognizer!
+    /// When the last single tap was delivered (`CACurrentMediaTime`), so plain-tmux can tell
+    /// a fresh tap from the follow-up taps of a double/triple tap (`isFollowUpTap`).
+    private var lastSingleTapAt: CFTimeInterval?
     private var twoFingerTap: UITapGestureRecognizer!
     private var editMenu: UIEditMenuInteraction!
     /// OUR alt-screen drag pan. Enabled ONLY while the pane is in `.appOwnsInput`
@@ -257,8 +265,11 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                 if let switchPan {
                     gr.require(toFail: switchPan)
                 }
+                if let altScreenPan {
+                    gr.require(toFail: altScreenPan)
+                }
                 DebugLog.shared.log(.gesture,
-                    "selectionPan subordinated (delegate+require-fail vs scrollPan+switchPan)")
+                    "selectionPan subordinated (delegate+require-fail vs scrollPan+switchPan+altScreenPan)")
             }
         }
     }
@@ -266,22 +277,27 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     private func installOurRecognizers(on view: TerminalView) {
         singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
         singleTap.delegate = self
+        singleTap.name = "ours.singleTap"
 
         doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
         doubleTap.delegate = self
+        doubleTap.name = "ours.doubleTap"
 
         tripleTap = UITapGestureRecognizer(target: self, action: #selector(handleTripleTap(_:)))
         tripleTap.numberOfTapsRequired = 3
         tripleTap.delegate = self
+        tripleTap.name = "ours.tripleTap"
 
         longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
         longPress.minimumPressDuration = 0.5
         longPress.delegate = self
+        longPress.name = "ours.longPress"
 
         twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap(_:)))
         twoFingerTap.numberOfTouchesRequired = 2
         twoFingerTap.delegate = self
+        twoFingerTap.name = "ours.twoFingerTap"
 
         // Tap disambiguation. single-tap waits for double to fail (one tap-timeout
         // window, ~0.3s), matching native iOS single-vs-double cost.
@@ -297,7 +313,13 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // line-select + menu re-present. `applyInclusiveSelection` just replaces the
         // range and `presentEditMenu` re-presents, so the upgrade is idempotent and the
         // brief word->line change is imperceptible (the third tap lands within ~150ms).
-        singleTap.require(toFail: doubleTap)
+        //
+        // The single-vs-double dependency is NOT set statically here: it is decided per
+        // touch in `gestureRecognizer(_:shouldRequireFailureOf:)`. A raw shell keeps the
+        // wait (tap = cursor placement). Plain tmux drops it so pane select fires on
+        // finger-up (device build 174: ~0.4-0.5s touch-to-click), per Apple's "stackable
+        // taps" guidance and SwiftTerm's own default; `handleSingleTap` then ignores the
+        // follow-up taps of a double/triple tap (`isFollowUpTap`).
 
         editMenu = UIEditMenuInteraction(delegate: self)
         view.addInteraction(editMenu)
@@ -308,10 +330,12 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // false` has parked the native pan and this is the only live drag-owner.
         altScreenPan = UIPanGestureRecognizer(target: self, action: #selector(handleAltScreenPan(_:)))
         altScreenPan.delegate = self
+        altScreenPan.name = "ours.altScreenPan"
         altScreenPan.isEnabled = false
 
         switchPan = UIPanGestureRecognizer(target: self, action: #selector(handleSwitchPan(_:)))
         switchPan.delegate = self
+        switchPan.name = "ours.switchPan"
         // Enabled at install (NOT via modeTracker.onChange, which fires only on a mode CHANGE
         // and so never fires for a fresh pane that starts in .localScroll: the exact bug).
         // The mount then toggles it on mode transitions via `setSwitchPanEnabled`.
@@ -330,6 +354,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         // drag off the handles falls through to scroll.
         handlePan = UIPanGestureRecognizer(target: self, action: #selector(handleHandlePan(_:)))
         handlePan.delegate = self
+        handlePan.name = "ours.handlePan"
         handlePan.isEnabled = false
 
         ours = [singleTap, doubleTap, tripleTap, longPress, twoFingerTap, altScreenPan, switchPan, handlePan]
@@ -685,20 +710,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// OUR selection-handle drag pan. `.began` hit-tests the two endpoint handle circles
     /// (via `SemicolynKit.hitTestHandle`, generous `slop` since a fingertip is much
     /// bigger than the handle glyph) and immediately CANCELS if the touch isn't on
-    /// either, so a plain content drag is unaffected (falls through to `scrollPan`/
-    /// `switchPan`, which were made to wait on this recognizer's failure, see
-    /// `gestureRecognizer(_:shouldRequireFailureOf:)`). `.changed` re-sets the selection
+    /// either. Normally it never even begins off a handle: `gestureRecognizerShouldBegin`
+    /// awards the drag at touch-down (handle -> this pan, anything else -> the content pans),
+    /// so this hit-test is a backstop. `.changed` re-sets the selection
     /// with the anchored end fixed and the dragged end following the finger's cell
     /// (absolute row), normalized via `SemicolynKit.orderedSelection` so the selection
     /// never inverts mid-drag. `.ended` presents the edit menu (Copy/Paste), matching
     /// the double/triple-tap handlers.
     @objc private func handleHandlePan(_ g: UIPanGestureRecognizer) {
-        // Deviation from the brief's snippet (a bare `return` here): `scrollPan`/`switchPan`
-        // are required to fail against this recognizer (see `shouldRequireFailureOf`), so a
-        // bare `return` on `.began` would leave this recognizer stuck in `.began` (UIKit has
-        // already transitioned its state before invoking the target/action) with nothing to
-        // release the pans waiting on it, PERMANENTLY blocking scroll/switch on any pane
-        // with no active selection. Force-cancel via the isEnabled bounce (same proven idiom
+        // A bare `return` on `.began` would leave this recognizer stuck in `.began` (UIKit
+        // has already transitioned its state before invoking the target/action), owning the
+        // touch for the rest of the drag. Force-cancel via the isEnabled bounce (same proven idiom
         // `beginDrag` uses on `longPress`, see its comment above): writing `g.state =
         // .cancelled` directly on a stock, non-subclassed UIPanGestureRecognizer is not
         // reliably honored by UIKit's arbitration engine and may not release a recognizer
@@ -724,7 +746,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
         switch g.state {
         case .began:
-            // Compute each endpoint's on-screen rect from the STORED selection positions.
+            // Hit-test where the touch STARTED (the same point `gestureRecognizerShouldBegin`
+            // used to award this drag to the handle), not where the pan crossed its threshold.
             guard let ends = currentSelectionEnds(in: view) else {
                 // Force-cancel via isEnabled bounce, not `g.state = .cancelled` (see the
                 // no-active-selection guard above for why).
@@ -732,15 +755,7 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
                 g.isEnabled = true
                 return
             }
-            let startRect = cellRect(col: ends.start.col, row: ends.start.row, cellW: cellW, cellH: cellH, in: view)
-            let endRect   = cellRect(col: ends.end.col,   row: ends.end.row,   cellW: cellW, cellH: cellH, in: view)
-            draggingEnd = SemicolynKit.hitTestHandle(
-                point: SelectionHandlePoint(x: Double(p.x), y: Double(p.y)),
-                startRect: SelectionHandleRect(x: Double(startRect.origin.x), y: Double(startRect.origin.y),
-                                               width: Double(startRect.width), height: Double(startRect.height)),
-                endRect: SelectionHandleRect(x: Double(endRect.origin.x), y: Double(endRect.origin.y),
-                                             width: Double(endRect.width), height: Double(endRect.height)),
-                slop: 22)
+            draggingEnd = selectionHandle(at: touchStartPoint(of: g, in: view), in: view)
             if draggingEnd == nil {
                 // not a handle: let content own it (isEnabled bounce, see above)
                 g.isEnabled = false
@@ -845,6 +860,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
 
     @objc private func handleSingleTap(_ g: UITapGestureRecognizer) {
         guard let view = terminalView else { return }
+        // Plain tmux: single taps fire without waiting out the double-tap window, so a
+        // double/triple tap also delivers its 2nd/3rd tap here. Only the first may act: a
+        // follow-up would send tmux a second click (its own double-click binding enters
+        // copy-mode) or clear the word the double-tap just selected.
+        let now = CACurrentMediaTime()
+        let previousTapAt = lastSingleTapAt
+        lastSingleTapAt = now
+        if callbacks.isTmux(), isFollowUpTap(at: now, previousTapAt: previousTapAt) {
+            DebugLog.shared.log(.gesture, "gesture:singleTap action=skip reason=followUpTap dt=\(String(format: "%.3f", now - (previousTapAt ?? now)))")
+            return
+        }
         // A tap always raises the keyboard. We replaced SwiftTerm's own tap recognizer
         // (which called `becomeFirstResponder`), and PR #90's `editingInteractionConfiguration
         // = .none` suppressed the system tap-to-focus, so nothing re-presented the keyboard
@@ -866,7 +892,8 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         switch paneTapAction(isActivePane: callbacks.isActivePane(),
                              mode: callbacks.currentMode(),
                              hasSelection: callbacks.hasSelection(),
-                             tapInsideSelection: tapInside) {
+                             tapInsideSelection: tapInside,
+                             isTmux: callbacks.isTmux()) {
         case .focusPane:
             callbacks.onSelectPane()
             DebugLog.shared.log(.gesture, "gesture:singleTap action=focus-pane")
@@ -981,26 +1008,68 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
         editMenu.presentEditMenu(with: config)
     }
 
+    /// Where a pan's touch STARTED: its current location minus its accumulated translation.
+    private func touchStartPoint(of pan: UIPanGestureRecognizer, in view: UIView) -> CGPoint {
+        let p = pan.location(in: view)
+        let t = pan.translation(in: view)
+        return CGPoint(x: p.x - t.x, y: p.y - t.y)
+    }
+
+    /// The selection handle (start/end) under `point`, or nil when there is no active
+    /// selection or the point is off both handles. Fingertip-generous `slop`.
+    private func selectionHandle(at point: CGPoint, in view: TerminalView) -> SelectionEnd? {
+        guard view.hasActiveSelection, let ends = currentSelectionEnds(in: view) else { return nil }
+        let term = view.getTerminal()
+        let cols = max(term.cols, 1), rows = max(term.rows, 1)
+        // Same true-cell-height rule as `handleHandlePan`: prefer `caretFrame` (one true cell).
+        let caret = view.caretFrame
+        let cellW = caret.width  > 0 ? caret.width  : view.bounds.width  / CGFloat(cols)
+        let cellH = caret.height > 0 ? caret.height : view.bounds.height / CGFloat(rows)
+        let startRect = cellRect(col: ends.start.col, row: ends.start.row, cellW: cellW, cellH: cellH, in: view)
+        let endRect   = cellRect(col: ends.end.col,   row: ends.end.row,   cellW: cellW, cellH: cellH, in: view)
+        return SemicolynKit.hitTestHandle(
+            point: SelectionHandlePoint(x: Double(point.x), y: Double(point.y)),
+            startRect: SelectionHandleRect(x: Double(startRect.origin.x), y: Double(startRect.origin.y),
+                                           width: Double(startRect.width), height: Double(startRect.height)),
+            endRect: SelectionHandleRect(x: Double(endRect.origin.x), y: Double(endRect.origin.y),
+                                         width: Double(endRect.width), height: Double(endRect.height)),
+            slop: 22)
+    }
+
     // MARK: UIGestureRecognizerDelegate
+
+    /// Award a one-finger drag at touch-down: a touch that STARTS on a selection handle
+    /// belongs to the handle drag alone; any other touch to the content drag owners
+    /// (scroll / window swipe / alt-screen). Kit's `dragMayBegin` decides. Replaces making
+    /// the content pans wait for the handle drag, which broke every swipe after a selection
+    /// (device build 176: the handle drag begins-then-cancels off a handle, cancelling its
+    /// dependents). Other recognizers are not gated.
+    func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+        let r = role(of: g)
+        guard r == .handlePan || r.isContentDragOwner,
+              let pan = g as? UIPanGestureRecognizer, let view = terminalView else { return true }
+        let onHandle = selectionHandle(at: touchStartPoint(of: pan, in: view), in: view) != nil
+        let mayBegin = dragMayBegin(r, touchStartsOnHandle: onHandle)
+        if !mayBegin {
+            DebugLog.shared.log(.gesture, "gesture:shouldBegin role=\(r) onHandle=\(onHandle) -> false")
+        }
+        return mayBegin
+    }
 
     /// Map a recognizer to its pure `GestureRole` so the simultaneity policy is a
     /// Linux-tested decision (`gesturesMayRecognizeSimultaneously`). The scroll pan is
     /// the terminal view's inherited `UIScrollView.panGestureRecognizer`, NOT one of
     /// ours; identity-match it. `longPress` is ours; pinch is a `UIPinchGestureRecognizer`
-    /// installed by the mount; everything else is a tap or unmodeled.
-    ///
-    /// NOTE: `handlePan` has no dedicated `GestureRole` case (Task 6 is scoped to this
-    /// file only, adding a case means also touching `GestureSimultaneity.swift`), so it
-    /// maps to `.other` here and its exclusivity vs `scrollPan`/`switchPan` is handled
-    /// directly in the two delegate methods below (identity-checked ahead of the
-    /// Kit-policy fallback), NOT via `gesturesMayRecognizeSimultaneously`. Documented
-    /// deviation from the "mirror the role/ours pattern" instruction, see task report.
+    /// installed by the mount; everything else is a tap or unmodeled. `handlePan` has its
+    /// own role so ALL drag-ownership rules live in the Kit policy (device build 175: the
+    /// old App-local handlePan special case covered scroll/switch but not the alt-screen
+    /// pan, so a handle drag inside tmux also switched windows).
     private func role(of g: UIGestureRecognizer) -> GestureRole {
         if g === terminalView?.panGestureRecognizer { return .scrollPan }
         if g === altScreenPan { return .altScreenPan }
         if g === switchPan { return .switchPan }
         if g === longPress { return .longPress }
-        if g === handlePan { return .other }
+        if g === handlePan { return .handlePan }
         if g is UIPinchGestureRecognizer { return .pinch }
         if g is UITapGestureRecognizer { return .tap }
         // A pan that is neither the inherited scroll pan, our alt-screen pan, our handle
@@ -1016,19 +1085,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     // coexists with the 1-finger pan/taps, but the long-press must NOT co-recognize
     // with the scroll pan, otherwise a moving-finger drag was treated as a held-touch
     // text selection (device trace 2026-07-13: every drag started a selection). Making
-    // that one pairing exclusive lets the pan cancel the long-press on movement.
-    //
-    // `handlePan` is excluded from `scrollPan`/`switchPan` directly here (ahead of the
-    // Kit policy call), the App-local mirror of the `.selectionPan`/`.scrollPan` Kit
-    // exclusion, since `handlePan` has no Kit role (see `role(of:)`).
+    // that one pairing exclusive lets the pan cancel the long-press on movement. The
+    // handle drag is exclusive with every content drag owner, the long-press and the
+    // selection pan (all in Kit, derived from `GestureRole.isContentDragOwner`).
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        if isHandlePanVsScrollOrSwitch(g, other) { return false }
         return gesturesMayRecognizeSimultaneously(role(of: g), role(of: other))
     }
 
-    /// Make SwiftTerm's selection/mouse pan *lose* to the native scroll pan, AND make
-    /// `scrollPan`/`switchPan` lose to OUR `handlePan`.
+    /// Make SwiftTerm's selection/mouse pan *lose* to every content drag owner (Kit's
+    /// `gestureMustWaitForFailure`). Handle-vs-content drag ownership is NOT a wait; it is
+    /// decided at touch-down in `gestureRecognizerShouldBegin` (see the history below).
     ///
     /// `shouldRecognizeSimultaneouslyWith == false` only stops two pans from co-recognizing;
     /// it does not decide WHICH wins. For the selection pan (an unwanted hijacker) we want
@@ -1050,21 +1117,17 @@ final class TerminalGestureController: NSObject, UIGestureRecognizerDelegate {
     /// grabbed); otherwise `handlePan` is dead weight and must not block the pan.
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRequireFailureOf other: UIGestureRecognizer) -> Bool {
-        if other === handlePan, role(of: g) == .scrollPan || role(of: g) == .switchPan {
-            return terminalView?.hasActiveSelection == true
+        // Single tap vs double tap / long press, decided per touch (see the note in
+        // `installOurRecognizers`). Raw shell: wait out the double tap (tap = cursor place).
+        // Plain tmux: no double-tap wait (instant pane select), but DO wait for the long
+        // press to fail, so a held touch that zooms never also clicks on release (device
+        // build 174: zoom then a stray pane click from one touch). A quick tap is not
+        // delayed: the long press fails the moment the finger lifts.
+        if g === singleTap {
+            if other === doubleTap { return !callbacks.isTmux() }
+            if other === longPress { return callbacks.isTmux() }
         }
-        guard role(of: g) == .selectionPan else { return false }
-        return role(of: other) == .scrollPan || role(of: other) == .switchPan
-    }
-
-    /// True when `(g, other)` is the `handlePan` vs `scrollPan`/`switchPan` pairing in
-    /// either order, the App-local exclusion `role(of:)`/Kit policy can't express because
-    /// `handlePan` maps to `.other` (see `role(of:)`).
-    private func isHandlePanVsScrollOrSwitch(_ g: UIGestureRecognizer, _ other: UIGestureRecognizer) -> Bool {
-        let pair = Set([ObjectIdentifier(g), ObjectIdentifier(other)])
-        guard let handlePan, let scrollPan = terminalView?.panGestureRecognizer, let switchPan else { return false }
-        return pair == Set([ObjectIdentifier(handlePan), ObjectIdentifier(scrollPan)])
-            || pair == Set([ObjectIdentifier(handlePan), ObjectIdentifier(switchPan)])
+        return gestureMustWaitForFailure(role(of: g), of: role(of: other))
     }
 }
 
