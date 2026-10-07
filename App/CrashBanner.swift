@@ -4,12 +4,11 @@ import SwiftUI
 import SemicolynKit
 
 /// The one banner that does NOT auto-dismiss (degraded-mode spec §"Mid-session
-/// tmux crash recovery"): tmux died mid-session, the SSH transport is alive, and
-/// the user is now on a fresh raw shell. Red, top of screen, persists until the
-/// user picks an action or dismisses.
+/// tmux crash recovery"): the session's tmux ended mid-session (today raised by
+/// the Mosh exit path). Red, top of screen, persists until the user reconnects
+/// or dismisses.
 struct CrashBanner: View {
-    let onReattach: () -> Void
-    let onStartNew: () -> Void
+    let onReconnect: () -> Void
     let onDismiss: () -> Void
     @Environment(\.theme) private var theme
 
@@ -17,20 +16,17 @@ struct CrashBanner: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "xmark.octagon.fill")
-                Text("tmux session ended — your shell is still running.").font(.caption).bold()
+                Text("tmux session ended: your shell is still running.").font(.caption).bold()
                 Spacer()
             }
             HStack(spacing: 12) {
-                // White pill on the red banner — force a DARK label so the text is
+                // White pill on the red banner: force a DARK label so the text is
                 // legible (the banner's .foregroundStyle(.white) would otherwise make
                 // it white-on-white and invisible).
-                Button("Reattach") { InputClickFeedback.play(); onReattach() }
+                Button("Reconnect") { InputClickFeedback.play(); onReconnect() }
                     .buttonStyle(.borderedProminent)
                     .tint(.white)
                     .foregroundStyle(Color(theme.state.broken))
-                Button("Start new tmux") { InputClickFeedback.play(); onStartNew() }
-                    .buttonStyle(.bordered)
-                    .tint(.white)
                 Spacer()
                 Button("Dismiss") { InputClickFeedback.play(); onDismiss() }.buttonStyle(.plain)
             }
