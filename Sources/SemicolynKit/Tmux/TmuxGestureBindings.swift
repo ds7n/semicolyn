@@ -53,8 +53,11 @@ public func containsPlainTmuxLaunchSentinel(_ output: String) -> Bool {
 /// The one-line command that launches plain tmux with the private gesture bindings.
 ///
 /// Wrapped in `sh -c '...'` so it behaves the same under any login shell (bash/zsh/fish),
-/// and kept on one short line (545 + name length) because Mosh/ET type it into an
-/// interactive shell. It:
+/// and kept on one short line (698 + name length, under the 1024-byte MAX_CANON) because
+/// Mosh/ET type it into an interactive shell. Every tmux client spawn delays the first
+/// paint, so it starts at most FOUR: `has-session`, `new-session` (only if absent), one
+/// `show -s user-keys` that reads every slot, and one final `exec tmux` that carries all
+/// the `set`/`bind` commands (chained with `\;`) ahead of `attach-session`. It:
 /// 1. prints `plainTmuxLaunchSentinel`;
 /// 2. if tmux is not on `PATH`, `exec tmux` so the shell prints ONE `tmux: not found`
 ///    line (what `TmuxLaunchProbe` classifies as missing) and exits;
@@ -65,8 +68,16 @@ public func containsPlainTmuxLaunchSentinel(_ output: String) -> Bool {
 ///    ends in `[<9900+i>~`): it registers the sequence there and binds `User<slot>` to
 ///    the action's command. A slot the user already uses is left untouched. Only if BOTH
 ///    slots are user-occupied is the action unbound, and then its raw sequence reaches
-///    the foreground program in the pane. Re-running is idempotent;
-/// 5. `exec`s `attach-session`.
+///    the foreground program in the pane. Re-running is idempotent (re-setting a slot
+///    that is already ours is harmless and costs no extra spawn). Each slot is decided
+///    in pure sh from ITS OWN `user-keys[N]` line of the single `show` output (matched
+///    as newline + key + space, then cut at the next newline; tmux escapes newlines in
+///    values), never by a glob over the whole multi-line output, where another slot's
+///    line could make a user-occupied slot look like ours. An explicitly empty slot
+///    (shown as `''`) counts as empty. If the `show` fails, no bindings are attempted;
+/// 5. `exec`s tmux with the collected `set`/`bind` commands, then `attach-session`. tmux
+///    stops a `\;` chain at the first failing command, so the `show` gate above keeps a
+///    tmux without `user-keys` from blocking the attach.
 ///
 /// - Precondition: `sessionName` passed `isValidTmuxSessionName` (letters, digits, `-`,
 ///   `_` only), so it is safe to interpolate unquoted. Enforced here; every caller also
@@ -77,5 +88,5 @@ public func plainTmuxLaunchCommand(sessionName: String) -> String {
     let commands = TmuxAction.allCases
         .map { $0.command.contains(" ") ? "\"\($0.command)\"" : $0.command }
         .joined(separator: " ")
-    return #"sh -c 'S=\#(sessionName);printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";i=0;for c in \#(commands);do k=$((9900+i));for n in $((900+i)) $((800+i));do v=$(tmux show -sv "user-keys[$n]" 2>/dev/null);case "$v" in ""|*"[$k~")tmux set -s "user-keys[$n]" "$(printf "\033[$k~")";tmux bind -n "User$n" $c;break;;esac;done;i=$((i+1));done;exec tmux attach-session -t "=$S"'"#
+    return #"sh -c 'S=\#(sessionName);printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in \#(commands);do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;exec tmux "$@" attach-session -t "=$S"'"#
 }

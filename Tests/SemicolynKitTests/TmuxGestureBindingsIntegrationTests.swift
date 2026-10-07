@@ -138,6 +138,41 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         XCTAssertEqual(try paneCount(), 1)
     }
 
+    /// The launch reads ALL slots in one `show`, so it must decide each slot from that
+    /// slot's own line. Here the preferred slot is user-occupied and the fallback is
+    /// already ours from a prior run: a match against the whole multi-line output would
+    /// see `[9900~` (on the 800 line) and wrongly claim 900. It must stay on 800 and leave
+    /// the user's 900 untouched.
+    func testUserPreferredSlotWithOurFallbackStaysOnFallback() throws {
+        try sh(#"tmux -f /dev/null new-session -d -s semicolyn \; set -s 'user-keys[900]' "$(printf '\033[1;9Z')" \; set -s 'user-keys[800]' "$(printf '\033[9900~')""#)
+        try launchInner()
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[900]'"), #"\033[1;9Z"#)
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[800]'"), #"\033[9900~"#)
+        XCTAssertEqual(try sh("tmux list-keys -T root User900 2>&1"), "unknown key: User900")
+        XCTAssertTrue(try sh("tmux list-keys -T root User800 2>&1").contains("split-window -h"))
+        // The other actions were unaffected: still on their preferred slots.
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[901]'"), #"\033[9901~"#)
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[801]'"), "")
+
+        try runCatInPane()
+        try send(.splitHorizontal)
+        try waitUntil("split via existing fallback slot") { try self.paneCount() == 2 }
+        XCTAssertFalse(try sh("tmux capture-pane -p -t semicolyn:0.0").contains("[9900~"))
+    }
+
+    /// With no tmux on PATH the launch prints the sentinel, then the shell's ONE
+    /// `tmux: not found` line from the early `exec tmux`, which the probe classifies as
+    /// missing. Runs the real command under /bin/sh with a PATH holding only `sh`.
+    func testMissingTmuxPrintsSentinelThenOneNotFoundLine() throws {
+        try FileManager.default.createDirectory(atPath: dir + "/bin", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: dir + "/bin/sh", withDestinationPath: "/bin/sh")
+        let out = try sh("PATH=" + dir + "/bin " + plainTmuxLaunchCommand(sessionName: "semicolyn"))
+        XCTAssertTrue(out.hasPrefix("SEMICOLYN_LAUNCH\r"), out)
+        XCTAssertTrue(out.hasSuffix("exec: tmux: not found"), out)
+        XCTAssertEqual(out.components(separatedBy: "not found").count, 2, out)
+        XCTAssertEqual(classifyTmuxLaunch(output: out), .tmuxMissing)
+    }
+
     /// Reconnect re-runs the launch against the same server: still exactly 8 bindings,
     /// same slots, still working.
     func testRelaunchKeepsExactlyEightBindings() throws {

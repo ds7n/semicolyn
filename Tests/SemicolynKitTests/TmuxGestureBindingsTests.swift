@@ -28,19 +28,55 @@ final class TmuxGestureBindingsTests: XCTestCase {
     }
 
     func testLaunchCommandExactForDefaultSession() {
-        let expected = #"sh -c 'S=semicolyn;printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";i=0;for c in "split-window -h" "split-window -v" kill-pane new-window "resize-pane -Z" next-window previous-window "select-pane -t +";do k=$((9900+i));for n in $((900+i)) $((800+i));do v=$(tmux show -sv "user-keys[$n]" 2>/dev/null);case "$v" in ""|*"[$k~")tmux set -s "user-keys[$n]" "$(printf "\033[$k~")";tmux bind -n "User$n" $c;break;;esac;done;i=$((i+1));done;exec tmux attach-session -t "=$S"'"#
+        let expected = #"sh -c 'S=semicolyn;printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in "split-window -h" "split-window -v" kill-pane new-window "resize-pane -Z" next-window previous-window "select-pane -t +";do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;exec tmux "$@" attach-session -t "=$S"'"#
         XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "semicolyn"), expected)
     }
 
     /// The command is TYPED into an interactive shell on Mosh/ET; macOS canonical-mode
-    /// lines cap at 1024 bytes (MAX_CANON). Length is 545 + name, so the built-in name
-    /// gives 554 and a 1-char name gives 546.
+    /// lines cap at 1024 bytes (MAX_CANON). Length is 698 + name, so the built-in name
+    /// gives 707 and a 1-char name gives 699.
     func testLaunchCommandLengthIsFixedOverheadPlusName() {
         let builtIn = plainTmuxLaunchCommand(sessionName: "semicolyn")
-        XCTAssertEqual(builtIn.count, 554)
-        XCTAssertEqual(builtIn.utf8.count, 554)
+        XCTAssertEqual(builtIn.count, 707)
+        XCTAssertEqual(builtIn.utf8.count, 707)
         XCTAssertLessThan(builtIn.utf8.count, 1024)
-        XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "a").count, 546)
+        XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "a").count, 699)
+    }
+
+    /// Every tmux client spawn costs a round trip before tmux paints, so the launch is
+    /// batched: has-session, new-session (only if absent), ONE `show` of all slots, and
+    /// ONE final `exec tmux` that carries every set/bind plus `attach-session`. The early
+    /// `exec tmux;` (tmux-missing diagnostic) has no argument, so it is not counted. A
+    /// regression back to per-action `show`/`set`/`bind` calls fails here.
+    func testLaunchCommandSpawnsExactlyFourTmuxClients() {
+        let cmd = plainTmuxLaunchCommand(sessionName: "semicolyn")
+        XCTAssertEqual(tmuxInvocations(in: cmd),
+                       ["tmux has-session", "tmux new-session", "tmux show", #"exec tmux "$@""#])
+        XCTAssertFalse(cmd.contains("show -sv"))
+        XCTAssertFalse(cmd.contains("tmux set"))
+        XCTAssertFalse(cmd.contains("tmux bind"))
+    }
+
+    /// The per-action loop decides every slot in pure sh: no tmux spawn inside it.
+    func testLaunchCommandLoopBodySpawnsNoTmux() throws {
+        let cmd = plainTmuxLaunchCommand(sessionName: "semicolyn")
+        let loopStart = try XCTUnwrap(cmd.range(of: "for c in "))
+        let loopEnd = try XCTUnwrap(cmd.range(of: ";done;exec tmux"))
+        let body = cmd[loopStart.upperBound..<loopEnd.lowerBound]
+        XCTAssertFalse(body.contains("tmux"), "tmux spawned inside the per-action loop: \(body)")
+    }
+
+    /// The `tmux` command words at command position (start of a `;`/`|`/`&`/`(`-separated
+    /// segment), with an `exec ` prefix kept, each trimmed to its first two words after
+    /// any `exec`.
+    private func tmuxInvocations(in cmd: String) -> [String] {
+        cmd.split(whereSeparator: { ";|&()".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix("tmux ") || $0.hasPrefix("exec tmux ") }
+            .map { seg in
+                let words = seg.split(separator: " ")
+                return words.prefix(words.first == "exec" ? 3 : 2).joined(separator: " ")
+            }
     }
 
     /// The script tries slot 900+i then 800+i, so the fallbacks must be contiguous
