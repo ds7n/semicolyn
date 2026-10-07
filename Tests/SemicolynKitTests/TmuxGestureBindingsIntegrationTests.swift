@@ -138,6 +138,85 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         XCTAssertEqual(try paneCount(), 1)
     }
 
+    /// The launch reads ALL slots in one `show`, so it must decide each slot from that
+    /// slot's own line. Here the preferred slot is user-occupied and the fallback is
+    /// already ours from a prior run: a match against the whole multi-line output would
+    /// see `[9900~` (on the 800 line) and wrongly claim 900. It must stay on 800 and leave
+    /// the user's 900 untouched.
+    func testUserPreferredSlotWithOurFallbackStaysOnFallback() throws {
+        try sh(#"tmux -f /dev/null new-session -d -s semicolyn \; set -s 'user-keys[900]' "$(printf '\033[1;9Z')" \; set -s 'user-keys[800]' "$(printf '\033[9900~')""#)
+        try launchInner()
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[900]'"), #"\033[1;9Z"#)
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[800]'"), #"\033[9900~"#)
+        XCTAssertEqual(try sh("tmux list-keys -T root User900 2>&1"), "unknown key: User900")
+        XCTAssertTrue(try sh("tmux list-keys -T root User800 2>&1").contains("split-window -h"))
+        // The other actions were unaffected: still on their preferred slots.
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[901]'"), #"\033[9901~"#)
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[801]'"), "")
+
+        try runCatInPane()
+        try send(.splitHorizontal)
+        try waitUntil("split via existing fallback slot") { try self.paneCount() == 2 }
+        XCTAssertFalse(try sh("tmux capture-pane -p -t semicolyn:0.0").contains("[9900~"))
+    }
+
+    /// With no tmux on PATH the launch prints the sentinel, then the shell's ONE
+    /// `tmux: not found` line from the early `exec tmux`, which the probe classifies as
+    /// missing. Runs the real command under /bin/sh with a PATH holding only `sh`.
+    func testMissingTmuxPrintsSentinelThenOneNotFoundLine() throws {
+        try FileManager.default.createDirectory(atPath: dir + "/bin", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: dir + "/bin/sh", withDestinationPath: "/bin/sh")
+        let out = try sh("PATH=" + dir + "/bin " + plainTmuxLaunchCommand(sessionName: "semicolyn"))
+        XCTAssertTrue(out.hasPrefix("SEMICOLYN_LAUNCH\r"), out)
+        XCTAssertTrue(out.hasSuffix("exec: tmux: not found"), out)
+        XCTAssertEqual(out.components(separatedBy: "not found").count, 2, out)
+        XCTAssertEqual(classifyTmuxLaunch(output: out), .tmuxMissing)
+    }
+
+    /// tmux aborts a `\;` chain at its first failing command. A `tmux` shim ahead on PATH
+    /// makes the launch's set/bind call genuinely fail in real tmux (it prepends an
+    /// unknown command to that one call; every other call passes straight through). The
+    /// bindings are then lost, but the user must still land in the attached session, not
+    /// at a bare shell.
+    func testFailedBindingChainStillAttaches() throws {
+        let real = try sh("command -v tmux")
+        let shimDir = dir + "/shim"
+        try FileManager.default.createDirectory(atPath: shimDir, withIntermediateDirectories: true)
+        let shim = "#!/bin/sh\n"
+            + "if [ \"$1\" = set ]; then exec \(real) no-such-command \\; \"$@\"; fi\n"
+            + "exec \(real) \"$@\"\n"
+        try shim.write(toFile: shimDir + "/tmux", atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shimDir + "/tmux")
+
+        try launchInner(envAssignments: "PATH=" + shimDir + ":\"$PATH\" ")
+        XCTAssertEqual(try sh("tmux list-clients -F '#{session_name}'"), "semicolyn")
+        XCTAssertEqual(try sh("tmux show -s user-keys"), "user-keys")   // chain really failed
+        XCTAssertEqual(try sh("tmux list-keys -T root User900 2>&1"), "unknown key: User900")
+    }
+
+    /// tmux 3.4 prints our value unquoted (`user-keys[900] \033[9900~`), but a tmux that
+    /// wraps it in double quotes must still read as OURS on reconnect; otherwise 900 would
+    /// look user-occupied and the launch would also claim fallback 800. A `tmux` shim on
+    /// PATH quotes every value in the `show` output; the rest passes through to real tmux.
+    func testDoubleQuotedOwnValueInShowOutputCountsAsOurs() throws {
+        try sh(#"tmux -f /dev/null new-session -d -s semicolyn \; set -s 'user-keys[900]' "$(printf '\033[9900~')""#)
+        let real = try sh("command -v tmux")
+        let shimDir = dir + "/shim"
+        try FileManager.default.createDirectory(atPath: shimDir, withIntermediateDirectories: true)
+        let shim = "#!/bin/sh\n"
+            + #"if [ "$1" = show ]; then \#(real) "$@" | sed 's/^\(user-keys\[[0-9]*\]\) \([^"].*\)$/\1 "\2"/'; exit 0; fi"#
+            + "\nexec \(real) \"$@\"\n"
+        try shim.write(toFile: shimDir + "/tmux", atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shimDir + "/tmux")
+        XCTAssertEqual(try sh(shimDir + "/tmux show -s user-keys"), #"user-keys[900] "\033[9900~""#)
+
+        try launchInner(envAssignments: "PATH=" + shimDir + ":\"$PATH\" ")
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[900]'"), #"\033[9900~"#)
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[800]'"), "")   // no fallback claimed
+        XCTAssertEqual(try sh("tmux list-keys -T root User800 2>&1"), "unknown key: User800")
+        XCTAssertTrue(try sh("tmux list-keys -T root User900 2>&1").contains("split-window -h"))
+    }
+
     /// Reconnect re-runs the launch against the same server: still exactly 8 bindings,
     /// same slots, still working.
     func testRelaunchKeepsExactlyEightBindings() throws {
@@ -222,10 +301,11 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
 
     /// Start the app's launch command as the INNER client inside an OUTER tmux pane and
     /// wait until it is attached (bindings are installed before `attach-session`).
-    private func launchInner() throws {
+    /// `envAssignments` (e.g. `PATH=...`) are applied to the launch command only.
+    private func launchInner(envAssignments: String = "") throws {
         let launch = plainTmuxLaunchCommand(sessionName: "semicolyn")
         try sh("tmux -L outer -f /dev/null new-session -d -s outer -x 120 -y 40 "
-               + shellQuoted("env -u TMUX " + launch))
+               + shellQuoted("env -u TMUX " + envAssignments + launch))
         try waitUntil("inner client attached") {
             try self.sh("tmux list-clients -t semicolyn 2>/dev/null") != ""
         }

@@ -50,9 +50,20 @@ private struct RootView: View {
             // Re-apply persisted logging config on every foreground (not just cold
             // launch), so a settings change made and then backgrounded takes effect
             // without reopening Diagnostics. Root-level so it fires regardless of which
-            // screen is up. Idempotent.
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { DebugLog.shared.configureFromDefaults() }
+            // screen is up. Idempotent. Before that (and before any foreground logging),
+            // on the FIRST transition out of background (background -> inactive), retire
+            // the remote log link: a suspended socket is often left half-dead but still
+            // `.ready`, so lines logged now must buffer for the fresh connection.
+            .onChange(of: scenePhase) { oldPhase, phase in
+                if oldPhase == .background {
+                    DebugLog.shared.noteRemoteWillEnterForeground()
+                }
+                if phase == .background {
+                    DebugLog.shared.noteRemoteDidEnterBackground()
+                    return
+                }
+                guard phase == .active else { return }
+                DebugLog.shared.configureFromDefaults()
             }
     }
 }
