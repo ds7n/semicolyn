@@ -112,7 +112,8 @@ final class PaneTerminalView: TerminalView {
 
         let grClass = String(describing: type(of: gestureRecognizer))
         let delegateClass = gestureRecognizer.delegate.map { String(describing: type(of: $0)) } ?? "nil"
-        DebugLog.shared.log(.gesture, "addGR: \(grClass) delegate=\(delegateClass)")
+        let traceID = GestureTracer.shared.attach(to: gestureRecognizer)
+        DebugLog.shared.log(.gesture, "addGR: #\(traceID) \(grClass) delegate=\(delegateClass)")
 
         // The recognizer classes are private, so match on the delegate class name, the
         // only public signal. Conservative substring match tolerant of UIKit renames.
@@ -122,5 +123,46 @@ final class PaneTerminalView: TerminalView {
             gestureRecognizer.isEnabled = false
             DebugLog.shared.log(.gesture, "addGR: DISABLED native text-interaction recognizer \(grClass)")
         }
+    }
+}
+
+/// Diagnostic only (no behavior change): attached as an extra target to EVERY recognizer
+/// added to a terminal view, including SwiftTerm's lazily-created selection/mouse pans that
+/// we never see otherwise, and logs each one that WINS a touch (began / recognized / ended /
+/// cancelled; `.changed` skipped to keep the log readable). Each recognizer gets a stable
+/// `#id` (also printed by `addGR`), plus its `name` when we set one, so a device trace shows
+/// exactly which recognizer owned each touch.
+@MainActor
+final class GestureTracer: NSObject {
+    static let shared = GestureTracer()
+    private var ids: [ObjectIdentifier: Int] = [:]
+    private var nextID = 1
+
+    /// Attach the trace target to `gr` and return its stable id.
+    func attach(to gr: UIGestureRecognizer) -> Int {
+        let key = ObjectIdentifier(gr)
+        if let id = ids[key] { return id }
+        let id = nextID
+        nextID += 1
+        ids[key] = id
+        gr.addTarget(self, action: #selector(trace(_:)))
+        return id
+    }
+
+    @objc private func trace(_ gr: UIGestureRecognizer) {
+        let state: String
+        switch gr.state {
+        case .began: state = "began"
+        case .ended: state = "ended/recognized"
+        case .cancelled: state = "cancelled"
+        case .failed: state = "failed"
+        default: return   // .changed / .possible: too noisy, carries no ownership info
+        }
+        let id = ids[ObjectIdentifier(gr)].map(String.init) ?? "?"
+        let label = gr.name ?? String(describing: type(of: gr))
+        let delegateClass = gr.delegate.map { String(describing: type(of: $0)) } ?? "nil"
+        let p = gr.location(in: gr.view)
+        DebugLog.shared.log(.gesture,
+            "gr:trace #\(id) \(label) state=\(state) enabled=\(gr.isEnabled) delegate=\(delegateClass) loc=(\(Int(p.x)),\(Int(p.y)))")
     }
 }
