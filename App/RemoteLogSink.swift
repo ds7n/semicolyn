@@ -29,8 +29,18 @@ enum BuildBanner {
 }
 
 /// Streams diagnostic lines to a developer-run syslog server over UDP/TCP/TLS.
-/// Fire-and-forget: `send` never blocks the caller (the log path); a line is dropped if
-/// the connection isn't ready. The local `DebugLog` buffer retains everything regardless.
+/// Fire-and-forget: `send` never blocks the caller (the log path). While the link is not
+/// ready (cold start, or after it dropped) lines are BUFFERED in a bounded `pending`
+/// queue (drop-oldest) and flushed in order once a connection reaches `.ready`. The local
+/// `DebugLog` buffer retains everything regardless.
+///
+/// Self-healing: a `.failed` / `.waiting` / unrequested `.cancelled` state, or a send
+/// error, marks the link down and schedules a reconnect with exponential backoff
+/// (`remoteLogReconnectDelay`: 1, 2, 4, 8, 16, then 30s). Each connection carries a
+/// generation number so callbacks from a superseded connection are ignored. The app
+/// calls `reconnectIfNeeded()` on foreground to skip the backoff. Before this, a link that
+/// died while backgrounded stayed dead until relaunch (device 2026-10-05). This class
+/// must never log through `DebugLog` (it IS DebugLog's remote sink: recursion).
 ///
 /// TLS uses `NWProtocolTLS` with certificate verification DISABLED, this targets the
 /// developer's own diagnostics host (self-signed cert from `tools/syslog-sink/`), not a
@@ -53,6 +63,19 @@ final class RemoteLogSink {
     /// Max buffered pre-ready lines. The cold-start window is a couple hundred lines at
     /// most; past this, oldest are dropped (the local DebugLog buffer still has them).
     private static let maxPending = 500
+    /// Identifies the current `connection`. Bumped on every new connection and on
+    /// `stop()`; a state callback or send completion captured with an older value is
+    /// stale and ignored (no double reconnects, no stale `.ready` flipping `isReady`).
+    private var generation = 0
+    /// Reconnect attempts since the link was last `.ready` (indexes the backoff).
+    private var attempts = 0
+    /// The single scheduled backoff reconnect, if any (at most one at a time).
+    private var reconnectWork: DispatchWorkItem?
+    /// When the link was first seen down (nil while up / before the first connect
+    /// failed). Reported as `downFor` in the post-reconnect trace line.
+    private var downSince: Date?
+    /// Set by `stop()`: no connection, send, or reconnect happens afterwards.
+    private var stopped = false
 
     init(host: String, port: Int, transport: LogTransport) {
         self.host = NWEndpoint.Host(host)
@@ -79,29 +102,107 @@ final class RemoteLogSink {
     }
 
     private func start() {
-        queue.async { [weak self] in
+        queue.async { [weak self] in self?.connect() }
+    }
+
+    /// Open a fresh connection as a new generation, superseding (and cancelling) any
+    /// previous one. Caller on `queue`.
+    private func connect() {
+        guard !stopped else { return }
+        generation += 1
+        let gen = generation
+        // Detach the old connection's handler before cancelling it, so its `.cancelled`
+        // is not mistaken for a link drop (the generation guard below also covers it).
+        connection?.stateUpdateHandler = nil
+        connection?.cancel()
+        let conn = NWConnection(host: host, port: port, using: makeParameters())
+        conn.stateUpdateHandler = { [weak self] state in
+            guard let self, gen == self.generation, !self.stopped else { return }
+            self.handleState(state)
+        }
+        connection = conn
+        conn.start(queue: queue)
+    }
+
+    /// React to a state change of the CURRENT connection (generation already checked).
+    /// Caller on `queue` (the connection was started on it).
+    private func handleState(_ state: NWConnection.State) {
+        switch state {
+        case .ready:
+            linkUp()
+        case .failed, .waiting:
+            // `.waiting` = no viable path right now; NWConnection would sit there, so
+            // treat it as down and retry on our own backoff with a fresh connection.
+            linkDown()
+        case .cancelled:
+            // Only reachable for a cancel we did not request: `stop()` sets `stopped` and
+            // `connect()` detaches the handler, both filtered before we get here.
+            linkDown()
+        default:
+            break
+        }
+    }
+
+    /// Link up: stamp the build banner, note the reconnect gap (if this follows a drop),
+    /// then flush everything buffered while down (the cold-launch resume trace, or the
+    /// lines emitted during the outage). Buffered lines are pre-framed with their
+    /// EMIT-time timestamp, so the flushed trace stays in chronological order. The banner
+    /// stamps every stream (including one started mid-session or after a reconnect) with
+    /// the build/OS/device that produced the trace. Caller on `queue`.
+    private func linkUp() {
+        isReady = true
+        // A link that came up on its own (e.g. out of `.waiting`) supersedes any pending
+        // backoff reconnect, which would otherwise tear down this good connection.
+        reconnectWork?.cancel()
+        reconnectWork = nil
+        writeString(syslogFrame(message: BuildBanner.line,
+                                timestamp: Self.timestamp(), transport: transport))
+        if let since = downSince {
+            let downFor = String(format: "%.1f", Date().timeIntervalSince(since))
+            writeString(syslogFrame(message: "remoteLog:reconnected attempt=\(attempts) downFor=\(downFor)s",
+                                    timestamp: Self.timestamp(), transport: transport))
+        }
+        attempts = 0
+        downSince = nil
+        let buffered = pending
+        pending.removeAll()
+        for framed in buffered { writeString(framed) }
+    }
+
+    /// Link down: route new lines to `pending` and schedule a backoff reconnect.
+    /// Idempotent per outage (only one reconnect is ever scheduled). Caller on `queue`.
+    private func linkDown() {
+        isReady = false
+        if downSince == nil { downSince = Date() }
+        scheduleReconnect()
+    }
+
+    /// Schedule ONE reconnect after the backoff delay for the current attempt. No-op if
+    /// stopped or one is already scheduled. Caller on `queue`.
+    private func scheduleReconnect() {
+        guard !stopped, reconnectWork == nil else { return }
+        let delay = remoteLogReconnectDelay(attempt: attempts)
+        attempts += 1
+        let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            let conn = NWConnection(host: self.host, port: self.port, using: self.makeParameters())
-            // Emit the build banner as the first framed line once the link is ready, so
-            // every stream (including one started mid-session or after a reconnect) is
-            // stamped with the build/OS/device that produced the trace.
-            conn.stateUpdateHandler = { [weak self] state in
-                guard let self else { return }
-                if case .ready = state {
-                    // Link up: stamp the build banner, then flush everything buffered
-                    // during the pre-ready window (the cold-launch resume trace). Buffered
-                    // lines are pre-framed with their EMIT-time timestamp, so the flushed
-                    // trace stays in chronological order.
-                    self.isReady = true
-                    self.writeString(syslogFrame(message: BuildBanner.line,
-                                                 timestamp: Self.timestamp(), transport: self.transport))
-                    let buffered = self.pending
-                    self.pending.removeAll()
-                    for framed in buffered { self.writeString(framed) }
-                }
-            }
-            conn.start(queue: self.queue)
-            self.connection = conn
+            self.reconnectWork = nil
+            self.connect()
+        }
+        reconnectWork = work
+        queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Foreground recovery: if the link is known down, reconnect NOW instead of waiting
+    /// out the backoff (cancel the timer, reset attempts). A link that is up, or the
+    /// initial connect still in progress (never yet failed), is left alone so a foreground
+    /// at cold launch does not restart a handshake that is about to succeed.
+    func reconnectIfNeeded() {
+        queue.async { [weak self] in
+            guard let self, !self.stopped, !self.isReady, self.downSince != nil else { return }
+            self.reconnectWork?.cancel()
+            self.reconnectWork = nil
+            self.attempts = 0
+            self.connect()
         }
     }
 
@@ -116,6 +217,7 @@ final class RemoteLogSink {
     /// framed string for the post-`.ready` flush so the cold-start window is not lost.
     /// Buffer is bounded (drop-oldest) so an unreachable host can't grow it.
     private func sendRaw(_ line: String) {
+        guard !stopped else { return }
         let framed = syslogFrame(message: line, timestamp: Self.timestamp(), transport: transport)
         guard isReady else {
             pending.append(framed)
@@ -126,9 +228,16 @@ final class RemoteLogSink {
     }
 
     /// Write an already-framed line to the connection (caller on `queue`, link ready).
+    /// A send error on the CURRENT generation means the link died under a `.ready`
+    /// state (e.g. the socket was reaped while backgrounded): mark it down and reconnect.
+    /// The completion runs on `queue` (the connection's start queue).
     private func writeString(_ framed: String) {
         guard let data = framed.data(using: .utf8) else { return }
-        connection?.send(content: data, completion: .idempotent)
+        let gen = generation
+        connection?.send(content: data, completion: .contentProcessed { [weak self] (error: NWError?) in
+            guard let self, error != nil, gen == self.generation, !self.stopped else { return }
+            self.linkDown()
+        })
     }
 
     /// Connect (if needed) and send a probe line, reporting whether the connection
@@ -169,12 +278,19 @@ final class RemoteLogSink {
         queue.asyncAfter(deadline: .now() + 5) { finish(false) }
     }
 
+    /// Fully stop: cancel the connection and any backoff timer; nothing reconnects after.
     func stop() {
         queue.async { [weak self] in
-            self?.connection?.cancel()
-            self?.connection = nil
-            self?.isReady = false
-            self?.pending.removeAll()
+            guard let self else { return }
+            self.stopped = true
+            self.generation += 1
+            self.reconnectWork?.cancel()
+            self.reconnectWork = nil
+            self.connection?.stateUpdateHandler = nil
+            self.connection?.cancel()
+            self.connection = nil
+            self.isReady = false
+            self.pending.removeAll()
         }
     }
 

@@ -98,6 +98,13 @@ final class DebugLog: ObservableObject {
         remote = sink
     }
 
+    /// Foreground recovery for the remote stream: if its link dropped (e.g. while the app
+    /// was backgrounded), reconnect now rather than waiting out the sink's backoff. No-op
+    /// when there is no sink or its link is up. Called on scene activation.
+    func reconnectRemoteIfNeeded() {
+        remote?.reconnectIfNeeded()
+    }
+
     /// Configure the master gate + remote sink from persisted settings AT LAUNCH, so
     /// remote streaming works from a cold start without first visiting the Diagnostics
     /// screen (previously the sink was only attached in `DiagnosticsSettingsView.onAppear`,
