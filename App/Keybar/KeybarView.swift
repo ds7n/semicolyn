@@ -98,7 +98,8 @@ struct KeybarView: View {
     }
 
     private var scrollItems: [KeybarScrollItem] {
-        keybarScrollItems(promotions: vm.activePromotions,
+        // Promotions were fed only by the removed -CC per-pane process poll.
+        keybarScrollItems(promotions: [],
                           scrollSlots: layout.scroll,
                           fnEngaged: vm.fnState.engaged)
     }

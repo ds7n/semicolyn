@@ -119,7 +119,7 @@ struct ModifierSlotView: View {
     }
 }
 
-/// Esc pill: tap=Esc; swipe-left/right = prev/next window; long-press opens the
+/// Esc pill: tap=Esc; long-press opens the
 /// Settings tree (4d wires the Settings→Keybar leaf; the full unified picker,
 /// windows/hosts/recent, is a later slice). The dim `≡` glyph hints at the
 /// extra gestures (keybar-customization spec "Esc pill → Visual").
@@ -139,10 +139,6 @@ struct EscPillView: View {
         }
         .onInputClickTap { vm.keybar.tapEscape() }
         .onLongPressGesture { onOpenSettings() }
-        .gesture(DragGesture(minimumDistance: 18).onEnded { g in
-            if g.translation.width > 18 { vm.selectNextWindow() }
-            else if g.translation.width < -18 { vm.selectPrevWindow() }
-        })
     }
 }
 

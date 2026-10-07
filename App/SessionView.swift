@@ -68,73 +68,9 @@ struct SessionView: View {
                 // attached only in TerminalScreen.makeUIView; without a new identity per
                 // connection SwiftUI reuses the prior view (updateUIView, not makeUIView)
                 // on reattach, so the sink stays nil after teardown and Mosh frames never
-                // render = blank reconnect (device bug 2026-09-06/07). Wraps BOTH the -CC
-                // pane branch and the raw/mosh TerminalScreen branch.
+                // render = blank reconnect (device bug 2026-09-06/07). Wraps the single
+                // TerminalScreen (raw SSH, plain tmux, Mosh, ET).
                 Group {
-                if let tmuxState = vm.tmuxState {
-                    VStack(spacing: 0) {
-                        WindowTabStrip(windows: tmuxState.windows, active: tmuxState.activeWindow,
-                                       onSelect: { id in
-                                           DebugLog.shared.log(.gesture, "gesture:windowTab tap=@\(id.raw)")
-                                           vm.selectWindow(id)
-                                       })
-                        TmuxPaneContainer(
-                            state: tmuxState,
-                            register: { vm.registerPane($0, $1) },
-                            unregister: { vm.unregisterPane($0) },
-                            send: { vm.terminalKeyboardInput($0) },
-                            theme: theme,
-                            settings: terminalSettings.settings,
-                            osc52Allowed: vm.osc52Allowed,
-                            onTitle: { [weak vm] view, t in vm?.setTmuxTitle(from: view, t) },
-                            onTmuxResize: { [weak vm] cols, rows in vm?.setTmuxClientSize(cols: cols, rows: rows) },
-                            onSSHLink: { [weak vm] url in vm?.presentSSHLink(url) },
-                            onIsMultiWindowTmux: { [weak vm] in vm?.isMultiWindowTmux ?? false },
-                            onSwitchWindow: { [weak vm] delta in vm?.selectAdjacentWindowWrapping(delta) },
-                            onZoomActivePane: { [weak vm] in vm?.zoomActivePane() },
-                            onPlaceCursor: { [weak vm] view, col, row in vm?.placeTmuxCursor(view, toCol: col, toRow: row) },
-                            onSelectPane: { [weak vm] pane in vm?.selectPane(pane) },
-                            vm: vm,
-                            keybarSettings: AppStores.shared.keybarSettings,
-                            hardwareKeyboardConnected: hardwareKeyboard.isConnected)
-                        // Client size is reported by the pane container's layout pass
-                        // (bounds ÷ measured cell) via onTmuxResize, no coarse estimate.
-                    }
-                    .overlay(alignment: .top) {
-                        if let reason = vm.degraded {
-                            DegradedBanner(reason: reason) { vm.degraded = nil }
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                                .task {
-                                    try? await Task.sleep(nanoseconds: 4_000_000_000)
-                                    vm.degraded = nil
-                                }
-                        }
-                    }
-                    .animation(.easeInOut, value: vm.degraded)
-                    .overlay(alignment: .top) {
-                        if let reason = vm.moshFallback {
-                            MoshFallbackBanner(reason: reason) { vm.moshFallback = nil }
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                                // Persist until the user dismisses (tap). No auto-dismiss:
-                                // it carries the real mosh failure reason, which the user
-                                // needs time to read, and the 4s timer used to cancel early
-                                // when attachSSHShell replaced this view (the "brief flash").
-                        }
-                    }
-                    .animation(.easeInOut, value: vm.moshFallback)
-                    .overlay(alignment: .top) {
-                        if vm.crashBanner != nil {
-                            CrashBanner(
-                                onReattach: { vm.reattachTmux() },
-                                onStartNew: { vm.startNewTmux() },
-                                onDismiss: { vm.dismissCrashBanner() })
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                        }
-                    }
-                    .animation(.easeInOut, value: vm.crashBanner)
-                    // Keybar + predictor now mount as each pane's inputAccessoryView
-                    // (see TmuxPaneContainer); no .safeAreaInset keybar here anymore.
-                } else {
                     TerminalScreen(send: { [weak vm] bytes in vm?.terminalKeyboardInput(bytes) },
                                    output: vm.output,
                                    session: vm.session,
@@ -200,8 +136,7 @@ struct SessionView: View {
                         .overlay(alignment: .top) {
                             if vm.crashBanner != nil {
                                 CrashBanner(
-                                    onReattach: { vm.reattachTmux() },
-                                    onStartNew: { vm.startNewTmux() },
+                                    onReconnect: { vm.reconnect() },
                                     onDismiss: { vm.dismissCrashBanner() })
                                     .transition(.move(edge: .top).combined(with: .opacity))
                             }
@@ -209,7 +144,6 @@ struct SessionView: View {
                         .animation(.easeInOut, value: vm.crashBanner)
                         // Keybar + predictor now mount as the terminal's inputAccessoryView
                         // (see TerminalScreen); no .safeAreaInset keybar here anymore.
-                }
                 }
                 .id(vm.connectionEpoch)   // fresh mount per connection/reattach (see above)
             } else if case .idle = vm.state {

@@ -3,8 +3,8 @@
 import SwiftUI
 import SemicolynKit
 
-/// Shown when a cold Mosh/ET resume reattach fails on launch. Mirrors `CrashBanner`
-/// (the ET/-CC degrade-on-failure banner): red, top-of-screen, persists until the
+/// Shown when a cold Mosh/ET resume reattach fails on launch. Mirrors `CrashBanner`:
+/// red, top-of-screen, persists until the
 /// user picks an action. The persisted record is already cleared; the VM holds the
 /// reattach info in memory so Retry works for this banner's lifetime.
 struct ResumeFailureBanner: View {

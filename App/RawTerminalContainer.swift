@@ -25,7 +25,7 @@ import SemicolynKit
 final class RawTerminalContainer: UIView {
     /// The single terminal child, pinned to the container's own edges (Auto Layout frames it).
     let terminal: PaneTerminalView
-    /// The SwiftUI coordinator, retained weakly (mirrors `TmuxPaneContainer.ContainerView`).
+    /// The SwiftUI coordinator, retained weakly.
     weak var coordinator: TerminalScreen.Coordinator?
     /// The child height last applied via `bottomConstraint`, so we only mutate the constant (which
     /// triggers a layout pass) when it actually changes, avoiding a layout feedback loop. Also the
@@ -155,9 +155,9 @@ final class RawTerminalContainer: UIView {
             + "targetHeight=\(targetHeight.map { String(format: "%.0f", Double($0)) } ?? "hold") "
             + "lastGood=\(String(format: "%.0f", Double(lastChildHeight))) applied=\(applied) "
             + "klgTop=\(Int(klg.minY)) klgH=\(Int(klg.height)) "
-            // Foundation probe (2026-08-17): the -CC path proved `bounds.height` (== klgTop)
-            // is the correct usable height in every regime, letting us delete the window-space
-            // sampler there. Before applying the same simplification to THIS path, we need
+            // Foundation probe (2026-08-17): the former tmux pane path proved `bounds.height`
+            // (== klgTop) is the correct usable height in every regime, letting us delete the
+            // window-space sampler there. Before applying the same simplification to THIS path, we need
             // keyboard-UP evidence that `bounds`/`klgTop`/`targetHeight` agree here too. Log
             // the delta so a raw-SSH keyboard-up capture answers it directly.
             + "boundsVsTarget=\(targetHeight.map { Int(bounds.height - $0) }.map(String.init) ?? "hold") "
