@@ -76,6 +76,10 @@ final class RemoteLogSink {
     private var downSince: Date?
     /// Set by `stop()`: no connection, send, or reconnect happens afterwards.
     private var stopped = false
+    /// When the current connection reached `.ready` (nil while not ready).
+    private var readyAt: Date?
+    /// When the app last entered the background (see `noteDidEnterBackground`).
+    private var backgroundedAt: Date?
 
     init(host: String, port: Int, transport: LogTransport) {
         self.host = NWEndpoint.Host(host)
@@ -89,7 +93,7 @@ final class RemoteLogSink {
         case .udp:
             return .udp
         case .tcp:
-            return .tcp
+            return NWParameters(tls: nil, tcp: Self.keepaliveTCPOptions())
         case .tls:
             // TLS with verification disabled (developer's self-signed diagnostics host).
             let tls = NWProtocolTLS.Options()
@@ -97,8 +101,20 @@ final class RemoteLogSink {
                 tls.securityProtocolOptions,
                 { _, _, complete in complete(true) },   // accept any certificate
                 queue)
-            return NWParameters(tls: tls, tcp: .init())
+            return NWParameters(tls: tls, tcp: Self.keepaliveTCPOptions())
         }
+    }
+
+    /// TCP options with keepalive on (idle 15s, probe every 5s, 3 probes), so a dead peer
+    /// or a reaped socket surfaces as `.failed` within ~30s even while the app stays in
+    /// the foreground and sends nothing that would error.
+    private static func keepaliveTCPOptions() -> NWProtocolTCP.Options {
+        let tcp = NWProtocolTCP.Options()
+        tcp.enableKeepalive = true
+        tcp.keepaliveIdle = 15
+        tcp.keepaliveInterval = 5
+        tcp.keepaliveCount = 3
+        return tcp
     }
 
     private func start() {
@@ -151,6 +167,7 @@ final class RemoteLogSink {
     /// the build/OS/device that produced the trace. Caller on `queue`.
     private func linkUp() {
         isReady = true
+        readyAt = Date()
         // A link that came up on its own (e.g. out of `.waiting`) supersedes any pending
         // backoff reconnect, which would otherwise tear down this good connection.
         reconnectWork?.cancel()
@@ -173,6 +190,7 @@ final class RemoteLogSink {
     /// Idempotent per outage (only one reconnect is ever scheduled). Caller on `queue`.
     private func linkDown() {
         isReady = false
+        readyAt = nil
         if downSince == nil { downSince = Date() }
         scheduleReconnect()
     }
@@ -192,16 +210,39 @@ final class RemoteLogSink {
         queue.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    /// Foreground recovery: if the link is known down, reconnect NOW instead of waiting
-    /// out the backoff (cancel the timer, reset attempts). A link that is up, or the
-    /// initial connect still in progress (never yet failed), is left alone so a foreground
-    /// at cold launch does not restart a handshake that is about to succeed.
+    /// Record that the app entered the background. A `.ready` link that predates this is
+    /// suspect on the next foreground: iOS often leaves a suspended socket half-dead,
+    /// still reporting `.ready` with no send error for a long time (device 2026-10-05).
+    func noteDidEnterBackground() {
+        queue.async { [weak self] in self?.backgroundedAt = Date() }
+    }
+
+    /// Foreground recovery, reconnecting NOW instead of waiting out the backoff (cancel
+    /// the timer, reset attempts) when either:
+    /// - the link is known down (`downSince` set), or
+    /// - the link is `.ready` but became ready BEFORE the app was last backgrounded
+    ///   (possibly a half-dead suspended socket): it is cancelled and replaced.
+    /// A link that became ready after the last background, or the initial connect still
+    /// in progress (never yet failed), is left alone so a foreground at cold launch does
+    /// not restart a handshake that is about to succeed.
     func reconnectIfNeeded() {
         queue.async { [weak self] in
-            guard let self, !self.stopped, !self.isReady, self.downSince != nil else { return }
+            guard let self, !self.stopped else { return }
+            if self.isReady {
+                guard let readyAt = self.readyAt, let bg = self.backgroundedAt, bg > readyAt else { return }
+                // Stale across a background: treat as down since the background so the
+                // `remoteLog:reconnected downFor=` line shows the suspended gap.
+                self.isReady = false
+                self.readyAt = nil
+                self.downSince = bg
+            } else {
+                guard self.downSince != nil else { return }
+            }
             self.reconnectWork?.cancel()
             self.reconnectWork = nil
             self.attempts = 0
+            // `connect()` bumps the generation and detaches + cancels the old connection,
+            // so its callbacks and in-flight send completions are ignored.
             self.connect()
         }
     }
@@ -290,6 +331,7 @@ final class RemoteLogSink {
             self.connection?.cancel()
             self.connection = nil
             self.isReady = false
+            self.readyAt = nil
             self.pending.removeAll()
         }
     }

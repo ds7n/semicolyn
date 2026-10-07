@@ -105,6 +105,12 @@ final class DebugLog: ObservableObject {
         remote?.reconnectIfNeeded()
     }
 
+    /// Tell the remote sink the app entered the background, so the next foreground can
+    /// replace a `.ready` link that may have been left half-dead while suspended.
+    func noteRemoteDidEnterBackground() {
+        remote?.noteDidEnterBackground()
+    }
+
     /// Configure the master gate + remote sink from persisted settings AT LAUNCH, so
     /// remote streaming works from a cold start without first visiting the Diagnostics
     /// screen (previously the sink was only attached in `DiagnosticsSettingsView.onAppear`,
