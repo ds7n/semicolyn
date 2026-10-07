@@ -28,40 +28,53 @@ final class TmuxGestureBindingsTests: XCTestCase {
     }
 
     func testLaunchCommandExactForDefaultSession() {
-        let expected = #"sh -c 'S=semicolyn;printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in "split-window -h" "split-window -v" kill-pane new-window "resize-pane -Z" next-window previous-window "select-pane -t +";do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;exec tmux "$@" attach-session -t "=$S"'"#
+        let expected = #"sh -c 'S=semicolyn;printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in "split-window -h" "split-window -v" kill-pane new-window "resize-pane -Z" next-window previous-window "select-pane -t +";do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null;exec tmux attach-session -t "=$S"'"#
         XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "semicolyn"), expected)
     }
 
     /// The command is TYPED into an interactive shell on Mosh/ET; macOS canonical-mode
-    /// lines cap at 1024 bytes (MAX_CANON). Length is 698 + name, so the built-in name
-    /// gives 707 and a 1-char name gives 699.
+    /// lines cap at 1024 bytes (MAX_CANON). Length is 729 + name, so the built-in name
+    /// gives 738 and a 1-char name gives 730.
     func testLaunchCommandLengthIsFixedOverheadPlusName() {
         let builtIn = plainTmuxLaunchCommand(sessionName: "semicolyn")
-        XCTAssertEqual(builtIn.count, 707)
-        XCTAssertEqual(builtIn.utf8.count, 707)
+        XCTAssertEqual(builtIn.count, 738)
+        XCTAssertEqual(builtIn.utf8.count, 738)
         XCTAssertLessThan(builtIn.utf8.count, 1024)
-        XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "a").count, 699)
+        XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "a").count, 730)
     }
 
     /// Every tmux client spawn costs a round trip before tmux paints, so the launch is
-    /// batched: has-session, new-session (only if absent), ONE `show` of all slots, and
-    /// ONE final `exec tmux` that carries every set/bind plus `attach-session`. The early
-    /// `exec tmux;` (tmux-missing diagnostic) has no argument, so it is not counted. A
-    /// regression back to per-action `show`/`set`/`bind` calls fails here.
-    func testLaunchCommandSpawnsExactlyFourTmuxClients() {
+    /// batched: has-session, new-session (only if absent), ONE `show` of all slots, ONE
+    /// call carrying every set/bind (skipped when there are none), and the final
+    /// `exec tmux attach-session`. The early `exec tmux;` (tmux-missing diagnostic) has no
+    /// argument, so it is not counted. A regression back to per-action
+    /// `show`/`set`/`bind` calls fails here.
+    func testLaunchCommandSpawnsAtMostFiveTmuxClients() {
         let cmd = plainTmuxLaunchCommand(sessionName: "semicolyn")
         XCTAssertEqual(tmuxInvocations(in: cmd),
-                       ["tmux has-session", "tmux new-session", "tmux show", #"exec tmux "$@""#])
+                       ["tmux has-session", "tmux new-session", "tmux show", #"tmux "$@""#,
+                        "exec tmux attach-session"])
         XCTAssertFalse(cmd.contains("show -sv"))
         XCTAssertFalse(cmd.contains("tmux set"))
         XCTAssertFalse(cmd.contains("tmux bind"))
+    }
+
+    /// tmux aborts a `\;` chain at its first failing command, so `attach-session` must
+    /// NOT ride in the set/bind chain: a failed bind would strand the user at a bare
+    /// shell. The chain runs as its own call with failure ignored (`;`, not `&&`), only
+    /// when it is non-empty, and the script always ends with a standalone attach.
+    func testAttachIsItsOwnExecNeverChainedAfterBindings() {
+        let cmd = plainTmuxLaunchCommand(sessionName: "semicolyn")
+        XCTAssertTrue(cmd.hasSuffix(#";done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null;exec tmux attach-session -t "=$S"'"#))
+        XCTAssertFalse(cmd.contains(#""$@" attach-session"#))
+        XCTAssertEqual(cmd.components(separatedBy: "attach-session").count, 2)
     }
 
     /// The per-action loop decides every slot in pure sh: no tmux spawn inside it.
     func testLaunchCommandLoopBodySpawnsNoTmux() throws {
         let cmd = plainTmuxLaunchCommand(sessionName: "semicolyn")
         let loopStart = try XCTUnwrap(cmd.range(of: "for c in "))
-        let loopEnd = try XCTUnwrap(cmd.range(of: ";done;exec tmux"))
+        let loopEnd = try XCTUnwrap(cmd.range(of: ";done;[ $#"))
         let body = cmd[loopStart.upperBound..<loopEnd.lowerBound]
         XCTAssertFalse(body.contains("tmux"), "tmux spawned inside the per-action loop: \(body)")
     }
