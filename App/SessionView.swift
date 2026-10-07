@@ -96,6 +96,17 @@ struct SessionView: View {
                                    keybarSettings: AppStores.shared.keybarSettings,
                                    hardwareKeyboardConnected: hardwareKeyboard.isConnected,
                                    keyboardFocusRequestToken: vm.keyboardFocusRequestToken)
+                        // Connecting overlay (in-band tmux launch over Mosh/ET): hides the
+                        // login shell, the typed launch and the tmux spawn stall until tmux
+                        // paints. Drawn ABOVE the still-mounted terminal (which keeps
+                        // receiving output, sizing and first responder) and BELOW the
+                        // banners, so a tmux-missing degrade banner shows over it. Opaque and
+                        // hit-testable so no touch reaches tmux mid-launch.
+                        .overlay {
+                            if vm.connectOverlay {
+                                connectingOverlay
+                            }
+                        }
                         .overlay(alignment: .top) {
                             if let reason = vm.degraded {
                                 DegradedBanner(reason: reason) { vm.degraded = nil }
@@ -487,6 +498,26 @@ struct SessionView: View {
     }
 
     // MARK: - Status / connecting / error
+
+    /// Covers the mounted terminal while `vm.connectOverlay` is up. Same spinner + label
+    /// as `statusView`'s `.connecting` case, on the terminal's own background so the
+    /// reveal does not flash a different color. `contentShape` + hit testing + an empty
+    /// tap handler make it swallow every touch (nothing reaches the terminal's gesture
+    /// engine or tmux while the launch is in flight).
+    private var connectingOverlay: some View {
+        ZStack {
+            Color(theme.terminal.bg)
+            VStack(spacing: 20) {
+                ProgressView()
+                    .scaleEffect(1.5)
+                Text("Connecting to \(host.label)…")
+                    .foregroundStyle(Color(theme.text.secondary))
+            }
+        }
+        .contentShape(Rectangle())
+        .allowsHitTesting(true)
+        .onTapGesture {}
+    }
 
     /// Shown while connecting or on failure (when not in the password prompt).
     /// Wraps content in a `NavigationStack` so a Close button is always reachable,
