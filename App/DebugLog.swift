@@ -98,11 +98,11 @@ final class DebugLog: ObservableObject {
         remote = sink
     }
 
-    /// Foreground recovery for the remote stream: if its link dropped (e.g. while the app
-    /// was backgrounded), reconnect now rather than waiting out the sink's backoff. No-op
-    /// when there is no sink or its link is up. Called on scene activation.
-    func reconnectRemoteIfNeeded() {
-        remote?.reconnectIfNeeded()
+    /// Foreground recovery for the remote stream: replace its link (a suspended socket
+    /// is often left half-dead, still `.ready`). Call on the FIRST transition back from
+    /// background, before any foreground logging. Idempotent per background.
+    func noteRemoteWillEnterForeground() {
+        remote?.noteWillEnterForeground()
     }
 
     /// Tell the remote sink the app entered the background, so the next foreground can

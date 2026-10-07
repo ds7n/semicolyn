@@ -38,7 +38,9 @@ enum BuildBanner {
 /// error, marks the link down and schedules a reconnect with exponential backoff
 /// (`remoteLogReconnectDelay`: 1, 2, 4, 8, 16, then 30s). Each connection carries a
 /// generation number so callbacks from a superseded connection are ignored. The app
-/// calls `reconnectIfNeeded()` on foreground to skip the backoff. Before this, a link that
+/// calls `noteWillEnterForeground()` on the way back from background (also observed via
+/// `UIApplication.willEnterForegroundNotification`), which replaces the link outright:
+/// iOS often leaves a suspended socket half-dead, still `.ready`. Before this, a link that
 /// died while backgrounded stayed dead until relaunch (device 2026-10-05). This class
 /// must never log through `DebugLog` (it IS DebugLog's remote sink: recursion).
 ///
@@ -76,16 +78,36 @@ final class RemoteLogSink {
     private var downSince: Date?
     /// Set by `stop()`: no connection, send, or reconnect happens afterwards.
     private var stopped = false
-    /// When the current connection reached `.ready` (nil while not ready).
-    private var readyAt: Date?
-    /// When the app last entered the background (see `noteDidEnterBackground`).
+    /// When the app last entered the background (see `noteDidEnterBackground`); cleared
+    /// by the first `noteWillEnterForeground` after it, which makes that call idempotent.
     private var backgroundedAt: Date?
+    /// App lifecycle notification observers (removed in `stop()` / `deinit`). Set once in
+    /// `init`, before any other access.
+    private var lifecycleObservers: [NSObjectProtocol] = []
 
     init(host: String, port: Int, transport: LogTransport) {
         self.host = NWEndpoint.Host(host)
         self.port = NWEndpoint.Port(rawValue: UInt16(clamping: port)) ?? 6514
         self.transport = transport
         start()
+        // Belt-and-braces lifecycle triggers alongside the RootView `scenePhase` calls
+        // (both paths are idempotent). willEnterForeground fires before any SwiftUI
+        // foreground handler, so the stale link is retired before foreground logging.
+        let center = NotificationCenter.default
+        lifecycleObservers = [
+            center.addObserver(forName: UIApplication.didEnterBackgroundNotification,
+                               object: nil, queue: nil) { [weak self] _ in
+                self?.noteDidEnterBackground()
+            },
+            center.addObserver(forName: UIApplication.willEnterForegroundNotification,
+                               object: nil, queue: nil) { [weak self] _ in
+                self?.noteWillEnterForeground()
+            },
+        ]
+    }
+
+    deinit {
+        lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     private func makeParameters() -> NWParameters {
@@ -167,7 +189,6 @@ final class RemoteLogSink {
     /// the build/OS/device that produced the trace. Caller on `queue`.
     private func linkUp() {
         isReady = true
-        readyAt = Date()
         // A link that came up on its own (e.g. out of `.waiting`) supersedes any pending
         // backoff reconnect, which would otherwise tear down this good connection.
         reconnectWork?.cancel()
@@ -190,7 +211,6 @@ final class RemoteLogSink {
     /// Idempotent per outage (only one reconnect is ever scheduled). Caller on `queue`.
     private func linkDown() {
         isReady = false
-        readyAt = nil
         if downSince == nil { downSince = Date() }
         scheduleReconnect()
     }
@@ -210,39 +230,36 @@ final class RemoteLogSink {
         queue.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    /// Record that the app entered the background. A `.ready` link that predates this is
-    /// suspect on the next foreground: iOS often leaves a suspended socket half-dead,
-    /// still reporting `.ready` with no send error for a long time (device 2026-10-05).
+    /// Record that the app entered the background (time captured at the call, not when
+    /// `queue` gets to it). Repeat calls just move the mark later.
     func noteDidEnterBackground() {
-        queue.async { [weak self] in self?.backgroundedAt = Date() }
+        let now = Date()
+        queue.async { [weak self] in self?.backgroundedAt = now }
     }
 
-    /// Foreground recovery, reconnecting NOW instead of waiting out the backoff (cancel
-    /// the timer, reset attempts) when either:
-    /// - the link is known down (`downSince` set), or
-    /// - the link is `.ready` but became ready BEFORE the app was last backgrounded
-    ///   (possibly a half-dead suspended socket): it is cancelled and replaced.
-    /// A link that became ready after the last background, or the initial connect still
-    /// in progress (never yet failed), is left alone so a foreground at cold launch does
-    /// not restart a handshake that is about to succeed.
-    func reconnectIfNeeded() {
+    /// Foreground recovery: on ANY return from background, retire the current link no
+    /// matter when it became ready (iOS often leaves a suspended socket half-dead, still
+    /// `.ready` with no send error, device 2026-10-05). Lines logged from here on go to
+    /// `pending` (this enqueues on `queue` before them) and flush after the new `.ready`
+    /// (banner, reconnected line, flush). Reconnects NOW: cancel backoff, reset attempts,
+    /// new generation (the old connection's callbacks and send completions are ignored).
+    /// Exception: an in-flight FIRST connect (never ready, never failed) is left alone so
+    /// a handshake about to succeed is not restarted. Idempotent: `backgroundedAt` is
+    /// cleared on first use, so the notification and `scenePhase` triggers don't double up.
+    func noteWillEnterForeground() {
         queue.async { [weak self] in
-            guard let self, !self.stopped else { return }
+            guard let self, !self.stopped, let bg = self.backgroundedAt else { return }
+            self.backgroundedAt = nil
             if self.isReady {
-                guard let readyAt = self.readyAt, let bg = self.backgroundedAt, bg > readyAt else { return }
-                // Stale across a background: treat as down since the background so the
-                // `remoteLog:reconnected downFor=` line shows the suspended gap.
+                // Count the gap from the background so `downFor=` shows it.
                 self.isReady = false
-                self.readyAt = nil
                 self.downSince = bg
-            } else {
-                guard self.downSince != nil else { return }
+            } else if self.downSince == nil {
+                return   // in-flight first connect: leave it
             }
             self.reconnectWork?.cancel()
             self.reconnectWork = nil
             self.attempts = 0
-            // `connect()` bumps the generation and detaches + cancels the old connection,
-            // so its callbacks and in-flight send completions are ignored.
             self.connect()
         }
     }
@@ -277,6 +294,11 @@ final class RemoteLogSink {
         let gen = generation
         connection?.send(content: data, completion: .contentProcessed { [weak self] (error: NWError?) in
             guard let self, error != nil, gen == self.generation, !self.stopped else { return }
+            // UDP has no link: a send error is typically an ICMP unreachable reported on
+            // the next datagram, and the fresh UDP connection is `.ready` at once, so
+            // treating it as down would reconnect every ~1s forever (attempts reset on
+            // each `.ready`). UDP relies on foreground replacement instead.
+            guard self.transport != .udp else { return }
             self.linkDown()
         })
     }
@@ -321,8 +343,10 @@ final class RemoteLogSink {
 
     /// Fully stop: cancel the connection and any backoff timer; nothing reconnects after.
     func stop() {
-        queue.async { [weak self] in
-            guard let self else { return }
+        // Strong capture: the cancel must run even if this was the last reference.
+        queue.async { [self] in
+            self.lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) }
+            self.lifecycleObservers.removeAll()
             self.stopped = true
             self.generation += 1
             self.reconnectWork?.cancel()
@@ -331,7 +355,6 @@ final class RemoteLogSink {
             self.connection?.cancel()
             self.connection = nil
             self.isReady = false
-            self.readyAt = nil
             self.pending.removeAll()
         }
     }
