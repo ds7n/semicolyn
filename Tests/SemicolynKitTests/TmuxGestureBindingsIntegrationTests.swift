@@ -194,6 +194,29 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         XCTAssertEqual(try sh("tmux list-keys -T root User900 2>&1"), "unknown key: User900")
     }
 
+    /// tmux 3.4 prints our value unquoted (`user-keys[900] \033[9900~`), but a tmux that
+    /// wraps it in double quotes must still read as OURS on reconnect; otherwise 900 would
+    /// look user-occupied and the launch would also claim fallback 800. A `tmux` shim on
+    /// PATH quotes every value in the `show` output; the rest passes through to real tmux.
+    func testDoubleQuotedOwnValueInShowOutputCountsAsOurs() throws {
+        try sh(#"tmux -f /dev/null new-session -d -s semicolyn \; set -s 'user-keys[900]' "$(printf '\033[9900~')""#)
+        let real = try sh("command -v tmux")
+        let shimDir = dir + "/shim"
+        try FileManager.default.createDirectory(atPath: shimDir, withIntermediateDirectories: true)
+        let shim = "#!/bin/sh\n"
+            + #"if [ "$1" = show ]; then \#(real) "$@" | sed 's/^\(user-keys\[[0-9]*\]\) \([^"].*\)$/\1 "\2"/'; exit 0; fi"#
+            + "\nexec \(real) \"$@\"\n"
+        try shim.write(toFile: shimDir + "/tmux", atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shimDir + "/tmux")
+        XCTAssertEqual(try sh(shimDir + "/tmux show -s user-keys"), #"user-keys[900] "\033[9900~""#)
+
+        try launchInner(envAssignments: "PATH=" + shimDir + ":\"$PATH\" ")
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[900]'"), #"\033[9900~"#)
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[800]'"), "")   // no fallback claimed
+        XCTAssertEqual(try sh("tmux list-keys -T root User800 2>&1"), "unknown key: User800")
+        XCTAssertTrue(try sh("tmux list-keys -T root User900 2>&1").contains("split-window -h"))
+    }
+
     /// Reconnect re-runs the launch against the same server: still exactly 8 bindings,
     /// same slots, still working.
     func testRelaunchKeepsExactlyEightBindings() throws {

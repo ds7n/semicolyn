@@ -28,19 +28,19 @@ final class TmuxGestureBindingsTests: XCTestCase {
     }
 
     func testLaunchCommandExactForDefaultSession() {
-        let expected = #"sh -c 'S=semicolyn;printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in "split-window -h" "split-window -v" kill-pane new-window "resize-pane -Z" next-window previous-window "select-pane -t +";do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null;exec tmux attach-session -t "=$S"'"#
+        let expected = #"sh -c 'S=semicolyn;printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in "split-window -h" "split-window -v" kill-pane new-window "resize-pane -Z" next-window previous-window "select-pane -t +";do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null;exec tmux attach-session -t "=$S"'"#
         XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "semicolyn"), expected)
     }
 
     /// The command is TYPED into an interactive shell on Mosh/ET; macOS canonical-mode
-    /// lines cap at 1024 bytes (MAX_CANON). Length is 729 + name, so the built-in name
-    /// gives 738 and a 1-char name gives 730.
+    /// lines cap at 1024 bytes (MAX_CANON). Length is 739 + name, so the built-in name
+    /// gives 748 and a 1-char name gives 740.
     func testLaunchCommandLengthIsFixedOverheadPlusName() {
         let builtIn = plainTmuxLaunchCommand(sessionName: "semicolyn")
-        XCTAssertEqual(builtIn.count, 738)
-        XCTAssertEqual(builtIn.utf8.count, 738)
+        XCTAssertEqual(builtIn.count, 748)
+        XCTAssertEqual(builtIn.utf8.count, 748)
         XCTAssertLessThan(builtIn.utf8.count, 1024)
-        XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "a").count, 730)
+        XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "a").count, 740)
     }
 
     /// Every tmux client spawn costs a round trip before tmux paints, so the launch is
