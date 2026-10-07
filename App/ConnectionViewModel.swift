@@ -169,6 +169,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Terminal mouse reporting as last reported while the overlay is up
     /// (`noteTerminalMouseMode`). Reset to false at launch.
     private var connectOverlayMouseOn = false
+    /// True once the reactive probe classified tmux as missing AFTER the current
+    /// `beginConnectOverlay()` (set in `evaluatePlainTmuxProbe`, reset at begin). Read
+    /// instead of `degraded`, which can still hold a stale `.tmuxNotFound` from an earlier
+    /// launch and would otherwise reveal a later relaunch instantly.
+    private var connectOverlayTmuxMissing = false
     /// Fires the reveal check at the `connectRevealTimeoutSeconds` deadline.
     private var connectOverlayTimeout: Task<Void, Never>?
     /// Re-checks once the quiet window after the latest post-sentinel output elapses, so
@@ -1822,6 +1827,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             plainTmuxProbeWatchdog?.cancel(); plainTmuxProbeWatchdog = nil
             DebugLog.shared.log(.tmux, "plainTmux probe: tmuxMissing → degrade to raw shell, drop gesture layer")
             degraded = .tmuxNotFound
+            connectOverlayTmuxMissing = true   // this launch's verdict (see the overlay)
             plainTmuxSessionNamePendingInstall = nil
             plainTmux = nil
         case .tmuxStarted:
@@ -1845,12 +1851,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         connectOverlaySentinelSeen = false
         connectOverlayLastOutputAt = nil
         connectOverlayMouseOn = false
+        connectOverlayTmuxMissing = false
         connectOverlay = true
         DebugLog.shared.log(.connect, "connect:overlay up (in-band tmux launch)")
         connectOverlayTimeout = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(connectRevealTimeoutSeconds * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
-            self.evaluateConnectReveal()
+            // The backstop must fire even if uptime reads a hair under the deadline
+            // (clock granularity, device sleep): force the timeout reveal.
+            self.evaluateConnectReveal(deadlineReached: true)
         }
     }
 
@@ -1884,19 +1893,20 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     /// Ask the pure `connectRevealDecision` whether to lower the overlay; on a reveal,
     /// lower it, cancel its timers and log the decision line once. `sessionEnded` is
-    /// passed by the end paths (teardown, `.idle`/`.failed`, crash banner). No-op while
-    /// the overlay is down.
-    private func evaluateConnectReveal(sessionEnded: Bool = false) {
+    /// passed by the end paths (teardown, `.idle`/`.failed`, crash banner).
+    /// `deadlineReached` is passed only by the timeout Task: when the decider would keep
+    /// covering, it reveals with `.timeout` anyway. No-op while the overlay is down.
+    private func evaluateConnectReveal(sessionEnded: Bool = false, deadlineReached: Bool = false) {
         guard connectOverlay else { return }
         let now = ProcessInfo.processInfo.systemUptime
         let input = ConnectRevealInput(
             sentinelSeen: connectOverlaySentinelSeen,
             secondsSinceLastOutput: connectOverlayLastOutputAt.map { now - $0 },
             mouseModeOn: connectOverlayMouseOn,
-            tmuxMissing: degraded == .tmuxNotFound,
+            tmuxMissing: connectOverlayTmuxMissing,
             sessionEnded: sessionEnded,
             secondsSinceLaunch: now - connectOverlayLaunchedAt)
-        guard let reason = connectRevealDecision(input) else { return }
+        guard let reason = connectRevealDecision(input) ?? (deadlineReached ? ConnectRevealReason.timeout : nil) else { return }
         connectOverlay = false
         connectOverlayTimeout?.cancel(); connectOverlayTimeout = nil
         connectOverlayQuietCheck?.cancel(); connectOverlayQuietCheck = nil
