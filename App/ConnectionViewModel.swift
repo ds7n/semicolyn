@@ -63,6 +63,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 connectionEpoch &+= 1
                 DebugLog.shared.log(.lifecycle, "connectionEpoch -> \(connectionEpoch) (fresh terminal mount)")
             }
+            // A failed/ended connection must never stay hidden behind the connecting
+            // overlay. (`.connecting` is NOT an end: Mosh's onFirstFrame can fire, and
+            // raise the overlay, synchronously inside `sess.start()` before `.shell`.)
+            switch state {
+            case .idle, .failed: evaluateConnectReveal(sessionEnded: true)
+            case .connecting, .shell: break
+            }
         }
     }
     /// Increments on every entry into `.shell` (see `state.didSet`). Drives
@@ -142,7 +149,36 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     @Published private(set) var fnState = FnState()
     /// Set when the Mosh session crashed or ended mid-session (its exit path). The
     /// crash banner persists until the user acts (Reconnect).
-    @Published var crashBanner: CrashBannerState?
+    @Published var crashBanner: CrashBannerState? {
+        didSet { if crashBanner != nil { evaluateConnectReveal(sessionEnded: true) } }
+    }
+    /// True while the "Connecting to <host>..." overlay covers the mounted terminal: from
+    /// the in-band plain-tmux launch (Mosh fresh connect, ET, Mosh fresh-relaunch
+    /// reattach) until `connectRevealDecision` says tmux has painted (or the launch
+    /// failed / timed out). The terminal stays mounted underneath so it keeps receiving
+    /// output, sizing and first responder. Raised by `beginConnectOverlay()`, lowered
+    /// only by `evaluateConnectReveal`.
+    @Published private(set) var connectOverlay = false
+    /// `systemUptime` when the in-band launch was typed (the overlay went up).
+    private var connectOverlayLaunchedAt: TimeInterval = 0
+    /// True once the `SEMICOLYN_LAUNCH` sentinel has appeared in the launch output.
+    private var connectOverlaySentinelSeen = false
+    /// `systemUptime` of the latest output chunk that arrived AFTER the chunk carrying
+    /// the sentinel (nil until one does; see `ConnectRevealInput.secondsSinceLastOutput`).
+    private var connectOverlayLastOutputAt: TimeInterval?
+    /// Terminal mouse reporting as last reported while the overlay is up
+    /// (`noteTerminalMouseMode`). Reset to false at launch.
+    private var connectOverlayMouseOn = false
+    /// True once the reactive probe classified tmux as missing AFTER the current
+    /// `beginConnectOverlay()` (set in `evaluatePlainTmuxProbe`, reset at begin). Read
+    /// instead of `degraded`, which can still hold a stale `.tmuxNotFound` from an earlier
+    /// launch and would otherwise reveal a later relaunch instantly.
+    private var connectOverlayTmuxMissing = false
+    /// Fires the reveal check at the `connectRevealTimeoutSeconds` deadline.
+    private var connectOverlayTimeout: Task<Void, Never>?
+    /// Re-checks once the quiet window after the latest post-sentinel output elapses, so
+    /// `sentinelQuiet` fires without needing another output chunk.
+    private var connectOverlayQuietCheck: Task<Void, Never>?
     /// Bumped when the app wants the active terminal to re-claim first responder
     /// (e.g. returning from the Settings sheet, which resigned it). The raw
     /// terminal observes this and calls `becomeFirstResponder()`.
@@ -499,6 +535,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         plainTmuxProbeBuffer = ""
         plainTmuxProbeResolved = false
         plainTmuxProbeWatchdog?.cancel(); plainTmuxProbeWatchdog = nil
+        // Drop the connecting overlay (logs reason=sessionEnded once if it was up) and
+        // cancel its timers. No-op when it is already down.
+        evaluateConnectReveal(sessionEnded: true)
         fnState.reset()
         rawWriter?.finish()
         rawWriter = nil
@@ -713,6 +752,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onOutput = { [weak self] data in
             guard let self else { return }
             self.output.onOutput(data: data)
+            // Connecting overlay: runs after the probe accumulation below (on every exit
+            // path) so the sentinel check sees this chunk.
+            defer { self.noteConnectOverlayOutput() }
             // STATE-resume liveness (chunk-count discriminator, NOT a time gate).
             // Wire evidence (2026-09-10 tcpdump): mosh renders the restored screen from
             // LOCAL blob state SYNCHRONOUSLY at onFirstFrame, delivered as the FIRST
@@ -853,6 +895,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                         self.plainTmuxProbeResolved = true
                         DebugLog.shared.log(.tmux, "resume:reattachMosh plainTmux probe window expired inconclusive → assume started")
                     }
+                    // Cover the fresh login shell + typed launch until tmux paints.
+                    self.beginConnectOverlay()
                     sess.writeInput(Data((launch + "\n").utf8))
                     self.armMoshReattachWatchdog(host: host)
                 }
@@ -1278,10 +1322,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // off the Mosh path: `onHarvestBytes` is never installed here, so its
             // pass in `onOutput` is a no-op.)
             sess.onOutput = { [weak self] data in
-                self?.output.onOutput(data: data)
+                guard let self else { return }
+                self.output.onOutput(data: data)
+                // Connecting overlay: runs after the probe accumulation below (on every
+                // exit path) so the sentinel check sees this chunk.
+                defer { self.noteConnectOverlayOutput() }
                 // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`): accumulate
                 // per `shouldAccumulatePlainTmuxProbe`.
-                guard let self, self.shouldAccumulatePlainTmuxProbe else { return }
+                guard self.shouldAccumulatePlainTmuxProbe else { return }
                 self.plainTmuxProbeBuffer += String(decoding: data, as: UTF8.self)
                 self.evaluatePlainTmuxProbe()
             }
@@ -1336,6 +1384,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     // fire SYNCHRONOUSLY during `sess.start()` below (see the `onOutput`
                     // comment above), before `moshSession = sess` runs, so `self.moshSession`
                     // may still be nil at this instant.
+                    // Cover the login shell + typed launch until tmux paints.
+                    self.beginConnectOverlay()
                     sess.writeInput(Data((launch + "\n").utf8))
                 }
                 // Connected edge: persist the resume record. Reattach endpoint is the
@@ -1396,6 +1446,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     // falls back to a generic string only when nothing was captured.
                     self.moshFallback = reason ?? "Mosh connection failed, using SSH"
                     DebugLog.shared.log(.connect, "mosh: exit fallbackSSH (elapsed=\(String(format: "%.2f", elapsed))s) → SSH fallback")
+                    // The Mosh session the overlay was covering is gone.
+                    self.evaluateConnectReveal(sessionEnded: true)
                     Task { [weak self] in
                         guard let self else { return }
                         do {
@@ -1543,6 +1595,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onOutput = { [weak self] data in
             guard let self else { return }
             self.output.onOutput(data: data)
+            // Connecting overlay: runs after the probe accumulation below (on every exit
+            // path) so the sentinel check sees this chunk.
+            defer { self.noteConnectOverlayOutput() }
             // Reactive tmux-missing detector (see `evaluatePlainTmuxProbe`): accumulate
             // per `shouldAccumulatePlainTmuxProbe`.
             guard self.shouldAccumulatePlainTmuxProbe else { return }
@@ -1588,6 +1643,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     self.plainTmuxProbeResolved = true
                     DebugLog.shared.log(.tmux, "et: plainTmux probe window expired inconclusive → assume started")
                 }
+                // Cover the login shell + typed launch until tmux paints.
+                self.beginConnectOverlay()
                 sess.send(Data((launch + "\n").utf8))
             }
             // Connected edge: persist the resume record. Runs AFTER the plain-tmux install
@@ -1770,6 +1827,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             plainTmuxProbeWatchdog?.cancel(); plainTmuxProbeWatchdog = nil
             DebugLog.shared.log(.tmux, "plainTmux probe: tmuxMissing → degrade to raw shell, drop gesture layer")
             degraded = .tmuxNotFound
+            connectOverlayTmuxMissing = true   // this launch's verdict (see the overlay)
             plainTmuxSessionNamePendingInstall = nil
             plainTmux = nil
         case .tmuxStarted:
@@ -1779,6 +1837,80 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         case .inconclusive:
             break   // keep accumulating until the watchdog window expires
         }
+    }
+
+    // MARK: - Connecting overlay
+
+    /// Raise the "Connecting to <host>..." overlay at the in-band plain-tmux launch
+    /// (call right before the launch is written). Resets the reveal inputs, stamps the
+    /// launch time and arms the `connectRevealTimeoutSeconds` backstop.
+    private func beginConnectOverlay() {
+        connectOverlayTimeout?.cancel()
+        connectOverlayQuietCheck?.cancel(); connectOverlayQuietCheck = nil
+        connectOverlayLaunchedAt = ProcessInfo.processInfo.systemUptime
+        connectOverlaySentinelSeen = false
+        connectOverlayLastOutputAt = nil
+        connectOverlayMouseOn = false
+        connectOverlayTmuxMissing = false
+        connectOverlay = true
+        DebugLog.shared.log(.connect, "connect:overlay up (in-band tmux launch)")
+        connectOverlayTimeout = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(connectRevealTimeoutSeconds * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            // The backstop must fire even if uptime reads a hair under the deadline
+            // (clock granularity, device sleep): force the timeout reveal.
+            self.evaluateConnectReveal(deadlineReached: true)
+        }
+    }
+
+    /// Feed one output chunk to the overlay (Mosh/ET `onOutput`, after the probe buffer
+    /// was updated). The chunk that first carries the sentinel only marks it seen; every
+    /// LATER chunk is post-sentinel output that restarts the quiet window.
+    private func noteConnectOverlayOutput() {
+        guard connectOverlay else { return }
+        if !connectOverlaySentinelSeen {
+            connectOverlaySentinelSeen = containsPlainTmuxLaunchSentinel(plainTmuxProbeBuffer)
+        } else {
+            connectOverlayLastOutputAt = ProcessInfo.processInfo.systemUptime
+            connectOverlayQuietCheck?.cancel()
+            connectOverlayQuietCheck = Task { [weak self] in
+                // A hair past the window so the re-check lands on the reveal side of it.
+                try? await Task.sleep(nanoseconds: UInt64((connectRevealQuietSeconds + 0.01) * 1_000_000_000))
+                guard !Task.isCancelled, let self else { return }
+                self.evaluateConnectReveal()
+            }
+        }
+        evaluateConnectReveal()
+    }
+
+    /// The mounted terminal's mouse reporting changed (`TerminalScreen`'s mode hook). Only
+    /// meaningful while the overlay is up: tmux turning mouse mode on means it attached.
+    func noteTerminalMouseMode(on: Bool) {
+        guard connectOverlay else { return }
+        connectOverlayMouseOn = on
+        evaluateConnectReveal()
+    }
+
+    /// Ask the pure `connectRevealDecision` whether to lower the overlay; on a reveal,
+    /// lower it, cancel its timers and log the decision line once. `sessionEnded` is
+    /// passed by the end paths (teardown, `.idle`/`.failed`, crash banner).
+    /// `deadlineReached` is passed only by the timeout Task: when the decider would keep
+    /// covering, it reveals with `.timeout` anyway. No-op while the overlay is down.
+    private func evaluateConnectReveal(sessionEnded: Bool = false, deadlineReached: Bool = false) {
+        guard connectOverlay else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let input = ConnectRevealInput(
+            sentinelSeen: connectOverlaySentinelSeen,
+            secondsSinceLastOutput: connectOverlayLastOutputAt.map { now - $0 },
+            mouseModeOn: connectOverlayMouseOn,
+            tmuxMissing: connectOverlayTmuxMissing,
+            sessionEnded: sessionEnded,
+            secondsSinceLaunch: now - connectOverlayLaunchedAt)
+        guard let reason = connectRevealDecision(input) ?? (deadlineReached ? ConnectRevealReason.timeout : nil) else { return }
+        connectOverlay = false
+        connectOverlayTimeout?.cancel(); connectOverlayTimeout = nil
+        connectOverlayQuietCheck?.cancel(); connectOverlayQuietCheck = nil
+        DebugLog.shared.log(.connect, connectRevealLogLine(input, reason: reason))
     }
 
     // MARK: - Banner actions
