@@ -67,8 +67,18 @@ struct TerminalScreen: UIViewRepresentable {
         terminal.terminalDelegate = context.coordinator
         // Event-driven InteractionMode: recompute on every alt-screen / mouse-mode
         // transition (single-pane mount → nil key), then refresh the dot immediately.
-        terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] _, term in
+        terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] event, term in
             coordinator?.modeTracker.recompute(terminal: term, altSource: .rawLive)
+            // Connecting overlay: tmux turning mouse reporting on is the "attached" signal
+            // (the VM ignores it unless the overlay is up). Delivered on the main thread
+            // from a nonisolated SwiftTerm hook; hop onto the main actor for the VM.
+            if case .mouseChanged = event {
+                let on = term.mouseMode != .off
+                let vm = coordinator?.vm
+                MainActor.assumeIsolated {
+                    vm?.noteTerminalMouseMode(on: on)
+                }
+            }
         }
         // Mode now only drives the mouse dot and the gesture context; recognizers are
         // never toggled. (Replaces the init-time dot-only closure.)
