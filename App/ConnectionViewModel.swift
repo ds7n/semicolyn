@@ -315,9 +315,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `systemUptime` of the direct launch's first frame; the marker scan stops
     /// `moshDirectLaunchFallbackWindowSeconds` after it. Nil until then.
     private var moshDirectLaunchFirstFrameAt: TimeInterval?
-    /// True once the direct launch evidently attached tmux (mouse mode turned on, or the
-    /// overlay revealed on `mouseMode`/`sentinelQuiet`): the marker scan stops, so screen
-    /// content can never trigger the fallback inside a working tmux session.
+    /// True once the direct launch evidently attached tmux: tmux turned mouse mode on
+    /// (directly, or via the overlay's `.mouseMode` reveal, the same signal). The marker
+    /// scan then stops. `sentinelQuiet` deliberately does NOT count: it does not prove
+    /// tmux attached and could wrongly suppress the fallback. With mouse mode off, the
+    /// nonce plus `moshDirectLaunchFallbackWindowSeconds` bound the scan instead.
     private var moshDirectLaunchAttached = false
     /// Same idempotency guard as `moshPlainTmuxLaunchSent`, for the ET plain-tmux
     /// route (a distinct flag so neither transport's reset touches the other's
@@ -2006,8 +2008,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             sessionEnded: sessionEnded,
             secondsSinceLaunch: now - connectOverlayLaunchedAt)
         guard let reason = connectRevealDecision(input) ?? (deadlineReached ? ConnectRevealReason.timeout : nil) else { return }
-        // A paint-driven reveal is attach evidence: stop the direct launch's marker scan.
-        if moshDirectLaunch, reason == .mouseMode || reason == .sentinelQuiet {
+        // A mouse-mode reveal is attach evidence: stop the direct launch's marker scan.
+        // Not `sentinelQuiet` (no proof tmux attached; it could suppress the fallback).
+        if moshDirectLaunch, reason == .mouseMode {
             moshDirectLaunchAttached = true
         }
         connectOverlay = false

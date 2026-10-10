@@ -42,8 +42,8 @@ public struct MoshDirectLaunchFallbackInput: Equatable, Sendable {
     public var nonce: String
     /// The fallback already fired for this connection.
     public var alreadyFired: Bool
-    /// The direct launch evidently attached tmux (mouse mode on, or the overlay revealed
-    /// on `mouseMode`/`sentinelQuiet`).
+    /// The direct launch evidently attached tmux: terminal mouse mode turned on (also
+    /// what the overlay's `.mouseMode` reveal reports). `sentinelQuiet` does not count.
     public var attached: Bool
     /// Seconds since the direct launch's first frame.
     public var secondsSinceFirstFrame: Double
