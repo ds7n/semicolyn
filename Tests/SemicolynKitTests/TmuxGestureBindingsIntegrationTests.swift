@@ -233,6 +233,91 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         try waitUntil("split after relaunch") { try self.paneCount() == 2 }
     }
 
+    // MARK: - Direct launch (mosh-server session command)
+
+    /// The direct variant (run as mosh-server's command, no interactive shell) attaches
+    /// with the private bindings installed, and the gestures work.
+    func testDirectLaunchAttachesWithBindings() throws {
+        try launchInner(launch: plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Xy7Qk2Ma"))
+        XCTAssertEqual(try sh("tmux list-clients -F '#{session_name}'"), "semicolyn")
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[900]'"), #"\033[9900~"#)
+        XCTAssertTrue(try sh("tmux list-keys -T root User907 2>&1").contains("select-pane -t +"))
+        try send(.splitHorizontal)
+        try waitUntil("split via direct launch") { try self.paneCount() == 2 }
+    }
+
+    /// tmux absent from the (non-interactive) PATH: the sentinel, then the distinct
+    /// marker, then the user's login shell runs as `$SHELL -l` (a fake shell here that
+    /// reports its arguments). No `tmux: not found` line, so the probe stays inconclusive
+    /// and the app's marker-driven in-band fallback is what reacts.
+    func testDirectMissingTmuxPrintsMarkerThenRunsLoginShell() throws {
+        try FileManager.default.createDirectory(atPath: dir + "/bin", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: dir + "/bin/sh", withDestinationPath: "/bin/sh")
+        let fake = try writeFakeShell(name: "fakeshell", body: #"printf 'FAKESHELL %s\n' "$*""#)
+        let out = try sh("PATH=" + dir + "/bin SHELL=" + fake + " "
+                         + plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Xy7Qk2Ma") + " </dev/null")
+        XCTAssertEqual(out, "SEMICOLYN_LAUNCH\rSEMICOLYN_NOTMUX_Xy7Qk2Ma\nFAKESHELL -l")
+        XCTAssertTrue(containsPlainTmuxNoTmuxMarker(out, nonce: "Xy7Qk2Ma"))
+        XCTAssertFalse(containsPlainTmuxNoTmuxMarker(out, nonce: "Zz9Pp1Qq"))
+        XCTAssertEqual(classifyTmuxLaunch(output: out), .inconclusive)
+    }
+
+    /// SHELL unset: the fallback is a login `sh` (it reads `$HOME/.profile`).
+    func testDirectMissingTmuxWithoutShellFallsBackToLoginSh() throws {
+        try FileManager.default.createDirectory(atPath: dir + "/bin", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: dir + "/bin/sh", withDestinationPath: "/bin/sh")
+        try "echo PROFILE_RAN\n".write(toFile: dir + "/.profile", atomically: true, encoding: .utf8)
+        let out = try sh("unset SHELL;PATH=" + dir + "/bin "
+                         + plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Xy7Qk2Ma") + " </dev/null")
+        XCTAssertTrue(out.hasPrefix("SEMICOLYN_LAUNCH\rSEMICOLYN_NOTMUX_Xy7Qk2Ma\n"), out)
+        XCTAssertTrue(out.hasSuffix("PROFILE_RAN"), out)
+    }
+
+    /// Detaching leaves the user at their login shell (the Mosh session would live on)
+    /// and the tmux session survives. The in-band variant `exec`s attach, so its pane
+    /// would end; here the outer pane stays alive running the fallback shell.
+    func testDirectDetachRunsLoginShellAndKeepsSession() throws {
+        try sh("tmux -f /dev/null new-session -d -s semicolyn")   // pane shell != fake shell
+        let fake = try writeFakeShell(name: "fakeshell",
+                                      body: #"printf '%s\n' "$*" > "\#(dir)/fallback-ran"; exec cat"#)
+        try launchInner(envAssignments: "SHELL=" + fake + " ",
+                        launch: plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Xy7Qk2Ma"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir + "/fallback-ran"))
+        try sh("tmux detach-client -s semicolyn")
+        try waitUntil("fallback shell ran after detach") {
+            FileManager.default.fileExists(atPath: self.dir + "/fallback-ran")
+        }
+        XCTAssertEqual(try sh("cat " + dir + "/fallback-ran"), "-l")
+        XCTAssertEqual(try sh("tmux -L outer display-message -p -t outer '#{pane_current_command}'"), "cat")
+        XCTAssertEqual(try sh("tmux has-session -t =semicolyn 2>&1 && echo alive"), "alive")
+    }
+
+    /// Killing the session (tmux exits) also lands in the login shell.
+    func testDirectSessionKilledRunsLoginShell() throws {
+        try sh("tmux -f /dev/null new-session -d -s semicolyn")
+        let fake = try writeFakeShell(name: "fakeshell",
+                                      body: #"printf '%s\n' "$*" > "\#(dir)/fallback-ran"; exec cat"#)
+        try launchInner(envAssignments: "SHELL=" + fake + " ",
+                        launch: plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Xy7Qk2Ma"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir + "/fallback-ran"))
+        try sh("tmux kill-session -t =semicolyn")
+        try waitUntil("fallback shell ran after kill-session") {
+            FileManager.default.fileExists(atPath: self.dir + "/fallback-ran")
+        }
+        XCTAssertEqual(try sh("cat " + dir + "/fallback-ran"), "-l")
+        XCTAssertEqual(try sh("tmux -L outer display-message -p -t outer '#{pane_current_command}'"), "cat")
+    }
+
+    /// The in-band variant `exec`s attach, so detaching ends the pane's process: the
+    /// contrast that makes the direct variant's non-exec attach necessary.
+    func testInBandDetachEndsTheLaunchProcess() throws {
+        try launchInner()
+        try sh("tmux detach-client -s semicolyn")
+        try waitUntil("outer pane exited with the in-band launch") {
+            try self.sh("tmux -L outer has-session -t outer 2>/dev/null && echo up") == ""
+        }
+    }
+
     // MARK: - Helpers
 
     /// Run `script` under /bin/sh with tmux isolated to `dir`. Output goes to a file, not a
@@ -302,13 +387,23 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
     /// Start the app's launch command as the INNER client inside an OUTER tmux pane and
     /// wait until it is attached (bindings are installed before `attach-session`).
     /// `envAssignments` (e.g. `PATH=...`) are applied to the launch command only.
-    private func launchInner(envAssignments: String = "") throws {
-        let launch = plainTmuxLaunchCommand(sessionName: "semicolyn")
+    /// `launch` defaults to the in-band launch command.
+    private func launchInner(envAssignments: String = "",
+                             launch: String = plainTmuxLaunchCommand(sessionName: "semicolyn")) throws {
         try sh("tmux -L outer -f /dev/null new-session -d -s outer -x 120 -y 40 "
                + shellQuoted("env -u TMUX " + envAssignments + launch))
         try waitUntil("inner client attached") {
             try self.sh("tmux list-clients -t semicolyn 2>/dev/null") != ""
         }
+    }
+
+    /// Write an executable `/bin/sh` script `dir/<name>` with `body`, standing in for the
+    /// user's `$SHELL`. Returns its path.
+    private func writeFakeShell(name: String, body: String) throws -> String {
+        let path = dir + "/" + name
+        try ("#!/bin/sh\n" + body + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+        return path
     }
 
     /// Type `cat -v` into the inner pane and wait until it is the foreground program, so

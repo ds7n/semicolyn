@@ -70,7 +70,8 @@ struct TerminalScreen: UIViewRepresentable {
         terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] event, term in
             coordinator?.modeTracker.recompute(terminal: term, altSource: .rawLive)
             // Connecting overlay: tmux turning mouse reporting on is the "attached" signal
-            // (the VM ignores it unless the overlay is up). Delivered on the main thread
+            // (the VM uses it while the overlay is up, and to stop the Mosh direct launch's
+            // marker scan). Delivered on the main thread
             // from a nonisolated SwiftTerm hook; hop onto the main actor for the VM.
             if case .mouseChanged = event {
                 let on = term.mouseMode != .off
