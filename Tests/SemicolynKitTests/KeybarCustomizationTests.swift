@@ -258,20 +258,70 @@ final class KeybarCustomizationTests: XCTestCase {
         XCTAssertEqual(sym, .symbol("~"))
     }
 
-    // MARK: - Settings + reverse-bar
+    // MARK: - Settings + v1 direction migration
 
-    func testDefaultDirectionIsLockedLeft() {
-        XCTAssertEqual(KeybarSettings.default.direction, .lockedLeft)
+    func testDefaultSettingsUseDefaultLayout() {
         XCTAssertEqual(KeybarSettings.default.layout, .default)
     }
 
-    func testSettingsCodableRoundTripBothDirections() throws {
-        for dir in [KeybarLayoutDirection.lockedLeft, .lockedRight] {
-            let settings = KeybarSettings(layout: .default, direction: dir)
-            let data = try JSONEncoder().encode(settings)
-            let decoded = try JSONDecoder().decode(KeybarSettings.self, from: data)
-            XCTAssertEqual(decoded, settings)
-            XCTAssertEqual(decoded.direction, dir)
-        }
+    func testSettingsCodableRoundTrip() throws {
+        let settings = KeybarSettings(layout: KeybarLayout.default.moving(.tab, to: .right)!)
+        let data = try JSONEncoder().encode(settings)
+        XCTAssertEqual(try JSONDecoder().decode(KeybarSettings.self, from: data), settings)
+    }
+
+    func testEncodedSettingsHaveNoDirectionKey() throws {
+        let data = try JSONEncoder().encode(KeybarSettings.default)
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(object["direction"])
+        XCTAssertNotNil(object["layout"])
+    }
+
+    private let v1Locked = #"[{"kind":"escPill"},{"kind":"pad"},{"kind":"modifier"},{"kind":"tab"}]"#
+    private let v1Scroll = #"[{"kind":"symbol","value":"/"},{"kind":"fn"}]"#
+
+    private func v1Blob(direction: String?) -> Data {
+        let dir = direction.map { #","direction":"\#($0)""# } ?? ""
+        return Data(#"{"layout":{"locked":\#(v1Locked),"scroll":\#(v1Scroll)}\#(dir)}"#.utf8)
+    }
+
+    func testV1LockedLeftBlobMigratesPadRight() throws {
+        let decoded = try JSONDecoder().decode(KeybarSettings.self, from: v1Blob(direction: "lockedLeft"))
+        XCTAssertEqual(decoded.layout, KeybarLayout(left: [.escPill, .modifier, .tab],
+                                                    middle: [.symbol("/"), .fn], right: [.pad]))
+    }
+
+    func testV1BlobWithoutDirectionMigratesAsLockedLeft() throws {
+        let decoded = try JSONDecoder().decode(KeybarSettings.self, from: v1Blob(direction: nil))
+        XCTAssertEqual(decoded.layout.right, [.pad])
+        XCTAssertEqual(decoded.layout.left, [.escPill, .modifier, .tab])
+    }
+
+    func testV1LockedRightBlobKeepsBarPhysicallyIdentical() throws {
+        let decoded = try JSONDecoder().decode(KeybarSettings.self, from: v1Blob(direction: "lockedRight"))
+        XCTAssertEqual(decoded.layout, KeybarLayout(left: [], middle: [.symbol("/"), .fn],
+                                                    right: [.tab, .modifier, .pad, .escPill]))
+        XCTAssertTrue(decoded.layout.isValid)
+    }
+
+    func testMigratedLockedRightSurvivesReencodeWithoutDoubleMirror() throws {
+        // Review Focus 1.
+        let first = try JSONDecoder().decode(KeybarSettings.self, from: v1Blob(direction: "lockedRight"))
+        let second = try JSONDecoder().decode(KeybarSettings.self, from: try JSONEncoder().encode(first))
+        XCTAssertEqual(second, first)
+    }
+
+    func testV1BlobWithUnknownDirectionMigratesAsLockedLeft() throws {
+        // Review Focus 2: an unrecognized value must not throw (which would reset the layout).
+        let decoded = try JSONDecoder().decode(KeybarSettings.self, from: v1Blob(direction: "sideways"))
+        XCTAssertEqual(decoded.layout.right, [.pad])
+        XCTAssertEqual(decoded.layout.left, [.escPill, .modifier, .tab])
+    }
+
+    func testV2BlobWithStrayLockedRightDirectionIsNotMirrored() throws {
+        // A v2 layout is never re-migrated, even if a direction key is present.
+        let blob = Data(#"{"layout":{"left":[{"kind":"escPill"}],"middle":[],"right":[{"kind":"pad"}]},"direction":"lockedRight"}"#.utf8)
+        let decoded = try JSONDecoder().decode(KeybarSettings.self, from: blob)
+        XCTAssertEqual(decoded.layout, KeybarLayout(left: [.escPill], middle: [], right: [.pad]))
     }
 }

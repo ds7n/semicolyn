@@ -103,7 +103,7 @@ final class KeybarLibraryTests: XCTestCase {
         """.utf8)
         let decoded = try JSONDecoder().decode(KeybarSettings.self, from: oldBlob)
         XCTAssertEqual(decoded.library, .empty)
-        XCTAssertEqual(decoded.direction, .lockedRight)
-        XCTAssertEqual(decoded.layout.middle, [.symbol("/")])
+        // v1 lockedRight blob migrates mirrored: locked [esc, pad] -> right reversed.
+        XCTAssertEqual(decoded.layout, KeybarLayout(left: [], middle: [.symbol("/")], right: [.pad, .escPill]))
     }
 }
