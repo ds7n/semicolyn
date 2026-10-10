@@ -4,31 +4,34 @@ import XCTest
 @testable import SemicolynKit
 
 /// Phase 4e compact keybar: when a hardware keyboard is connected the bar shrinks
-/// to the built-in widgets (Esc pill · Pad · Modifier · Tab), honoring the user's
-/// locked-region order, plus the "hide keybar with hardware keyboard" setting
+/// to the built-in widgets (Esc pill · Pad · Modifier · Tab), honoring each
+/// fixed region's order and side, plus the "hide keybar with hardware keyboard" setting
 /// (external-keyboard spec "Keybar behavior").
 final class CompactKeybarTests: XCTestCase {
     // MARK: - compactKeybarSlots
 
-    func testDefaultLockedYieldsAllFourBuiltins() {
-        XCTAssertEqual(compactKeybarSlots(locked: KeybarLayout.default.locked),
-                       [.escPill, .pad, .modifier, .tab])
+    func testDefaultLayoutSplitsBuiltinsBySide() {
+        let result = compactKeybarSlots(left: KeybarLayout.default.left, right: KeybarLayout.default.right)
+        XCTAssertEqual(result.left, [.escPill, .modifier, .tab])
+        XCTAssertEqual(result.right, [.pad])
     }
 
-    func testPreservesUserLockedOrder() {
-        XCTAssertEqual(compactKeybarSlots(locked: [.tab, .modifier, .escPill, .pad]),
-                       [.tab, .modifier, .escPill, .pad])
+    func testPreservesUserOrderWithinEachSide() {
+        let result = compactKeybarSlots(left: [.tab, .escPill], right: [.modifier, .pad])
+        XCTAssertEqual(result.left, [.tab, .escPill])
+        XCTAssertEqual(result.right, [.modifier, .pad])
     }
 
     func testDropsRemovedBuiltins() {
-        // User removed Modifier and Tab; compact bar shows only what's present.
-        XCTAssertEqual(compactKeybarSlots(locked: [.escPill, .pad]),
-                       [.escPill, .pad])
+        let result = compactKeybarSlots(left: [.escPill], right: [.pad])
+        XCTAssertEqual(result.left, [.escPill])
+        XCTAssertEqual(result.right, [.pad])
     }
 
-    func testExcludesNonBuiltinSlotsThatStrayedIntoLocked() {
-        XCTAssertEqual(compactKeybarSlots(locked: [.escPill, .pad, .symbol("/"), .fn]),
-                       [.escPill, .pad])
+    func testExcludesNonBuiltinSlotsOnBothSides() {
+        let result = compactKeybarSlots(left: [.escPill, .symbol("/")], right: [.fn, .pad])
+        XCTAssertEqual(result.left, [.escPill])
+        XCTAssertEqual(result.right, [.pad])
     }
 
     // MARK: - hideKeybarWithHardwareKeyboard setting

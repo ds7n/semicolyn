@@ -65,82 +65,142 @@ extension KeybarSlot: Codable {
     }
 }
 
-/// The keybar's slot composition, split into the locked region (never scrolls)
-/// and the horizontally scrollable region. 4d makes this user-editable via the
-/// Settings→Keybar editor; mutations enforce the spec's sticky rules.
-public struct KeybarLayout: Equatable, Sendable, Codable {
-    public let locked: [KeybarSlot]
-    public let scroll: [KeybarSlot]
-    public init(locked: [KeybarSlot], scroll: [KeybarSlot]) {
-        self.locked = locked; self.scroll = scroll
+/// One of the keybar's three regions. `left` and `right` are pinned to their
+/// edges and never scroll; `middle` scrolls horizontally and absorbs the slack.
+public enum KeybarRegion: String, CaseIterable, Sendable {
+    case left
+    case middle
+    case right
+}
+
+/// The keybar's slot composition across three ordered regions. Mutations are
+/// value-semantic and enforce the sticky rules (spec 2026-08-14 Phase 2, revised
+/// 2026-10-10): Esc pill and Pad are never deletable and never scroll.
+public struct KeybarLayout: Equatable, Sendable {
+    public let left: [KeybarSlot]
+    public let middle: [KeybarSlot]
+    public let right: [KeybarSlot]
+
+    public init(left: [KeybarSlot], middle: [KeybarSlot], right: [KeybarSlot]) {
+        self.left = left; self.middle = middle; self.right = right
     }
 
-    /// Locked `Esc · Pad · Modifier · Tab`; scroll = six convenience symbols + Fn
-    /// (keybar-customization spec "Default locked-left composition" + "Scroll region").
+    /// Left `Esc · Modifier · Tab`; middle = six convenience symbols + Fn; right = Pad.
     public static let `default` = KeybarLayout(
-        locked: [.escPill, .pad, .modifier, .tab],
-        scroll: [.symbol("/"), .symbol("|"), .symbol("~"), .symbol("-"), .symbol("("), .symbol(")"), .fn]
+        left: [.escPill, .modifier, .tab],
+        middle: [.symbol("/"), .symbol("|"), .symbol("~"), .symbol("-"), .symbol("("), .symbol(")"), .fn],
+        right: [.pad]
     )
 
-    // MARK: - Sticky rules (spec "Sticky rules summary")
+    /// Every slot on the bar, left to right.
+    public var allSlots: [KeybarSlot] { left + middle + right }
 
-    /// Whether a slot may be deleted. Only the two constrained special widgets
-    /// (Esc pill, Pad) are non-removable; every other slot can be removed.
+    /// The ordered slots of one region.
+    public func slots(in region: KeybarRegion) -> [KeybarSlot] {
+        switch region {
+        case .left:   return left
+        case .middle: return middle
+        case .right:  return right
+        }
+    }
+
+    /// The region holding `slot`, or nil when it is not on the bar.
+    public func region(of slot: KeybarSlot) -> KeybarRegion? {
+        KeybarRegion.allCases.first { slots(in: $0).contains(slot) }
+    }
+
+    // MARK: - Sticky rules
+
+    /// Whether a slot may be deleted. Only Esc pill and Pad are non-removable.
     public static func isRemovable(_ slot: KeybarSlot) -> Bool {
         slot != .escPill && slot != .pad
     }
 
-    /// Whether a slot may be dragged across the locked/scroll divider. Esc pill
-    /// and Pad are constrained to the locked region; everything else is free.
-    public static func canMoveAcrossDivider(_ slot: KeybarSlot) -> Bool {
-        slot != .escPill && slot != .pad
+    /// Whether a slot must stay in a fixed region (never scroll off-screen).
+    public static func isLockedOnly(_ slot: KeybarSlot) -> Bool {
+        slot == .escPill || slot == .pad
+    }
+
+    /// The regions a slot may live in, in display order.
+    public static func allowedRegions(for slot: KeybarSlot) -> [KeybarRegion] {
+        isLockedOnly(slot) ? [.left, .right] : KeybarRegion.allCases
     }
 
     // MARK: - Invariants
 
-    /// A layout is valid when Esc and Pad each appear exactly once and live in
-    /// the locked region, and no slot is duplicated across the bar.
+    /// Valid when Esc pill and Pad each appear exactly once in a fixed region and
+    /// no slot is duplicated anywhere on the bar.
     public var isValid: Bool {
-        let all = locked + scroll
-        if Set(all).count != all.count { return false }            // no duplicates
-        if locked.filter({ $0 == .escPill }).count != 1 { return false }
-        if locked.filter({ $0 == .pad }).count != 1 { return false }
-        if scroll.contains(.escPill) || scroll.contains(.pad) { return false }
+        let all = allSlots
+        if Set(all).count != all.count { return false }
+        for constrained in [KeybarSlot.escPill, .pad] {
+            if all.filter({ $0 == constrained }).count != 1 { return false }
+            if middle.contains(constrained) { return false }
+        }
         return true
     }
 
-    // MARK: - Mutations (value semantics; nil when a sticky rule forbids the op)
+    // MARK: - Mutations
 
-    /// Returns a layout with `slot` removed, or nil if the slot is not removable
-    /// (Esc pill / Pad). Removable-but-absent slots return an unchanged copy.
+    /// `slot` removed from whichever region holds it, or nil when the slot is not
+    /// removable. A removable-but-absent slot returns an unchanged copy.
     public func removing(_ slot: KeybarSlot) -> KeybarLayout? {
         guard KeybarLayout.isRemovable(slot) else { return nil }
-        return KeybarLayout(locked: locked.filter { $0 != slot },
-                            scroll: scroll.filter { $0 != slot })
+        return filtering { $0 != slot }
     }
 
-    /// Moves `slot` to the opposite region (locked↔scroll), appending it at the
-    /// end of the target region. Returns nil if the slot is pinned to locked
-    /// (Esc pill / Pad). A slot already in the target region is returned unchanged.
-    public func moving(_ slot: KeybarSlot, toScroll: Bool) -> KeybarLayout? {
-        guard KeybarLayout.canMoveAcrossDivider(slot) else { return nil }
-        var newLocked = locked.filter { $0 != slot }
-        var newScroll = scroll.filter { $0 != slot }
-        if toScroll { newScroll.append(slot) } else { newLocked.append(slot) }
-        return KeybarLayout(locked: newLocked, scroll: newScroll)
+    /// `slot` moved to the end of `region`. Nil when the region is not allowed for
+    /// the slot (Esc pill / Pad into the middle). Already in `region`: unchanged.
+    public func moving(_ slot: KeybarSlot, to region: KeybarRegion) -> KeybarLayout? {
+        guard KeybarLayout.allowedRegions(for: slot).contains(region) else { return nil }
+        if self.region(of: slot) == region { return self }
+        let without = filtering { $0 != slot }
+        return without.replacing(region, with: without.slots(in: region) + [slot])
     }
 
-    /// Reorders the locked region using `onMove`-style offsets. Within-region
-    /// permutation only — never changes membership, so always succeeds.
-    public func reorderingLocked(fromOffsets source: IndexSet, toOffset destination: Int) -> KeybarLayout {
-        KeybarLayout(locked: KeybarLayout._moved(locked, fromOffsets: source, toOffset: destination),
-                     scroll: scroll)
+    /// `slot` appended to `region`; unchanged when the slot is already on the bar.
+    /// Used by "Add" flows, which must never duplicate a slot.
+    public func appending(_ slot: KeybarSlot, to region: KeybarRegion) -> KeybarLayout {
+        guard self.region(of: slot) == nil else { return self }
+        return replacing(region, with: slots(in: region) + [slot])
     }
 
-    /// Reorders the scroll region using `onMove`-style offsets.
-    public func reorderingScroll(fromOffsets source: IndexSet, toOffset destination: Int) -> KeybarLayout {
-        KeybarLayout(locked: locked,
-                     scroll: KeybarLayout._moved(scroll, fromOffsets: source, toOffset: destination))
+    /// Keeps only the slots matching `isIncluded`, in every region.
+    public func filtering(_ isIncluded: (KeybarSlot) -> Bool) -> KeybarLayout {
+        KeybarLayout(left: left.filter(isIncluded),
+                     middle: middle.filter(isIncluded),
+                     right: right.filter(isIncluded))
+    }
+
+    /// Reorders one region using `onMove`-style offsets; never changes membership.
+    public func reordering(_ region: KeybarRegion, fromOffsets source: IndexSet, toOffset destination: Int) -> KeybarLayout {
+        replacing(region, with: KeybarLayout._moved(slots(in: region), fromOffsets: source, toOffset: destination))
+    }
+
+    // MARK: - v1 migration
+
+    /// Converts a persisted v1 layout (`locked` + `scroll`, optionally shown
+    /// mirrored by the retired direction toggle) to three regions.
+    /// Non-mirrored: Pad leaves `locked` for the right region, the rest stays left.
+    /// Mirrored: the user saw `locked` at the right edge in reverse order, so it
+    /// becomes the right region reversed, keeping the bar physically identical.
+    public static func fromV1(locked: [KeybarSlot], scroll: [KeybarSlot], mirrored: Bool) -> KeybarLayout {
+        if mirrored {
+            return KeybarLayout(left: [], middle: scroll, right: Array(locked.reversed()))
+        }
+        return KeybarLayout(left: locked.filter { $0 != .pad },
+                            middle: scroll,
+                            right: locked.contains(.pad) ? [.pad] : [])
+    }
+
+    // MARK: - Helpers
+
+    private func replacing(_ region: KeybarRegion, with slots: [KeybarSlot]) -> KeybarLayout {
+        switch region {
+        case .left:   return KeybarLayout(left: slots, middle: middle, right: right)
+        case .middle: return KeybarLayout(left: left, middle: slots, right: right)
+        case .right:  return KeybarLayout(left: left, middle: middle, right: slots)
+        }
     }
 
     /// SwiftUI `move(fromOffsets:toOffset:)` semantics, implemented without
@@ -152,5 +212,34 @@ public struct KeybarLayout: Equatable, Sendable, Codable {
         let insertAt = destination - source.filter { $0 < destination }.count
         result.insert(contentsOf: moving, at: insertAt)
         return result
+    }
+}
+
+extension KeybarLayout: Codable {
+    private enum CodingKeys: String, CodingKey { case left, middle, right }
+    private enum V1Keys: String, CodingKey { case locked, scroll }
+
+    /// v2 payloads (`left`/`middle`/`right`) decode directly. A v1 payload
+    /// (`locked`/`scroll`) migrates as non-mirrored; `KeybarSettings` re-derives
+    /// the mirrored case because only it knows the retired direction.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let v1 = try decoder.container(keyedBy: V1Keys.self)
+        if !c.contains(.left) && v1.contains(.locked) {
+            self = KeybarLayout.fromV1(locked: try v1.decode([KeybarSlot].self, forKey: .locked),
+                                       scroll: try v1.decode([KeybarSlot].self, forKey: .scroll),
+                                       mirrored: false)
+            return
+        }
+        left = try c.decode([KeybarSlot].self, forKey: .left)
+        middle = try c.decode([KeybarSlot].self, forKey: .middle)
+        right = try c.decode([KeybarSlot].self, forKey: .right)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(left, forKey: .left)
+        try c.encode(middle, forKey: .middle)
+        try c.encode(right, forKey: .right)
     }
 }
