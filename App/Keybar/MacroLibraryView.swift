@@ -65,7 +65,7 @@ struct MacroLibraryView: View {
                 label(macro)
                 Spacer()
                 Button {
-                    store.appendToScroll(.pinnedMacro(macro.id))
+                    store.appendToMiddle(.pinnedMacro(macro.id))
                 } label: {
                     Image(systemName: "pin")
                 }

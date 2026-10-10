@@ -3,10 +3,9 @@
 import SwiftUI
 import SemicolynKit
 
-/// The keyboard accessory bar. Locked region renders fixed at the leading edge;
-/// the scroll region pans horizontally. 4d drives the composition from the
-/// user's persisted `KeybarSettings`; reverse-bar flips the whole layout via
-/// `layoutDirection` (a pure mirror, gestures are unaffected, per spec).
+/// The keyboard accessory bar. Left and right regions render fixed at their
+/// edges; the middle region pans horizontally and absorbs the slack. The
+/// composition comes from the user's persisted `KeybarSettings`.
 struct KeybarView: View {
     @ObservedObject var keybarSettings: KeybarSettingsStore
     @ObservedObject var vm: ConnectionViewModel
@@ -39,12 +38,6 @@ struct KeybarView: View {
         // The UIInputViewAudioFeedback context for `UIDevice.playInputClick()` is now
         // provided by `KeybarInputAccessory` (this keybar is hosted as the terminal's
         // real inputAccessoryView), so no in-view audio-feedback host is needed here.
-        // Reverse-bar: a layout-mirror only. RTL flips HStack order + the
-        // ScrollView's leading edge so the locked region anchors right and the
-        // Esc pill lands far-right; DragGesture translations are unaffected, so
-        // gesture semantics stay physical (keybar-customization spec).
-        .environment(\.layoutDirection,
-                     keybarSettings.settings.direction == .lockedRight ? .rightToLeft : .leftToRight)
         .sheet(isPresented: $showingSettings, onDismiss: { vm.requestKeyboardFocus() }) {
             SettingsView(context: .inSession, keybarSettings: keybarSettings)
         }
@@ -63,35 +56,38 @@ struct KeybarView: View {
             .background(Color(theme.surface.panel))
     }
 
-    /// Full bar: locked region + horizontally-scrollable region.
-    ///
-    /// Device #2 (2026-07-20): the locked keys rendered spread edge-to-edge with large gaps
-    /// between them. The trailing horizontal `ScrollView` was not claiming the HStack's slack,
-    /// so the leftover width distributed across the fixed children instead of packing them left.
-    /// Pinning the ScrollView to `.frame(maxWidth: .infinity, alignment: .leading)` makes it
-    /// absorb all remaining width (content stays leading-aligned and pannable), so the locked
-    /// keys sit tight at the leading edge with only their `spacing: 6` gap.
+    /// Full bar: fixed left + horizontally scrolling middle + fixed right.
+    /// The middle ScrollView takes `maxWidth: .infinity`, so it owns all slack and
+    /// both fixed regions pack tight against their edges.
     private var fullContent: some View {
-        HStack(spacing: 6) {
-            ForEach(Array(layout.locked.enumerated()), id: \.offset) { _, slot in
+        HStack(spacing: 3) {
+            ForEach(Array(layout.left.enumerated()), id: \.offset) { _, slot in
                 slotView(slot)
             }
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
+                HStack(spacing: 3) {
                     ForEach(Array(scrollItems.enumerated()), id: \.offset) { _, item in
                         scrollItemView(item)
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(Array(layout.right.enumerated()), id: \.offset) { _, slot in
+                slotView(slot)
+            }
         }
     }
 
-    /// Compact bar (hardware keyboard): the built-in widgets from the user's
-    /// locked region only, no scroll region (4e "Keybar behavior").
+    /// Compact bar (hardware keyboard): built-in widgets from the fixed regions
+    /// only, each kept on its own side; no middle (4e "Keybar behavior").
     private var compactContent: some View {
-        HStack(spacing: 6) {
-            ForEach(Array(compactKeybarSlots(locked: layout.locked).enumerated()), id: \.offset) { _, slot in
+        let compact = compactKeybarSlots(left: layout.left, right: layout.right)
+        return HStack(spacing: 3) {
+            ForEach(Array(compact.left.enumerated()), id: \.offset) { _, slot in
+                slotView(slot)
+            }
+            Spacer(minLength: 0)
+            ForEach(Array(compact.right.enumerated()), id: \.offset) { _, slot in
                 slotView(slot)
             }
         }
@@ -100,7 +96,7 @@ struct KeybarView: View {
     private var scrollItems: [KeybarScrollItem] {
         // Promotions were fed only by the removed -CC per-pane process poll.
         keybarScrollItems(promotions: [],
-                          scrollSlots: layout.scroll,
+                          scrollSlots: layout.middle,
                           fnEngaged: vm.fnState.engaged)
     }
 

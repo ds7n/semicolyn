@@ -116,7 +116,7 @@ struct CustomSlotEditorView: View {
                               tap: bindings[.tap], swipeUp: bindings[.swipeUp],
                               swipeDown: bindings[.swipeDown], longPress: bindings[.longPress])
         store.saveCustomSlot(slot)
-        if editingID == nil { store.appendToScroll(.custom(id)) }
+        if editingID == nil { store.appendToMiddle(.custom(id)) }
         dismiss()
     }
 }

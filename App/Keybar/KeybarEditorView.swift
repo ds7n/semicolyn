@@ -19,15 +19,13 @@ private enum KeybarEditorSheet: Identifiable {
     }
 }
 
-/// Settings → Keybar: a single editable list of every slot in order, split into
-/// the locked and scroll regions, plus the reverse-bar toggle. Reorder via the
-/// drag handles, delete via swipe-to-delete (Esc/Pad excluded), and move a slot
-/// across the divider via its per-row menu. "Reset to defaults" restores the v1
-/// layout. (keybar-customization spec "Customization model".)
+/// Settings → Keybar: every slot in order across the Left (fixed), Middle
+/// (scrolls) and Right (fixed) regions. Reorder via drag handles, delete via
+/// swipe (Esc/Pad excluded), move between regions via each row's menu. Reset
+/// restores the default layout.
 ///
-/// Note: the spec describes a single draggable divider; SwiftUI cross-section
-/// drag is unreliable, so 4d-1 uses two sections + an explicit per-row "move
-/// across divider" action. Flagged for the Simulator pass.
+/// Note: SwiftUI cross-section drag is unreliable, so moving between regions
+/// uses an explicit per-row "Move to" menu instead of dragging across sections.
 struct KeybarEditorView: View {
     @ObservedObject var store: KeybarSettingsStore
     /// One-time warning before removing the Modifier (don't nag on repeat).
@@ -39,36 +37,14 @@ struct KeybarEditorView: View {
 
     var body: some View {
         List {
-            Section("Layout direction") {
-                Picker("Locked region", selection: directionBinding) {
-                    Text("Left").tag(KeybarLayoutDirection.lockedLeft)
-                    Text("Right").tag(KeybarLayoutDirection.lockedRight)
-                }
-                .pickerStyle(.segmented)
-            }
-
             Section {
                 Toggle("Hide when hardware keyboard connected", isOn: hideWithHardwareKeyboardBinding)
             } footer: {
                 Text("Hides the keybar while a hardware keyboard is attached. The predictor strip stays.")
             }
 
-            Section("Locked region") {
-                ForEach(layout.locked, id: \.self) { slot in
-                    row(slot, inScroll: false)
-                        .deleteDisabled(!KeybarLayout.isRemovable(slot))
-                }
-                .onMove { store.settings.layout = layout.reorderingLocked(fromOffsets: $0, toOffset: $1) }
-                .onDelete { delete($0, from: layout.locked) }
-            }
-
-            Section("Scroll region") {
-                ForEach(layout.scroll, id: \.self) { slot in
-                    row(slot, inScroll: true)
-                        .deleteDisabled(!KeybarLayout.isRemovable(slot))
-                }
-                .onMove { store.settings.layout = layout.reorderingScroll(fromOffsets: $0, toOffset: $1) }
-                .onDelete { delete($0, from: layout.scroll) }
+            ForEach(KeybarRegion.allCases, id: \.self) { region in
+                regionSection(region)
             }
 
             Section { addMenu } footer: {
@@ -106,7 +82,27 @@ struct KeybarEditorView: View {
 
     // MARK: - Row
 
-    @ViewBuilder private func row(_ slot: KeybarSlot, inScroll: Bool) -> some View {
+    @ViewBuilder private func regionSection(_ region: KeybarRegion) -> some View {
+        let slots = layout.slots(in: region)
+        Section(regionTitle(region)) {
+            ForEach(slots, id: \.self) { slot in
+                row(slot, in: region)
+                    .deleteDisabled(!KeybarLayout.isRemovable(slot))
+            }
+            .onMove { store.settings.layout = layout.reordering(region, fromOffsets: $0, toOffset: $1) }
+            .onDelete { delete($0, from: slots) }
+        }
+    }
+
+    private func regionTitle(_ region: KeybarRegion) -> String {
+        switch region {
+        case .left:   return "Left (fixed)"
+        case .middle: return "Middle (scrolls)"
+        case .right:  return "Right (fixed)"
+        }
+    }
+
+    @ViewBuilder private func row(_ slot: KeybarSlot, in region: KeybarRegion) -> some View {
         HStack {
             Text(slotLabel(slot))
             Spacer()
@@ -124,17 +120,14 @@ struct KeybarEditorView: View {
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Edit swipe secondaries")
             }
-            if KeybarLayout.canMoveAcrossDivider(slot) {
-                Menu {
-                    Button(inScroll ? "Move to Locked region" : "Move to Scroll region") {
-                        apply(layout.moving(slot, toScroll: !inScroll))
+            Menu {
+                ForEach(KeybarLayout.allowedRegions(for: slot).filter { $0 != region }, id: \.self) { target in
+                    Button("Move to \(regionTitle(target))") {
+                        apply(layout.moving(slot, to: target))
                     }
-                } label: {
-                    Image(systemName: "arrow.up.arrow.down").font(.footnote)
                 }
-            } else {
-                // Esc pill / Pad: pinned to the locked region.
-                Image(systemName: "lock.fill").font(.footnote).foregroundStyle(.secondary)
+            } label: {
+                Image(systemName: "arrow.left.arrow.right").font(.footnote)
             }
         }
     }
@@ -145,7 +138,7 @@ struct KeybarEditorView: View {
         Menu {
             ForEach(addableDefaults, id: \.self) { slot in
                 Button(slotLabel(slot)) {
-                    store.settings.layout = KeybarLayout(locked: layout.locked, scroll: layout.scroll + [slot])
+                    store.settings.layout = layout.appending(slot, to: .middle)
                 }
             }
             Divider()
@@ -159,17 +152,12 @@ struct KeybarEditorView: View {
 
     /// Default built-ins / symbols the user has removed and can re-add.
     private var addableDefaults: [KeybarSlot] {
-        let present = Set(layout.locked + layout.scroll)
-        let candidates = KeybarLayout.default.scroll + [KeybarSlot.modifier, .tab]
+        let present = Set(layout.allSlots)
+        let candidates = KeybarLayout.default.middle + [KeybarSlot.modifier, .tab]
         return candidates.filter { !present.contains($0) }
     }
 
     // MARK: - Actions
-
-    private var directionBinding: Binding<KeybarLayoutDirection> {
-        Binding(get: { store.settings.direction },
-                set: { store.settings.direction = $0 })
-    }
 
     private var hideWithHardwareKeyboardBinding: Binding<Bool> {
         Binding(get: { store.settings.hideKeybarWithHardwareKeyboard },
@@ -196,7 +184,7 @@ struct KeybarEditorView: View {
             DebugLog.shared.log(.keybar, "keybar:layoutApply refused")
             return
         }
-        DebugLog.shared.log(.keybar, "keybar:layoutApply locked=\(newLayout.locked.count) scroll=\(newLayout.scroll.count)")
+        DebugLog.shared.log(.keybar, "keybar:layoutApply left=\(newLayout.left.count) middle=\(newLayout.middle.count) right=\(newLayout.right.count)")
         store.settings.layout = newLayout
     }
 

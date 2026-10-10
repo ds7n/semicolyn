@@ -41,7 +41,7 @@ final class AppStores {
     private let encryptedRecords: EncryptedRecordStore
     /// Terminal rendering preferences (font, cursor, scrollback).
     let terminalSettings = TerminalSettingsStore()
-    /// User keybar customization (slot layout + reverse-bar direction), persisted.
+    /// User keybar customization (three-region slot layout + library), persisted.
     let keybarSettings = KeybarSettingsStore()
     /// User-selected theme id (Appearance), persisted. The root view resolves it
     /// through the Pro-gate and injects the result into `\.theme`.
