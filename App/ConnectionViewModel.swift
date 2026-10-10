@@ -308,6 +308,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// accumulating once the sentinel is seen (the marker follows the sentinel). Reset at
     /// bootstrap, on the fallback, and in `teardown()`.
     private var moshDirectLaunchOutput = ""
+    /// This connection's random nonce, baked into the direct launch's marker
+    /// (`SEMICOLYN_NOTMUX_<nonce>`) so a bare marker merely shown on screen (e.g. this
+    /// repo's source in a restored pane) can never match. Minted at bootstrap.
+    private var moshDirectLaunchNonce = ""
+    /// `systemUptime` of the direct launch's first frame; the marker scan stops
+    /// `moshDirectLaunchFallbackWindowSeconds` after it. Nil until then.
+    private var moshDirectLaunchFirstFrameAt: TimeInterval?
+    /// True once the direct launch evidently attached tmux (mouse mode turned on, or the
+    /// overlay revealed on `mouseMode`/`sentinelQuiet`): the marker scan stops, so screen
+    /// content can never trigger the fallback inside a working tmux session.
+    private var moshDirectLaunchAttached = false
     /// Same idempotency guard as `moshPlainTmuxLaunchSent`, for the ET plain-tmux
     /// route (a distinct flag so neither transport's reset touches the other's
     /// state). Reset in `teardown()`.
@@ -550,6 +561,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         moshDirectLaunch = false
         moshDirectLaunchFallbackSent = false
         moshDirectLaunchOutput = ""
+        moshDirectLaunchNonce = ""
+        moshDirectLaunchFirstFrameAt = nil
+        moshDirectLaunchAttached = false
         etPlainTmuxLaunchSent = false
         plainTmuxProbeArmed = false
         plainTmuxProbeBuffer = ""
@@ -1296,17 +1310,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // gracefully. Detaching/exiting tmux leaves the user at their login shell.
         let useTmux = resolveUseTmux(host: host, defaults: defaults)
         var directLaunchCommand: String?
+        moshDirectLaunchNonce = makeMoshLaunchNonce()
         if useTmux {
             self.tmuxSessionNameForConnection = resolveTmuxSessionName(host: host, defaults: defaults)
             DebugLog.shared.log(.lifecycle, "mosh: useTmux=ON session=\(tmuxSessionNameForConnection) (unconditional launch)")
             if isValidTmuxSessionName(tmuxSessionNameForConnection) {
-                directLaunchCommand = plainTmuxDirectLaunchCommand(sessionName: tmuxSessionNameForConnection)
+                directLaunchCommand = plainTmuxDirectLaunchCommand(sessionName: tmuxSessionNameForConnection,
+                                                                   nonce: moshDirectLaunchNonce)
                 DebugLog.shared.log(.tmux, "mosh: direct launch session=\(tmuxSessionNameForConnection)")
             }
         }
         moshDirectLaunch = directLaunchCommand != nil
         moshDirectLaunchFallbackSent = false
         moshDirectLaunchOutput = ""
+        moshDirectLaunchFirstFrameAt = nil
+        moshDirectLaunchAttached = false
         // Effective config for the argv (port range, server path, prediction mode).
         // resolveOptional honors Inherited three-state (NOT host.mosh.value).
         let cfg = resolveOptional(host.mosh, defaults.mosh) ?? MoshConfig(enabled: true)
@@ -1355,19 +1373,32 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // exit path) so the sentinel check sees this chunk.
                 defer { self.noteConnectOverlayOutput() }
                 // Direct launch: tmux was not on mosh-server's non-interactive PATH, so the
-                // script printed the marker and exec'd the user's login shell. Fall back
-                // ONCE to the in-band launch typed into that shell. Checked BEFORE the probe
-                // accumulation, which stops once the sentinel (printed before the marker)
-                // is seen. Returns without adding this chunk to the re-armed probe buffer:
-                // it carries the DIRECT launch's sentinel, which must not count as the
-                // in-band launch's.
+                // script printed `SEMICOLYN_NOTMUX_<nonce>` and exec'd the user's login
+                // shell. Fall back ONCE to the in-band launch typed into that shell. The
+                // pure `shouldFireMoshDirectLaunchFallback` requires this connection's
+                // exact nonce'd marker, no attach evidence yet, and the first frame under
+                // `moshDirectLaunchFallbackWindowSeconds` old, so screen content inside a
+                // working tmux session can never type a launch line into the foreground
+                // program. Checked BEFORE the probe accumulation, which stops once the
+                // sentinel (printed before the marker) is seen. Returns without adding
+                // this chunk to the re-armed probe buffer: it carries the DIRECT launch's
+                // sentinel, which must not count as the in-band launch's.
                 if self.moshDirectLaunch, !self.moshDirectLaunchFallbackSent,
+                   !self.moshDirectLaunchAttached,
                    self.moshDirectLaunchOutput.utf8.count < 16384 {
                     self.moshDirectLaunchOutput += String(decoding: data, as: UTF8.self)
-                    if containsPlainTmuxNoTmuxMarker(self.moshDirectLaunchOutput) {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    let input = MoshDirectLaunchFallbackInput(
+                        output: self.moshDirectLaunchOutput,
+                        nonce: self.moshDirectLaunchNonce,
+                        alreadyFired: self.moshDirectLaunchFallbackSent,
+                        attached: self.moshDirectLaunchAttached,
+                        secondsSinceFirstFrame: now - (self.moshDirectLaunchFirstFrameAt ?? now))
+                    if shouldFireMoshDirectLaunchFallback(input) {
+                        DebugLog.shared.log(.tmux, moshDirectLaunchFallbackLogLine(input, fire: true))
                         self.moshDirectLaunchFallbackSent = true
                         self.moshDirectLaunchOutput = ""
-                        DebugLog.shared.log(.tmux, "mosh: direct launch printed \(plainTmuxNoTmuxMarker) (tmux not on non-interactive PATH) → in-band launch fallback in login shell session=\(self.tmuxSessionNameForConnection)")
+                        DebugLog.shared.log(.tmux, "mosh: direct launch printed SEMICOLYN_NOTMUX (tmux not on non-interactive PATH) → in-band launch fallback in login shell session=\(self.tmuxSessionNameForConnection)")
                         self.startMoshPlainTmuxLaunch(sess: sess, typeInBandLaunch: true)
                         return
                     }
@@ -1549,8 +1580,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             self.plainTmuxProbeResolved = true
             DebugLog.shared.log(.tmux, "mosh: plainTmux probe window expired inconclusive → assume started")
         }
+        // The direct launch's marker scan is bounded from its first frame (now).
+        if !typeInBandLaunch { moshDirectLaunchFirstFrameAt = ProcessInfo.processInfo.systemUptime }
         // Cover the login shell / typed launch until tmux paints (launch time = now).
-        beginConnectOverlay()
+        beginConnectOverlay(directLaunch: !typeInBandLaunch)
         guard typeInBandLaunch else { return }
         sess.writeInput(Data((PlainTmuxController.launchCommand(sessionName: name) + "\n").utf8))
     }
@@ -1903,10 +1936,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     // MARK: - Connecting overlay
 
-    /// Raise the "Connecting to <host>..." overlay at the in-band plain-tmux launch
-    /// (call right before the launch is written). Resets the reveal inputs, stamps the
-    /// launch time and arms the `connectRevealTimeoutSeconds` backstop.
-    private func beginConnectOverlay() {
+    /// Raise the "Connecting to <host>..." overlay at the plain-tmux launch: right before
+    /// the in-band launch is written, or at the Mosh direct launch's first frame
+    /// (`directLaunch`, which only changes the log line). Resets the reveal inputs, stamps
+    /// the launch time and arms the `connectRevealTimeoutSeconds` backstop.
+    private func beginConnectOverlay(directLaunch: Bool = false) {
         connectOverlayTimeout?.cancel()
         connectOverlayQuietCheck?.cancel(); connectOverlayQuietCheck = nil
         connectOverlayLaunchedAt = ProcessInfo.processInfo.systemUptime
@@ -1915,7 +1949,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         connectOverlayMouseOn = false
         connectOverlayTmuxMissing = false
         connectOverlay = true
-        DebugLog.shared.log(.connect, "connect:overlay up (in-band tmux launch)")
+        DebugLog.shared.log(.connect, "connect:overlay up (\(directLaunch ? "direct" : "in-band") tmux launch)")
         connectOverlayTimeout = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(connectRevealTimeoutSeconds * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
@@ -1948,6 +1982,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// The mounted terminal's mouse reporting changed (`TerminalScreen`'s mode hook). Only
     /// meaningful while the overlay is up: tmux turning mouse mode on means it attached.
     func noteTerminalMouseMode(on: Bool) {
+        // tmux turned mouse mode on: the Mosh direct launch attached, so stop its marker
+        // scan (checked before the overlay guard; the overlay may already be down).
+        if on, moshDirectLaunch { moshDirectLaunchAttached = true }
         guard connectOverlay else { return }
         connectOverlayMouseOn = on
         evaluateConnectReveal()
@@ -1969,6 +2006,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             sessionEnded: sessionEnded,
             secondsSinceLaunch: now - connectOverlayLaunchedAt)
         guard let reason = connectRevealDecision(input) ?? (deadlineReached ? ConnectRevealReason.timeout : nil) else { return }
+        // A paint-driven reveal is attach evidence: stop the direct launch's marker scan.
+        if moshDirectLaunch, reason == .mouseMode || reason == .sentinelQuiet {
+            moshDirectLaunchAttached = true
+        }
         connectOverlay = false
         connectOverlayTimeout?.cancel(); connectOverlayTimeout = nil
         connectOverlayQuietCheck?.cancel(); connectOverlayQuietCheck = nil
