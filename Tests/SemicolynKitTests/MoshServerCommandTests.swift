@@ -59,4 +59,32 @@ final class MoshServerCommandTests: XCTestCase {
         XCTAssertEqual(moshServerCommand(cfg),
                        [tmout, "mosh-server", "new", "-s", "-c", "256", "-l", "LANG=en_US.UTF-8"])
     }
+
+    // A session command rides after `--` (mosh-server runs it instead of the login
+    // shell). It is one already-quoted shell fragment, appended verbatim, so the joined
+    // string sshd hands the login shell is exactly the bootstrap plus `-- <command>`.
+    func testSessionCommandAppendedAfterDoubleDash() {
+        let cfg = MoshConfig(enabled: true, udpPortRange: [60000, 61000])
+        let argv = moshServerCommand(cfg, sessionCommand: "sh -c 'echo hi;exec x'")
+        XCTAssertEqual(argv, [tmout, "mosh-server", "new", "-s", "-c", "256", "-l",
+                              "LANG=en_US.UTF-8", "-p", "60000:61000", "--", "sh -c 'echo hi;exec x'"])
+        XCTAssertEqual(argv.joined(separator: " "),
+                       "MOSH_SERVER_NETWORK_TMOUT=604800 mosh-server new -s -c 256 -l LANG=en_US.UTF-8 -p 60000:61000 -- sh -c 'echo hi;exec x'")
+    }
+
+    // The real direct-launch script joins into exactly `<bootstrap> -- <script>`.
+    func testDirectLaunchScriptJoinsAfterBootstrap() {
+        let script = plainTmuxDirectLaunchCommand(sessionName: "semicolyn")
+        let joined = moshServerCommand(MoshConfig(enabled: true), sessionCommand: script)
+            .joined(separator: " ")
+        XCTAssertEqual(joined, "MOSH_SERVER_NETWORK_TMOUT=604800 mosh-server new -s -c 256 -l LANG=en_US.UTF-8 -- " + script)
+    }
+
+    // nil (the default) is byte-identical to the no-command form: no trailing `--`.
+    func testNilSessionCommandIsUnchanged() {
+        let cfg = MoshConfig(enabled: true)
+        XCTAssertEqual(moshServerCommand(cfg, sessionCommand: nil), moshServerCommand(cfg))
+        XCTAssertEqual(moshServerCommand(cfg, sessionCommand: nil),
+                       [tmout, "mosh-server", "new", "-s", "-c", "256", "-l", "LANG=en_US.UTF-8"])
+    }
 }

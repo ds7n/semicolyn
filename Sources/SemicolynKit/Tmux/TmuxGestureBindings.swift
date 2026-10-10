@@ -50,6 +50,18 @@ public func containsPlainTmuxLaunchSentinel(_ output: String) -> Bool {
     output.contains(plainTmuxLaunchSentinel)
 }
 
+/// Printed by the DIRECT launch (`plainTmuxDirectLaunchCommand`) when `tmux` is not on
+/// the non-interactive `PATH`, right before it `exec`s the user's login shell. Tells the
+/// app to retry with the in-band launch in that shell, whose rc files may add tmux to
+/// `PATH`. Printed via `printf "SEMICOLYN_%s\n" NOTMUX`, so the script text itself never
+/// contains this exact string.
+public let plainTmuxNoTmuxMarker = "SEMICOLYN_NOTMUX"
+
+/// Whether accumulated direct-launch output contains the tmux-not-on-PATH marker.
+public func containsPlainTmuxNoTmuxMarker(_ output: String) -> Bool {
+    output.contains(plainTmuxNoTmuxMarker)
+}
+
 /// The one-line command that launches plain tmux with the private gesture bindings.
 ///
 /// Wrapped in `sh -c '...'` so it behaves the same under any login shell (bash/zsh/fish),
@@ -81,14 +93,49 @@ public func containsPlainTmuxLaunchSentinel(_ output: String) -> Bool {
 ///    a `\;` chain at the first failing command, so attach must never ride in that chain:
 ///    a failed bind costs gestures, never the session.
 ///
+/// Steps 3 to 5 (up to the attach) are `plainTmuxBindingsScript`, shared verbatim with
+/// `plainTmuxDirectLaunchCommand`.
+///
 /// - Precondition: `sessionName` passed `isValidTmuxSessionName` (letters, digits, `-`,
 ///   `_` only), so it is safe to interpolate unquoted. Enforced here; every caller also
 ///   validates first.
 public func plainTmuxLaunchCommand(sessionName: String) -> String {
     precondition(isValidTmuxSessionName(sessionName),
                  "plainTmuxLaunchCommand: session name must pass isValidTmuxSessionName")
+    return #"sh -c 'S=\#(sessionName);printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;\#(plainTmuxBindingsScript());exec tmux attach-session -t "=$S"'"#
+}
+
+/// The DIRECT launch: the same tmux launch, run by mosh-server as its session command
+/// (`mosh-server new ... -- <this>`) instead of being typed into the user's login shell,
+/// so the interactive shell's startup and the echoed launch line never appear. Same
+/// sentinel, session create and binding body (`plainTmuxBindingsScript`) as
+/// `plainTmuxLaunchCommand`. Differences, because there is no interactive shell behind it:
+/// - tmux not on `PATH` (a non-interactive `PATH` can lack the user's rc additions):
+///   prints `plainTmuxNoTmuxMarker` and `exec`s the login shell (`"${SHELL:-sh}" -l`), so
+///   the user gets their normal shell and the app can retry the in-band launch there;
+/// - attach is NOT `exec`'d and is followed by the login shell, so detaching or exiting
+///   tmux leaves the user at their shell (as the typed launch does) instead of ending the
+///   Mosh session.
+///
+/// Contains no single quote of its own, so it survives the login shell's parse of the
+/// joined mosh-server command exactly as the typed launch does.
+///
+/// - Precondition: `sessionName` passed `isValidTmuxSessionName` (see
+///   `plainTmuxLaunchCommand`).
+public func plainTmuxDirectLaunchCommand(sessionName: String) -> String {
+    precondition(isValidTmuxSessionName(sessionName),
+                 "plainTmuxDirectLaunchCommand: session name must pass isValidTmuxSessionName")
+    let loginShell = #"exec "${SHELL:-sh}" -l"#
+    return #"sh -c 'S=\#(sessionName);printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||{ printf "SEMICOLYN_%s\n" NOTMUX;\#(loginShell);};\#(plainTmuxBindingsScript());tmux attach-session -t "=$S";\#(loginShell)'"#
+}
+
+/// The launch body shared by both launch variants: create the session `$S` if absent,
+/// then claim a slot and bind each action in ONE ignored-failure tmux call (steps 3 to 5
+/// of `plainTmuxLaunchCommand`, up to but excluding the attach). Expects `S` set and
+/// tmux on `PATH`; contains no single quote.
+private func plainTmuxBindingsScript() -> String {
     let commands = TmuxAction.allCases
         .map { $0.command.contains(" ") ? "\"\($0.command)\"" : $0.command }
         .joined(separator: " ")
-    return #"sh -c 'S=\#(sessionName);printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in \#(commands);do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null;exec tmux attach-session -t "=$S"'"#
+    return #"tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in \#(commands);do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null"#
 }

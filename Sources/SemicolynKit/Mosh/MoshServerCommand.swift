@@ -15,13 +15,21 @@ public let moshServerNetworkTimeoutSeconds = 604_800   // 7 days
 /// mosh-server inherits the abandoned-session timeout. Then: `-s` binds to the SSH
 /// connection's address; `-c 256` requests 256-color; `-l LANG=…` sets a UTF-8 locale
 /// (mosh warns/degrades without one); `-p lo:hi` constrains the UDP port when a range
-/// is configured.
-public func moshServerCommand(_ config: MoshConfig, locale: String = "en_US.UTF-8") -> [String] {
+/// is configured. A non-nil `sessionCommand` follows `--`: mosh-server runs it instead
+/// of the login shell. It is ONE already-quoted shell fragment (e.g. the
+/// `plainTmuxDirectLaunchCommand` `sh -c '...'` string), appended verbatim as the last
+/// element so the space-joined command hands it to the login shell unchanged; nil leaves
+/// the argv exactly as without it.
+public func moshServerCommand(_ config: MoshConfig, locale: String = "en_US.UTF-8",
+                              sessionCommand: String? = nil) -> [String] {
     var argv = ["MOSH_SERVER_NETWORK_TMOUT=\(moshServerNetworkTimeoutSeconds)",
                 config.serverPath ?? "mosh-server", "new", "-s", "-c", "256",
                 "-l", "LANG=\(locale)"]
     if let range = config.udpPortRange, range.count == 2 {
         argv += ["-p", "\(range[0]):\(range[1])"]
+    }
+    if let sessionCommand {
+        argv += ["--", sessionCommand]
     }
     return argv
 }

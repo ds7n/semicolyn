@@ -115,4 +115,86 @@ final class TmuxGestureBindingsTests: XCTestCase {
         XCTAssertFalse(containsPlainTmuxLaunchSentinel("SEMICOLYN_LAUNC"))   // truncated chunk
         XCTAssertFalse(containsPlainTmuxLaunchSentinel("SEMICOLYN_PREFIX=C-a"))   // old sentinel
     }
+
+    // MARK: - Direct launch (mosh-server session command)
+
+    private let directExpected = #"sh -c 'S=semicolyn;printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||{ printf "SEMICOLYN_%s\n" NOTMUX;exec "${SHELL:-sh}" -l;};tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in "split-window -h" "split-window -v" kill-pane new-window "resize-pane -Z" next-window previous-window "select-pane -t +";do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null;tmux attach-session -t "=$S";exec "${SHELL:-sh}" -l'"#
+
+    func testDirectLaunchCommandExactForDefaultSession() {
+        XCTAssertEqual(plainTmuxDirectLaunchCommand(sessionName: "semicolyn"), directExpected)
+    }
+
+    /// Not typed (it rides the SSH exec as mosh-server's command), but pinned so any
+    /// change to the script is deliberate: 805 + name length.
+    func testDirectLaunchCommandLengthIsFixedOverheadPlusName() {
+        XCTAssertEqual(plainTmuxDirectLaunchCommand(sessionName: "semicolyn").utf8.count, 814)
+        XCTAssertEqual(plainTmuxDirectLaunchCommand(sessionName: "a").utf8.count, 806)
+    }
+
+    func testDirectLaunchCommandEmbedsSessionName() {
+        XCTAssertTrue(plainTmuxDirectLaunchCommand(sessionName: "work-1").hasPrefix("sh -c 'S=work-1;printf "))
+    }
+
+    /// The whole script is ONE single-quoted `sh -c` argument, so it must contain no
+    /// single quote of its own: exactly the two delimiters, at the ends.
+    func testDirectLaunchCommandHasOnlyTheTwoOuterSingleQuotes() {
+        let cmd = plainTmuxDirectLaunchCommand(sessionName: "semicolyn")
+        XCTAssertEqual(cmd.filter { $0 == "'" }.count, 2)
+        XCTAssertTrue(cmd.hasPrefix("sh -c '"))
+        XCTAssertTrue(cmd.hasSuffix("'"))
+    }
+
+    /// Detaching or exiting tmux must leave the user at their login shell, not end the
+    /// Mosh session: attach is NOT exec'd, and is followed by the shell fallback.
+    func testDirectAttachIsNotExecAndIsFollowedByLoginShell() {
+        let cmd = plainTmuxDirectLaunchCommand(sessionName: "semicolyn")
+        XCTAssertTrue(cmd.hasSuffix(#"&&tmux "$@" 2>/dev/null;tmux attach-session -t "=$S";exec "${SHELL:-sh}" -l'"#))
+        XCTAssertFalse(cmd.contains("exec tmux"))
+        XCTAssertEqual(cmd.components(separatedBy: "attach-session").count, 2)
+    }
+
+    /// tmux missing from the non-interactive PATH prints the distinct marker and hands the
+    /// user their interactive login shell instead of a `tmux: not found` line.
+    func testDirectMissingTmuxPrintsMarkerThenExecsLoginShell() {
+        let cmd = plainTmuxDirectLaunchCommand(sessionName: "semicolyn")
+        XCTAssertTrue(cmd.contains(#"command -v tmux >/dev/null||{ printf "SEMICOLYN_%s\n" NOTMUX;exec "${SHELL:-sh}" -l;};"#))
+        XCTAssertFalse(containsPlainTmuxNoTmuxMarker(cmd))   // printf-split, like the sentinel
+    }
+
+    /// Same batched spawn budget as the in-band launch: the attach is a plain call.
+    func testDirectLaunchCommandSpawnsAtMostFiveTmuxClients() {
+        XCTAssertEqual(tmuxInvocations(in: plainTmuxDirectLaunchCommand(sessionName: "semicolyn")),
+                       ["tmux has-session", "tmux new-session", "tmux show", #"tmux "$@""#,
+                        "tmux attach-session"])
+    }
+
+    /// The session-create + binding body is SHARED with the in-band launch, not a copy:
+    /// both variants carry the identical text from `tmux has-session` through the
+    /// set/bind call, for any session name.
+    func testDirectAndInBandShareTheBindingBody() throws {
+        for name in ["semicolyn", "a", "work-1"] {
+            let inBand = try sharedBody(plainTmuxLaunchCommand(sessionName: name))
+            let direct = try sharedBody(plainTmuxDirectLaunchCommand(sessionName: name))
+            XCTAssertEqual(direct, inBand)
+            XCTAssertTrue(inBand.hasPrefix(#"tmux has-session -t "=$S""#), inBand)
+            XCTAssertTrue(inBand.hasSuffix(#"&&tmux "$@" 2>/dev/null"#), inBand)
+        }
+    }
+
+    func testNoTmuxMarkerDetection() {
+        XCTAssertEqual(plainTmuxNoTmuxMarker, "SEMICOLYN_NOTMUX")
+        XCTAssertTrue(containsPlainTmuxNoTmuxMarker("SEMICOLYN_LAUNCH\rSEMICOLYN_NOTMUX\r\n$ "))
+        XCTAssertFalse(containsPlainTmuxNoTmuxMarker(""))
+        XCTAssertFalse(containsPlainTmuxNoTmuxMarker("SEMICOLYN_NOTMU"))   // truncated chunk
+        XCTAssertFalse(containsPlainTmuxNoTmuxMarker("SEMICOLYN_LAUNCH\r"))   // sentinel only
+        // The in-band launch never prints it, so its tmux-missing path stays the probe's.
+        XCTAssertFalse(containsPlainTmuxNoTmuxMarker(plainTmuxLaunchCommand(sessionName: "semicolyn")))
+    }
+
+    /// The text from `tmux has-session` up to and including the set/bind call.
+    private func sharedBody(_ cmd: String) throws -> String {
+        let start = try XCTUnwrap(cmd.range(of: "tmux has-session"))
+        let end = try XCTUnwrap(cmd.range(of: #"tmux "$@" 2>/dev/null"#))
+        return String(cmd[start.lowerBound..<end.upperBound])
+    }
 }
