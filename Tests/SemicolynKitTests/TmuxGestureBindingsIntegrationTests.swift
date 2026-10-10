@@ -238,7 +238,7 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
     /// The direct variant (run as mosh-server's command, no interactive shell) attaches
     /// with the private bindings installed, and the gestures work.
     func testDirectLaunchAttachesWithBindings() throws {
-        try launchInner(launch: plainTmuxDirectLaunchCommand(sessionName: "semicolyn"))
+        try launchInner(launch: plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Xy7Qk2Ma"))
         XCTAssertEqual(try sh("tmux list-clients -F '#{session_name}'"), "semicolyn")
         XCTAssertEqual(try sh("tmux show -sv 'user-keys[900]'"), #"\033[9900~"#)
         XCTAssertTrue(try sh("tmux list-keys -T root User907 2>&1").contains("select-pane -t +"))
@@ -255,9 +255,10 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: dir + "/bin/sh", withDestinationPath: "/bin/sh")
         let fake = try writeFakeShell(name: "fakeshell", body: #"printf 'FAKESHELL %s\n' "$*""#)
         let out = try sh("PATH=" + dir + "/bin SHELL=" + fake + " "
-                         + plainTmuxDirectLaunchCommand(sessionName: "semicolyn") + " </dev/null")
-        XCTAssertEqual(out, "SEMICOLYN_LAUNCH\rSEMICOLYN_NOTMUX\nFAKESHELL -l")
-        XCTAssertTrue(containsPlainTmuxNoTmuxMarker(out))
+                         + plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Xy7Qk2Ma") + " </dev/null")
+        XCTAssertEqual(out, "SEMICOLYN_LAUNCH\rSEMICOLYN_NOTMUX_Xy7Qk2Ma\nFAKESHELL -l")
+        XCTAssertTrue(containsPlainTmuxNoTmuxMarker(out, nonce: "Xy7Qk2Ma"))
+        XCTAssertFalse(containsPlainTmuxNoTmuxMarker(out, nonce: "Zz9Pp1Qq"))
         XCTAssertEqual(classifyTmuxLaunch(output: out), .inconclusive)
     }
 
@@ -267,8 +268,8 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: dir + "/bin/sh", withDestinationPath: "/bin/sh")
         try "echo PROFILE_RAN\n".write(toFile: dir + "/.profile", atomically: true, encoding: .utf8)
         let out = try sh("unset SHELL;PATH=" + dir + "/bin "
-                         + plainTmuxDirectLaunchCommand(sessionName: "semicolyn") + " </dev/null")
-        XCTAssertTrue(out.hasPrefix("SEMICOLYN_LAUNCH\rSEMICOLYN_NOTMUX\n"), out)
+                         + plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Xy7Qk2Ma") + " </dev/null")
+        XCTAssertTrue(out.hasPrefix("SEMICOLYN_LAUNCH\rSEMICOLYN_NOTMUX_Xy7Qk2Ma\n"), out)
         XCTAssertTrue(out.hasSuffix("PROFILE_RAN"), out)
     }
 
@@ -280,7 +281,7 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         let fake = try writeFakeShell(name: "fakeshell",
                                       body: #"printf '%s\n' "$*" > "\#(dir)/fallback-ran"; exec cat"#)
         try launchInner(envAssignments: "SHELL=" + fake + " ",
-                        launch: plainTmuxDirectLaunchCommand(sessionName: "semicolyn"))
+                        launch: plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Xy7Qk2Ma"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: dir + "/fallback-ran"))
         try sh("tmux detach-client -s semicolyn")
         try waitUntil("fallback shell ran after detach") {
@@ -297,7 +298,7 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         let fake = try writeFakeShell(name: "fakeshell",
                                       body: #"printf '%s\n' "$*" > "\#(dir)/fallback-ran"; exec cat"#)
         try launchInner(envAssignments: "SHELL=" + fake + " ",
-                        launch: plainTmuxDirectLaunchCommand(sessionName: "semicolyn"))
+                        launch: plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Xy7Qk2Ma"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: dir + "/fallback-ran"))
         try sh("tmux kill-session -t =semicolyn")
         try waitUntil("fallback shell ran after kill-session") {

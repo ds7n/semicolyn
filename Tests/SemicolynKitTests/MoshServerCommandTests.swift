@@ -74,7 +74,7 @@ final class MoshServerCommandTests: XCTestCase {
 
     // The real direct-launch script joins into exactly `<bootstrap> -- <script>`.
     func testDirectLaunchScriptJoinsAfterBootstrap() {
-        let script = plainTmuxDirectLaunchCommand(sessionName: "semicolyn")
+        let script = plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Xy7Qk2Ma")
         let joined = moshServerCommand(MoshConfig(enabled: true), sessionCommand: script)
             .joined(separator: " ")
         XCTAssertEqual(joined, "MOSH_SERVER_NETWORK_TMOUT=604800 mosh-server new -s -c 256 -l LANG=en_US.UTF-8 -- " + script)

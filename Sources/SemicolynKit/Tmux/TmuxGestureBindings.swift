@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
+import Foundation
 
 /// Private tmux key bindings that drive plain-tmux gestures without knowing the user's
 /// own keybindings. The launch command (`plainTmuxLaunchCommand`) teaches the tmux server
@@ -51,15 +52,28 @@ public func containsPlainTmuxLaunchSentinel(_ output: String) -> Bool {
 }
 
 /// Printed by the DIRECT launch (`plainTmuxDirectLaunchCommand`) when `tmux` is not on
-/// the non-interactive `PATH`, right before it `exec`s the user's login shell. Tells the
-/// app to retry with the in-band launch in that shell, whose rc files may add tmux to
-/// `PATH`. Printed via `printf "SEMICOLYN_%s\n" NOTMUX`, so the script text itself never
-/// contains this exact string.
-public let plainTmuxNoTmuxMarker = "SEMICOLYN_NOTMUX"
+/// the non-interactive `PATH`, right before it `exec`s the user's login shell:
+/// `SEMICOLYN_NOTMUX_<nonce>`, with this connection's nonce. Tells the app to retry with
+/// the in-band launch in that shell, whose rc files may add tmux to `PATH`. Printed via
+/// `printf "SEMICOLYN_%s_%s\n" NOTMUX <nonce>`, so the script text itself never contains
+/// it, and the nonce keeps the bare word (e.g. in this repo's source on screen) from
+/// matching.
+public func plainTmuxNoTmuxMarker(nonce: String) -> String { "SEMICOLYN_NOTMUX_" + nonce }
 
-/// Whether accumulated direct-launch output contains the tmux-not-on-PATH marker.
-public func containsPlainTmuxNoTmuxMarker(_ output: String) -> Bool {
-    output.contains(plainTmuxNoTmuxMarker)
+/// Whether `output` contains `plainTmuxNoTmuxMarker(nonce:)` as a whole token: followed by
+/// a non-alphanumeric character or the end, so a longer nonce sharing this prefix does not
+/// match.
+public func containsPlainTmuxNoTmuxMarker(_ output: String, nonce: String) -> Bool {
+    let marker = plainTmuxNoTmuxMarker(nonce: nonce)
+    var searchFrom = output.startIndex
+    while let r = output.range(of: marker, range: searchFrom..<output.endIndex) {
+        guard r.upperBound < output.endIndex else { return true }
+        let next = output.unicodeScalars[r.upperBound]
+        let alnum = (next >= "a" && next <= "z") || (next >= "A" && next <= "Z") || (next >= "0" && next <= "9")
+        if !alnum { return true }
+        searchFrom = r.upperBound
+    }
+    return false
 }
 
 /// The one-line command that launches plain tmux with the private gesture bindings.
@@ -111,7 +125,7 @@ public func plainTmuxLaunchCommand(sessionName: String) -> String {
 /// sentinel, session create and binding body (`plainTmuxBindingsScript`) as
 /// `plainTmuxLaunchCommand`. Differences, because there is no interactive shell behind it:
 /// - tmux not on `PATH` (a non-interactive `PATH` can lack the user's rc additions):
-///   prints `plainTmuxNoTmuxMarker` and `exec`s the login shell (`"${SHELL:-sh}" -l`), so
+///   prints `plainTmuxNoTmuxMarker(nonce:)` and `exec`s the login shell (`"${SHELL:-sh}" -l`), so
 ///   the user gets their normal shell and the app can retry the in-band launch there;
 /// - attach is NOT `exec`'d and is followed by the login shell, so detaching or exiting
 ///   tmux leaves the user at their shell (as the typed launch does) instead of ending the
@@ -121,12 +135,15 @@ public func plainTmuxLaunchCommand(sessionName: String) -> String {
 /// joined mosh-server command exactly as the typed launch does.
 ///
 /// - Precondition: `sessionName` passed `isValidTmuxSessionName` (see
-///   `plainTmuxLaunchCommand`).
-public func plainTmuxDirectLaunchCommand(sessionName: String) -> String {
+///   `plainTmuxLaunchCommand`) and `nonce` passed `isValidMoshLaunchNonce` (letters and
+///   digits only, 1...16), so both are safe to interpolate unquoted.
+public func plainTmuxDirectLaunchCommand(sessionName: String, nonce: String) -> String {
     precondition(isValidTmuxSessionName(sessionName),
                  "plainTmuxDirectLaunchCommand: session name must pass isValidTmuxSessionName")
+    precondition(isValidMoshLaunchNonce(nonce),
+                 "plainTmuxDirectLaunchCommand: nonce must pass isValidMoshLaunchNonce")
     let loginShell = #"exec "${SHELL:-sh}" -l"#
-    return #"sh -c 'S=\#(sessionName);printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||{ printf "SEMICOLYN_%s\n" NOTMUX;\#(loginShell);};\#(plainTmuxBindingsScript());tmux attach-session -t "=$S";\#(loginShell)'"#
+    return #"sh -c 'S=\#(sessionName);printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||{ printf "SEMICOLYN_%s_%s\n" NOTMUX \#(nonce);\#(loginShell);};\#(plainTmuxBindingsScript());tmux attach-session -t "=$S";\#(loginShell)'"#
 }
 
 /// The launch body shared by both launch variants: create the session `$S` if absent,
