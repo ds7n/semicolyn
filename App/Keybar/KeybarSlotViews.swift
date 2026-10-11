@@ -27,8 +27,8 @@ struct SlotChrome<Label: View>: View {
                 }
             }
         }
-        .frame(minWidth: 36, minHeight: 27)   // tightened input area (2026-07-24): 34→27 row, still tappable
-        .padding(.horizontal, 6)
+        .frame(minWidth: 32, minHeight: 27)   // tightened input area (2026-07-24): 34→27 row, still tappable
+        .padding(.horizontal, 3)               // narrower keys (2026-10-11): 48→38pt wide, more fit on the bar
         .background(bg)
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
