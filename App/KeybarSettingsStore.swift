@@ -3,11 +3,11 @@
 import Foundation
 import SemicolynKit
 
-/// App-lifetime holder for the user's keybar customization (slot layout +
-/// reverse-bar direction). Persists as JSON in `UserDefaults`; the
+/// App-lifetime holder for the user's keybar customization (three-region slot
+/// layout + library). Persists as JSON in `UserDefaults`; the
 /// Settings→Keybar editor mutates `settings` and the live `KeybarView` reacts.
 ///
-/// Mirrors `TerminalSettingsStore` but adds persistence — keybar layout must
+/// Mirrors `TerminalSettingsStore` but adds persistence, keybar layout must
 /// survive relaunch, whereas terminal prefs are still ephemeral.
 @MainActor final class KeybarSettingsStore: ObservableObject {
     private static let defaultsKey = "semicolyn.keybarSettings"
@@ -18,7 +18,7 @@ import SemicolynKit
 
     /// Loads the persisted layout, falling back to `KeybarSettings.default` when
     /// nothing is stored or the stored payload fails to decode (forward-compat
-    /// safety — a malformed/old blob never bricks the keybar).
+    /// safety, a malformed/old blob never bricks the keybar).
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.defaultsKey),
            let decoded = try? JSONDecoder().decode(KeybarSettings.self, from: data) {
@@ -51,25 +51,18 @@ import SemicolynKit
     /// orphaned custom-slot binding simply resolves to "unbound" at render).
     func deleteMacro(_ id: MacroID) {
         settings.library.removeMacro(id)
-        settings.layout = KeybarLayout(
-            locked: settings.layout.locked.filter { $0 != .pinnedMacro(id) },
-            scroll: settings.layout.scroll.filter { $0 != .pinnedMacro(id) })
+        settings.layout = settings.layout.filtering { $0 != .pinnedMacro(id) }
     }
 
     /// Deletes a custom slot and removes it from the bar.
     func deleteCustomSlot(_ id: CustomSlotID) {
         settings.library.removeCustomSlot(id)
-        settings.layout = KeybarLayout(
-            locked: settings.layout.locked.filter { $0 != .custom(id) },
-            scroll: settings.layout.scroll.filter { $0 != .custom(id) })
+        settings.layout = settings.layout.filtering { $0 != .custom(id) }
     }
 
-    /// Appends a slot to the (default) scroll region, if not already on the bar.
-    func appendToScroll(_ slot: KeybarSlot) {
-        let present = Set(settings.layout.locked + settings.layout.scroll)
-        guard !present.contains(slot) else { return }
-        settings.layout = KeybarLayout(locked: settings.layout.locked,
-                                       scroll: settings.layout.scroll + [slot])
+    /// Appends a slot to the scrolling middle region, if not already on the bar.
+    func appendToMiddle(_ slot: KeybarSlot) {
+        settings.layout = settings.layout.appending(slot, to: .middle)
     }
 
     private func persist() {

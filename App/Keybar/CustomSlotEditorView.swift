@@ -42,7 +42,7 @@ struct CustomSlotEditorView: View {
             Section {
                 TextField("Label / glyph (optional)", text: $label)
             } footer: {
-                Text("Shown on the slot. If blank, the slot uses the tapped macro's name.")
+                Text("Shown on the key. If blank, the key uses the tap macro's name.")
             }
 
             Section("Gestures") {
@@ -53,14 +53,14 @@ struct CustomSlotEditorView: View {
 
             if let id = editingID {
                 Section {
-                    Button("Delete slot", role: .destructive) {
+                    Button("Delete gesture key", role: .destructive) {
                         store.deleteCustomSlot(id)
                         dismiss()
                     }
                 }
             }
         }
-        .navigationTitle(editingID == nil ? "New slot" : "Edit slot")
+        .navigationTitle(editingID == nil ? "New gesture key" : "Edit gesture key")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
@@ -116,7 +116,7 @@ struct CustomSlotEditorView: View {
                               tap: bindings[.tap], swipeUp: bindings[.swipeUp],
                               swipeDown: bindings[.swipeDown], longPress: bindings[.longPress])
         store.saveCustomSlot(slot)
-        if editingID == nil { store.appendToScroll(.custom(id)) }
+        if editingID == nil { store.appendToMiddle(.custom(id)) }
         dismiss()
     }
 }

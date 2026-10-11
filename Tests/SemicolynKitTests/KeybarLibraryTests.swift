@@ -24,7 +24,7 @@ final class KeybarLibraryTests: XCTestCase {
     func testNewSlotsAreRemovableAndMovable() {
         for slot in [KeybarSlot.custom(CustomSlotID("s1")), .pinnedMacro(MacroID("m1"))] {
             XCTAssertTrue(KeybarLayout.isRemovable(slot))
-            XCTAssertTrue(KeybarLayout.canMoveAcrossDivider(slot))
+            XCTAssertEqual(KeybarLayout.allowedRegions(for: slot), [.left, .middle, .right])
         }
     }
 
@@ -36,8 +36,9 @@ final class KeybarLibraryTests: XCTestCase {
 
     func testLayoutWithCustomAndMacroSlotsIsValidAndRoundTrips() throws {
         let layout = KeybarLayout(
-            locked: [.escPill, .pad],
-            scroll: [.custom(CustomSlotID("s1")), .pinnedMacro(MacroID("m1"))])
+            left: [.escPill],
+            middle: [.custom(CustomSlotID("s1")), .pinnedMacro(MacroID("m1"))],
+            right: [.pad])
         XCTAssertTrue(layout.isValid)
         let data = try JSONEncoder().encode(layout)
         XCTAssertEqual(try JSONDecoder().decode(KeybarLayout.self, from: data), layout)
@@ -102,7 +103,7 @@ final class KeybarLibraryTests: XCTestCase {
         """.utf8)
         let decoded = try JSONDecoder().decode(KeybarSettings.self, from: oldBlob)
         XCTAssertEqual(decoded.library, .empty)
-        XCTAssertEqual(decoded.direction, .lockedRight)
-        XCTAssertEqual(decoded.layout.scroll, [.symbol("/")])
+        // v1 lockedRight blob migrates mirrored: locked [esc, pad] -> right reversed.
+        XCTAssertEqual(decoded.layout, KeybarLayout(left: [], middle: [.symbol("/")], right: [.pad, .escPill]))
     }
 }

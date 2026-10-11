@@ -3,10 +3,10 @@
 import SwiftUI
 import SemicolynKit
 
-/// The macro library, a.k.a. the Launcher: a searchable list of every macro.
+/// The macro library (Settings → Macros): a searchable list of every macro.
 /// Two modes via `onPick`:
-///   - nil → **Launcher**: pin a macro to the bar, delete (swipe), create new.
-///   - non-nil → **picker** (from a custom-slot binding row): tapping a macro
+///   - nil → **library**: add a macro to the bar as a macro key, delete (swipe), create new.
+///   - non-nil → **picker** (from a gesture-key binding row): tapping a macro
 ///     returns it to the caller.
 /// "+ New macro" opens the creation flow in both modes (keybar-customization spec
 /// "Macro library" / "Macro creation → entry points").
@@ -41,7 +41,7 @@ struct MacroLibraryView: View {
             }
         }
         .searchable(text: $search)
-        .navigationTitle(isPicker ? "Pick a macro" : "Launcher")
+        .navigationTitle(isPicker ? "Pick a macro" : "Macros")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { creating = true } label: { Label("New macro", systemImage: "plus") }
@@ -65,12 +65,12 @@ struct MacroLibraryView: View {
                 label(macro)
                 Spacer()
                 Button {
-                    store.appendToScroll(.pinnedMacro(macro.id))
+                    store.appendToMiddle(.pinnedMacro(macro.id))
                 } label: {
-                    Image(systemName: "pin")
+                    Image(systemName: "plus.circle")
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("Pin \(macro.name) to keybar")
+                .accessibilityLabel("Add \(macro.name) as a macro key")
             }
         }
     }

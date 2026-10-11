@@ -4,19 +4,20 @@ import XCTest
 @testable import SemicolynKit
 
 final class KeybarLayoutTests: XCTestCase {
-    func testDefaultLockedRegionIsEscPadModifierTab() {
-        XCTAssertEqual(KeybarLayout.default.locked, [.escPill, .pad, .modifier, .tab])
+    func testDefaultLeftRegionIsEscModifierTab() {
+        XCTAssertEqual(KeybarLayout.default.left, [.escPill, .modifier, .tab])
     }
 
-    func testDefaultScrollSymbolsMatchSpec() {
-        // Fn is now an explicit, reorderable/removable scroll slot (4d) rather
-        // than auto-appended at render time.
-        XCTAssertEqual(KeybarLayout.default.scroll,
+    func testDefaultMiddleSymbolsMatchSpec() {
+        // Fn is an explicit, reorderable/removable middle slot (4d) rather than
+        // auto-appended at render time.
+        XCTAssertEqual(KeybarLayout.default.middle,
                        [.symbol("/"), .symbol("|"), .symbol("~"), .symbol("-"), .symbol("("), .symbol(")"), .fn])
     }
 
-    func testEscAndPadAreLockedNotInScroll() {
-        XCTAssertFalse(KeybarLayout.default.scroll.contains(.escPill))
-        XCTAssertFalse(KeybarLayout.default.scroll.contains(.pad))
+    func testDefaultRightRegionIsPadAndNothingConstrainedScrolls() {
+        XCTAssertEqual(KeybarLayout.default.right, [.pad])
+        XCTAssertFalse(KeybarLayout.default.middle.contains(.escPill))
+        XCTAssertFalse(KeybarLayout.default.middle.contains(.pad))
     }
 }
