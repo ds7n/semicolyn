@@ -48,7 +48,7 @@ struct KeybarEditorView: View {
             }
 
             Section { addMenu } footer: {
-                Text("Pin a saved macro, record or template a new one, or build a custom slot.")
+                Text("A macro key runs one macro when tapped. A gesture key can run a different macro for tap, swipe up, swipe down and long-press.")
             }
         }
         .environment(\.editMode, .constant(.active))   // always show reorder handles
@@ -62,7 +62,9 @@ struct KeybarEditorView: View {
             NavigationStack {
                 switch which {
                 case .launcher:        MacroLibraryView(store: store)
-                case .createMacro:     MacroCreationView(store: store)
+                case .createMacro:
+                    // From the Add menu a new macro lands on the bar as a macro key.
+                    MacroCreationView(store: store) { store.appendToMiddle(.pinnedMacro($0.id)) }
                 case .createSlot:      CustomSlotEditorView(store: store, slot: nil)
                 case .editSlot(let s):  CustomSlotEditorView(store: store, slot: s)
                 case .editFixed(let k): FixedKeySecondaryEditorView(store: store, id: k)
@@ -104,14 +106,22 @@ struct KeybarEditorView: View {
 
     @ViewBuilder private func row(_ slot: KeybarSlot, in region: KeybarRegion) -> some View {
         HStack {
-            Text(slotLabel(slot))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(slotLabel(slot))
+                if let detail = keybarEditorDetail(for: slot, settings: store.settings) {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
             Spacer()
             if case .custom(let id) = slot, let customSlot = store.settings.library.customSlot(id) {
                 Button { editorSheet = .editSlot(customSlot) } label: {
                     Image(systemName: "pencil").font(.footnote)
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("Edit custom slot")
+                .accessibilityLabel("Edit gesture key")
             }
             if let fixedID = fixedKeyID(for: slot) {
                 Button { editorSheet = .editFixed(fixedID) } label: {
@@ -142,9 +152,9 @@ struct KeybarEditorView: View {
                 }
             }
             Divider()
-            Button("Pin a macro…") { editorSheet = .launcher }
-            Button("Create new macro…") { editorSheet = .createMacro }
-            Button("Create new slot…") { editorSheet = .createSlot }
+            Button("Add macro key…") { editorSheet = .launcher }
+            Button("Add gesture key…") { editorSheet = .createSlot }
+            Button("Record new macro key…") { editorSheet = .createMacro }
         } label: {
             Label("Add", systemImage: "plus")
         }
@@ -200,19 +210,6 @@ struct KeybarEditorView: View {
     }
 
     private func slotLabel(_ slot: KeybarSlot) -> String {
-        switch slot {
-        case .escPill:        return "Esc pill"
-        case .pad:            return "Pad (arrows + pane)"
-        case .modifier:       return "Modifier (Ctrl/Alt/Shift)"
-        case .tab:            return "Tab"
-        case .fn:             return "Fn (function keys)"
-        case .symbol(let s):  return "Symbol “\(s)”"
-        case .pinnedMacro(let id):
-            return store.settings.library.macro(id).map { "Macro “\($0.name)”" } ?? "Pinned macro (missing)"
-        case .custom(let id):
-            let lib = store.settings.library
-            let name = lib.customSlot(id)?.displayLabel(macroName: { lib.macro($0)?.name })
-            return name.map { "Slot “\($0)”" } ?? "Custom slot"
-        }
+        keybarEditorTitle(for: slot, library: store.settings.library)
     }
 }

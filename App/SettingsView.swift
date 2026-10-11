@@ -17,7 +17,7 @@ struct SettingsView: View {
                 row(.appearance, "Appearance", "paintpalette") { ThemePickerView() }
                 row(.terminal, "Terminal", "terminal") { TerminalSettingsView() }
                 row(.keybar, "Keybar", "keyboard") { KeybarEditorView(store: keybarSettings) }
-                row(.launcher, "Launcher", "command") { MacroLibraryView(store: keybarSettings) }
+                row(.launcher, "Macros", "command") { MacroLibraryView(store: keybarSettings) }
                 row(.defaults, "Connection Defaults", "slider.horizontal.3") { DefaultsEditorView() }
                 row(.privacy, "Privacy", "hand.raised") { PrivacySettingsView() }
                 row(.experimental, "Experimental", "flask") { ExperimentalSettingsView() }
