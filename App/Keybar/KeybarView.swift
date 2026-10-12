@@ -51,7 +51,7 @@ struct KeybarView: View {
     /// probe on the inner ScrollView was the wrong element; this is the real fix).
     @ViewBuilder private func barChrome<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         content()
-            .padding(.horizontal, 8).padding(.vertical, 2)   // tightened input area (2026-07-24): 3→2
+            .padding(.horizontal, 4).padding(.vertical, 2)   // tightened input area (2026-07-24): 3→2; sides 8→4 (2026-10-12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(theme.surface.panel))
     }

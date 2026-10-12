@@ -19,10 +19,12 @@ struct PromotionSlotView: View {
         .background(Color(theme.keybar.slotBgPromoted))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .onInputClickTap { if let c = slot.tap.first { vm.keybar.tapSymbol(c) } }
-        .gesture(DragGesture(minimumDistance: 12).onEnded { g in
-            if g.translation.height < -12, let u = slot.up?.first { vm.keybar.tapSymbol(u) }
-            else if g.translation.height > 12, let d = slot.down?.first { vm.keybar.tapSymbol(d) }
-        })
+        .keySwipe("promotion") { dir in
+            switch dir {
+            case .up:   if let u = slot.up?.first { vm.keybar.tapSymbol(u) }
+            case .down: if let d = slot.down?.first { vm.keybar.tapSymbol(d) }
+            }
+        }
     }
 }
 
@@ -62,9 +64,9 @@ struct FnSlotView: View {
         }
     }
     var body: some View {
-        Text("Fn").font(.caption).foregroundStyle(Color(theme.text.primary))
-            .frame(minWidth: 30, minHeight: 34).padding(.horizontal, 4)
-            .background(bg).clipShape(RoundedRectangle(cornerRadius: 6))
-            .onInputClickTap { vm.fnTap() }
+        SlotChrome(bg: bg) {
+            Text("Fn").font(.caption).foregroundStyle(Color(theme.text.primary))
+        }
+        .onInputClickTap { vm.fnTap() }
     }
 }
