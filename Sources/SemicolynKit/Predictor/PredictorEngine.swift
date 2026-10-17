@@ -28,6 +28,12 @@ public struct PredictorEngine: Sendable {
     /// `proseSeed.unigram.magnitude()`, cached at init for the same reason as
     /// `cliMagnitude`.
     private let proseMagnitude: Double
+    /// Shipped English dictionary for the single ranker; `nil` under the legacy init.
+    private let english: WordDictionary?
+    /// Shipped command tree for the single ranker; `nil` under the legacy init.
+    private let commands: CommandTree?
+    /// Single-ranker weights (unused by the legacy query API).
+    public var weights: RankingWeights
 
     public init(learned: LearnedState, seed: PredictorSeed?,
                 proseSeed: PredictorSeed? = nil,
@@ -42,6 +48,30 @@ public struct PredictorEngine: Sendable {
         self.filter = filter
         self.config = config
         self.window = window
+        self.english = nil
+        self.commands = nil
+        self.weights = RankingWeights()
+    }
+
+    /// An engine for the single ranker (``suggestions(line:lineOptedOut:limit:)``),
+    /// reading the shipped English dictionary and command tree. Either may be `nil`
+    /// (that source then adds nothing). The legacy seeds are absent, so the legacy
+    /// query API returns learned and harvested words only.
+    public init(learned: LearnedState, english: WordDictionary?, commands: CommandTree?,
+                filter: TokenFilter = .init(), weights: RankingWeights = .init(),
+                window: RollingWindow = .days30) {
+        self.learned = learned
+        self.seed = nil
+        self.proseSeed = nil
+        self.cliMagnitude = 0
+        self.proseMagnitude = 0
+        self.output = OutputHarvest()
+        self.filter = filter
+        self.config = SuggestionConfig()
+        self.window = window
+        self.english = english
+        self.commands = commands
+        self.weights = weights
     }
 
     /// L6 frequency-graduation tier, ephemeral, never persisted (not part of
@@ -238,6 +268,20 @@ public struct PredictorEngine: Sendable {
             merged.append(entry)
         }
         return merged
+    }
+
+    /// Up to `limit` ranked suggestions for the token at the end of `line`, from one
+    /// comparable score over the English dictionary, command tree, learned words,
+    /// screen words, bigram context and spelling corrections. `filter` is re-applied
+    /// at read time. No minimum prefix: one letter gets suggestions. Returns `[]` when
+    /// the cursor follows trailing punctuation or (completion mode only, for now) when
+    /// no word is being typed. `lineOptedOut` gates next-word mode; completions stay
+    /// allowed on an opted-out line, as in the legacy path.
+    public func suggestions(line: String, lineOptedOut: Bool, limit: Int = 12) -> [Suggestion] {
+        let sources = RankingSources(
+            english: english, commands: commands, learned: learned, screen: output,
+            filter: filter, weights: weights, window: window)
+        return rankSuggestions(line: line, sources: sources, limit: limit)
     }
 
     /// One chip in a ``blendedSuggestions`` result: either a completion of the
