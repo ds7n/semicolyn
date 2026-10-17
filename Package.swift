@@ -15,6 +15,7 @@ var targets: [Target] = [
     .target(name: "SeedKit", dependencies: ["SemicolynKit"]),
     .executableTarget(name: "semicolyn-seedbuild", dependencies: ["SeedKit"]),
     .executableTarget(name: "semicolyn-predeval", dependencies: ["SeedKit"]),
+    .executableTarget(name: "semicolyn-dictbuild", dependencies: ["SeedKit"]),
     .testTarget(name: "SeedKitTests", dependencies: ["SeedKit"]),
 ]
 
