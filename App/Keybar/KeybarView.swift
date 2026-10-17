@@ -58,11 +58,17 @@ struct KeybarView: View {
 
     /// Full bar: fixed left + horizontally scrolling middle + fixed right.
     /// The middle ScrollView takes `maxWidth: .infinity`, so it owns all slack and
-    /// both fixed regions pack tight against their edges.
+    /// both fixed regions pack tight against their edges. A hairline divider is
+    /// overlaid in the 3pt gap at each region boundary, so it takes no space.
     private var fullContent: some View {
         HStack(spacing: 3) {
-            ForEach(Array(layout.left.enumerated()), id: \.offset) { _, slot in
-                slotView(slot)
+            if !layout.left.isEmpty {
+                HStack(spacing: 3) {
+                    ForEach(Array(layout.left.enumerated()), id: \.offset) { _, slot in
+                        slotView(slot)
+                    }
+                }
+                .overlay(alignment: .trailing) { regionDivider.offset(x: 2) }
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 3) {
@@ -72,10 +78,24 @@ struct KeybarView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            ForEach(Array(layout.right.enumerated()), id: \.offset) { _, slot in
-                slotView(slot)
+            if !layout.right.isEmpty {
+                HStack(spacing: 3) {
+                    ForEach(Array(layout.right.enumerated()), id: \.offset) { _, slot in
+                        slotView(slot)
+                    }
+                }
+                .overlay(alignment: .leading) { regionDivider.offset(x: -2) }
             }
         }
+    }
+
+    /// A subtle 1pt line centered in the gap between two regions (offset ±2 from
+    /// the region edge = half the 3pt spacing plus half the line).
+    private var regionDivider: some View {
+        Capsule()
+            .fill(Color(theme.text.secondary).opacity(0.35))
+            .frame(width: 1, height: 18)
+            .allowsHitTesting(false)
     }
 
     /// Compact bar (hardware keyboard): built-in widgets from the fixed regions
