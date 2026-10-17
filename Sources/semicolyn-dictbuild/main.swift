@@ -23,6 +23,10 @@ func fail(_ message: String) -> Never {
 func runNgramFilter(_ args: [String]) {
     let aliases = ["-y": "min-year", "--min-year": "min-year", "-c": "min-count",
                    "--min-count": "min-count", "-v": "vocab", "--vocab": "vocab"]
+    if args.contains("-h") || args.contains("--help") {
+        print(usage)
+        exit(0)
+    }
     var values: [String: String] = [:]
     var i = 0
     while i < args.count {
@@ -35,6 +39,7 @@ func runNgramFilter(_ args: [String]) {
     guard let yearText = values["min-year"], let minYear = Int(yearText) else {
         fail("missing or invalid --min-year\n\(usage)")
     }
+    guard minYear >= 0 else { fail("--min-year must be non-negative, got \(minYear)") }
     guard let countText = values["min-count"], let minCount = UInt64(countText) else {
         fail("missing or invalid --min-count\n\(usage)")
     }
@@ -43,6 +48,9 @@ func runNgramFilter(_ args: [String]) {
         guard let data = FileManager.default.contents(atPath: path) else { fail("cannot read file: \(path)") }
         let text = String(decoding: data, as: UTF8.self)
         vocab = Set(text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).map(String.init))
+        if vocab?.isEmpty ?? true {
+            FileHandle.standardError.write(Data("warning: vocab file loaded zero words: \(path)\n".utf8))
+        }
     }
 
     var filter = NgramStreamFilter(minYear: minYear, minCount: minCount, vocab: vocab)

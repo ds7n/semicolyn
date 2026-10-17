@@ -77,4 +77,64 @@ final class NgramLineTests: XCTestCase {
     func testFilterToleratesCRLF() {
         XCTAssertEqual(run(["the cat\t2000,50,1\r\n"]), "the cat\t50\n")
     }
+
+    // MARK: - pre-filter pinned to the parser
+
+    private let tableLines: [String] = [
+        "the cat\t1989,5,1\t1990,7,2\t2019,3,1",
+        "a\t+2000,+5,1",
+        "a\t2000,x,1\t2001,4,1",
+        "a\t2000,5,1\t2001,,1\tbad\t2002,6,1",
+        "a\t2000,-4,1\t2001,6,1",
+        "a\t2000,18446744073709551615,1\t2001,5,1",
+        "a\t2000,99999999999999999999999,1",
+        "a\t1989,50,1\t1990,3,1",
+        "a\t2000,5x,1\t2001,4,1",
+        "a\tx2000,5,1",
+        "a\t2000;5;1",
+        "a\t2000",
+        "a\t2000,5",
+        "a\t,5,1",
+        "a\t\t2000,5,1",
+        "a\t2000,5,1\t",
+        "the_DET\t2000,9,1",
+        "_NOUN_\t2000,9,1",
+        "the _NOUN_\t2000,9,1",
+        "123\t2000,5,1",
+        "the 123\t2000,5,1",
+        "abc",
+        "",
+        "\t2000,5,1",
+        "caf\u{e9} au\t2000,5,1",
+        "x's\t1990,1,1",
+        "old\t1989,5,1",
+        "zero\t2000,0,1",
+    ]
+
+    func testByteSumNeverUndercountsTheParser() {
+        for minYear in [1990, 0, 2000] {
+            for line in tableLines {
+                let expected = parseNgramLine(Substring(line), minYear: minYear)?.count ?? 0
+                let sum = NgramStreamFilter.byteSum(Array(line.utf8)[...], minYear: minYear)
+                XCTAssertGreaterThanOrEqual(sum, expected, "line: \(line.debugDescription) minYear \(minYear)")
+            }
+        }
+    }
+
+    func testStreamEqualsParserFilterAtSeveralMinCounts() {
+        let vocabs: [Set<String>?] = [nil, ["the", "cat", "a", "x's", "abc", "caf\u{e9}", "au"]]
+        for minCount: UInt64 in [0, 1, 5, 6, 40, 1_000_000] {
+            for vocab in vocabs {
+                var expected = ""
+                for line in tableLines {
+                    guard let n = parseNgramLine(Substring(line), minYear: 1990), n.count >= minCount else { continue }
+                    if let vocab, !n.tokens.allSatisfy({ vocab.contains($0.lowercased()) }) { continue }
+                    expected += n.tokens.joined(separator: " ") + "\t\(n.count)\n"
+                }
+                let input = tableLines.joined(separator: "\n") + "\n"
+                XCTAssertEqual(run([input], vocab: vocab, minCount: minCount), expected,
+                               "minCount \(minCount) vocab \(vocab != nil)")
+            }
+        }
+    }
 }
