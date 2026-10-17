@@ -14,6 +14,7 @@ var targets: [Target] = [
     // Build-time seed-ingestion tooling, never part of the shipped app product.
     .target(name: "SeedKit", dependencies: ["SemicolynKit"]),
     .executableTarget(name: "semicolyn-seedbuild", dependencies: ["SeedKit"]),
+    .executableTarget(name: "semicolyn-predeval", dependencies: ["SeedKit"]),
     .testTarget(name: "SeedKitTests", dependencies: ["SeedKit"]),
 ]
 

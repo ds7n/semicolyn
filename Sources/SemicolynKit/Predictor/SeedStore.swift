@@ -66,6 +66,11 @@ enum SeedBlobFormat {
 public struct PredictorSeed: Sendable {
     public let unigram: Vocabulary
     public let bigram: BigramVocabulary
+
+    public init(unigram: Vocabulary, bigram: BigramVocabulary) {
+        self.unigram = unigram
+        self.bigram = bigram
+    }
 }
 
 /// Manages the pinned seed on disk under a caller-provided `directory` (the app
