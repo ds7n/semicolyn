@@ -135,7 +135,8 @@ private func completionScores(typed: String, ctx: LineContext, sources: RankingS
 /// wins when two stored forms display alike). The prefix index is byte-exact, so it
 /// is probed with the first typed character in each case and then narrowed with
 /// ``caseMatchedForm(typed:candidate:)``; probing the whole typed prefix would miss
-/// mixed-case words such as `GitHub` for `gith`.
+/// mixed-case words such as `GitHub` for `gith`. Tokens with a zero count in the
+/// window (aged out) are skipped.
 private func learnedMatches(typed: String, source: any CandidateSource) -> [String: UInt32] {
     guard let first = typed.first else { return [:] }
     let lead = String(first)
@@ -145,7 +146,8 @@ private func learnedMatches(typed: String, source: any CandidateSource) -> [Stri
     }
     var out: [String: UInt32] = [:]
     for probe in probes {
-        for entry in source.candidates(forPrefix: probe) {
+        // An indexed token outside the window estimates 0: it is not a learned word now.
+        for entry in source.candidates(forPrefix: probe) where entry.count > 0 {
             guard let display = caseMatchedForm(typed: typed, candidate: entry.token) else { continue }
             out[display] = max(out[display] ?? 0, entry.count)
         }
@@ -182,7 +184,7 @@ private func addContext(previous: String, typed: String, sources: RankingSources
     }
     let learnedNext = sources.learned.bigram.candidates(after: previous.lowercased(), window: sources.window)
     var best: [String: UInt32] = [:]
-    for entry in learnedNext {
+    for entry in learnedNext where entry.count > 0 {
         guard let display = caseMatchedForm(typed: typed, candidate: entry.token), scores[display] != nil else {
             continue
         }

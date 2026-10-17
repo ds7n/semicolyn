@@ -102,6 +102,25 @@ final class SuggestionRankerTests: XCTestCase {
                        log2(7.0) / saturationLog, accuracy: 1e-9)
     }
 
+    func testLearnedWordOutsideWindowNotSuggested() throws {
+        var e = try RankFixture.engine()
+        for prev in ["a", "b", "c"] { e.record("semicolyn", after: prev) }
+        e.rollover()
+        XCTAssertEqual(texts(e, "se"), ["semicolyn"])      // inside the 30-day window
+        for _ in 0..<30 { e.rollover() }
+        XCTAssertEqual(texts(e, "se"), [])                 // aged out: estimate 0, not a 0.0 chip
+    }
+
+    func testLearnedBigramOutsideWindowAddsNoContext() throws {
+        var e = try RankFixture.engine()
+        for prev in ["my", "x", "y"] { e.record("car", after: prev) }
+        for _ in 0..<31 { e.rollover() }
+        e.record("car", after: "q")                        // graduated: unigram today, bigram q -> car only
+        let s = e.suggestions(line: "feed my ca", lineOptedOut: false)
+        XCTAssertEqual(s.map(\.text), ["car", "cat"])
+        XCTAssertEqual(s[0].score, 150.0 / 255 + 1 / saturationLog, accuracy: 1e-9)
+    }
+
     func testLearnedMixedCaseFound() throws {
         var e = try RankFixture.engine()
         for prev in ["a", "b", "c"] { e.record("GitHub", after: prev) }

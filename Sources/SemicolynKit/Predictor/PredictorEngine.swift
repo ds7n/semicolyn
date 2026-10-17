@@ -16,7 +16,8 @@ public struct PredictorEngine: Sendable {
     private let proseSeed: PredictorSeed?
     /// Ephemeral output-token context (not persisted); leads suggestions.
     private var output: OutputHarvest
-    /// Write-time exclusion rules, consulted only by `record`, never by reads.
+    /// Exclusion rules: applied at write time by `record` and `harvest`, and
+    /// re-applied at read time by every suggestion query as a safety net.
     public var filter: TokenFilter
     /// Ranking knobs (top-K, confidence floor, seed weight).
     public var config: SuggestionConfig
