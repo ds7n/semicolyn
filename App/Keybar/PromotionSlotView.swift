@@ -15,7 +15,7 @@ struct PromotionSlotView: View {
             Text(slot.tap).font(.system(.body, design: .monospaced)).foregroundStyle(Color(theme.text.primary))
             if let down = slot.down { Text(down).font(.system(size: 9)).foregroundStyle(Color(theme.text.secondary)) }
         }
-        .frame(minWidth: 30, minHeight: 34).padding(.horizontal, 4)
+        .frame(minWidth: 24, minHeight: 31).padding(.horizontal, 4)   // same size as SlotChrome so a promotion never changes the bar height
         .background(Color(theme.keybar.slotBgPromoted))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .onInputClickTap { if let c = slot.tap.first { vm.keybar.tapSymbol(c) } }
@@ -28,7 +28,7 @@ struct PromotionSlotView: View {
     }
 }
 
-/// A function-key slot (F1–F12) shown while Fn mode is engaged.
+/// A function-key slot (F1-F12) shown while Fn mode is engaged.
 struct FkeySlotView: View {
     let n: Int
     let vm: ConnectionViewModel

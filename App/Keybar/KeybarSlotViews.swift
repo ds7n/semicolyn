@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
+import UIKit
 import SemicolynKit
 
 /// Shared slot chrome: themed background + label, uniform min size. When a slot has
@@ -27,7 +28,7 @@ struct SlotChrome<Label: View>: View {
                 }
             }
         }
-        .frame(minWidth: 24, minHeight: 27)   // tightened input area (2026-07-24): 34→27 row, still tappable
+        .frame(minWidth: 24, minHeight: 31)   // 27→31 (2026-10-17): bar felt short once Fn stopped setting its height
         .padding(.horizontal, 4)               // narrower keys (2026-10-12): 48→32pt wide, default middle fits
         .background(bg)
         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -95,18 +96,77 @@ extension View {
     }
 
     /// A vertical swipe on a keybar key that never steals a sideways drag from the
-    /// scrolling middle. The drag runs as a SIMULTANEOUS gesture (a plain `.gesture`
-    /// drag claimed horizontal drags that started on a key, so the middle only
-    /// scrolled when the drag began in a gap), and Kit `keySwipeDirection` decides on
-    /// release whether it was a swipe at all.
+    /// scrolling middle. Even a SIMULTANEOUS SwiftUI drag blocked the scroll view
+    /// when the drag started on a key (device build 188), so on iOS 18+ the swipe is a
+    /// UIKit pan that refuses to begin unless Kit `keySwipeShouldClaim` says the drag
+    /// started vertically; a sideways start fails at once and the scroll view moves.
     func keySwipe(_ key: String, onSwipe: @escaping (KeySwipeDirection) -> Void) -> some View {
-        simultaneousGesture(DragGesture(minimumDistance: 12).onEnded { g in
-            let dx = Double(g.translation.width), dy = Double(g.translation.height)
-            let dir = keySwipeDirection(dx: dx, dy: dy)
+        modifier(KeySwipeModifier(key: key, onSwipe: onSwipe))
+    }
+}
+
+/// Judge a finished drag with Kit `keySwipeDirection`, log it, and fire the swipe.
+@MainActor private func finishKeySwipe(_ key: String, dx: Double, dy: Double,
+                                       onSwipe: (KeySwipeDirection) -> Void) {
+    let dir = keySwipeDirection(dx: dx, dy: dy)
+    DebugLog.shared.log(.keybar,
+        "keybar:swipe key=\(key) dx=\(Int(dx)) dy=\(Int(dy)) -> \(dir?.rawValue ?? "none") reason=\(dir == nil ? "notVertical" : "vertical")")
+    if let dir { onSwipe(dir) }
+}
+
+private struct KeySwipeModifier: ViewModifier {
+    let key: String
+    let onSwipe: (KeySwipeDirection) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.gesture(KeySwipeRecognizer(key: key, onSwipe: onSwipe))
+        } else {
+            content.simultaneousGesture(DragGesture(minimumDistance: 12).onEnded { g in
+                finishKeySwipe(key, dx: Double(g.translation.width), dy: Double(g.translation.height),
+                               onSwipe: onSwipe)
+            })
+        }
+    }
+}
+
+/// The iOS 18+ key swipe: a pan whose delegate lets it begin only for a vertical
+/// start, and recognizes alongside the scroll view and the key's tap.
+@available(iOS 18.0, *)
+private struct KeySwipeRecognizer: UIGestureRecognizerRepresentable {
+    let key: String
+    let onSwipe: (KeySwipeDirection) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator(key: key) }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = UIPanGestureRecognizer()
+        pan.delegate = context.coordinator
+        return pan
+    }
+
+    func handleUIGestureRecognizerAction(_ pan: UIPanGestureRecognizer, context: Context) {
+        guard pan.state == .ended else { return }
+        let t = pan.translation(in: pan.view)
+        finishKeySwipe(key, dx: Double(t.x), dy: Double(t.y), onSwipe: onSwipe)
+    }
+
+    @MainActor final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        let key: String
+        init(key: String) { self.key = key }
+
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+            guard let pan = g as? UIPanGestureRecognizer else { return true }
+            var move = pan.translation(in: pan.view)
+            if move == .zero { move = pan.velocity(in: pan.view) }  // no travel yet: use direction of motion
+            let claim = keySwipeShouldClaim(dx: Double(move.x), dy: Double(move.y))
             DebugLog.shared.log(.keybar,
-                "keybar:swipe key=\(key) dx=\(Int(dx)) dy=\(Int(dy)) -> \(dir?.rawValue ?? "none") reason=\(dir == nil ? "notVertical" : "vertical")")
-            if let dir { onSwipe(dir) }
-        })
+                "keybar:swipeStart key=\(key) dx=\(Int(move.x)) dy=\(Int(move.y)) -> \(claim ? "claim" : "scroll")")
+            return claim
+        }
+
+        func gestureRecognizer(_ g: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     }
 }
 

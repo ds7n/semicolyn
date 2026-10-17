@@ -16,7 +16,7 @@ public struct SwipeSecondaries: Equatable, Sendable, Codable {
     }
 }
 
-/// A stable, Codable identifier for a fixed key — the override-map key.
+/// A stable, Codable identifier for a fixed key, the override-map key.
 public enum FixedKeyID: Hashable, Sendable, Codable {
     case symbol(String)
     case tab
@@ -37,17 +37,23 @@ public enum FixedKeyDefaults {
         }
     }
 
-    /// Common symbol pairs. Swipe-up = the "shifted/partner" glyph.
+    /// The six default middle keys carry the 18 most-used CLI symbols (tap = the
+    /// six most used; a bracket pair shares one key, open up, close down). The
+    /// rest are partner glyphs for symbols a user adds themselves.
     private static let symbolTable: [String: SwipeSecondaries] = [
-        "-": SwipeSecondaries(up: .literal("_")),
-        "/": SwipeSecondaries(up: .literal("\\")),
-        ".": SwipeSecondaries(up: .literal("..")),
+        "-": SwipeSecondaries(up: .literal("_"), down: .literal("=")),
+        "|": SwipeSecondaries(up: .literal(">"), down: .literal(";")),
+        "/": SwipeSecondaries(up: .literal("\\"), down: .literal("*")),
+        "$": SwipeSecondaries(up: .literal("("), down: .literal(")")),
+        "\"": SwipeSecondaries(up: .literal("'"), down: .literal(":")),
+        ".": SwipeSecondaries(up: .literal("{"), down: .literal("}")),
         ":": SwipeSecondaries(up: .literal(";")),
         "'": SwipeSecondaries(up: .literal("\"")),
         "`": SwipeSecondaries(up: .literal("~")),
-        "|": SwipeSecondaries(up: .literal("&")),
         "=": SwipeSecondaries(up: .literal("+")),
         "*": SwipeSecondaries(up: .literal("^")),
+        "[": SwipeSecondaries(up: .literal("]")),
+        "<": SwipeSecondaries(up: .literal(">")),
     ]
 }
 
