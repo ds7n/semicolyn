@@ -27,8 +27,8 @@ struct SlotChrome<Label: View>: View {
                 }
             }
         }
-        .frame(minWidth: 36, minHeight: 27)   // tightened input area (2026-07-24): 34→27 row, still tappable
-        .padding(.horizontal, 6)
+        .frame(minWidth: 24, minHeight: 27)   // tightened input area (2026-07-24): 34→27 row, still tappable
+        .padding(.horizontal, 4)               // narrower keys (2026-10-12): 48→32pt wide, default middle fits
         .background(bg)
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
@@ -86,9 +86,26 @@ extension View {
     /// now gesture-only (device #2 removed the edge-pinned overlay glyphs).
     func fixedKeySwipes(_ secondaries: SwipeSecondaries,
                         emit: @escaping (SecondaryValue) -> Void) -> some View {
-        self.gesture(DragGesture(minimumDistance: 12).onEnded { g in
-            if g.translation.height < -12, let up = secondaries.up { emit(up) }
-            else if g.translation.height > 12, let down = secondaries.down { emit(down) }
+        keySwipe("fixed") { dir in
+            switch dir {
+            case .up:   if let up = secondaries.up { emit(up) }
+            case .down: if let down = secondaries.down { emit(down) }
+            }
+        }
+    }
+
+    /// A vertical swipe on a keybar key that never steals a sideways drag from the
+    /// scrolling middle. The drag runs as a SIMULTANEOUS gesture (a plain `.gesture`
+    /// drag claimed horizontal drags that started on a key, so the middle only
+    /// scrolled when the drag began in a gap), and Kit `keySwipeDirection` decides on
+    /// release whether it was a swipe at all.
+    func keySwipe(_ key: String, onSwipe: @escaping (KeySwipeDirection) -> Void) -> some View {
+        simultaneousGesture(DragGesture(minimumDistance: 12).onEnded { g in
+            let dx = Double(g.translation.width), dy = Double(g.translation.height)
+            let dir = keySwipeDirection(dx: dx, dy: dy)
+            DebugLog.shared.log(.keybar,
+                "keybar:swipe key=\(key) dx=\(Int(dx)) dy=\(Int(dy)) -> \(dir?.rawValue ?? "none") reason=\(dir == nil ? "notVertical" : "vertical")")
+            if let dir { onSwipe(dir) }
         })
     }
 }
@@ -112,10 +129,12 @@ struct ModifierSlotView: View {
             Text("⌃").foregroundStyle(Color(theme.text.primary))
         }
         .onInputClickTap { vm.keybar.tapCtrl() }
-        .gesture(DragGesture(minimumDistance: 12).onEnded { g in
-            if g.translation.height < -12 { vm.keybar.armAlt() }
-            else if g.translation.height > 12 { vm.keybar.armShift() }
-        })
+        .keySwipe("modifier") { dir in
+            switch dir {
+            case .up:   vm.keybar.armAlt()
+            case .down: vm.keybar.armShift()
+            }
+        }
     }
 }
 
@@ -199,10 +218,7 @@ struct CustomSlotView: View {
         }
         .onInputClickTap { fire(.tap) }
         .onLongPressGesture { fire(.longPress) }
-        .gesture(DragGesture(minimumDistance: 12).onEnded { g in
-            if g.translation.height < -12 { fire(.swipeUp) }
-            else if g.translation.height > 12 { fire(.swipeDown) }
-        })
+        .keySwipe("gestureKey") { dir in fire(dir == .up ? .swipeUp : .swipeDown) }
     }
 
     private func hintGlyph(_ s: String) -> some View {
