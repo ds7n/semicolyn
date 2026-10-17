@@ -105,6 +105,42 @@ final class NextWordRankingTests: XCTestCase {
         XCTAssertFalse(s.contains { $0.kind == .nextWord })
     }
 
+    func testNoNextWordChipsAfterASecretValue() throws {
+        // An empty pattern list lets the secret-shaped literals be learned, so each line
+        // below WOULD offer a learned next word if the secret-value guard were missing.
+        var e = PredictorEngine(learned: .empty, english: try RankFixture.english(),
+                                commands: RankFixture.commands(), filter: TokenFilter(patterns: []))
+        for secret in ["summer", "sunshine"] {
+            for _ in 0..<3 { e.record(secret, after: nil) }        // finished word: a learned literal
+            graduate(&e, "again", after: [secret, "x", "y"])       // learned successor of the secret
+        }
+        func nextWords(_ line: String) -> [Suggestion] {
+            e.suggestions(line: line, lineOptedOut: false).filter { $0.kind == .nextWord }
+        }
+        // Controls: the same finished words outside a secret slot do get the successor.
+        XCTAssertEqual(nextWords("feed summer").map(\.text), ["again"])
+        XCTAssertEqual(nextWords("mysql sunshine").map(\.text), ["again"])
+        XCTAssertEqual(nextWords("feed the").map(\.text), ["cat"])
+        // Secret values: a bare secret flag before the word.
+        XCTAssertEqual(nextWords("curl --token summer"), [])
+        XCTAssertEqual(nextWords("mysql -p sunshine"), [])
+    }
+
+    func testNoNextWordChipsAfterAnEmbeddedSecretValue() throws {
+        // No patterns and no entropy band: these 18+ character literals would otherwise
+        // graduate count-only (soft entropy band) and never count as finished words.
+        let f = TokenFilter(patterns: [], entropyThreshold: nil)
+        var e = PredictorEngine(learned: .empty, english: nil, commands: nil, filter: f)
+        for _ in 0..<3 { e.record("--verbose=sunshine", after: nil) }
+        for _ in 0..<3 { e.record("--password=sunshine", after: nil) }
+        graduate(&e, "again", after: ["--verbose=sunshine", "--password=sunshine", "y"])
+        let kinds = { (line: String) in
+            e.suggestions(line: line, lineOptedOut: false).filter { $0.kind == .nextWord }.map(\.text)
+        }
+        XCTAssertEqual(kinds("mysql --verbose=sunshine"), ["again"])  // control: not a secret flag
+        XCTAssertEqual(kinds("mysql --password=sunshine"), [])
+    }
+
     func testNextWordFilteredAtReadTime() throws {
         let f = TokenFilter(patterns: TokenFilter.defaultPatterns + [.blocklist(["cat"])])
         let e = try RankFixture.engine(filter: f)

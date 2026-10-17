@@ -76,8 +76,9 @@ func learnedTerm(count: UInt32, saturation: UInt32) -> Double {
 /// With no word being typed this is next-word mode (``nextWordSuggestions``). With a
 /// word typed it is completion mode, plus next-word candidates for that word at the
 /// lower `nextWordAfterWord` weight when it is a finished word (an English word, a
-/// known tool or a learned literal). `lineOptedOut` suppresses every next-word
-/// candidate; completions stay allowed. All kinds sort together by score.
+/// known tool or a learned literal) that is not itself a secret value. `lineOptedOut`
+/// suppresses every next-word candidate; completions stay allowed. All kinds sort
+/// together by score.
 func rankSuggestions(line: String, lineOptedOut: Bool, sources: RankingSources, limit: Int) -> [Suggestion] {
     guard limit > 0 else { return [] }
     let isKnownTool: (String) -> Bool = { word in sources.commands?.isKnownTool(word) ?? false }
@@ -92,7 +93,10 @@ func rankSuggestions(line: String, lineOptedOut: Bool, sources: RankingSources, 
         ranked = nextWordSuggestions(ctx: ctx, weight: sources.weights.nextWord, sources: sources)
     } else {
         ranked = completionSuggestions(typed: typed, ctx: ctx, sources: sources)
-        if !lineOptedOut, isFinishedWord(typed, sources: sources) {
+        // Never predict past a secret value: the typed token follows a secret flag or
+        // header, or embeds one (`--password=value`, `user:pass@host`).
+        let typedIsSecret = isSecretValueToken(ctx.currentToken, precededBy: ctx.previousWord)
+        if !lineOptedOut, !typedIsSecret, isFinishedWord(typed, sources: sources) {
             // The context the next word would be typed in: the same line after a space.
             let nextCtx = lineContext(line: line + " ", isKnownTool: isKnownTool)
             let taken = Set(ranked.map(\.text))
