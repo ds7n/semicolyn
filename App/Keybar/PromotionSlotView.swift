@@ -15,14 +15,16 @@ struct PromotionSlotView: View {
             Text(slot.tap).font(.system(.body, design: .monospaced)).foregroundStyle(Color(theme.text.primary))
             if let down = slot.down { Text(down).font(.system(size: 9)).foregroundStyle(Color(theme.text.secondary)) }
         }
-        .frame(minWidth: 40, minHeight: 34).padding(.horizontal, 6)
+        .frame(minWidth: 30, minHeight: 34).padding(.horizontal, 4)
         .background(Color(theme.keybar.slotBgPromoted))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .onInputClickTap { if let c = slot.tap.first { vm.keybar.tapSymbol(c) } }
-        .gesture(DragGesture(minimumDistance: 12).onEnded { g in
-            if g.translation.height < -12, let u = slot.up?.first { vm.keybar.tapSymbol(u) }
-            else if g.translation.height > 12, let d = slot.down?.first { vm.keybar.tapSymbol(d) }
-        })
+        .keySwipe("promotion") { dir in
+            switch dir {
+            case .up:   if let u = slot.up?.first { vm.keybar.tapSymbol(u) }
+            case .down: if let d = slot.down?.first { vm.keybar.tapSymbol(d) }
+            }
+        }
     }
 }
 
@@ -62,9 +64,9 @@ struct FnSlotView: View {
         }
     }
     var body: some View {
-        Text("Fn").font(.caption).foregroundStyle(Color(theme.text.primary))
-            .frame(minWidth: 40, minHeight: 34).padding(.horizontal, 6)
-            .background(bg).clipShape(RoundedRectangle(cornerRadius: 6))
-            .onInputClickTap { vm.fnTap() }
+        SlotChrome(bg: bg) {
+            Text("Fn").font(.caption).foregroundStyle(Color(theme.text.primary))
+        }
+        .onInputClickTap { vm.fnTap() }
     }
 }
