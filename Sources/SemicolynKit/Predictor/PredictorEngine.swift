@@ -91,6 +91,10 @@ public struct PredictorEngine: Sendable {
     /// as a safety net, since a bundled seed (unlike `record`) can carry an
     /// excluded token (e.g. profanity) that never passed through this gate.
     ///
+    /// Normalization: the learned form is `lookupWord(fromToken: token).word` (a
+    /// token that is only punctuation is not recorded), and the bigram is keyed on
+    /// the previous token's lookup word lowercased, the key every bigram read uses.
+    ///
     /// L6: tokens are deferred until they recur across N distinct contexts; see
     /// ``GraduationTier``.
     ///
@@ -99,16 +103,22 @@ public struct PredictorEngine: Sendable {
     /// never surfaces as a completion, the core secret-exclusion invariant.
     public mutating func record(_ token: String, count: UInt32 = 1, after previous: String? = nil,
                                 echoConfirmed: Bool = true, optedOut: Bool = false) {
+        // Normalize: learn the lookup word (surrounding punctuation trimmed; paths and
+        // flags whole). Both the raw token and the word must pass the filter, so
+        // trimming can never let an excluded form through.
         guard !filter.excludes(token) else { return }
+        let word = lookupWord(fromToken: token).word
+        guard !word.isEmpty, !filter.excludes(word) else { return }
         // L7: derive graduation confidence from all visible layers. High iff the
         // echo oracle confirmed the character, the line was not marked opted-out,
-        // and the token is not in the soft entropy band (L5 near-miss).
-        let confidence: LearnConfidence =
-            (echoConfirmed && !optedOut && !filter.isPatternAdjacent(token)) ? .high : .low
+        // and neither form is in the soft entropy band (L5 near-miss).
+        let nearMiss = filter.isPatternAdjacent(token) || filter.isPatternAdjacent(word)
+        let confidence: LearnConfidence = (echoConfirmed && !optedOut && !nearMiss) ? .high : .low
         // L6: defer until the token has recurred across N distinct contexts. `admit`
         // returns the occurrences to persist now (empty while deferred; the full
         // backfill on graduation; just this one once already graduated).
-        for occ in graduation.admit(token: token, previous: previous, count: count, confidence: confidence) {
+        let context = previous.flatMap(bigramContext(forPrevious:))
+        for occ in graduation.admit(token: word, previous: context, count: count, confidence: confidence) {
             let storeLiteral = (occ.confidence == .high)
             learned.unigram.record(occ.token, count: occ.count, storeLiteral: storeLiteral)
             if let prev = occ.previous, !filter.excludes(prev) {
@@ -116,6 +126,22 @@ public struct PredictorEngine: Sendable {
                                       storeLiteral: storeLiteral)
             }
         }
+    }
+
+    /// The graduation context and bigram key for a raw previous token: its lookup word
+    /// folded to lowercase (the one key convention every bigram read uses), or `nil`
+    /// when nothing word-like is left (treated as start of line). When the raw token
+    /// or its lookup word is excluded, that excluded form is returned instead, so the
+    /// context still counts toward graduation but the write-time `filter.excludes(prev)`
+    /// gate drops the adjacency (folding can lower entropy, so only an already-excluded
+    /// form is safe to carry). A folded key that is itself excluded is dropped by the
+    /// same gate.
+    private func bigramContext(forPrevious raw: String) -> String? {
+        if filter.excludes(raw) { return raw }
+        let word = lookupWord(fromToken: raw).word
+        guard !word.isEmpty else { return nil }
+        if filter.excludes(word) { return word }
+        return word.lowercased()
     }
 
     /// Clear the ephemeral graduation tier (context/host switch / incognito). The
@@ -203,7 +229,8 @@ public struct PredictorEngine: Sendable {
         // to the unigram axis rather than querying a dead bigram axis (no composite
         // key has an empty previous, so it would always return nothing).
         if let previous, !previous.isEmpty {
-            learnedSource = learned.bigram.nextSource(after: previous, window: window)
+            // `record` keys learned bigrams on the folded previous word.
+            learnedSource = learned.bigram.nextSource(after: previous.lowercased(), window: window)
             cliSeedSource = seed?.bigram.nextSource(after: previous) ?? Self.emptySource()
             proseSeedSource = proseSeed?.bigram.nextSource(after: previous) ?? Self.emptySource()
         } else {
@@ -275,14 +302,15 @@ public struct PredictorEngine: Sendable {
     /// comparable score over the English dictionary, command tree, learned words,
     /// screen words, bigram context and spelling corrections. `filter` is re-applied
     /// at read time. No minimum prefix: one letter gets suggestions. Returns `[]` when
-    /// the cursor follows trailing punctuation or (completion mode only, for now) when
-    /// no word is being typed. `lineOptedOut` gates next-word mode; completions stay
-    /// allowed on an opted-out line, as in the legacy path.
+    /// the cursor follows trailing punctuation. With no word being typed it predicts the
+    /// next word; after a finished word it adds lower-weight next-word chips.
+    /// `lineOptedOut` suppresses every next-word chip; completions stay allowed on an
+    /// opted-out line, as in the legacy path.
     public func suggestions(line: String, lineOptedOut: Bool, limit: Int = 12) -> [Suggestion] {
         let sources = RankingSources(
             english: english, commands: commands, learned: learned, screen: output,
             filter: filter, weights: weights, window: window)
-        return rankSuggestions(line: line, sources: sources, limit: limit)
+        return rankSuggestions(line: line, lineOptedOut: lineOptedOut, sources: sources, limit: limit)
     }
 
     /// One chip in a ``blendedSuggestions`` result: either a completion of the

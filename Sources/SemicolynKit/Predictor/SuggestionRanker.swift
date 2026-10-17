@@ -71,17 +71,98 @@ func learnedTerm(count: UInt32, saturation: UInt32) -> Double {
 }
 
 /// Ranked suggestions for the token at the end of `line`. Returns `[]` when the
-/// cursor sits after trailing punctuation, when `limit <= 0`, or (until next-word
-/// mode lands) when no word is being typed.
-func rankSuggestions(line: String, sources: RankingSources, limit: Int) -> [Suggestion] {
+/// cursor sits after trailing punctuation or when `limit <= 0`.
+///
+/// With no word being typed this is next-word mode (``nextWordSuggestions``). With a
+/// word typed it is completion mode, plus next-word candidates for that word at the
+/// lower `nextWordAfterWord` weight when it is a finished word (an English word, a
+/// known tool or a learned literal). `lineOptedOut` suppresses every next-word
+/// candidate; completions stay allowed. All kinds sort together by score.
+func rankSuggestions(line: String, lineOptedOut: Bool, sources: RankingSources, limit: Int) -> [Suggestion] {
     guard limit > 0 else { return [] }
     let isKnownTool: (String) -> Bool = { word in sources.commands?.isKnownTool(word) ?? false }
     let ctx = lineContext(line: line, isKnownTool: isKnownTool)
     let lw = lookupWord(fromToken: ctx.currentToken)
     guard lw.trailing.isEmpty else { return [] }
     let typed = lw.word
-    guard !typed.isEmpty else { return [] }
 
+    var ranked: [Suggestion]
+    if typed.isEmpty {
+        guard !lineOptedOut else { return [] }
+        ranked = nextWordSuggestions(ctx: ctx, weight: sources.weights.nextWord, sources: sources)
+    } else {
+        ranked = completionSuggestions(typed: typed, ctx: ctx, sources: sources)
+        if !lineOptedOut, isFinishedWord(typed, sources: sources) {
+            // The context the next word would be typed in: the same line after a space.
+            let nextCtx = lineContext(line: line + " ", isKnownTool: isKnownTool)
+            let taken = Set(ranked.map(\.text))
+            let next = nextWordSuggestions(ctx: nextCtx, weight: sources.weights.nextWordAfterWord, sources: sources)
+            // A text already offered as a completion or correction keeps that chip only.
+            ranked += next.filter { !taken.contains($0.text) }
+        }
+    }
+    ranked.sort { a, b in
+        a.score != b.score ? a.score > b.score : a.text.utf8.lexicographicallyPrecedes(b.text.utf8)
+    }
+    return Array(ranked.prefix(limit))
+}
+
+/// True when `typed` is a whole word worth predicting a successor for: an English
+/// word (any stored case), a known tool, or a learned literal (as typed or lowercased).
+private func isFinishedWord(_ typed: String, sources: RankingSources) -> Bool {
+    if sources.english?.bestStoredForm(ofFolded: typed) != nil { return true }
+    if sources.commands?.isKnownTool(typed) ?? false { return true }
+    let unigram = sources.learned.unigram
+    return unigram.containsLiteral(typed) || unigram.containsLiteral(typed.lowercased())
+}
+
+/// Next-word candidates for the empty token after `ctx`, scored with `weight` in
+/// place of a per-source weight: command-tree candidates on non-prose lines
+/// (`weight * s/255`), English successors of the previous word (`weight * s/255`,
+/// halved by `englishInCommand` on a command line) and learned bigram successors
+/// of the folded previous word (`weight * learnedTerm`), summed per text.
+///
+/// Returns `[]` at the start of an empty line or segment (no previous word, no
+/// segment words, not after a pipe) and when the next token would be a secret
+/// value (the previous word is a secret flag or header). `filter` is re-applied.
+private func nextWordSuggestions(ctx: LineContext, weight: Double, sources: RankingSources) -> [Suggestion] {
+    guard ctx.previousWord != nil || !ctx.segmentWords.isEmpty || ctx.afterPipe else { return [] }
+    guard !isSecretValueToken("", precededBy: ctx.previousWord) else { return [] }
+    let w = sources.weights
+    var scores: [String: Double] = [:]
+
+    if ctx.kind != .prose, let commands = sources.commands {
+        let found = commands.candidates(
+            segmentWords: ctx.segmentWords, typed: "", afterPipe: ctx.afterPipe, limit: 20)
+        for word in found {
+            scores[word.text, default: 0] += weight * (Double(word.score) / 255)
+        }
+    }
+    if let previous = ctx.previousWord, !previous.isEmpty {
+        if let english = sources.english {
+            let kindWeight = ctx.kind == .command ? w.englishInCommand : w.english
+            for next in english.successors(of: previous, limit: 20) {
+                scores[next.text, default: 0] += weight * (Double(next.score) / 255) * kindWeight
+            }
+        }
+        // `record` keys bigrams on the folded previous word; read the same key.
+        var best: [String: UInt32] = [:]
+        for entry in sources.learned.bigram.candidates(after: previous.lowercased(), window: sources.window)
+        where entry.count > 0 {
+            best[entry.token] = max(best[entry.token] ?? 0, entry.count)
+        }
+        for (text, count) in best {
+            scores[text, default: 0] += weight * learnedTerm(count: count, saturation: w.learnedSaturation)
+        }
+    }
+    return scores.compactMap { text, score in
+        sources.filter.excludes(text) ? nil : Suggestion(text: text, kind: .nextWord, score: score)
+    }
+}
+
+/// Completion-mode chips for `typed`: summed completion terms (minus the exact typed
+/// word) and spelling corrections, read-time filtered, unsorted.
+private func completionSuggestions(typed: String, ctx: LineContext, sources: RankingSources) -> [Suggestion] {
     var scores = completionScores(typed: typed, ctx: ctx, sources: sources)
     scores[typed] = nil
     var ranked: [Suggestion] = scores.compactMap { text, score in
@@ -94,10 +175,7 @@ func rankSuggestions(line: String, sources: RankingSources, limit: Int) -> [Sugg
             ranked.append(Suggestion(text: fix.text, kind: .correction, score: score))
         }
     }
-    ranked.sort { a, b in
-        a.score != b.score ? a.score > b.score : a.text.utf8.lexicographicallyPrecedes(b.text.utf8)
-    }
-    return Array(ranked.prefix(limit))
+    return ranked
 }
 
 /// Summed completion terms per display text, before the exact-typed drop and filter.
