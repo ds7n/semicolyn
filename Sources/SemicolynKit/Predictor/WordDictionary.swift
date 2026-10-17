@@ -147,6 +147,19 @@ public struct WordDictionary: Sendable {
         score(ofFolded: word) != nil
     }
 
+    /// The highest-scoring stored form whose fold equals `folded` (ties: UTF-8 text order), or nil.
+    public func bestStoredForm(ofFolded folded: String) -> ScoredWord? {
+        let key = Array(folded.lowercased().utf8)
+        var i = lowerBound(key)
+        var best: ScoredWord?
+        // The equal-fold run is sorted by stored bytes, so a strict > keeps the earliest tie.
+        while i < words.count, self.folded[i] == key {
+            if best == nil || words[i].score > (best?.score ?? 0) { best = words[i] }
+            i += 1
+        }
+        return best
+    }
+
     /// Highest score among stored forms whose fold equals `word.lowercased()`.
     public func score(ofFolded word: String) -> UInt8? {
         let key = Array(word.lowercased().utf8)

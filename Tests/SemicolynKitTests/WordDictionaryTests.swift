@@ -171,4 +171,15 @@ final class WordDictionaryTests: XCTestCase {
         let expected = (0..<150_000).filter { $0 % 255 == 254 }.prefix(12).map { "a" + String(format: "%06d", $0) }
         XCTAssertEqual(d.completions(typed: "a", limit: 12).map(\.text), Array(expected))
     }
+
+    func testBestStoredForm() throws {
+        let d = try fixture()
+        XCTAssertEqual(d.bestStoredForm(ofFolded: "linux"), ScoredWord(text: "Linux", score: 180))
+        XCTAssertEqual(d.bestStoredForm(ofFolded: "api"), ScoredWord(text: "API", score: 160))
+        XCTAssertEqual(d.bestStoredForm(ofFolded: "apple"), ScoredWord(text: "apple", score: 100))
+        XCTAssertNil(d.bestStoredForm(ofFolded: "th"))
+        XCTAssertNil(d.bestStoredForm(ofFolded: "zzz"))
+        let tie = try WordDictionary(entries: [.init(text: "Ab", score: 5), .init(text: "aB", score: 5)], successors: [:])
+        XCTAssertEqual(tie.bestStoredForm(ofFolded: "ab"), ScoredWord(text: "Ab", score: 5))
+    }
 }

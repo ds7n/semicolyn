@@ -52,20 +52,13 @@ public func spellingCorrections(for typed: String, in dictionary: WordDictionary
     var seen = Set<String>()
     var found: [ScoredWord] = []
     for variant in editDistanceOneVariants(of: Array(folded)) {
-        guard seen.insert(variant).inserted, let score = dictionary.score(ofFolded: variant) else { continue }
-        // Prefix matches can outrank the exact word, so look past the first few and
-        // pick the exact fold; fall back to the folded form if it is buried deeper.
-        let exact = dictionary.completions(typed: variant, limit: 64)
-            .first { $0.text.lowercased() == variant }
-        var text = exact?.text ?? variant
-        if capitalize, let first = text.first {
-            text = first.uppercased() + text.dropFirst()
+        guard seen.insert(variant).inserted, var word = dictionary.bestStoredForm(ofFolded: variant) else { continue }
+        if capitalize, let first = word.text.first {
+            word = ScoredWord(text: first.uppercased() + word.text.dropFirst(), score: word.score)
         }
-        found.append(ScoredWord(text: text, score: exact?.score ?? score))
+        found.append(word)
     }
-    var byText = Set<String>()
-    let unique = found.filter { byText.insert($0.text).inserted }
-    let ranked = unique.sorted { a, b in
+    let ranked = found.sorted { a, b in
         a.score != b.score ? a.score > b.score : a.text.utf8.lexicographicallyPrecedes(b.text.utf8)
     }
     return Array(ranked.prefix(limit))

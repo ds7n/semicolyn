@@ -36,4 +36,10 @@ final class SpellingCorrectionTests: XCTestCase {
         let r = spellingCorrections(for: "teh", in: try dict(), limit: 5)
         XCTAssertEqual(r, [ScoredWord(text: "the", score: 255), ScoredWord(text: "ten", score: 90)])
     }
+    func testStoredCaseSurvivesManyPrefixExtensions() throws {
+        var entries = [ScoredWord(text: "Linux", score: 180)]
+        for i in 0..<100 { entries.append(ScoredWord(text: "linuxa\(i)", score: 250)) }
+        let d = try WordDictionary(entries: entries, successors: [:])
+        XCTAssertEqual(spellingCorrections(for: "linx", in: d, limit: 5), [ScoredWord(text: "Linux", score: 180)])
+    }
 }
