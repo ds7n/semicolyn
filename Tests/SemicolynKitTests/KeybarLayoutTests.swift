@@ -12,7 +12,7 @@ final class KeybarLayoutTests: XCTestCase {
         // Fn is an explicit, reorderable/removable middle slot (4d) rather than
         // auto-appended at render time.
         XCTAssertEqual(KeybarLayout.default.middle,
-                       [.symbol("/"), .symbol("|"), .symbol("~"), .symbol("-"), .symbol("("), .symbol(")"), .fn])
+                       [.symbol("-"), .symbol("|"), .symbol("/"), .symbol("$"), .symbol("\""), .symbol("."), .fn])
     }
 
     func testDefaultRightRegionIsPadAndNothingConstrainedScrolls() {

@@ -8,7 +8,7 @@ import XCTest
 /// `2026-08-14-keybar-keyboard-redesign-design.md` Phase 2 (revised 2026-10-10).
 final class KeybarCustomizationTests: XCTestCase {
     private let defaultMiddle: [KeybarSlot] =
-        [.symbol("/"), .symbol("|"), .symbol("~"), .symbol("-"), .symbol("("), .symbol(")"), .fn]
+        [.symbol("-"), .symbol("|"), .symbol("/"), .symbol("$"), .symbol("\""), .symbol("."), .fn]
 
     // MARK: - Default
 
@@ -68,9 +68,9 @@ final class KeybarCustomizationTests: XCTestCase {
     }
 
     func testRemovingMiddleSymbolDropsOnlyThatSymbol() {
-        let result = KeybarLayout.default.removing(.symbol("~"))
+        let result = KeybarLayout.default.removing(.symbol("$"))
         XCTAssertEqual(result?.middle,
-                       [.symbol("/"), .symbol("|"), .symbol("-"), .symbol("("), .symbol(")"), .fn])
+                       [.symbol("-"), .symbol("|"), .symbol("/"), .symbol("\""), .symbol("."), .fn])
         XCTAssertEqual(result?.left, KeybarLayout.default.left)
         XCTAssertEqual(result?.right, KeybarLayout.default.right)
     }
@@ -153,10 +153,10 @@ final class KeybarCustomizationTests: XCTestCase {
     }
 
     func testReorderingMiddleMovesSlotToEnd() {
-        // Move "/" (index 0) past the last element (offset 7).
+        // Move "-" (index 0) past the last element (offset 7).
         let result = KeybarLayout.default.reordering(.middle, fromOffsets: IndexSet(integer: 0), toOffset: 7)
         XCTAssertEqual(result.middle,
-                       [.symbol("|"), .symbol("~"), .symbol("-"), .symbol("("), .symbol(")"), .fn, .symbol("/")])
+                       [.symbol("|"), .symbol("/"), .symbol("$"), .symbol("\""), .symbol("."), .fn, .symbol("-")])
     }
 
     func testReorderingRightPermutesRight() {

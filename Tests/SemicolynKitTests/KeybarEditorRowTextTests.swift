@@ -57,7 +57,11 @@ final class KeybarEditorRowTextTests: XCTestCase {
     // MARK: - Detail: fixed keys
 
     func testSymbolDetailShowsBuiltInDefault() {
-        XCTAssertEqual(keybarEditorDetail(for: .symbol("/"), settings: settings()), "↑ \\   ↓ none")
+        XCTAssertEqual(keybarEditorDetail(for: .symbol("/"), settings: settings()), "↑ \\   ↓ *")
+    }
+
+    func testSymbolDetailShowsNoneForAMissingSwipeDown() {
+        XCTAssertEqual(keybarEditorDetail(for: .symbol(":"), settings: settings()), "↑ ;   ↓ none")
     }
 
     func testSymbolDetailShowsUserOverrideInsteadOfDefault() {
