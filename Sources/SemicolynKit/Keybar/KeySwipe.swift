@@ -16,3 +16,11 @@ public func keySwipeDirection(dx: Double, dy: Double, threshold: Double = 12) ->
     guard abs(dy) > threshold, abs(dy) > abs(dx) * 1.5 else { return nil }
     return dy < 0 ? .up : .down
 }
+
+/// Decides, the moment a drag on a keybar key starts moving, whether the key
+/// claims it as a possible swipe. A drag that starts sideways (or exactly
+/// diagonal) is left to the scrolling middle region; claiming it would stop the
+/// scroll view from moving. `keySwipeDirection` still judges the finished drag.
+public func keySwipeShouldClaim(dx: Double, dy: Double) -> Bool {
+    abs(dy) > abs(dx)
+}

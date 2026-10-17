@@ -54,4 +54,25 @@ final class KeySwipeTests: XCTestCase {
     func testDiagonalIsIgnored() {
         XCTAssertNil(keySwipeDirection(dx: 25, dy: 25))
     }
+
+    // MARK: - Claim at drag start (key vs scrolling middle)
+
+    func testKeyClaimsAMostlyVerticalStart() {
+        XCTAssertTrue(keySwipeShouldClaim(dx: 3, dy: -10))
+        XCTAssertTrue(keySwipeShouldClaim(dx: -3, dy: 10))
+    }
+
+    func testKeyLeavesASidewaysStartToTheScrollView() {
+        // The device-log drags that failed to scroll began like this.
+        XCTAssertFalse(keySwipeShouldClaim(dx: -10, dy: 2))
+        XCTAssertFalse(keySwipeShouldClaim(dx: 10, dy: -3))
+    }
+
+    func testAnExactDiagonalStartGoesToTheScrollView() {
+        XCTAssertFalse(keySwipeShouldClaim(dx: 8, dy: 8))
+    }
+
+    func testJustMoreVerticalThanHorizontalIsClaimed() {
+        XCTAssertTrue(keySwipeShouldClaim(dx: 8, dy: 8.5))
+    }
 }

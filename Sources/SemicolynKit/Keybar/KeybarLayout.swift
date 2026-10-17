@@ -85,10 +85,11 @@ public struct KeybarLayout: Equatable, Sendable {
         self.left = left; self.middle = middle; self.right = right
     }
 
-    /// Left `Esc · Modifier · Tab`; middle = six convenience symbols + Fn; right = Pad.
+    /// Left `Esc · Modifier · Tab`; middle = the six most-used CLI symbols + Fn
+    /// (their swipes live in `FixedKeyDefaults`); right = Pad.
     public static let `default` = KeybarLayout(
         left: [.escPill, .modifier, .tab],
-        middle: [.symbol("/"), .symbol("|"), .symbol("~"), .symbol("-"), .symbol("("), .symbol(")"), .fn],
+        middle: [.symbol("-"), .symbol("|"), .symbol("/"), .symbol("$"), .symbol("\""), .symbol("."), .fn],
         right: [.pad]
     )
 
