@@ -100,4 +100,10 @@ final class TldrParserTests: XCTestCase {
         let page = "`tr \"'\" x`"
         XCTAssertEqual(TldrParser.invocations(fromPage: page), [["tr", "'", "x"]])
     }
+
+    func testExampleSpansAreRawCodeSpans() {
+        let page = "# git\n\n- Commit:\n\n`git commit -m \"{{msg}}\" | wc`\n\nprose `a` and `b`\n`unpaired"
+        XCTAssertEqual(TldrParser.exampleSpans(fromPage: page), ["git commit -m \"{{msg}}\" | wc", "a", "b"])
+        XCTAssertEqual(TldrParser.exampleSpans(fromPage: "no code here"), [])
+    }
 }

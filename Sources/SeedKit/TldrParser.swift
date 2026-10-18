@@ -17,12 +17,20 @@ public enum TldrParser {
     /// Returns `[]` for a page with no code spans.
     public static func invocations(fromPage markdown: String) -> [[String]] {
         var sequences: [[String]] = []
-        for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
-            for span in codeSpans(in: String(line)) {
-                sequences.append(contentsOf: segments(in: span))
-            }
+        for span in exampleSpans(fromPage: markdown) {
+            sequences.append(contentsOf: segments(in: span))
         }
         return sequences
+    }
+
+    /// The raw contents of every inline code span in `markdown`, in document order, with
+    /// placeholders and operators intact (for callers that segment the line themselves).
+    public static func exampleSpans(fromPage markdown: String) -> [String] {
+        var spans: [String] = []
+        for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
+            spans.append(contentsOf: codeSpans(in: String(line)))
+        }
+        return spans
     }
 
     /// The contents of each paired-backtick span in `line`, in order. An unpaired

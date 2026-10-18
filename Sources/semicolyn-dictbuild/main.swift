@@ -8,6 +8,7 @@ import SemicolynKit
 ///
 ///     semicolyn-dictbuild ngram-filter -y 1990 -c N [-v vocab.txt] < ngrams > out.tsv
 ///     semicolyn-dictbuild english -u unigrams/ -b bigrams/ -w wordfreq.tsv -s scowl.txt -t titles.txt -l block.txt -o out.gdic
+///     semicolyn-dictbuild commands -t tldr/pages -f autocomplete/src -o out.gcmt
 
 let usage = """
 usage:
@@ -19,6 +20,9 @@ usage:
       [--max-words <n>] [--successor-words <n>] [--successors-per-word <n>]
       Reads ngram-filter output (*.tsv in each dir), wordfreq (word<TAB>freq), SCOWL / blocklist
       (one word per line), titles (one cased title per line); writes a WordDictionary blob.
+  semicolyn-dictbuild commands -t|--tldr <pages dir> -f|--fig <src dir> -o|--out <file>
+      Reads tldr pages (common, linux, osx; held-out pages skipped) and top-level Fig specs
+      (<src dir>/*.ts); writes a CommandTree blob. Exits nonzero if no pages or no specs parse.
   -h, --help   show this help
 """
 
@@ -237,6 +241,73 @@ func runEnglish(_ args: [String]) {
     print("words: \(entries.count)\npairs: \(packed.count)\nsuccessor keys: \(successors.count)\nbytes: \(blob.count)")
 }
 
+func runCommands(_ args: [String]) {
+    let aliases = ["-t": "tldr", "--tldr": "tldr", "-f": "fig", "--fig": "fig", "-o": "out", "--out": "out"]
+    if args.contains("-h") || args.contains("--help") {
+        print(usage)
+        exit(0)
+    }
+    var values: [String: String] = [:]
+    var i = 0
+    while i < args.count {
+        guard let name = aliases[args[i]], i + 1 < args.count else {
+            fail("unknown or incomplete option: \(args[i])\n\(usage)")
+        }
+        values[name] = args[i + 1]
+        i += 2
+    }
+    func required(_ name: String) -> String {
+        guard let value = values[name] else { fail("missing --\(name)\n\(usage)") }
+        return value
+    }
+    let fm = FileManager.default
+
+    var observed = CommandUsage()
+    var pagesRead = 0
+    var heldOut = 0
+    for platform in ["common", "linux", "osx"] {
+        let dir = required("tldr") + "/" + platform
+        guard let names = try? fm.contentsOfDirectory(atPath: dir) else {
+            FileHandle.standardError.write(Data("warning: cannot read directory: \(dir)\n".utf8))
+            continue
+        }
+        for name in names.sorted() where name.hasSuffix(".md") {
+            if TldrHoldout.isHeldOut(pageStem: String(name.dropLast(3))) { heldOut += 1; continue }
+            guard let data = fm.contents(atPath: dir + "/" + name) else { fail("cannot read file: \(dir)/\(name)") }
+            pagesRead += 1
+            for span in TldrParser.exampleSpans(fromPage: String(decoding: data, as: UTF8.self)) {
+                observed.ingest(example: span)
+            }
+        }
+    }
+    guard pagesRead > 0 else { fail("no tldr pages read under \(required("tldr")); check the path") }
+
+    let figDir = required("fig")
+    guard let figNames = try? fm.contentsOfDirectory(atPath: figDir) else { fail("cannot read directory: \(figDir)") }
+    var specs: [FigCommandSpec] = []
+    for name in figNames.sorted() where name.hasSuffix(".ts") && !name.hasSuffix(".d.ts") {
+        guard let data = fm.contents(atPath: figDir + "/" + name) else { fail("cannot read file: \(figDir)/\(name)") }
+        let spec = FigSpecParser.spec(fromSource: String(decoding: data, as: UTF8.self),
+                                      command: String(name.dropLast(3)))
+        if !spec.subcommands.isEmpty || !spec.options.isEmpty { specs.append(spec) }
+    }
+    guard !specs.isEmpty else { fail("no Fig specs parsed under \(figDir); check the path") }
+
+    let parts = buildCommandTreeParts(specs: specs, usage: observed)
+    let blob = CommandTree(tools: parts.tools, pipeTargets: parts.pipeTargets).serialize()
+    let outPath = required("out")
+    guard fm.createFile(atPath: outPath, contents: Data(blob)) else { fail("cannot write file: \(outPath)") }
+    print("""
+        pages read: \(pagesRead)
+        held out skipped: \(heldOut)
+        specs parsed: \(specs.count)
+        tools kept: \(parts.tools.count)
+        total nodes: \(countNodes(parts.tools))
+        pipe targets: \(parts.pipeTargets.count)
+        bytes: \(blob.count)
+        """)
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else { fail(usage) }
 switch command {
@@ -246,6 +317,8 @@ case "ngram-filter":
     runNgramFilter(Array(args.dropFirst()))
 case "english":
     runEnglish(Array(args.dropFirst()))
+case "commands":
+    runCommands(Array(args.dropFirst()))
 default:
     fail("unknown command: \(command)\n\(usage)")
 }

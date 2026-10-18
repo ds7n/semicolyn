@@ -24,7 +24,7 @@ public enum FigSpecParser {
 
     // MARK: - Tokenizing
 
-    private enum Token: Equatable {
+    enum Token: Equatable {
         case punct(Character)            // one of { } [ ] : ,
         case string(String, template: Bool)
         case ident(String)
@@ -34,7 +34,7 @@ public enum FigSpecParser {
     /// literals, identifiers — skipping comments, whitespace, and everything else
     /// (operators, numbers, parens, `;`). Every brace/bracket outside a string or
     /// comment is preserved, so nesting stays balanced.
-    private static func tokenize(_ source: String) -> [Token] {
+    static func tokenize(_ source: String) -> [Token] {
         var tokens: [Token] = []
         let chars = Array(source)
         let n = chars.count
