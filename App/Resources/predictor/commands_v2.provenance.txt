@@ -1,6 +1,6 @@
 commands_v2 provenance (GCMT v1, built by scripts/build-command-dict.sh)
-built from semicolyn: 2b28992 (clean tree; builder code unchanged through 90abc5d)
-built at: 2026-10-18T03:06:50Z
+built from semicolyn: 813d9a4e8bdabdeafb13c7ac4c6583a67cac3384 (clean builder sources)
+built at: 2026-10-18T13:17:56Z
 sources:
   tldr=tldr v2.3 @ 3b17800dbd75c5e19287e2f955c5886c446d2ec3, https://github.com/tldr-pages/tldr.git, licence: CC BY 4.0
   fig=fig aef52acff84c45edde61ae610cc2c964802b9a38 @ aef52acff84c45edde61ae610cc2c964802b9a38, https://github.com/withfig/autocomplete.git, licence: MIT
@@ -10,9 +10,9 @@ build output:
   pages read: 4718
   held out skipped: 527
   specs parsed: 649
-  tools kept: 800
-  total nodes: 3979
+  tools kept: 3613
+  total nodes: 26454
   pipe targets: 214
-  bytes: 87494
+  bytes: 429086
 changes: reduced to a scored command, subcommand and flag tree
-size: 87494 bytes raw, 35670 bytes gzip -9
+size: 429086 bytes raw, 123436 bytes gzip -9
