@@ -50,6 +50,8 @@ struct PredictorStripView: View {
     var body: some View {
         GeometryReader { geo in
             strip(width: geo.size.width)
+                // GeometryReader places its child top-leading; keep the chips vertically centred.
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
         }
         .frame(height: Self.rowHeight)                 // CONSTANT, reserved even when empty
         .frame(maxWidth: .infinity, alignment: .leading)

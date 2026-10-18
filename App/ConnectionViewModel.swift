@@ -2318,7 +2318,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     }
 
     private func refreshPredictorSuggestions() {
-        guard let predictor else { predictorVM.clear(); return }
+        guard let predictor else { clearPredictorChips(); return }
         let line = tracker.line
         let prefix = tracker.current
         let optedOut = tracker.lineOptedOut
