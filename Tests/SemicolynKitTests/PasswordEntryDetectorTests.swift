@@ -491,4 +491,106 @@ final class PasswordEntryDetectorTests: XCTestCase {
         }
         XCTAssertFalse(d.shouldLearnCommittedLine())      // all hidden → suppress
     }
+
+    // MARK: - Commit-time echo check (transport-agnostic)
+
+    func testCommitRowVerdictWins() {
+        // No oracle and nothing output: bytes alone would say "not echoed".
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ls".utf8))
+        XCTAssertFalse(d.shouldLearnCommittedLine())     // baseline: byte path suppresses
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+    }
+
+    func testCommitRowCannotOverridePrompt() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("password: ".utf8))
+        d.resetLine()
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testCommitRowCannotOverrideAlternateBuffer() {
+        // Full-screen TUI: even a confirmed row is not learned.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+        // Control: the same line on the primary buffer is learned.
+        oracle.isAlternateBuffer = false
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+    }
+
+    func testCommitRowFalseSuppresses() {
+        // Bytes echoed fully (a byte-path "yes"), but the screen shows no echo.
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("hunter2".utf8))
+        d.noteOutput(Array("hunter2".utf8))
+        XCTAssertTrue(d.shouldLearnCommittedLine())      // baseline: byte path would learn
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testCommitRowFalseOverridesOracleEchoed() {
+        // The per-keystroke oracle path says echoed; the commit row says not.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        oracle.cellAt = { r, c in
+            guard r == 0 else { return EchoCell(scalar: nil) }
+            return c == 0 ? EchoCell(scalar: "a") : (c == 1 ? EchoCell(scalar: "b") : EchoCell(scalar: nil))
+        }
+        oracle.nextCursor = EchoCursor(row: 0, col: 2)
+        d.settleLine(scalars: Array("ab".unicodeScalars), from: EchoCursor(row: 0, col: 0))
+        XCTAssertTrue(d.shouldLearnCommittedLine())      // baseline: oracle path would learn
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: "pin: ")
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testNilRowFallsBack() {
+        var echoed = PasswordEntryDetector()
+        echoed.noteInput(Array("ls".utf8))
+        echoed.noteOutput(Array("ls".utf8))
+        echoed.noteCommitRow(typedLine: "ls", renderedBeforeCursor: nil)
+        XCTAssertTrue(echoed.shouldLearnCommittedLine())
+
+        var silent = PasswordEntryDetector()
+        silent.noteInput(Array("ls".utf8))
+        silent.noteCommitRow(typedLine: "ls", renderedBeforeCursor: nil)
+        XCTAssertFalse(silent.shouldLearnCommittedLine())
+    }
+
+    func testNilRowDoesNotEraseEarlierFalseVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("hunter2".utf8))
+        d.noteOutput(Array("hunter2".utf8))
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: nil)
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testVerdictClearedOnReset() {
+        var d = PasswordEntryDetector()
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+        d.resetLine()
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testVerdictClearedOnFullReset() {
+        var d = PasswordEntryDetector()
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+        d.reset()
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
 }

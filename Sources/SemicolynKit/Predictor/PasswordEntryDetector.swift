@@ -85,6 +85,10 @@ public struct PasswordEntryDetector: Sendable {
     /// Gates the oracle verdict: a "clean echo" reading during a total stall is
     /// ambiguous, so an oracle line with no output is suppressed.
     private var outputSeenThisLine = false
+    /// The commit-time echo verdict for the current line (`rowConfirmsEcho` on
+    /// the rendered text before the cursor at Enter), or nil when none was read.
+    /// When present it outranks the per-keystroke oracle tally and byte count.
+    private var commitRowVerdict: Bool?
 
     /// Substrings (lowercased) that, appearing at the tail end of output, mark the
     /// following typed line as a password entry. Matched as a suffix (ignoring
@@ -197,18 +201,33 @@ public struct PasswordEntryDetector: Sendable {
         return shown == scalar ? .echoed : .masked
     }
 
+    /// Record the commit-time echo check for the line about to commit: the App
+    /// reads `renderedBeforeCursor` (see `renderedTextBeforeCursor`) at Enter,
+    /// before sending it. A nil reading (grid unreadable) records nothing, leaving
+    /// any earlier verdict and the per-keystroke / byte logic in charge.
+    public mutating func noteCommitRow(typedLine: String, renderedBeforeCursor: String?) {
+        guard let renderedBeforeCursor else { return }
+        commitRowVerdict = rowConfirmsEcho(typedLine: typedLine, renderedBeforeCursor: renderedBeforeCursor)
+    }
+
     /// The verdict for the line that just committed (Enter). `true` only when the
     /// line's typed characters were positively confirmed echoed AND no password
     /// prompt preceded it. Fail-safe: an empty line, an unconfirmed line, or a
     /// prompt-preceded line all return `false` (do not learn).
     ///
+    /// Precedence (security contract): a password prompt suppresses, then the
+    /// alternate buffer suppresses, then a commit-row verdict decides, else the
+    /// per-keystroke oracle tally or byte count. A commit-row `true` can never
+    /// override a prompt or alt-screen suppression.
+    ///
     /// Call once, at the moment a line commits, BEFORE `resetLine`.
     public func shouldLearnCommittedLine() -> Bool {
         if promptSuppressedThisLine { return false }
+        if oracle?.isAlternateBuffer == true { return false }       // alt-screen ⇒ suppress
+        if let commitRowVerdict { return commitRowVerdict }
         // Oracle path: when the buffer check classified this line, trust the
         // majority-echoed statistic (the far stronger signal per spec L1).
         if oracleActiveThisLine {
-            if oracle?.isAlternateBuffer == true { return false }   // alt-screen ⇒ suppress
             guard outputSeenThisLine else { return false }          // stall ⇒ ambiguous ⇒ suppress
             guard oracleClassifiedThisLine > 0 else { return false }
             // Strong majority required (> 50%). A tie or worse suppresses —
@@ -232,6 +251,7 @@ public struct PasswordEntryDetector: Sendable {
         oracleActiveThisLine = false
         outputSeenThisLine = false
         lastClass = nil
+        commitRowVerdict = nil
         typedThisLine = 0
         echoedThisLine = 0
         promptSuppressedThisLine = tailLooksLikePasswordPrompt()
@@ -244,6 +264,7 @@ public struct PasswordEntryDetector: Sendable {
         oracleActiveThisLine = false
         outputSeenThisLine = false
         lastClass = nil
+        commitRowVerdict = nil
         typedThisLine = 0
         echoedThisLine = 0
         promptSuppressedThisLine = false
