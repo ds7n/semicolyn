@@ -108,6 +108,59 @@ final class CommandTreeBuilderTests: XCTestCase {
         XCTAssertTrue(all.isKnownTool("cc"))
     }
 
+    /// `count` usage-only tools named `t00000`, `t00001`, ... all used once, so name order ranks them.
+    private func usageOnlyTools(_ count: Int) -> CommandUsage {
+        var u = CommandUsage()
+        u.toolCounts = Dictionary(uniqueKeysWithValues: (0..<count).map { (String(format: "t%05d", $0), 1) })
+        return u
+    }
+
+    func testDefaultKeepsEveryToolPastTheOldCap() {
+        // 801 usage tools plus a Fig tool nobody uses: all kept, the Fig tool at the lowest score.
+        var u = usageOnlyTools(801)
+        u.toolCounts["t00000"] = 5
+        let fig = FigCommandSpec(names: ["zzfig"], subcommands: [], options: ["--help"])
+        let parts = buildCommandTreeParts(specs: [fig], usage: u)
+        XCTAssertEqual(parts.tools.count, 802)
+        XCTAssertEqual(parts.tools.first?.name, "t00000")
+        XCTAssertEqual(parts.tools.first?.score, 255)
+        XCTAssertEqual(parts.tools.last?.name, "zzfig")
+        XCTAssertEqual(parts.tools.last?.score, 1)
+        XCTAssertTrue(buildCommandTree(specs: [fig], usage: u).isKnownTool("t00800"))
+    }
+
+    func testToolCapBelowAtAndAboveFormatLimit() {
+        XCTAssertEqual(maxCommandTreeTools, 65535)
+        // Below and exactly at the u16 tool count: everything is kept and round-trips.
+        for count in [maxCommandTreeTools - 1, maxCommandTreeTools] {
+            let tree = buildCommandTree(specs: [], usage: usageOnlyTools(count))
+            let back = CommandTree(deserializing: tree.serialize())
+            XCTAssertEqual(back?.toolCount, count)
+            XCTAssertEqual(back?.isKnownTool(String(format: "t%05d", count - 1)), true)
+        }
+        // One above: the lowest-ranked tool is dropped, even when the caller asks for more.
+        let above = usageOnlyTools(maxCommandTreeTools + 1)
+        for asked in [maxCommandTreeTools, maxCommandTreeTools + 1] {
+            let back = CommandTree(deserializing: buildCommandTree(specs: [], usage: above, maxTools: asked).serialize())
+            XCTAssertEqual(back?.toolCount, maxCommandTreeTools)
+            XCTAssertEqual(back?.isKnownTool("t65534"), true)
+            XCTAssertEqual(back?.isKnownTool("t65535"), false)
+        }
+    }
+
+    func testPipeTargetCapAboveFormatLimit() {
+        var u = CommandUsage()
+        u.pipeTargetCounts = Dictionary(uniqueKeysWithValues: (0...maxCommandTreeTools).map {
+            (String(format: "p%05d", $0), 1)
+        })
+        let parts = buildCommandTreeParts(specs: [], usage: u)
+        XCTAssertEqual(parts.pipeTargets.count, maxCommandTreeTools)
+        XCTAssertEqual(parts.pipeTargets.last?.text, "p65534")
+        let back = CommandTree(deserializing: CommandTree(tools: [], pipeTargets: parts.pipeTargets).serialize())
+        XCTAssertEqual(back?.candidates(segmentWords: [], typed: "p6553", afterPipe: true, limit: 10).map(\.text),
+                       ["p65530", "p65531", "p65532", "p65533", "p65534"])
+    }
+
     func testPipeTargetsScored() {
         var u = CommandUsage()
         for _ in 0..<3 { u.ingest(example: "x | grep a") }

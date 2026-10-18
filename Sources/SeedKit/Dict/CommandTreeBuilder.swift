@@ -9,6 +9,10 @@ private let maxNameBytes = 255
 private let maxPerNode = 255
 private let maxTreeDepth = 4
 
+/// The most top-level tools (and, separately, pipe targets) `GCMT` can store: both counts are
+/// `u16`, unlike the `u8` per-node child and flag counts.
+public let maxCommandTreeTools = Int(UInt16.max)
+
 /// Score of `count` relative to the best sibling: `1 + round(254 * ln(1 + c) / ln(1 + max))`.
 /// A zero count (or an all-zero group) scores 1; the best sibling scores 255.
 private func relativeScore(_ count: Int, max best: Int) -> UInt8 {
@@ -22,15 +26,16 @@ private func isStorable(_ name: String) -> Bool {
 }
 
 /// Builds the shipped command tree. Tools are command names (``isCommandName(_:)``) with a
-/// Fig spec or a usage count: the top `maxTools` by count, ties broken by the number of `pages`
-/// in the tool's own family (stem equal to the tool or starting with `tool-`, more first), then
-/// by name. When `pages` (the names that have their own tldr page)
-/// is given, a usage-only tool or pipe target must also be in it, so words tldr merely shows
+/// Fig spec or a usage count, all of them by default (a Fig tool with no usage scores 1). They
+/// are ranked by count, ties broken by the number of `pages` in the tool's own family (stem
+/// equal to the tool or starting with `tool-`, more first), then by name, and the top
+/// `maxTools` are kept (never more than ``maxCommandTreeTools``; pipe targets likewise). When
+/// `pages` (the names that have their own tldr page) is given, a usage-only tool or pipe target must also be in it, so words tldr merely shows
 /// in command position (`stdout`) are not tools. Children come only from Fig structure and are
 /// ranked by how often tldr uses their path; each alias is its own child. A node's flags are
 /// those seen in tldr for its path plus `--help` when Fig declares it. Names that cannot be
 /// serialized are skipped and each node is capped to its 255 best children and flags.
-public func buildCommandTree(specs: [FigCommandSpec], usage: CommandUsage, maxTools: Int = 800,
+public func buildCommandTree(specs: [FigCommandSpec], usage: CommandUsage, maxTools: Int = maxCommandTreeTools,
                              pages: Set<String>? = nil) -> CommandTree {
     let parts = buildCommandTreeParts(specs: specs, usage: usage, maxTools: maxTools, pages: pages)
     return CommandTree(tools: parts.tools, pipeTargets: parts.pipeTargets)
@@ -42,7 +47,7 @@ public func countNodes(_ nodes: [CommandNode]) -> Int {
 }
 
 /// The tools and pipe targets ``buildCommandTree`` wraps, exposed so callers can report counts.
-public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage, maxTools: Int = 800,
+public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage, maxTools: Int = maxCommandTreeTools,
                                   pages: Set<String>? = nil) -> (tools: [CommandNode], pipeTargets: [ScoredWord]) {
     var figByTool: [String: FigCommandSpec] = [:]
     for spec in specs {
@@ -61,7 +66,8 @@ public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage, 
         let fa = family[a] ?? 0, fb = family[b] ?? 0
         return fa != fb ? fa > fb : a.utf8.lexicographicallyPrecedes(b.utf8)
     }
-    let kept = Array(ranked.prefix(max(0, maxTools)))
+    let cap = min(max(0, maxTools), maxCommandTreeTools)
+    let kept = Array(ranked.prefix(cap))
     let best = kept.map { usage.toolCounts[$0] ?? 0 }.max() ?? 0
     let tools = kept.map { name in
         let count = usage.toolCounts[name] ?? 0
@@ -71,7 +77,7 @@ public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage, 
 
     let pipeRanked = usage.pipeTargetCounts.filter { isEligible($0.key) }.sorted { a, b in
         a.value != b.value ? a.value > b.value : a.key.utf8.lexicographicallyPrecedes(b.key.utf8)
-    }.prefix(max(0, maxTools))
+    }.prefix(cap)
     let pipeBest = pipeRanked.first?.value ?? 0
     let pipes = pipeRanked.map { ScoredWord(text: $0.key, score: relativeScore($0.value, max: pipeBest)) }
     return (tools, pipes)
