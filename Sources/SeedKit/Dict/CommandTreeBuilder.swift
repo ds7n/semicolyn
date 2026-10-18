@@ -43,6 +43,8 @@ public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage,
     for spec in specs {
         for name in spec.names where isStorable(name) && figByTool[name] == nil { figByTool[name] = spec }
     }
+    var usage = usage
+    usage.flagCounts = rolledUpFlags(usage.flagCounts, figByTool: figByTool)
     let candidates = Set(figByTool.keys).union(usage.toolCounts.keys.filter(isStorable))
     let ranked = candidates.sorted { a, b in
         let ca = usage.toolCounts[a] ?? 0, cb = usage.toolCounts[b] ?? 0
@@ -53,7 +55,7 @@ public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage,
     let tools = kept.map { name in
         let count = usage.toolCounts[name] ?? 0
         return node(name: name, score: relativeScore(count, max: best), path: [name],
-                    fig: figByTool[name], usage: usage, depth: 1)
+                    fig: figByTool[name], usage: usage, depth: 1, flagPaths: [[name]])
     }
 
     let pipeRanked = usage.pipeTargetCounts.filter { isStorable($0.key) }.sorted { a, b in
@@ -65,10 +67,10 @@ public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage,
 }
 
 private func node(name: String, score: UInt8, path: [String], fig: FigCommandSpec?,
-                  usage: CommandUsage, depth: Int) -> CommandNode {
+                  usage: CommandUsage, depth: Int, flagPaths: [[String]]) -> CommandNode {
     CommandNode(name: name, score: score,
                 children: children(of: fig, path: path, usage: usage, depth: depth),
-                flags: flags(path: path, fig: fig, usage: usage))
+                flags: flags(paths: flagPaths, fig: fig, usage: usage))
 }
 
 private func children(of fig: FigCommandSpec?, path: [String], usage: CommandUsage, depth: Int) -> [CommandNode] {
@@ -86,18 +88,42 @@ private func children(of fig: FigCommandSpec?, path: [String], usage: CommandUsa
         for alias in member.spec.names where isStorable(alias) {
             guard out.count < maxPerNode else { return out }
             out.append(node(name: alias, score: score, path: path + [alias], fig: member.spec,
-                            usage: usage, depth: depth + 1))
+                            usage: usage, depth: depth + 1,
+                            flagPaths: member.spec.names.map { path + [$0] }))
         }
     }
     return out
 }
 
-private func flags(path: [String], fig: FigCommandSpec?, usage: CommandUsage) -> [ScoredWord] {
-    var counts = usage.flagCounts[path] ?? [:]
+/// Flags for a node. `paths` are the node's own path and its aliases' paths; their counts pool.
+private func flags(paths: [[String]], fig: FigCommandSpec?, usage: CommandUsage) -> [ScoredWord] {
+    var counts: [String: Int] = [:]
+    for path in paths {
+        for (flag, n) in usage.flagCounts[path] ?? [:] { counts[flag, default: 0] += n }
+    }
     if fig?.options.contains("--help") == true, counts["--help"] == nil { counts["--help"] = 0 }
     let best = counts.values.max() ?? 0
     let ordered = counts.filter { isStorable($0.key) }.sorted { a, b in
         a.value != b.value ? a.value > b.value : a.key.utf8.lexicographicallyPrecedes(b.key.utf8)
     }
     return ordered.prefix(maxPerNode).map { ScoredWord(text: $0.key, score: relativeScore($0.value, max: best)) }
+}
+
+/// Moves flag counts recorded under paths that are not nodes of the built tree (a positional
+/// such as `ls /tmp -l`) up to the deepest ancestor that is one.
+private func rolledUpFlags(_ flagCounts: [[String]: [String: Int]],
+                           figByTool: [String: FigCommandSpec]) -> [[String]: [String: Int]] {
+    var rolled: [[String]: [String: Int]] = [:]
+    for (path, counts) in flagCounts {
+        var node = figByTool[path[0]]
+        var resolved = [path[0]]
+        for word in path.dropFirst() {
+            guard let child = node?.subcommands.first(where: { $0.names.contains(word) }),
+                  resolved.count < maxTreeDepth else { break }
+            node = child
+            resolved.append(word)
+        }
+        for (flag, n) in counts { rolled[resolved, default: [:]][flag, default: 0] += n }
+    }
+    return rolled
 }

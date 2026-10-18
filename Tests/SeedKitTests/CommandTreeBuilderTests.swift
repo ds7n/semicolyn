@@ -133,4 +133,41 @@ final class CommandTreeBuilderTests: XCTestCase {
         XCTAssertEqual(kids.first?.text, "sub299")
         XCTAssertEqual(t.candidates(segmentWords: ["big", "sub0"], typed: "-", afterPipe: false, limit: 1000).count, 0)
     }
+
+    func testPlaceholderFlagsAreCounted() {
+        var u = CommandUsage()
+        u.ingest(example: "foo --bar={{x}}")
+        u.ingest(example: "foo -n{{5}}")
+        u.ingest(example: "foo {{file}} -v")
+        u.ingest(example: "foo -{{x}} --")
+        XCTAssertEqual(u.flagCounts[["foo"]], ["--bar": 1, "-n": 1, "-v": 1])
+    }
+
+    func testFlagsRollUpToDeepestKnownNode() {
+        let fig = FigCommandSpec(names: ["ls"], subcommands: [], options: [])
+        var u = CommandUsage()
+        u.ingest(example: "ls /tmp -l")
+        u.ingest(example: "ls -l")
+        u.ingest(example: "ls -a")
+        XCTAssertEqual(u.flagCounts[["ls", "/tmp"]], ["-l": 1])
+        let t = buildCommandTree(specs: [fig], usage: u)
+        let got = t.candidates(segmentWords: ["ls"], typed: "-", afterPipe: false, limit: 5)
+        XCTAssertEqual(got.map(\.text), ["-l", "-a"])
+        XCTAssertEqual(got.map(\.score), [255, 161])
+    }
+
+    func testAliasNodesPoolFlagCounts() {
+        let fig = FigCommandSpec(names: ["git"], subcommands: [
+            FigCommandSpec(names: ["checkout", "co"], subcommands: [], options: [])], options: [])
+        var u = CommandUsage()
+        u.ingest(example: "git checkout -b x")
+        u.ingest(example: "git co -b y")
+        u.ingest(example: "git co -q z")
+        let t = buildCommandTree(specs: [fig], usage: u)
+        for alias in ["checkout", "co"] {
+            let got = t.candidates(segmentWords: ["git", alias], typed: "-", afterPipe: false, limit: 5)
+            XCTAssertEqual(got.map(\.text), ["-b", "-q"], alias)
+            XCTAssertEqual(got.map(\.score), [255, 161], alias)
+        }
+    }
 }

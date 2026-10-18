@@ -14,7 +14,7 @@ public struct CommandUsage {
 
     /// Counts every command segment of `example`. Wrappers (`sudo`, ...) are stripped first.
     /// The path grows by non-flag words in the second and third positions; the first flag or
-    /// placeholder ends it. Flags are cut at `=` and counted against the path so far.
+    /// placeholder ends it. Flags are cut at `=` or a glued `{{` and counted against the path so far.
     public mutating func ingest(example: String) {
         for segment in commandSegments(of: example) {
             let words = strippingWrappers(segment.words)
@@ -25,15 +25,20 @@ public struct CommandUsage {
             var path = [tool]
             var extending = true
             for (index, word) in words.enumerated().dropFirst() {
-                if word.contains("{{") {
-                    extending = false
-                    continue
-                }
                 if word.hasPrefix("-") {
                     extending = false
-                    let flag = word.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)[0]
+                    // Flag name: cut at `=` and at a glued placeholder (`-n{{5}}`).
+                    var end = word.endIndex
+                    for marker in ["=", "{{"] {
+                        if let r = word.range(of: marker), r.lowerBound < end { end = r.lowerBound }
+                    }
+                    let flag = String(word[..<end])
                     guard flag.count > 1, flag != "--" else { continue }
-                    flagCounts[path, default: [:]][String(flag), default: 0] += 1
+                    flagCounts[path, default: [:]][flag, default: 0] += 1
+                    continue
+                }
+                if word.contains("{{") {
+                    extending = false
                     continue
                 }
                 guard extending, index <= 2 else {
