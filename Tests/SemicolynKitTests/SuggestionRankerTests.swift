@@ -148,7 +148,7 @@ final class SuggestionRankerTests: XCTestCase {
 
     func testScreenWordsDecayByRecency() throws {
         var e = try RankFixture.engine()
-        e.harvest(output: "thermal thermos")
+        e.harvest(output: "thermal thermos\n")
         let s = e.suggestions(line: "so so therm", lineOptedOut: false)
         XCTAssertEqual(s.map(\.text), ["thermos", "thermal"])
         XCTAssertEqual(s[0].score, 0.6, accuracy: 1e-9)
@@ -157,7 +157,7 @@ final class SuggestionRankerTests: XCTestCase {
 
     func testScreenWordsMatchCaseInsensitively() throws {
         var e = try RankFixture.engine()
-        e.harvest(output: "README.md")
+        e.harvest(output: "README.md\n")
         XCTAssertEqual(texts(e, "so so rea"), ["README.md"])
     }
 

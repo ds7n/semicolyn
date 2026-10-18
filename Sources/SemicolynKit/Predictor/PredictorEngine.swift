@@ -16,6 +16,12 @@ public struct PredictorEngine: Sendable {
     private let proseSeed: PredictorSeed?
     /// Ephemeral output-token context (not persisted); leads suggestions.
     private var output: OutputHarvest
+    /// Harvest context carried across `harvest(output:)` chunks: escape-filter state,
+    /// the last complete token (for the secret-flag check) and an unfinished
+    /// trailing token (UTF-8) joined with the start of the next chunk.
+    private var harvestFilter = ANSIByteFilter()
+    private var harvestPrevious: String?
+    private var harvestPartial: [UInt8] = []
     /// Exclusion rules: applied at write time by `record` and `harvest`, and
     /// re-applied at read time by every suggestion query as a safety net.
     public var filter: TokenFilter
@@ -162,32 +168,53 @@ public struct PredictorEngine: Sendable {
     public mutating func purgeLearned() {
         learned = .empty
         output.clear()
+        resetHarvestContext()
         graduation.reset()
     }
 
     /// Harvest screen words from command `output` so they surface as completions.
-    /// Escapes are stripped, then each whitespace-delimited token is kept only if
-    /// it is screen-word shaped (``isScreenWordShaped(_:)``), passes the privacy
-    /// `filter`, and is not the value of a secret flag (the preceding token, kept
-    /// or not, is the context). Rejected tokens are harvested nowhere.
+    /// Chunk-safe: escape sequences, the secret-flag context and a token not yet
+    /// ended by whitespace all carry into the next call. A kept token is
+    /// screen-word shaped (``isScreenWordShaped(_:)``), passes the privacy
+    /// `filter`, and is not the value of a secret flag. Rejected tokens are
+    /// harvested nowhere.
     public mutating func harvest(output: String) {
-        let raw = stripANSI(output)
-            .split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r" })
-            .map(String.init)
+        let clean = harvestFilter.filter(Array(output.utf8))
+        let bytes = harvestPartial + clean
+        harvestPartial = []
+        var tokens: [[UInt8]] = []
+        var current: [UInt8] = []
+        for b in bytes {
+            if b == 0x20 || b == 0x09 || b == 0x0a || b == 0x0d {
+                if !current.isEmpty { tokens.append(current); current = [] }
+            } else {
+                current.append(b)
+            }
+        }
+        // An unfinished trailing token waits for the next chunk. Over 65 bytes it
+        // can never be shape-valid, so only a prefix is kept (bounded memory).
+        harvestPartial = Array(current.prefix(65))
         var kept: [String] = []
-        var previous: String?
-        for token in raw {
-            defer { previous = token }
+        for raw in tokens {
+            let token = String(decoding: raw, as: UTF8.self)
+            defer { harvestPrevious = token }
             guard isScreenWordShaped(token), !filter.excludes(token),
-                  !isSecretValueToken(token, precededBy: previous) else { continue }
+                  !isSecretValueToken(token, precededBy: harvestPrevious) else { continue }
             kept.append(token)
         }
         self.output.harvest(kept)
     }
 
+    private mutating func resetHarvestContext() {
+        harvestFilter = ANSIByteFilter()
+        harvestPrevious = nil
+        harvestPartial = []
+    }
+
     /// Drop harvested output tokens, for a context change (host switch, incognito).
     public mutating func clearHarvest() {
         output.clear()
+        resetHarvestContext()
     }
 
     /// Up to `config.topK` suggestions for `prefix`. Just-harvested output tokens

@@ -69,4 +69,16 @@ final class ANSIByteFilterTests: XCTestCase {
         var f = ANSIByteFilter()
         XCTAssertEqual(f.filter([]), [])
     }
+
+    func testESCInsideOpenStringStartsFreshSequence() {
+        var f = ANSIByteFilter()
+        XCTAssertEqual(f.filter(b("\u{1b}]x\u{1b}[31my")), b("y"))
+        var g = ANSIByteFilter()
+        XCTAssertEqual(g.filter(b("\u{1b}]0;t\u{1b}[31mPassword: ")), b("Password: "))
+    }
+
+    func testStringTerminatorsUnchanged() {
+        var f = ANSIByteFilter()
+        XCTAssertEqual(f.filter(b("\u{1b}]t\u{1b}\\a\u{1b}]t\u{07}b\u{1b}]t\nc")), b("ab\nc"))
+    }
 }

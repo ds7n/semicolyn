@@ -31,7 +31,7 @@ final class PredictorEngineTests: XCTestCase {
         // minPrefix: 0 so the 1-char ESC-prefix assertion below exercises the real
         // escape-strip filter rather than being short-circuited by the min-prefix gate.
         var e = engine(config: SuggestionConfig(minPrefix: 0))
-        e.harvest(output: "\u{1b}[38;2;122;162;247muser\u{1b}[0m.host")
+        e.harvest(output: "\u{1b}[38;2;122;162;247muser\u{1b}[0m.host\n")
         // The visible text is suggestable with the color codes gone. The reset
         // `\u{1b}[0m` between `user` and `.host` is stripped, so they fuse into
         // one contiguous token (correct — no whitespace ever separated them), and
@@ -161,7 +161,7 @@ final class PredictorEngineTests: XCTestCase {
     func testHarvestedOutputLeadsSuggestions() {
         var e = engine()
         for _ in 0..<5 { e.record("status", after: "git") }   // strong learned
-        e.harvest(output: "deploy.log status.txt")            // just-seen output
+        e.harvest(output: "deploy.log status.txt\n")            // just-seen output
         // The harvested "status.txt" leads even over a frequent learned token.
         XCTAssertEqual(e.suggestions(forPrefix: "st").first, "status.txt")
     }
@@ -169,14 +169,14 @@ final class PredictorEngineTests: XCTestCase {
     func testHarvestedAndLearnedMergeDeduped() {
         var e = engine(config: SuggestionConfig(topK: 3))
         for _ in 0..<3 { e.record("stage") }   // ≥ 3 nil → graduates
-        e.harvest(output: "stash-pop")
+        e.harvest(output: "stash-pop\n")
         let s = e.suggestions(forPrefix: "st")
         XCTAssertEqual(s, ["stash-pop", "stage"], "harvested leads, learned fills, no dup")
     }
 
     func testHarvestRespectsPrivacyFilter() {
         var e = engine()
-        e.harvest(output: "build.log secret-aikey")   // "secret" excluded by default
+        e.harvest(output: "build.log secret-aikey\n")   // "secret" excluded by default
         XCTAssertEqual(e.suggestions(forPrefix: "secret"), [],
                        "an excluded output token must never be harvested or surfaced")
         XCTAssertEqual(e.suggestions(forPrefix: "build"), ["build.log"])
@@ -184,7 +184,7 @@ final class PredictorEngineTests: XCTestCase {
 
     func testHarvestedLeadsNextTokenAxisToo() {
         var e = engine()
-        e.harvest(output: "config.yaml")
+        e.harvest(output: "config.yaml\n")
         // `cat <harvested-file>`: after "cat", the harvested filename leads.
         XCTAssertEqual(e.suggestions(forPrefix: "config", after: "cat").first, "config.yaml")
     }
@@ -192,14 +192,14 @@ final class PredictorEngineTests: XCTestCase {
     func testNonPositiveTopKReturnsEmptyEvenWithHarvest() {
         // The harvest path is not otherwise capped; topK <= 0 must still yield [].
         var e = engine(config: SuggestionConfig(topK: 0))
-        e.harvest(output: "a1 a2 a3")
+        e.harvest(output: "a1 a2 a3\n")
         XCTAssertEqual(e.suggestions(forPrefix: "a"), [],
                        "topK <= 0 must return nothing, not the whole harvest")
     }
 
     func testClearHarvestDropsOutputTokens() {
         var e = engine()
-        e.harvest(output: "ephemeral.tmp")
+        e.harvest(output: "ephemeral.tmp\n")
         XCTAssertEqual(e.suggestions(forPrefix: "eph"), ["ephemeral.tmp"])
         e.clearHarvest()
         XCTAssertEqual(e.suggestions(forPrefix: "eph"), [])

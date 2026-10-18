@@ -14,7 +14,8 @@
 /// - OSC (`ESC ]`) and string sequences (`ESC P`, `ESC X`, `ESC ^`, `ESC _`) end at
 ///   BEL, `ESC \`, or LF (the LF is emitted).
 /// - Any other ESC: the ESC, intermediate bytes `0x20...0x2f`, one final byte.
-/// - A new ESC inside an unfinished sequence starts a fresh one.
+/// - A new ESC inside an unfinished sequence (string sequences included, unless
+///   it forms `ESC \`) starts a fresh one.
 public struct ANSIByteFilter: Sendable, Equatable {
     private enum State: Sendable, Equatable {
         case ground
@@ -38,6 +39,12 @@ public struct ANSIByteFilter: Sendable, Equatable {
     }
 
     private mutating func step(_ b: UInt8, into out: inout [UInt8]) {
+        if state == .stringEscape {
+            // `ESC \` ends the string; any other byte re-dispatches as if it
+            // followed a bare ESC (so `ESC [` starts a CSI inside an open string).
+            if b == UInt8(ascii: "\\") { state = .ground; return }
+            state = .escape
+        }
         switch state {
         case .ground:
             if b == 0x1b { state = .escape } else { out.append(b) }
@@ -73,12 +80,7 @@ public struct ANSIByteFilter: Sendable, Equatable {
             default: break
             }
         case .stringEscape:
-            switch b {
-            case UInt8(ascii: "\\"): state = .ground
-            case 0x1b: break
-            case 0x0a: state = .ground; out.append(b)
-            default: state = .string
-            }
+            break   // handled before the switch
         }
     }
 }
