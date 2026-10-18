@@ -817,4 +817,31 @@ final class PasswordEntryDetectorTests: XCTestCase {
                        PasswordEntryDetector.CommitVerdict(learn: false, reason: .bytes))
         XCTAssertFalse(e.shouldLearnCommittedLine())
     }
+
+    // MARK: - Prompt that arrives after the previous line's reset
+
+    func testPromptArrivingAfterResetSuppressesSilentLineEvenIfRowWouldConfirm() {
+        // The App resets at the Enter of `ssh host`, before the password prompt arrives.
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("$ ".utf8))
+        d.resetLine()
+        d.noteOutput(Array("alice@host's password: ".utf8))
+        d.noteInput(Array("hunter2".utf8))                    // silent prompt: no echo
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "hunter2")
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .prompt))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testEchoAfterPromptLikeOutputIsNotPromptSuppressed() {
+        // The tail ends with the echoed line, not the prompt, so the row decides.
+        var d = PasswordEntryDetector()
+        d.resetLine()
+        d.noteOutput(Array("Password:\r\n$ ".utf8))
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: true, reason: .row))
+    }
 }

@@ -271,8 +271,13 @@ public struct PasswordEntryDetector: Sendable {
 
     /// ``shouldLearnCommittedLine()`` with the deciding rule, for the decision log.
     /// Same precedence and fail-safe contract.
+    /// The prompt check also runs on the tail as it stands now: a prompt that arrived
+    /// after the previous `resetLine` and was followed by no visible echo (the tail
+    /// still ends with it) suppresses this line too.
     public func committedLineVerdict() -> CommitVerdict {
-        if promptSuppressedThisLine { return CommitVerdict(learn: false, reason: .prompt) }
+        if promptSuppressedThisLine || tailLooksLikePasswordPrompt() {
+            return CommitVerdict(learn: false, reason: .prompt)
+        }
         if let commitRowVerdict { return CommitVerdict(learn: commitRowVerdict, reason: .row) }
         if oracle?.isAlternateBuffer == true {                       // alt-screen ⇒ suppress
             return CommitVerdict(learn: false, reason: .alt)
