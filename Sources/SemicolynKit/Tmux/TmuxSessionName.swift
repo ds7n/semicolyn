@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
-/// The built-in tmux -CC session name when neither the host nor Defaults sets one.
+/// The built-in tmux session name when neither the host nor Defaults sets one.
 public let builtInTmuxSessionName = "semicolyn"
 
 /// Trims surrounding whitespace; returns nil for an empty/whitespace-only string
@@ -16,7 +16,7 @@ public func normalizedTmuxSessionName(_ raw: String) -> String? {
 /// character is an ASCII letter, digit, hyphen, or underscore. This rejects
 /// tmux's forbidden `.`/`:`, whitespace, control chars, and every shell
 /// metacharacter, so a validated name is always safe to interpolate into the
-/// `-CC new-session -A -s <name>` command.
+/// plain-tmux launch command (`new-session -d -s <name>`, `attach-session -t =<name>`).
 public func isValidTmuxSessionName(_ name: String) -> Bool {
     guard let n = normalizedTmuxSessionName(name) else { return false }
     return n.unicodeScalars.allSatisfy { s in

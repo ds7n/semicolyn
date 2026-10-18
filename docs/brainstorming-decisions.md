@@ -580,6 +580,17 @@ Two complementary input mechanisms central to the differentiation:
 
 **Full spec**: see `docs/superpowers/specs/2026-06-17-privacy-statement-design.md`.
 
+### Superseded: tmux control mode replaced by gesture-driven plain tmux (2026-10-18)
+
+The rows above are kept as written (this log is locked). This entry overrides them where they assume `tmux -CC`.
+
+| Topic | Decision |
+|---|---|
+| Session engine | **Plain tmux driven by gestures**, not control mode. The app launches plain tmux with private root-table key bindings and gestures (swipe, tap, long-press, the dpad menu) and hardware-keyboard shortcuts write those bindings' escape sequences. Same model on SSH, Mosh and Eternal Terminal. Shipped in PR #132 (gesture-driven plain tmux) and PR #136 (single gesture engine, which removed the `-CC` engine). |
+| Superseded rows | *Connections & sessions*: "Session engine" (`tmux -CC`, native tabs/panes). *Context detection*: "Signal source" (`pane_current_command` from control mode) and the promotion rows that depended on it. *Function keys*: "Auto-engage" and "User override per episode". *Degraded mode & tmux requirements*: "Detection" (`-V` decides `-CC` vs raw) and "Mid-session crash recovery" (`-CC` retry wording). *tmux session naming + multi-device*: "Default behavior" (both clients attached via `tmux -CC`). |
+| Still in force | The tmux 3.0 minimum and the `tmux -V` probe on SSH, the raw-shell fallback with its degrade reasons, and the per-host tmux opt-out. The legacy `semicolyn.tmux.attemptControlMode` key is still decoded as a fallback for the per-host "Use tmux" setting, so hosts that opted out keep tmux off. |
+| Removed with it | Keybar symbol promotions per foreground process, Fn auto-engage in `htop`/`top`/`mc`, and the per-app PgUp/PgDn alt-screen scroll branch: all were fed by control mode's per-pane process name, which plain tmux does not report. |
+
 ---
 
 ## Deferred / for future conversation

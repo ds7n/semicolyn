@@ -22,8 +22,8 @@ fresh session can act without re-deriving the painful bits.
 The iOS **compile + package** step ONLY: make `eternaltermlib` build for iOS in semicolyn's
 macOS CI and emit `ETerminal.xcframework` (device arm64 + simulator arm64/x86_64), linked as a
 `#if os(macOS)` binaryTarget in `Package.swift` like `Mosh.xcframework`. Nothing consumes it
-yet — the Swift `libetios` wrapper, SSH bootstrap, `TmuxRuntime` drop-in, and Transport picker
-are downstream (separate plans).
+yet: the Swift `libetios` wrapper, SSH bootstrap, tmux integration, and Transport picker
+are downstream (separate plans). (ET now runs gesture-driven plain tmux like SSH and Mosh.)
 
 ## The 5 locked decisions (do NOT re-litigate)
 

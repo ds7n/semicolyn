@@ -118,8 +118,8 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// replay (no cursor model): treated as a line-context reset in `.ground`.
     private static let editingC0: Set<UInt8> = [0x17, 0x15, 0x0b, 0x01, 0x03, 0x05]  // Ctrl-W/U/K/A/C/E
 
-    /// The tmux prefix byte (`Ctrl-A`, the app's default). In a native `-CC` client
-    /// the prefix flips tmux into its prefix key-table and the NEXT byte dispatches a
+    /// The tmux prefix byte (`Ctrl-A`, the app's default). Under tmux the prefix
+    /// flips tmux into its prefix key-table and the NEXT byte dispatches a
     /// binding (`prefix c` -> new-window): that following key is a tmux COMMAND, not
     /// typed text, so it must be swallowed rather than extend `current`. Device log
     /// (build 146) showed `Ctrl-A c whoami` leaking the binding `c` as `cwhoami`.

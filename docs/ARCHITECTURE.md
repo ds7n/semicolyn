@@ -7,14 +7,14 @@ The high-level overview and the index into the detailed specs/plans. For status 
 
 ## What it is
 
-semicolyn is an **iOS / iPadOS SSH + mosh terminal client built for touch** — terminal work that feels native on a phone: a context-aware key bar, a snippet launcher, **tmux control mode** driving persistent native tabs/panes, an **on-device predictor** that learns your vocabulary, and security-first credential handling with end-to-end-encrypted sync. Open-source (GPL-3.0) with a cosmetic-only one-time Pro.
+semicolyn is an **iOS / iPadOS SSH + mosh terminal client built for touch**: terminal work that feels native on a phone, with a context-aware key bar, a snippet launcher, **gesture-driven plain tmux** (windows and panes on SSH, Mosh and Eternal Terminal), an **on-device predictor** that learns your vocabulary, and security-first credential handling with end-to-end-encrypted sync. Open-source (GPL-3.0) with a cosmetic-only one-time Pro.
 
 ## Layering
 
 ```
 ┌─ Swift (SemicolynKit) ─ platform-agnostic, Linux-tested ─┐   ┌─ Apple-only (macOS-gated) ─┐
-│  model · resolution · storage stack · tmux -CC          │   │  SwiftUI · SwiftTerm        │
-│  parser/model/encoder/controller · predictor engine     │   │  Keychain/SE · CloudKit     │
+│  model · resolution · storage stack · tmux launch       │   │  SwiftUI · SwiftTerm        │
+│  gesture engine · tmux bindings · predictor engine      │   │  Keychain/SE · CloudKit     │
 └───────────────────────────┬─────────────────────────────┘   └──────────────┬─────────────┘
                             UniFFI XCFramework bridge ────────────────────────┘
 ┌───────────────────────────┴──────────────────────────┐
@@ -47,7 +47,7 @@ Every v1 subsystem has a locked spec under [`docs/superpowers/specs/`](superpowe
 
 **Connection & SSH** — `ssh-algorithms` (4-tier allowlist, PQC `mlkem768x25519` in Tier 1) · `host-key-trust` (TOFU + mismatch) · `ssh-cert-auth` · `chain-auth` (ProxyJump) · `pty-shell-channel` · `mosh-transport` (vendored `blinksh/mosh` → `Mosh.xcframework`, russh bootstrap → `MoshSession` bridge → SwiftTerm; M1–M4 shipped, on TestFlight; device feel-pass pending).
 
-**Terminal & tmux** — `terminal-emulator-scope` (`xterm-256color`, OSC policy, mouse modes) · `terminal-ux-additions` (font zoom, URL tap, cursor, scrollback, resize) · `terminal-feedback` (bell halo + haptic, never sound) · `degraded-mode` (tmux ≥3.0, raw-PTY fallback) · `context-detection` · `tmux-session` + the `tmux-control-channel` / `-control-mode-parser` / `-command-encoder` / `-session-model` / `-session-controller` family · `phase-3c-terminal-ux-integration`.
+**Terminal & tmux**: `terminal-emulator-scope` (`xterm-256color`, OSC policy, mouse modes) · `terminal-ux-additions` (font zoom, URL tap, cursor, scrollback, resize) · `terminal-feedback` (bell halo + haptic, never sound) · `degraded-mode` (tmux ≥3.0, raw-PTY fallback) · `context-detection` · `tmux-session` · `phase-3c-terminal-ux-integration`. tmux is plain tmux driven by gestures (`single-gesture-engine`, `tmux-private-gesture-bindings`); the earlier `tmux-control-*` control-mode (`-CC`) family is superseded (see the 2026-10-18 entry in [brainstorming-decisions.md](brainstorming-decisions.md)).
 
 **Input — keybar & keyboard** — `keybar-customization` (layout / gesture ownership) · `function-keys` (Fn / caps-lock SM) · `external-keyboard`.
 

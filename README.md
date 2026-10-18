@@ -6,8 +6,8 @@
 
 **An iOS SSH / mosh terminal client built for touch.** Semicolyn's wager is that
 terminal work can feel native on a phone: a context-aware key bar, a smart
-snippet launcher, tmux control mode driving persistent native tabs and panes,
-an on-device predictor that learns your vocabulary, and security-first
+snippet launcher, gestures that drive plain tmux windows and panes on every
+transport, an on-device predictor that learns your vocabulary, and security-first
 credential handling with end-to-end-encrypted sync.
 
 > The name **semicolyn** is a respell of *semicolon* — the `;` that chains one
@@ -28,8 +28,10 @@ validated by macOS CI.
 - **Touch-native terminal UX** — context-aware key bar (locked-left + scroll,
   fused Esc pill, arrow Pad, sticky/lockable modifiers), iOS-native selection and
   a delta-drag cursor halo instead of a joystick.
-- **tmux control mode as the session engine** — `tmux -CC` gives real native
-  tabs and panes (not a screen-scraped TUI), with a raw-PTY degraded fallback.
+- **Gesture-driven tmux**: plain tmux on SSH, Mosh and Eternal Terminal, driven
+  by swipes, taps, long-presses and hardware-keyboard shortcuts through private
+  key bindings (your own tmux keys stay untouched), with a raw-shell fallback
+  when tmux is missing or turned off.
 - **On-device predictor** — learns your command vocabulary with Count-Min Sketch
   + Bloom filters (a lossy frequency fingerprint, never recoverable text),
   ranks it with bundled English and command dictionaries, and harvests just-seen
@@ -44,7 +46,7 @@ validated by macOS CI.
 
 A Rust SSH core (`crates/semicolyn-ssh-core`, russh) is exposed to Swift through a
 UniFFI XCFramework. The Swift splits into a **platform-agnostic, Linux-tested**
-tier (`Sources/SemicolynKit/` — model, storage, tmux control-mode, predictor) and
+tier (`Sources/SemicolynKit/`: model, storage, tmux launch and gestures, predictor) and
 a **thin Apple-gated** tier (`App/` — SwiftUI, SwiftTerm, Keychain/SE, CloudKit),
 so the maximum surface stays testable off-Mac. Full diagram, rationale, repo
 layout, and the spec/plan map: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
