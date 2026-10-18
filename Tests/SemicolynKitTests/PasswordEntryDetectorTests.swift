@@ -23,6 +23,42 @@ final class PasswordEntryDetectorTests: XCTestCase {
         return learn
     }
 
+    // MARK: - Escape-aware output reading
+
+    func testNoteOutputIgnoresEscapeBytes() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("abc".utf8))
+        d.noteOutput(Array("\u{1b}[31m\u{1b}[0m".utf8))        // colour only, no echo
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+
+        var e = PasswordEntryDetector()
+        e.noteInput(Array("abc".utf8))
+        e.noteOutput(Array("\u{1b}[31ma".utf8))
+        e.noteOutput(Array("b\u{1b}[0mc".utf8))
+        XCTAssertTrue(e.shouldLearnCommittedLine())
+    }
+
+    func testPromptTailSeenThroughColour() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("\u{1b}[1mPassword:\u{1b}[0m ".utf8))
+        d.resetLine()
+        for ch in "abc" {
+            let b = Array(String(ch).utf8)
+            d.noteInput(b)
+            d.noteOutput(b)
+        }
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testResetClearsFilterState() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("\u{1b}]0;never-terminated".utf8))   // stuck inside an OSC
+        d.reset()
+        d.noteInput(Array("abc".utf8))
+        d.noteOutput(Array("abc".utf8))
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+    }
+
     // MARK: - Echo inference (the primary, prompt-independent signal)
 
     func testEchoedLineIsLearned() {

@@ -45,7 +45,7 @@ public struct PredictorEngine: Sendable {
         self.proseSeed = proseSeed
         self.cliMagnitude = seed.map { Double($0.unigram.magnitude()) } ?? 0
         self.proseMagnitude = proseSeed.map { Double($0.unigram.magnitude()) } ?? 0
-        self.output = OutputHarvest()
+        self.output = OutputHarvest(capacity: 512)
         self.filter = filter
         self.config = config
         self.window = window
@@ -66,7 +66,7 @@ public struct PredictorEngine: Sendable {
         self.proseSeed = nil
         self.cliMagnitude = 0
         self.proseMagnitude = 0
-        self.output = OutputHarvest()
+        self.output = OutputHarvest(capacity: 512)
         self.filter = filter
         self.config = SuggestionConfig()
         self.window = window
@@ -165,18 +165,24 @@ public struct PredictorEngine: Sendable {
         graduation.reset()
     }
 
-    /// Harvest tokens from command `output` so they surface as completions. Each
-    /// whitespace-delimited token is privacy-filtered (an excluded token is
-    /// harvested nowhere) before entering the ephemeral store.
+    /// Harvest screen words from command `output` so they surface as completions.
+    /// Escapes are stripped, then each whitespace-delimited token is kept only if
+    /// it is screen-word shaped (``isScreenWordShaped(_:)``), passes the privacy
+    /// `filter`, and is not the value of a secret flag (the preceding token, kept
+    /// or not, is the context). Rejected tokens are harvested nowhere.
     public mutating func harvest(output: String) {
-        // Strip ANSI/CSI/OSC escapes first so color codes and cursor moves never
-        // become suggestable tokens (they have no interior whitespace, so a raw
-        // split would fuse `\u{1b}[…m` onto the following word).
-        let tokens = stripANSI(output)
+        let raw = stripANSI(output)
             .split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r" })
             .map(String.init)
-            .filter { !filter.excludes($0) }
-        self.output.harvest(tokens)
+        var kept: [String] = []
+        var previous: String?
+        for token in raw {
+            defer { previous = token }
+            guard isScreenWordShaped(token), !filter.excludes(token),
+                  !isSecretValueToken(token, precededBy: previous) else { continue }
+            kept.append(token)
+        }
+        self.output.harvest(kept)
     }
 
     /// Drop harvested output tokens, for a context change (host switch, incognito).

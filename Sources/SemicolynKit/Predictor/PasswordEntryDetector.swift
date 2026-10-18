@@ -63,6 +63,9 @@ public struct PasswordEntryDetector: Sendable {
     private var outputTail = ""
     /// Max characters of output tail retained for prompt matching.
     private let tailCap = 256
+    /// Strips escape sequences from output before it is counted or tailed, so
+    /// colour codes neither fake an echo nor hide a prompt. Carried across chunks.
+    private var outputFilter = ANSIByteFilter()
 
     /// The three-way per-keystroke echo verdict (spec L1).
     public enum EchoClass: Equatable, Sendable { case echoed, masked, hidden }
@@ -100,8 +103,9 @@ public struct PasswordEntryDetector: Sendable {
 
     /// Fold a chunk of REMOTE output. Updates the prompt-tail and consumes echoes
     /// of characters typed on the current line (echo inference).
-    public mutating func noteOutput(_ bytes: [UInt8]) {
-        if !bytes.isEmpty { outputSeenThisLine = true }
+    public mutating func noteOutput(_ rawBytes: [UInt8]) {
+        if !rawBytes.isEmpty { outputSeenThisLine = true }
+        let bytes = outputFilter.filter(rawBytes)
         for b in bytes {
             // Count a printable output byte as an echo of a pending typed char,
             // up to the number typed. Masked prompts echo a constant char, which
@@ -244,6 +248,7 @@ public struct PasswordEntryDetector: Sendable {
         echoedThisLine = 0
         promptSuppressedThisLine = false
         outputTail = ""
+        outputFilter = ANSIByteFilter()
     }
 
     // MARK: - Internals

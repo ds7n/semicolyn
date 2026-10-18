@@ -31,12 +31,12 @@ final class PredictorEngineTests: XCTestCase {
         // minPrefix: 0 so the 1-char ESC-prefix assertion below exercises the real
         // escape-strip filter rather than being short-circuited by the min-prefix gate.
         var e = engine(config: SuggestionConfig(minPrefix: 0))
-        e.harvest(output: "\u{1b}[38;2;122;162;247muser\u{1b}[0m@host")
+        e.harvest(output: "\u{1b}[38;2;122;162;247muser\u{1b}[0m.host")
         // The visible text is suggestable with the color codes gone. The reset
-        // `\u{1b}[0m` between `user` and `@host` is stripped, so they fuse into
+        // `\u{1b}[0m` between `user` and `.host` is stripped, so they fuse into
         // one contiguous token (correct — no whitespace ever separated them), and
         // that token surfaces when its own visible prefix is typed.
-        XCTAssertEqual(e.suggestions(forPrefix: "user"), ["user@host"])
+        XCTAssertEqual(e.suggestions(forPrefix: "user"), ["user.host"])
         // Crucially, nothing beginning with an escape or its SGR numeric params is
         // suggestable — the escape codes never entered the vocabulary.
         XCTAssertTrue(e.suggestions(forPrefix: "\u{1b}").isEmpty,

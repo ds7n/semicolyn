@@ -58,3 +58,24 @@ public struct OutputHarvest: CandidateSource, Sendable {
         return result
     }
 }
+
+/// Whether `token` can be a word harvested from screen output: 3 to 64 characters
+/// from `[A-Za-z0-9._/~-]` with at least one letter. This drops prompt glyphs,
+/// box-drawing, bare numbers and long blobs before any secret filtering.
+public func isScreenWordShaped(_ token: String) -> Bool {
+    let bytes = token.utf8
+    guard (3...64).contains(bytes.count) else { return false }
+    var sawLetter = false
+    for b in bytes {
+        switch b {
+        case UInt8(ascii: "A")...UInt8(ascii: "Z"), UInt8(ascii: "a")...UInt8(ascii: "z"):
+            sawLetter = true
+        case UInt8(ascii: "0")...UInt8(ascii: "9"),
+             UInt8(ascii: "."), UInt8(ascii: "_"), UInt8(ascii: "/"), UInt8(ascii: "~"), UInt8(ascii: "-"):
+            break
+        default:
+            return false
+        }
+    }
+    return sawLetter
+}
