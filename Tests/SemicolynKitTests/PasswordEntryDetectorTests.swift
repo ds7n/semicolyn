@@ -661,4 +661,95 @@ final class PasswordEntryDetectorTests: XCTestCase {
         d.reset()
         XCTAssertFalse(d.shouldLearnCommittedLine())
     }
+
+    // MARK: - Alt buffer applies whenever no verdict exists (fix round 2)
+
+    func testAltBufferNoSettleNoVerdictSuppressesMaskedEcho() {
+        // Byte path would count the mask as echo; the alt-buffer check must stop it.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("**".utf8))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+        // Control: the same bytes on the primary buffer pass the byte path.
+        oracle.isAlternateBuffer = false
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+    }
+
+    func testAltBufferNoSettleNoVerdictSuppressesRealEcho() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testAltBufferNilReadingAfterTrueVerdictSuppresses() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("**".utf8))
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: "> ab")
+        XCTAssertTrue(d.shouldLearnCommittedLine())          // verdict wins under alt
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: nil)
+        XCTAssertFalse(d.shouldLearnCommittedLine())         // no verdict: alt suppresses
+    }
+
+    // MARK: - Only line-changing input clears the verdict
+
+    func testEnterOrControlChunkKeepsFalseVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("hunter2".utf8))
+        d.noteOutput(Array("hunter2".utf8))                  // byte path alone would learn
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        d.noteInput([0x0d])
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+        d.noteInput([0x0d, 0x0a, 0x03, 0x1b])
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testPrintableClearsTrueVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ab".utf8))                         // no echo: byte path says no
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: "$ ab")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+        d.noteInput(Array("x".utf8))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testSpaceClearsTrueVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ab".utf8))
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: "$ ab")
+        d.noteInput([0x20])
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testBackspaceClearsTrueVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("abc".utf8))
+        d.noteCommitRow(typedLine: "abc", renderedBeforeCursor: "$ abc")
+        d.noteInput([0x7f])                                   // 2 typed, 0 echoed
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+
+        var e = PasswordEntryDetector()
+        e.noteInput(Array("abc".utf8))
+        e.noteCommitRow(typedLine: "abc", renderedBeforeCursor: "$ abc")
+        e.noteInput([0x08])
+        XCTAssertFalse(e.shouldLearnCommittedLine())
+    }
+
+    func testNonASCIITextClearsTrueVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ab".utf8))
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: "$ ab")
+        d.noteInput(Array("é".utf8))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
 }

@@ -127,10 +127,12 @@ public struct PasswordEntryDetector: Sendable {
     /// Fold the OUTGOING keystroke chunk for the current line. Counts printable
     /// characters typed; control bytes (Enter, Ctrl-*, ESC) are handled by
     /// `commitLine`/`resetLine`, which the caller drives off the same stream.
-    /// Any input clears a commit-row verdict: keys typed after the reading make it
-    /// stale, so the App must read the row after the line's last input.
+    /// Input that changes the typed line (printable, space, non-ASCII text bytes,
+    /// backspace) clears a commit-row verdict, since the reading is then stale.
+    /// An Enter- or control-only chunk keeps it, so the Enter that commits the
+    /// line cannot erase a correct `false` verdict.
     public mutating func noteInput(_ bytes: [UInt8]) {
-        commitRowVerdict = nil
+        if bytes.contains(where: Self.changesTypedLine) { commitRowVerdict = nil }
         for b in bytes {
             switch b {
             case 0x21...0x7e:            // printable → a character that SHOULD echo
@@ -144,6 +146,12 @@ public struct PasswordEntryDetector: Sendable {
                 break
             }
         }
+    }
+
+    /// True for an input byte that edits the typed line: printable ASCII and
+    /// space, any UTF-8 text byte (>= 0x80), or a backspace (DEL / BS).
+    private static func changesTypedLine(_ b: UInt8) -> Bool {
+        (0x20...0x7e).contains(b) || b >= 0x80 || b == 0x7f || b == 0x08
     }
 
     /// Inject (or clear with nil) the buffer oracle. Clearing reverts to the
@@ -223,21 +231,22 @@ public struct PasswordEntryDetector: Sendable {
     /// prompt-preceded line all return `false` (do not learn).
     ///
     /// Precedence (security contract): a password prompt suppresses; then a
-    /// commit-row verdict decides; else the per-keystroke oracle tally (with its
-    /// alt-screen suppression) or the byte count. A commit-row `true` can never
+    /// commit-row verdict decides; then the alternate buffer suppresses; else the
+    /// per-keystroke oracle tally or the byte count. A commit-row `true` can never
     /// override a prompt. It does outrank the alt-screen check, because plain tmux
     /// and Mosh keep the outer terminal on the alternate buffer all session, and
     /// the row check only confirms text visibly echoed at the cursor (masked or
-    /// hidden fields still fail the match).
+    /// hidden fields still fail the match). Without a verdict the alt-screen check
+    /// covers every path, including the byte count (which would count a `*` mask).
     ///
     /// Call once, at the moment a line commits, BEFORE `resetLine`.
     public func shouldLearnCommittedLine() -> Bool {
         if promptSuppressedThisLine { return false }
         if let commitRowVerdict { return commitRowVerdict }
+        if oracle?.isAlternateBuffer == true { return false }       // alt-screen ⇒ suppress
         // Oracle path: when the buffer check classified this line, trust the
         // majority-echoed statistic (the far stronger signal per spec L1).
         if oracleActiveThisLine {
-            if oracle?.isAlternateBuffer == true { return false }   // alt-screen ⇒ suppress
             guard outputSeenThisLine else { return false }          // stall ⇒ ambiguous ⇒ suppress
             guard oracleClassifiedThisLine > 0 else { return false }
             // Strong majority required (> 50%). A tie or worse suppresses —
