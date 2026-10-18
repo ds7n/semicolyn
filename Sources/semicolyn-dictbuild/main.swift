@@ -9,6 +9,7 @@ import SemicolynKit
 ///     semicolyn-dictbuild ngram-filter -y 1990 -c N [-v vocab.txt] < ngrams > out.tsv
 ///     semicolyn-dictbuild english -u unigrams/ -b bigrams/ -w wordfreq.tsv -s scowl.txt -t titles.txt -l block.txt -o out.gdic
 ///     semicolyn-dictbuild commands -t tldr/pages -f autocomplete/src -o out.gcmt
+///     semicolyn-dictbuild inspect out.gdic
 
 let usage = """
 usage:
@@ -20,9 +21,14 @@ usage:
       [--max-words <n>] [--successor-words <n>] [--successors-per-word <n>]
       Reads ngram-filter output (*.tsv in each dir), wordfreq (word<TAB>freq), SCOWL / blocklist
       (one word per line), titles (one cased title per line); writes a WordDictionary blob.
+  semicolyn-dictbuild english --vocab-out <file> -u ... -w ... -s ... -t ... -l ...
+      Vocabulary pass: writes the sorted folded forms of the admitted words (one per line, the
+      input for ngram-filter --vocab) instead of a blob; --bigrams and --out are not needed.
   semicolyn-dictbuild commands -t|--tldr <pages dir> -f|--fig <src dir> -o|--out <file>
       Reads tldr pages (common, linux, osx; held-out pages skipped) and top-level Fig specs
       (<src dir>/*.ts); writes a CommandTree blob. Exits nonzero if no pages or no specs parse.
+  semicolyn-dictbuild inspect <file>
+      Detects GDIC / GCMT by magic and prints counts plus fixed completion/candidate probes.
   -h, --help   show this help
 """
 
@@ -147,7 +153,8 @@ func runEnglish(_ args: [String]) {
                    "-w": "wordfreq", "--wordfreq": "wordfreq", "-s": "scowl", "--scowl": "scowl",
                    "-t": "titles", "--titles": "titles", "-l": "blocklist", "--blocklist": "blocklist",
                    "-o": "out", "--out": "out", "--max-words": "max-words",
-                   "--successor-words": "successor-words", "--successors-per-word": "successors-per-word"]
+                   "--successor-words": "successor-words", "--successors-per-word": "successors-per-word",
+                   "--vocab-out": "vocab-out"]
     if args.contains("-h") || args.contains("--help") {
         print(usage)
         exit(0)
@@ -210,6 +217,16 @@ func runEnglish(_ args: [String]) {
     let sources = EnglishSources(books: books, wordfreq: wordfreq, realWords: realWords,
                                  titleWords: titleWords, blocklist: blocklist)
     let entries = buildEnglishEntries(sources, config: config)
+
+    if let vocabPath = values["vocab-out"] {
+        let folds = Set(entries.map { $0.text.lowercased() }).sorted()
+        let text = folds.joined(separator: "\n") + (folds.isEmpty ? "" : "\n")
+        guard FileManager.default.createFile(atPath: vocabPath, contents: Data(text.utf8)) else {
+            fail("cannot write file: \(vocabPath)")
+        }
+        print("words: \(entries.count)\nvocab: \(folds.count)")
+        return
+    }
 
     let index = SuccessorIndex(entries: entries, config: config)
     var bigramStats = InputStats(kind: "bigrams")
@@ -308,6 +325,24 @@ func runCommands(_ args: [String]) {
         """)
 }
 
+func runInspect(_ args: [String]) {
+    if args.contains("-h") || args.contains("--help") {
+        print(usage)
+        exit(0)
+    }
+    guard args.count == 1, let path = args.first else { fail("usage: semicolyn-dictbuild inspect <file>") }
+    guard let data = FileManager.default.contents(atPath: path) else { fail("cannot read file: \(path)") }
+    do {
+        print(try inspectDictionary([UInt8](data)))
+    } catch DictionaryInspectError.unknownFormat {
+        fail("unknown dictionary format (magic is neither GDIC nor GCMT): \(path)")
+    } catch DictionaryInspectError.corrupt(let format) {
+        fail("\(format) blob failed to load: \(path)")
+    } catch {
+        fail("cannot inspect \(path): \(error)")
+    }
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else { fail(usage) }
 switch command {
@@ -319,6 +354,8 @@ case "english":
     runEnglish(Array(args.dropFirst()))
 case "commands":
     runCommands(Array(args.dropFirst()))
+case "inspect":
+    runInspect(Array(args.dropFirst()))
 default:
     fail("unknown command: \(command)\n\(usage)")
 }
