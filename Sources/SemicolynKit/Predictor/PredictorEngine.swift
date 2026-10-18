@@ -108,7 +108,8 @@ public struct PredictorEngine: Sendable {
     /// A token with `.low` confidence graduates count-only (no stored literal) so it
     /// never surfaces as a completion, the core secret-exclusion invariant.
     public mutating func record(_ token: String, count: UInt32 = 1, after previous: String? = nil,
-                                echoConfirmed: Bool = true, optedOut: Bool = false) {
+                                echoConfirmed: Bool = true, optedOut: Bool = false,
+                                accepted: Bool = false) {
         // Normalize: learn the lookup word (surrounding punctuation trimmed; paths and
         // flags whole). Both the raw token and the word must pass the filter, so
         // trimming can never let an excluded form through.
@@ -124,7 +125,9 @@ public struct PredictorEngine: Sendable {
         // returns the occurrences to persist now (empty while deferred; the full
         // backfill on graduation; just this one once already graduated).
         let context = previous.flatMap(bigramContext(forPrevious:))
-        for occ in graduation.admit(token: word, previous: context, count: count, confidence: confidence) {
+        let required = requiredContexts(forWord: word, accepted: accepted)
+        for occ in graduation.admit(token: word, previous: context, count: count, confidence: confidence,
+                                    requiredContexts: required) {
             let storeLiteral = (occ.confidence == .high)
             learned.unigram.record(occ.token, count: occ.count, storeLiteral: storeLiteral)
             if let prev = occ.previous, !filter.excludes(prev) {
@@ -132,6 +135,17 @@ public struct PredictorEngine: Sendable {
                                       storeLiteral: storeLiteral)
             }
         }
+    }
+
+    /// Distinct contexts a word needs before it graduates: 1 when the user tapped it
+    /// or it was already learned in an earlier session, 2 for a dictionary word or
+    /// known tool, otherwise the tier default (nil = 3). Only speed changes: the
+    /// token filter and the confidence rule still gate what is stored.
+    private func requiredContexts(forWord word: String, accepted: Bool) -> Int? {
+        if accepted || learned.unigram.containsLiteral(word) { return 1 }
+        if english?.bestStoredForm(ofFolded: word.lowercased()) != nil { return 2 }
+        if commands?.isKnownTool(word) == true { return 2 }
+        return nil
     }
 
     /// The graduation context and bigram key for a raw previous token: its lookup word

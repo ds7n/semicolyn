@@ -60,8 +60,12 @@ public struct GraduationTier: Equatable, Sendable {
     /// occurrence (backfill); post-graduation, just this occurrence.
     /// The passed `confidence` is stamped onto every returned occurrence (backfill
     /// and passthrough alike) so L7 knows how to persist it.
+    /// `requiredContexts` overrides the tier threshold for this call (`nil` keeps the
+    /// threshold; values below 1 are clamped to 1). The caller picks it from how
+    /// trustworthy the word is (tapped, already learned, dictionary word, known tool).
     public mutating func admit(token: String, previous: String?, count: UInt32,
-                               confidence: LearnConfidence) -> [GraduatedOccurrence] {
+                               confidence: LearnConfidence,
+                               requiredContexts: Int? = nil) -> [GraduatedOccurrence] {
         if graduated.contains(token) {
             return [GraduatedOccurrence(token: token, previous: previous, count: count, confidence: confidence)]
         }
@@ -74,11 +78,12 @@ public struct GraduationTier: Equatable, Sendable {
         lastLineTokens.append(LineEntry(token: token, previous: previous, count: count))
 
         let contexts = pending[token]!
+        let required = max(1, requiredContexts ?? threshold)
         // Combined predicate: ≥N distinct preceding tokens, OR ≥N start-of-line
         // (nil) occurrences. A bare command repeated at the prompt graduates via the
         // nil count; a prompt-secret (non-nil preceding word) needs N distinct
         // contexts and so a once/few-typed password never graduates.
-        let graduates = contexts.count >= threshold || (contexts[nil] ?? 0) >= UInt32(threshold)
+        let graduates = contexts.count >= required || (contexts[nil] ?? 0) >= UInt32(required)
         guard graduates else { return [] }
         // Graduate: flush the backfill, promote, drop from pending.
         let flushed = contexts.map {

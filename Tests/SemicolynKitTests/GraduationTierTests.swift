@@ -159,3 +159,31 @@ final class GraduationTierTests: XCTestCase {
         XCTAssertEqual(after, [GraduatedOccurrence(token: "ls", previous: "x", count: 1, confidence: .high)])
     }
 }
+
+extension GraduationTierTests {
+    func testRequiredContextsOneGraduatesOnFirstAdmit() {
+        var tier = GraduationTier()
+        let out = tier.admit(token: "zork", previous: "a", count: 1, confidence: .high, requiredContexts: 1)
+        XCTAssertEqual(out, [GraduatedOccurrence(token: "zork", previous: "a", count: 1, confidence: .high)])
+    }
+
+    func testRequiredContextsZeroClampsToOne() {
+        var tier = GraduationTier()
+        let out = tier.admit(token: "zork", previous: "a", count: 1, confidence: .high, requiredContexts: 0)
+        XCTAssertEqual(out.count, 1)
+    }
+
+    func testRequiredContextsNilKeepsTierThreshold() {
+        var tier = GraduationTier()
+        XCTAssertTrue(tier.admit(token: "zork", previous: "a", count: 1, confidence: .high, requiredContexts: nil).isEmpty)
+        XCTAssertTrue(tier.admit(token: "zork", previous: "b", count: 1, confidence: .high, requiredContexts: nil).isEmpty)
+        XCTAssertEqual(tier.admit(token: "zork", previous: "c", count: 1, confidence: .high, requiredContexts: nil).count, 3)
+    }
+
+    func testRequiredContextsTwoAppliesToStartOfLineCount() {
+        var tier = GraduationTier()
+        XCTAssertTrue(tier.admit(token: "zork", previous: nil, count: 1, confidence: .high, requiredContexts: 2).isEmpty)
+        XCTAssertEqual(tier.admit(token: "zork", previous: nil, count: 1, confidence: .high, requiredContexts: 2),
+                       [GraduatedOccurrence(token: "zork", previous: nil, count: 2, confidence: .high)])
+    }
+}
