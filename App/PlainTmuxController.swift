@@ -79,6 +79,12 @@ final class PlainTmuxController {
         DebugLog.shared.log(.tmux, "plainTmux:windowAction \(action)")
     }
 
+    /// A hardware-keyboard window/pane shortcut (`⌘T`, `⇧⌘]`, `⌘D`, ...), already mapped
+    /// to its action by `keyboardTmuxAction`.
+    func onKeyboardShortcut(_ action: TmuxAction) {
+        sendAction(action)
+    }
+
     /// Finger-drag / edge-swipe window switch (relative: next/previous window).
     func onSwitchWindow(delta: Int) {
         let action: TmuxAction = delta >= 0 ? .nextWindow : .previousWindow

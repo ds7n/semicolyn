@@ -496,14 +496,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     // MARK: - Hardware-keyboard commands (Phase 4e)
 
     /// Dispatches a resolved hardware-keyboard command to its action. Window/pane
-    /// commands are currently no-ops; presentation commands publish a
+    /// commands drive plain tmux through the gesture bindings (`keyboardTmuxAction`)
+    /// and do nothing without tmux; presentation commands publish a
     /// `presentedSheet` intent for `SessionView`.
     func perform(_ command: KeyboardCommand) {
         DebugLog.shared.log(.input, "input:command \(command)")
         switch command {
         case .newWindow, .closeWindow, .switchWindow, .prevWindow, .nextWindow,
              .prevPane, .nextPane, .splitVertical, .splitHorizontal:
-            break   // window/pane commands: removed with -CC (plain-tmux rewire is a follow-up)
+            let action = keyboardTmuxAction(for: command, plainTmuxAttached: plainTmux != nil)
+            DebugLog.shared.log(.tmux, decisionLine(
+                "input:shortcut",
+                inputs: [("command", "\(command)"), ("plainTmux", "\(plainTmux != nil)")],
+                outputs: [("action", action.map { "\($0)" } ?? "none")],
+                reason: nil))
+            if let action { plainTmux?.onKeyboardShortcut(action) }
         case .clearScreen:         sendTerminalInput([0x0c])              // Ctrl-L
         case .paste:               pasteFromClipboard()
         case .reconnect:           reconnect()
