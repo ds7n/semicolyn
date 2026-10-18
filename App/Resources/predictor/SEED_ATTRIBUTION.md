@@ -3,16 +3,16 @@ SPDX-FileCopyrightText: 2026 True Positive LLC
 SPDX-License-Identifier: GPL-3.0-only
 -->
 
-# Predictor seed attribution
+# Predictor data attribution
 
-The bundled command-prediction seed (`seed_v1.sketch`) is a derived token-frequency
-fingerprint built from two open corpora. It contains extracted CLI command tokens and
-their frequencies, not verbatim source text; argument placeholders are removed.
+The bundled command dictionary (`commands_v2.bin`, described below) is derived from two
+open corpora. It holds scored command, subcommand and flag names, not verbatim source
+text; argument placeholders are removed.
 
 ## tldr-pages (https://github.com/tldr-pages/tldr): CC-BY-4.0
 Licensed under the Creative Commons Attribution 4.0 International License
-(https://creativecommons.org/licenses/by/4.0/). Changes were made: command-token
-sequences were extracted from the example pages and reduced to frequency counts.
+(https://creativecommons.org/licenses/by/4.0/). Changes were made: command, subcommand and
+flag usage was extracted from the example pages and reduced to frequency scores.
 
 ## Fig autocomplete (https://github.com/withfig/autocomplete): MIT
 The MIT License. Copyright (c) 2021 Hercules Labs Inc. (Fig).

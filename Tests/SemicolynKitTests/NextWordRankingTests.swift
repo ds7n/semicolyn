@@ -212,14 +212,6 @@ final class NextWordRankingTests: XCTestCase {
         XCTAssertEqual(score(s, 3), 2 / saturationLog + 0.5 / saturationLog, accuracy: 1e-12)
     }
 
-    func testLegacyNextWordQueryReadsFoldedKey() throws {
-        var e = PredictorEngine(learned: .empty, seed: nil)
-        // Count 2 per context clears the legacy confidence floor (2).
-        for prev in ["I", "we", "you"] { e.record("think", count: 2, after: prev) }
-        XCTAssertEqual(e.suggestions(forPrefix: "", after: "I"), ["think"])
-        XCTAssertEqual(e.suggestions(forPrefix: "", after: "i"), ["think"])
-    }
-
     func testEnglishAndLearnedSuccessorsSumAfterCapitalizedThe() throws {
         var e = try RankFixture.engine()
         graduate(&e, "cat", after: ["The", "A", "My"])

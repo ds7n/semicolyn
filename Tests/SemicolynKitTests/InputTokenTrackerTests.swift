@@ -144,14 +144,6 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertEqual(t.current, "cwhoami")
     }
 
-    func testChipsDropExactCurrentAndEmpties() {
-        XCTAssertEqual(predictorChips(current: "clau", suggestions: ["claude", "clang"]),
-                       ["claude", "clang"])
-        XCTAssertEqual(predictorChips(current: "claude", suggestions: ["claude", "clangd"]),
-                       ["clangd"])          // exact current dropped
-        XCTAssertEqual(predictorChips(current: "x", suggestions: []), [])
-    }
-
     // MARK: - L3 bracketed paste
 
     /// Bracketed-paste enter/exit markers as raw bytes.

@@ -7,14 +7,13 @@ import SemicolynKit
 /// Predictor evaluation driver. All logic lives in ``SeedKit``; this is argument parsing
 /// and file I/O.
 ///
-///     semicolyn-predeval replay -e legacy|v2 -t <file> [-l] [-n 5] [--cli-seed f] [--prose-seed f]
-///                               [--english f] [--commands f]
+///     semicolyn-predeval replay [-e v2] -t <file> [-l] [-n 5] [--english f] [--commands f]
 ///     semicolyn-predeval tldr-eval -p <tldr pages dir> -o <out file>
 
 let usage = """
 usage:
-  semicolyn-predeval replay -e|--engine legacy|v2 -t|--text <file> [-l|--learn] [-n|--slots 5]
-                            [--cli-seed <file>] [--prose-seed <file>] [--english <file>] [--commands <file>]
+  semicolyn-predeval replay [-e|--engine v2] -t|--text <file> [-l|--learn] [-n|--slots 5]
+                            [--english <file>] [--commands <file>]
   semicolyn-predeval tldr-eval -p|--pages <tldr pages dir> -o|--out <file>
   -h, --help   show this help
 """
@@ -55,13 +54,6 @@ func readBytes(_ path: String) -> [UInt8] {
     return [UInt8](data)
 }
 
-func readSeed(_ path: String?) -> [UInt8]? {
-    guard let path else { return nil }
-    let bytes = readBytes(path)
-    guard LegacyReplay.loadSeed(bytes) != nil else { fail("not a valid combined seed blob: \(path)") }
-    return bytes
-}
-
 func readDictionary(_ path: String?) -> [UInt8]? {
     guard let path else { return nil }
     let bytes = readBytes(path)
@@ -79,13 +71,14 @@ func readCommandTree(_ path: String?) -> [UInt8]? {
 func runReplay(_ args: [String]) {
     let opts = parse(
         args,
-        valued: ["engine", "text", "slots", "cli-seed", "prose-seed", "english", "commands"],
+        valued: ["engine", "text", "slots", "english", "commands"],
         switches: ["learn"],
         aliases: ["-e": "engine", "--engine": "engine", "-t": "text", "--text": "text",
                   "-l": "learn", "--learn": "learn", "-n": "slots", "--slots": "slots",
-                  "--cli-seed": "cli-seed", "--prose-seed": "prose-seed",
                   "--english": "english", "--commands": "commands"])
-    guard let engine = opts.values["engine"] else { fail("missing --engine\n\(usage)") }
+    // The single-ranker engine is the only one; `-e v2` is still accepted for old run scripts.
+    let engine = opts.values["engine"] ?? "v2"
+    guard engine == "v2" else { fail("unknown engine: \(engine) (expected v2)") }
     guard let textPath = opts.values["text"] else { fail("missing --text\n\(usage)") }
     let slots = opts.values["slots"].flatMap { Int($0) } ?? 5
     guard slots >= 1 else { fail("--slots must be a positive integer") }
@@ -97,19 +90,9 @@ func runReplay(_ args: [String]) {
         .filter { !$0.isEmpty }
     let config = ReplayConfig(visibleSlots: slots, learn: opts.flags.contains("learn"))
 
-    let report: ReplayReport
-    switch engine {
-    case "legacy":
-        var predictor = LegacyReplay(cliSeed: readSeed(opts.values["cli-seed"]),
-                                     proseSeed: readSeed(opts.values["prose-seed"]))
-        report = replay(lines: lines, predictor: &predictor, config: config)
-    case "v2":
-        var predictor = EngineReplay(english: readDictionary(opts.values["english"]),
-                                     commands: readCommandTree(opts.values["commands"]))
-        report = replay(lines: lines, predictor: &predictor, config: config)
-    default:
-        fail("unknown engine: \(engine) (expected legacy or v2)")
-    }
+    var predictor = EngineReplay(english: readDictionary(opts.values["english"]),
+                                 commands: readCommandTree(opts.values["commands"]))
+    let report = replay(lines: lines, predictor: &predictor, config: config)
     print(String(format: "saved/100=%.2f zero=%.1f%% lookups=%d hits=%@ p95ms=%.3f",
                  report.savedPer100, report.zeroRate * 100, report.lookups,
                  "\(report.hitsBySlot)", report.p95LatencyMs))

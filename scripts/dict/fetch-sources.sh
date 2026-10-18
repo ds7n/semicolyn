@@ -35,8 +35,8 @@ usage: scripts/dict/fetch-sources.sh [options]
   -s, --scowl-version <ver>    SCOWL release (default $SCOWL_DEFAULT)
   -d, --wiki-date <yyyymmdd>   enwiki dump date for all-titles-in-ns0 (default $WIKI_DEFAULT)
   -f, --wordfreq-version <v>   wordfreq wheel version (default $WORDFREQ_DEFAULT)
-  -t, --tldr-ref <tag>         tldr-pages tag (default: the pin in scripts/build-seed.sh)
-  -g, --fig-ref <sha>          Fig autocomplete commit (default: the pin in scripts/build-seed.sh)
+  -t, --tldr-ref <tag>         tldr-pages tag (default: the pin in scripts/dict/common.sh)
+  -g, --fig-ref <sha>          Fig autocomplete commit (default: the pin in scripts/dict/common.sh)
   -h, --help                   show this help
 
 Prints "SOURCES OK scowl=<n> titles=<n> wordfreq=<n> tldr=<ref> fig=<ref>" on success.
@@ -169,7 +169,7 @@ clone_pinned() {
   fi
 }
 
-# --- tldr-pages and Fig autocomplete at the build-seed.sh pins.
+# --- tldr-pages and Fig autocomplete at the scripts/dict/common.sh pins.
 fetch_repo() {
   local key="$1" repo="$2" ref="$3" licence="$4" dest="$src/$1" head
   [ -f "$src/$key.done" ] && { log "$key: already done"; return; }

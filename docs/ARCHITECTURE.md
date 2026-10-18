@@ -32,13 +32,14 @@ The design keeps the **Apple-only UI/SDK layer thin** so the maximum surface sta
 | `App/` + `project.yml` | iOS app target (SwiftUI MVP); `project.yml` is the XcodeGen manifest |
 | `crates/semicolyn-ssh-core/` | Rust SSH core (russh) exposed to Swift via UniFFI |
 | `Sources/SemicolynKit/` | Platform-agnostic Swift: `Model/`, `Storage/`, `Crypto/`, `Tmux/`, `Predictor/`, `Theme/`, `Terminal/`, `IO/` |
-| `Sources/SeedKit/`, `Sources/semicolyn-seedbuild/` | Build-time predictor-seed ingestion (tldr-pages + Fig specs) |
+| `Sources/SeedKit/`, `Sources/semicolyn-dictbuild/`, `Sources/semicolyn-predeval/` | Build-time predictor tooling: dictionary builders (English, commands) and the replay evaluation harness |
 | `Tests/` | `SemicolynKitTests`, `SeedKitTests`, `BridgeTests` (macOS) |
 | `docs/superpowers/specs/` | Per-subsystem locked design specs (one design each) |
 | `docs/superpowers/plans/` | The roadmap + per-phase implementation plans |
 | `docs/brainstorming-decisions.md` | Every locked decision, by topic, with the deferred list |
 | `mockups/specs/`, `mockups/drafts/` | Locked visual record · pre-decision explorations |
-| `scripts/` | `build-xcframework.sh`, `build-mosh-xcframework.sh`, `build-seed.sh` |
+| `scripts/` | `build-xcframework.sh`, `build-mosh-xcframework.sh`, `build-english-dict.sh`, `build-command-dict.sh`, `dict/` |
+| `corpora/eval/` | Predictor evaluation text only (commands and prose replay); never shipped or used to build a dictionary |
 
 ## Spec map
 
@@ -50,7 +51,7 @@ Every v1 subsystem has a locked spec under [`docs/superpowers/specs/`](superpowe
 
 **Input — keybar & keyboard** — `keybar-customization` (layout / gesture ownership) · `function-keys` (Fn / caps-lock SM) · `external-keyboard`.
 
-**On-device predictor** — `predictor-design` is the overview; **16 component specs** (`predictor-core-sketches`, `-prefix-ranking`, `-bigram-next-token`, `-candidate-aggregate`, `-daily-rollover`, `-bigram-rollover`, `-seed-deference`/`-seed-ingestion`/`-seed-runtime-load`, `-fig-ingestion`, `-output-harvesting`, `-privacy-filter`, `-learned-store`, `-engine`, `-rolling-serialization`, `-vocab-serialization`) cover the CMS+Bloom vocabulary, ranking, rollover, ingestion, and privacy. Suggestion-surface hygiene (min-prefix gate, typed-echo-only harvest, chip clearing) is `2026-07-07-predictor-suggestion-hygiene-design`.
+**On-device predictor**: `2026-10-17-predictor-rework-design` is the current design: one engine (`PredictorEngine`, `SuggestionRanker`) scores every candidate on one scale from the shipped English dictionary, the command tree, learned words (CMS+Bloom rolling stores, `predictor-learned-store` / `-rolling-serialization`), screen words harvested from output (`predictor-output-harvesting`), bigram context and spelling corrections; `predictor-privacy-filter` and the secret-exclusion layers gate what is learned. Two files ship in `App/Resources/predictor/`: `english_v2.bin` (GDIC, words and word pairs with 1-byte scores) and `commands_v2.bin` (GCMT, a scored command, subcommand and flag tree), each with a `.provenance.txt` record and REUSE sidecar; attribution is in `SEED_ATTRIBUTION.md`. They are built by `scripts/build-english-dict.sh` and `scripts/build-command-dict.sh` (the `semicolyn-dictbuild` tool, inside the dev container) from sources fetched by `scripts/dict/fetch-sources.sh`; tldr pages held out by `TldrHoldout` give the command tree only their tool name, never their examples. `semicolyn-predeval` replays text through the engine (`replay -t <file> [-l] [-n 5] --english <f> --commands <f>`: keystrokes saved per 100, zero-suggestion rate, hits by slot, p95 latency); `tldr-eval` writes the held-out command lines (`corpora/eval/commands_eval.txt`), and `corpora/eval/dev_v1.txt` + `prompt_v1.txt` are the prose text. Suggestion-surface hygiene (typed-echo-only learning, chip clearing) is `2026-07-07-predictor-suggestion-hygiene-design`.
 
 **Data, host model & sync** — `host-config-model` (schema, resolution, storage backbone) · `identities-keys-management` · `icloud-sync-scope` (what syncs vs stays local).
 

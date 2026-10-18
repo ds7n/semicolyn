@@ -18,13 +18,3 @@ public enum TldrHoldout {
         return hash % 10 == 0
     }
 }
-
-extension TldrHoldout {
-    /// The legacy seed token sequences of the tldr page `pageStem`: ``TldrParser/invocations(fromPage:)``
-    /// of `markdown`, or `[]` when `excludingHeldOut` is set and the page is held out
-    /// (``isHeldOut(pageStem:)``), so a seed built for a fair baseline never sees evaluation text.
-    public static func seedInvocations(pageStem: String, markdown: String, excludingHeldOut: Bool) -> [[String]] {
-        if excludingHeldOut && isHeldOut(pageStem: pageStem) { return [] }
-        return TldrParser.invocations(fromPage: markdown)
-    }
-}

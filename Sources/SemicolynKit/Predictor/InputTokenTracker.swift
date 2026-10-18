@@ -430,10 +430,3 @@ public struct InputTokenTracker: Equatable, Sendable {
         lineResets = 0
     }
 }
-
-/// The chips to show for `current` given the engine's ranked `suggestions`: the
-/// engine already prefix-matches, applies the confidence floor, and caps at top-K;
-/// the strip only drops the exact token already typed (and any empties).
-public func predictorChips(current: String, suggestions: [String]) -> [String] {
-    suggestions.filter { $0 != current && !$0.isEmpty }
-}

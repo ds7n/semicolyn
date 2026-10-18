@@ -83,16 +83,6 @@ final class ReplayHarnessTests: XCTestCase {
     }
 }
 
-final class LegacyReplayTests: XCTestCase {
-    func testNoSeedYieldsNoSuggestionsAndCommitLearnsWords() {
-        var p = LegacyReplay(cliSeed: nil, proseSeed: nil)
-        XCTAssertEqual(p.suggestions(line: "gi"), [])
-        // The graduation tier defers learning until a token recurs, so commit repeatedly.
-        for _ in 0..<6 { p.commit(line: "gitfoo status") }
-        XCTAssertTrue(p.suggestions(line: "gitf").contains("gitfoo"))
-    }
-}
-
 final class EngineReplayTests: XCTestCase {
     private func englishBlob() throws -> [UInt8] {
         try WordDictionary(entries: [ScoredWord(text: "hello", score: 200),

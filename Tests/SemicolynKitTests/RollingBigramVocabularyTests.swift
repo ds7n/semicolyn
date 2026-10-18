@@ -73,16 +73,14 @@ final class RollingBigramVocabularyTests: XCTestCase {
                        ["stash", "status"])
     }
 
-    func testNextSourceRanksWindowedThroughSeededSuggester() {
+    func testNextSourceRanksWindowed() {
         // The marquee, windowed: recent `git status` beats older `git commit`.
         var user = RollingBigramVocabulary()
         user.record(previous: "git", next: "commit", count: 3)
         user.rollover()
         user.record(previous: "git", next: "status", count: 5)
-        let emptySeed = BigramVocabulary()
-        let s = SeededSuggester(learned: user.nextSource(after: "git", window: .days7),
-                                seed: emptySeed.nextSource(after: "git"))
-        XCTAssertEqual(s.suggestions(forPrefix: ""), ["status", "commit"])
+        XCTAssertEqual(user.nextSource(after: "git", window: .days7).candidates(forPrefix: "").sorted { $0.count > $1.count },
+                       [TokenCount(token: "status", count: 5), TokenCount(token: "commit", count: 3)])
     }
 
     func testGuardsRejectUnrecordablePairs() {

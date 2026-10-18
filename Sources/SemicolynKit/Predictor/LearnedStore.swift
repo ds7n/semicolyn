@@ -22,11 +22,10 @@ public struct LearnedState: Equatable, Sendable {
 }
 
 /// Persists the learned state to disk under a caller-provided `directory` (the app
-/// passes the predictor dir; tests pass a temp dir). The read-write counterpart to
-/// ``SeedStore``: `save` overwrites atomically, `load` is fail-soft to an empty
-/// state. Both rolling states live in one atomically-written `learned.sketch`, so
-/// a thrown/interrupted save never pairs a fresh unigram state with a stale bigram
-/// one. See `2026-06-21-predictor-learned-store-design`.
+/// passes the predictor dir; tests pass a temp dir). `save` overwrites atomically,
+/// `load` is fail-soft to an empty state. Both rolling states live in one
+/// atomically-written `learned.sketch`, so a thrown/interrupted save never pairs a
+/// fresh unigram state with a stale bigram one. See `2026-06-21-predictor-learned-store-design`.
 public struct LearnedStore {
     private let directory: URL
 

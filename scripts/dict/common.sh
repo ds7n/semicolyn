@@ -39,13 +39,19 @@ dictbuild_bin() {
   printf '%s\n' "$bin"
 }
 
-# pinned_ref <TLDR_REF|FIG_REF>: the default ref pinned in scripts/build-seed.sh, so the
-# command dictionary and the legacy seed cannot drift apart.
+# Pinned source refs for the command dictionary: the tldr-pages tag and the Fig
+# autocomplete commit (the same pins the retired legacy seed used, so the evaluation text
+# and the shipped dictionary come from one tldr snapshot).
+DICT_TLDR_REF_PIN="v2.3"
+DICT_FIG_REF_PIN="aef52acff84c45edde61ae610cc2c964802b9a38"
+
+# pinned_ref <TLDR_REF|FIG_REF>: the default ref pinned above.
 pinned_ref() {
-  local name="$1" value
-  value="$(sed -n "s/^: \"\${${name}:=\(.*\)}\"\$/\1/p" scripts/build-seed.sh)"
-  [ -n "$value" ] || die "cannot read the $name pin from scripts/build-seed.sh"
-  printf '%s\n' "$value"
+  case "$1" in
+    TLDR_REF) printf '%s\n' "$DICT_TLDR_REF_PIN" ;;
+    FIG_REF) printf '%s\n' "$DICT_FIG_REF_PIN" ;;
+    *) die "unknown pin: $1" ;;
+  esac
 }
 
 # file_bytes <file>: size in bytes.

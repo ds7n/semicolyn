@@ -55,7 +55,7 @@
 /*.orig
 .DS_Store
 
-# Build-time seed artifacts (produced by scripts/build-seed.sh; bundled later)
+# Build-time seed artifacts (from the retired legacy seed build)
 /seeds/
 
 # Superpowers scratch — SDD progress ledger + brainstorm visual-companion sessions

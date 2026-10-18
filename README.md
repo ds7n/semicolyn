@@ -32,8 +32,8 @@ validated by macOS CI.
   tabs and panes (not a screen-scraped TUI), with a raw-PTY degraded fallback.
 - **On-device predictor** — learns your command vocabulary with Count-Min Sketch
   + Bloom filters (a lossy frequency fingerprint, never recoverable text),
-  defers to a bundled seed per-prefix, and harvests just-seen tokens from command
-  output. Write-time privacy filter keeps secrets out of the model.
+  ranks it with bundled English and command dictionaries, and harvests just-seen
+  tokens from command output. Write-time privacy filter keeps secrets out of the model.
 - **Security-first, zero-telemetry** — no analytics, crash reporting, ads, or
   third-party SDKs. Keys live in iCloud Keychain or Secure Enclave; CloudKit
   records are client-side AES-256-GCM so Apple sees only ciphertext.
