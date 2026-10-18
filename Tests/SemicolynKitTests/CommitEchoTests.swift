@@ -125,11 +125,85 @@ final class CommitEchoTests: XCTestCase {
 
     func testMaxCharsBoundaryStopsBeforeEarlierRow() {
         // Cursor row holds 4 chars. maxChars 4: already enough, no earlier row.
-        let rows = ["first row ", "$ ls      "]
+        let rows = ["first rowX", "$ ls      "]
         let oracle = GridOracle(rows: rows, cursor: EchoCursor(row: 1, col: 4), columns: 10)
         XCTAssertEqual(renderedTextBeforeCursor(oracle: oracle, maxChars: 4), "$ ls")
-        // maxChars 5: one short, so exactly one earlier whole row is prepended.
-        XCTAssertEqual(renderedTextBeforeCursor(oracle: oracle, maxChars: 5), "first row $ ls")
+        // maxChars 5: one short, so exactly one earlier full row is prepended.
+        XCTAssertEqual(renderedTextBeforeCursor(oracle: oracle, maxChars: 5), "first rowX$ ls")
+    }
+
+    // MARK: - Earlier rows only for a real wrap (adversarial)
+
+    func testEarlierRowNotFullIsNotPrepended() {
+        // The row above ends in a blank cell, so the cursor row did not wrap from it.
+        let oracle = GridOracle(rows: ["first row ", "$ ls"], cursor: EchoCursor(row: 1, col: 4), columns: 10)
+        XCTAssertEqual(renderedTextBeforeCursor(oracle: oracle, maxChars: 100), "$ ls")
+    }
+
+    func testCursorAtColumnOneWithTextWrapsFromFullRow() {
+        // Boundary: col 1 (the minimum past 0) with a non-blank prefix reads the full row above.
+        let oracle = GridOracle(rows: ["abcd", "e   "], cursor: EchoCursor(row: 1, col: 1), columns: 4)
+        XCTAssertEqual(renderedTextBeforeCursor(oracle: oracle, maxChars: 5), "abcde")
+    }
+
+    func testWrapChainStopsAtFirstNonFullRow() {
+        // r0 is short (not part of the wrap); r1 is full and wraps into the cursor row.
+        let rows = ["r ", "r1", "r2"]
+        let oracle = GridOracle(rows: rows, cursor: EchoCursor(row: 2, col: 2), columns: 2)
+        XCTAssertEqual(renderedTextBeforeCursor(oracle: oracle, maxChars: 100), "r1r2")
+    }
+
+    func testCursorAtColumnZeroUnderRowEndingInTypedTextDoesNotConfirm() {
+        // "Token: abcd1234efgh" printed, then a silent `read -s` with the cursor at
+        // col 0 of the next row: the token on the row above must not count as echo.
+        let oracle = GridOracle(
+            rows: ["Token: abcd1234efgh", "                   "],
+            cursor: EchoCursor(row: 1, col: 0), columns: 19)
+        let text = renderedTextBeforeCursor(oracle: oracle, maxChars: 12)
+        XCTAssertEqual(text, "")
+        XCTAssertFalse(rowConfirmsEcho(typedLine: "abcd1234efgh", renderedBeforeCursor: text ?? "x"))
+    }
+
+    func testCursorAtColumnZeroUnderRowEndingInTypedMinusLastDoesNotConfirm() {
+        // Same, but the row above ends with the typed text minus its last char
+        // (the 1-char slack shape).
+        let oracle = GridOracle(
+            rows: ["Token: abcd1234efg", "                  "],
+            cursor: EchoCursor(row: 1, col: 0), columns: 18)
+        let text = renderedTextBeforeCursor(oracle: oracle, maxChars: 12)
+        XCTAssertEqual(text, "")
+        XCTAssertFalse(rowConfirmsEcho(typedLine: "abcd1234efgh", renderedBeforeCursor: text ?? "x"))
+    }
+
+    func testBlankIndentedPrefixUnderRowEndingInTypedTextDoesNotConfirm() {
+        // An indented silent prompt: the cursor-row prefix is all blank.
+        let oracle = GridOracle(
+            rows: ["Token: abcd1234efgh", "                   "],
+            cursor: EchoCursor(row: 1, col: 4), columns: 19)
+        let text = renderedTextBeforeCursor(oracle: oracle, maxChars: 12)
+        XCTAssertEqual(text, "    ")
+        XCTAssertFalse(rowConfirmsEcho(typedLine: "abcd1234efgh", renderedBeforeCursor: text ?? "x"))
+    }
+
+    // MARK: - Decided edge outcomes
+
+    func testOneCharSlackConfirmsHunterWithBlankLastCellByDesign() {
+        // Decided: "hunter" typed, "hunte" on screen and the last cell still blank
+        // (one byte in flight) CONFIRMS. A 6-char line with 5 echoed is a visible
+        // echo, not a hidden field; the spec's 1-char slack accepts it.
+        let oracle = GridOracle(rows: ["$ hunte "], cursor: EchoCursor(row: 0, col: 8), columns: 10)
+        let text = renderedTextBeforeCursor(oracle: oracle, maxChars: 6)
+        XCTAssertEqual(text, "$ hunte ")
+        XCTAssertTrue(rowConfirmsEcho(typedLine: "hunter", renderedBeforeCursor: text ?? ""))
+    }
+
+    func testWideCharacterLineDoesNotConfirm() {
+        // A wide glyph fills one cell and leaves a blank continuation cell, so the
+        // reading has gaps and never matches: not learned (fail-safe).
+        let oracle = GridOracle(rows: ["$ 日 本 "], cursor: EchoCursor(row: 0, col: 6), columns: 10)
+        let text = renderedTextBeforeCursor(oracle: oracle, maxChars: 2)
+        XCTAssertEqual(text, "$ 日 本 ")
+        XCTAssertFalse(rowConfirmsEcho(typedLine: "日本", renderedBeforeCursor: text ?? ""))
     }
 
     func testEarlierRowsOldestFirstAndStopAtTop() {
@@ -144,9 +218,10 @@ final class CommitEchoTests: XCTestCase {
     }
 
     func testCursorAtColumnZeroReadsEmptyCursorRow() {
+        // Col 0: no wrap evidence, so the full row above is never read.
         let oracle = GridOracle(rows: ["ab", "  "], cursor: EchoCursor(row: 1, col: 0), columns: 2)
         XCTAssertEqual(renderedTextBeforeCursor(oracle: oracle, maxChars: 0), "")
-        XCTAssertEqual(renderedTextBeforeCursor(oracle: oracle, maxChars: 1), "ab")
+        XCTAssertEqual(renderedTextBeforeCursor(oracle: oracle, maxChars: 1), "")
     }
 
     func testUnreadableCellOnCursorRowGivesNil() {

@@ -513,8 +513,9 @@ final class PasswordEntryDetectorTests: XCTestCase {
         XCTAssertFalse(d.shouldLearnCommittedLine())
     }
 
-    func testCommitRowCannotOverrideAlternateBuffer() {
-        // Full-screen TUI: even a confirmed row is not learned.
+    func testCommitRowVerdictLearnsUnderAlternateBuffer() {
+        // Plain tmux / Mosh keep the outer terminal on the alternate buffer for the
+        // whole session; a row that visibly shows the typed line is still learned.
         var d = PasswordEntryDetector()
         let oracle = ScriptedEchoOracle()
         oracle.isAlternateBuffer = true
@@ -522,10 +523,77 @@ final class PasswordEntryDetectorTests: XCTestCase {
         d.noteInput(Array("ls".utf8))
         d.noteOutput(Array("ls".utf8))
         d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+    }
+
+    func testAlternateBufferWithoutVerdictStillSuppresses() {
+        // No commit-row verdict: the oracle path's alt-screen suppression applies
+        // as before, even though every keystroke classified echoed.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        oracle.cellAt = { r, c in
+            guard r == 0 else { return EchoCell(scalar: nil) }
+            return c == 0 ? EchoCell(scalar: "a") : (c == 1 ? EchoCell(scalar: "b") : EchoCell(scalar: nil))
+        }
+        oracle.nextCursor = EchoCursor(row: 0, col: 2)
+        d.settleLine(scalars: Array("ab".unicodeScalars), from: EchoCursor(row: 0, col: 0))
         XCTAssertFalse(d.shouldLearnCommittedLine())
         // Control: the same line on the primary buffer is learned.
         oracle.isAlternateBuffer = false
         XCTAssertTrue(d.shouldLearnCommittedLine())
+    }
+
+    func testAlternateBufferWithFalseVerdictSuppresses() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("hunter2".utf8))
+        d.noteOutput(Array("hunter2".utf8))
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testPromptBeatsTrueVerdictUnderAlternateBuffer() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteOutput(Array("Password: ".utf8))
+        d.resetLine()
+        d.noteInput(Array("ls".utf8))
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testNoteInputClearsVerdict() {
+        // A verdict read before more typing is stale: more keys arrived after it.
+        var d = PasswordEntryDetector()
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+        d.noteInput(Array("xy".utf8))                    // no echo for the new keys
+        XCTAssertFalse(d.shouldLearnCommittedLine())     // byte path: 2 typed, 0 echoed
+
+        var e = PasswordEntryDetector()
+        e.noteInput(Array("hunter2".utf8))
+        e.noteOutput(Array("hunter2".utf8))
+        e.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        e.noteInput(Array("x".utf8))
+        e.noteOutput(Array("x".utf8))
+        XCTAssertTrue(e.shouldLearnCommittedLine())      // false verdict also cleared
+    }
+
+    func testNilReadingClearsEarlierTrueVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ls".utf8))                     // nothing echoed in bytes
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: nil)
+        XCTAssertFalse(d.shouldLearnCommittedLine())      // falls back to bytes: suppress
     }
 
     func testCommitRowFalseSuppresses() {

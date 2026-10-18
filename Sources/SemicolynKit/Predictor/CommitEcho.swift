@@ -23,9 +23,12 @@ public func rowConfirmsEcho(typedLine: String, renderedBeforeCursor: String) -> 
 }
 
 /// The rendered text before the cursor: the cursor row from column 0 up to (not
-/// including) the cursor, preceded by whole earlier rows, oldest first, added
-/// only while fewer than `maxChars` characters have been gathered (so a line that
-/// wrapped across rows is read back whole). Blank cells read as spaces.
+/// including) the cursor. Earlier rows are prepended (oldest first, while fewer
+/// than `maxChars` characters are gathered) ONLY for a real wrap: the cursor is
+/// past column 0, the cursor-row prefix is not all blank, and each prepended row
+/// is full (its last cell is non-blank). Otherwise only the cursor row is read,
+/// so text left on an earlier row (a printed token above a silent `read -s`) can
+/// never stand in for an echo. Blank cells read as spaces.
 ///
 /// Returns nil (fail-safe: no verdict) when the cursor or `columns` is
 /// unreadable, the cursor lies outside the grid, or any needed cell is unreadable.
@@ -33,9 +36,14 @@ public func renderedTextBeforeCursor(oracle: EchoOracle, maxChars: Int) -> Strin
     guard let cursor = oracle.cursor(), let columns = oracle.columns else { return nil }
     guard columns > 0, cursor.row >= 0, cursor.col >= 0, cursor.col <= columns else { return nil }
     guard var text = readRow(oracle: oracle, row: cursor.row, upTo: cursor.col) else { return nil }
+    // No wrap evidence on the cursor row (an empty prefix at col 0, or an
+    // all-blank one): never look above it.
+    guard text.unicodeScalars.contains(where: { $0 != " " }) else { return text }
     var row = cursor.row - 1
     while text.count < maxChars, row >= 0 {
         guard let earlier = readRow(oracle: oracle, row: row, upTo: columns) else { return nil }
+        // A row ending in a blank did not wrap into the next one: stop the chain.
+        guard earlier.unicodeScalars.last != " " else { break }
         text = earlier + text
         row -= 1
     }

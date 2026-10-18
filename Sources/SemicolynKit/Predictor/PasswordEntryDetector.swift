@@ -127,7 +127,10 @@ public struct PasswordEntryDetector: Sendable {
     /// Fold the OUTGOING keystroke chunk for the current line. Counts printable
     /// characters typed; control bytes (Enter, Ctrl-*, ESC) are handled by
     /// `commitLine`/`resetLine`, which the caller drives off the same stream.
+    /// Any input clears a commit-row verdict: keys typed after the reading make it
+    /// stale, so the App must read the row after the line's last input.
     public mutating func noteInput(_ bytes: [UInt8]) {
+        commitRowVerdict = nil
         for b in bytes {
             switch b {
             case 0x21...0x7e:            // printable → a character that SHOULD echo
@@ -203,10 +206,14 @@ public struct PasswordEntryDetector: Sendable {
 
     /// Record the commit-time echo check for the line about to commit: the App
     /// reads `renderedBeforeCursor` (see `renderedTextBeforeCursor`) at Enter,
-    /// before sending it. A nil reading (grid unreadable) records nothing, leaving
-    /// any earlier verdict and the per-keystroke / byte logic in charge.
+    /// before sending it, and after the line's last `noteInput` (which clears the
+    /// verdict). A nil reading (grid unreadable) clears an earlier `true` verdict
+    /// (it is no longer backed by a fresh reading) but keeps an earlier `false`.
     public mutating func noteCommitRow(typedLine: String, renderedBeforeCursor: String?) {
-        guard let renderedBeforeCursor else { return }
+        guard let renderedBeforeCursor else {
+            if commitRowVerdict == true { commitRowVerdict = nil }
+            return
+        }
         commitRowVerdict = rowConfirmsEcho(typedLine: typedLine, renderedBeforeCursor: renderedBeforeCursor)
     }
 
@@ -215,19 +222,22 @@ public struct PasswordEntryDetector: Sendable {
     /// prompt preceded it. Fail-safe: an empty line, an unconfirmed line, or a
     /// prompt-preceded line all return `false` (do not learn).
     ///
-    /// Precedence (security contract): a password prompt suppresses, then the
-    /// alternate buffer suppresses, then a commit-row verdict decides, else the
-    /// per-keystroke oracle tally or byte count. A commit-row `true` can never
-    /// override a prompt or alt-screen suppression.
+    /// Precedence (security contract): a password prompt suppresses; then a
+    /// commit-row verdict decides; else the per-keystroke oracle tally (with its
+    /// alt-screen suppression) or the byte count. A commit-row `true` can never
+    /// override a prompt. It does outrank the alt-screen check, because plain tmux
+    /// and Mosh keep the outer terminal on the alternate buffer all session, and
+    /// the row check only confirms text visibly echoed at the cursor (masked or
+    /// hidden fields still fail the match).
     ///
     /// Call once, at the moment a line commits, BEFORE `resetLine`.
     public func shouldLearnCommittedLine() -> Bool {
         if promptSuppressedThisLine { return false }
-        if oracle?.isAlternateBuffer == true { return false }       // alt-screen ⇒ suppress
         if let commitRowVerdict { return commitRowVerdict }
         // Oracle path: when the buffer check classified this line, trust the
         // majority-echoed statistic (the far stronger signal per spec L1).
         if oracleActiveThisLine {
+            if oracle?.isAlternateBuffer == true { return false }   // alt-screen ⇒ suppress
             guard outputSeenThisLine else { return false }          // stall ⇒ ambiguous ⇒ suppress
             guard oracleClassifiedThisLine > 0 else { return false }
             // Strong majority required (> 50%). A tie or worse suppresses —
