@@ -62,6 +62,20 @@ func readSeed(_ path: String?) -> [UInt8]? {
     return bytes
 }
 
+func readDictionary(_ path: String?) -> [UInt8]? {
+    guard let path else { return nil }
+    let bytes = readBytes(path)
+    guard WordDictionary(deserializing: bytes) != nil else { fail("not a valid word dictionary: \(path)") }
+    return bytes
+}
+
+func readCommandTree(_ path: String?) -> [UInt8]? {
+    guard let path else { return nil }
+    let bytes = readBytes(path)
+    guard CommandTree(deserializing: bytes) != nil else { fail("not a valid command tree: \(path)") }
+    return bytes
+}
+
 func runReplay(_ args: [String]) {
     let opts = parse(
         args,
@@ -90,7 +104,9 @@ func runReplay(_ args: [String]) {
                                      proseSeed: readSeed(opts.values["prose-seed"]))
         report = replay(lines: lines, predictor: &predictor, config: config)
     case "v2":
-        fail("engine v2 is not available yet")
+        var predictor = EngineReplay(english: readDictionary(opts.values["english"]),
+                                     commands: readCommandTree(opts.values["commands"]))
+        report = replay(lines: lines, predictor: &predictor, config: config)
     default:
         fail("unknown engine: \(engine) (expected legacy or v2)")
     }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import XCTest
 @testable import SeedKit
+import SemicolynKit
 
 struct ScriptedPredictor: ReplayPredictor {
     var table: [String: [String]]
@@ -89,5 +90,37 @@ final class LegacyReplayTests: XCTestCase {
         // The graduation tier defers learning until a token recurs, so commit repeatedly.
         for _ in 0..<6 { p.commit(line: "gitfoo status") }
         XCTAssertTrue(p.suggestions(line: "gitf").contains("gitfoo"))
+    }
+}
+
+final class EngineReplayTests: XCTestCase {
+    private func englishBlob() throws -> [UInt8] {
+        try WordDictionary(entries: [ScoredWord(text: "hello", score: 200),
+                                     ScoredWord(text: "help", score: 100)],
+                           successors: [:]).serialize()
+    }
+
+    func testDictionaryWordsRankByScore() throws {
+        var p = EngineReplay(english: try englishBlob(), commands: nil)
+        XCTAssertEqual(p.suggestions(line: "hel"), ["hello", "help"])
+    }
+
+    func testUnreadableBlobAddsNothing() {
+        var p = EngineReplay(english: [1, 2, 3], commands: [4, 5])
+        XCTAssertEqual(p.suggestions(line: "hel"), [])
+    }
+
+    func testNoDictionariesYieldNothingUntilCommitsLearnTheWord() {
+        var p = EngineReplay(english: nil, commands: nil)
+        XCTAssertEqual(p.suggestions(line: "gitf"), [])
+        // The graduation tier defers an unknown word until it recurs in distinct contexts.
+        for prev in ["a", "b", "c", "d"] { p.commit(line: "\(prev) gitfoo") }
+        XCTAssertEqual(p.suggestions(line: "gitf"), ["gitfoo"])
+    }
+
+    func testOneCommitDoesNotLearnAnUnknownWord() {
+        var p = EngineReplay(english: nil, commands: nil)
+        p.commit(line: "a gitfoo")
+        XCTAssertEqual(p.suggestions(line: "gitf"), [])
     }
 }
