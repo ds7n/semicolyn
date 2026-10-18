@@ -1,0 +1,11 @@
+SPDX-FileCopyrightText: 2026 True Positive LLC
+SPDX-FileCopyrightText: Google Books Ngram Viewer data (Google LLC), CC BY 3.0
+SPDX-FileCopyrightText: wordfreq data (Robyn Speer and contributors), CC BY-SA 4.0
+SPDX-FileCopyrightText: Wikipedia contributors (enwiki page titles), CC BY-SA 4.0
+SPDX-FileCopyrightText: SCOWL (Kevin Atkinson and contributors), SCOWL copyright notice
+SPDX-License-Identifier: CC-BY-SA-4.0
+
+Derived English word and word-pair frequency scores (GDIC). Changes were made: reduced to
+word and word-pair frequency scores. See english_v2.provenance.txt and SEED_ATTRIBUTION.md.
+
+SCOWL licence notice: the full SCOWL Copyright file ships verbatim as SCOWL_COPYRIGHT.txt.

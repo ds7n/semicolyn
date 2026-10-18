@@ -6,7 +6,7 @@ import Foundation
 /// Each example invocation is an inline backtick code span (`git commit
 /// --message "{{message}}"`); this extracts those spans and segments them into
 /// clean vocabulary, dropping user-substituted `{{placeholders}}` and shell
-/// operators. Pure text→tokens — the unigram/bigram decision belongs to
+/// operators. Pure text→tokens, the unigram/bigram decision belongs to
 /// ``SeedBuilder``. See `2026-06-21-predictor-seed-ingestion-design`.
 public enum TldrParser {
     /// One token sequence per command segment found in `markdown`, in document
@@ -17,12 +17,32 @@ public enum TldrParser {
     /// Returns `[]` for a page with no code spans.
     public static func invocations(fromPage markdown: String) -> [[String]] {
         var sequences: [[String]] = []
-        for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
-            for span in codeSpans(in: String(line)) {
-                sequences.append(contentsOf: segments(in: span))
-            }
+        for span in exampleSpans(fromPage: markdown) {
+            sequences.append(contentsOf: segments(in: span))
         }
         return sequences
+    }
+
+    /// The raw contents of every inline code span in `markdown`, in document order, with
+    /// placeholders and operators intact (for callers that segment the line themselves).
+    public static func exampleSpans(fromPage markdown: String) -> [String] {
+        var spans: [String] = []
+        for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
+            spans.append(contentsOf: codeSpans(in: String(line)))
+        }
+        return spans
+    }
+
+    /// The example commands of `markdown`: the code spans of lines that start (after
+    /// indentation) with a backtick. Inline code inside description lines (`stdout`) is
+    /// not an example and is skipped.
+    public static func exampleCommands(fromPage markdown: String) -> [String] {
+        var commands: [String] = []
+        for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
+            guard line.drop(while: { $0 == " " || $0 == "\t" }).first == "`" else { continue }
+            commands.append(contentsOf: codeSpans(in: String(line)))
+        }
+        return commands
     }
 
     /// The contents of each paired-backtick span in `line`, in order. An unpaired

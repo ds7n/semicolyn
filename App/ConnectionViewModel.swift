@@ -110,6 +110,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Nil when the predictor is disabled for this session (incognito).
     private var predictor: PredictorActor?
     private var tracker = InputTokenTracker()
+    /// Coalesces remote output for the screen-word harvest: capped at 8 KiB (newest
+    /// bytes win) with at most one harvest in flight, so a big `cat` costs bounded
+    /// work and memory instead of one queued Task per chunk. Main-actor only.
+    private var harvestBuffer = HarvestBuffer()
+    /// Bumped at teardown so a harvest still in flight from the old session does not
+    /// clear the new session's in-flight mark or drain its buffer.
+    private var harvestGeneration = 0
     /// Last-observed values of the tracker's monotonic secret-exclusion drop tallies,
     /// so `observePredictorInput` can log the PER-CHUNK delta (privacy-safe: counts of
     /// tokens the L3-paste / L4b-secret gates dropped, never the token text). Reset to 0
@@ -135,14 +142,27 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// L1 echo oracle to the active pane's rendered grid on first access.
     private lazy var passwordDetector: PasswordEntryDetector = {
         var d = PasswordEntryDetector()
-        d.setOracle(SwiftTermEchoOracle(resolveActiveView: { [weak self] in
-            self?.activePaneView()
-        }))
+        d.setOracle(echoOracle)
         return d
     }()
+    /// The read-only view of the active pane's rendered grid, shared by the
+    /// detector's per-keystroke settle and the commit-time row read at Enter.
+    private lazy var echoOracle = SwiftTermEchoOracle(resolveActiveView: { [weak self] in
+        self?.activePaneView()
+    })
     /// Tokens committed on the current input line, buffered until the line commits
     /// so the whole line is learned or dropped as a unit per the detector verdict.
     private var pendingLineTokens: [CommittedToken] = []
+    /// Chip texts the user accepted on the current input line, passed to `record` so
+    /// a tapped word graduates faster. Cleared at each line commit and line reset.
+    private var acceptedThisLine: Set<String> = []
+    /// Bumped at every line commit and line reset, so a per-keystroke echo settle
+    /// scheduled for an earlier line never folds into the next line's tally.
+    private var predictorLineGeneration = 0
+    /// True when this connection's Mosh session runs local-echo prediction `always`:
+    /// mosh-client may then draw keystrokes the server never confirmed, so the
+    /// commit-time grid read cannot prove an echo and every line is suppressed.
+    private var moshPredictAlways = false
 
     /// Fn-layer state for the active pane. Published so the keybar re-renders the
     /// Fn slot and the F-key layer.
@@ -451,13 +471,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         false
     }
 
-    /// The `TerminalView` the user is currently typing into (L1 echo oracle and the
-    /// predictor's alt-screen check).
-    /// Only the removed -CC path registered pane views; plain tmux and raw shell have
-    /// none, so this is nil (unchanged behavior). Pointing it at the mounted terminal
-    /// is a separate follow-up.
+    /// The `TerminalView` the user is currently typing into (L1 echo oracle, the
+    /// commit-time row check and the alt-screen check): the mounted terminal, on
+    /// every transport (raw SSH, plain tmux, Mosh, ET). Nil before it mounts.
     private func activePaneView() -> TerminalView? {
-        nil
+        mountedTerminalView
     }
 
     // MARK: - tmux
@@ -594,6 +612,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         output.onHarvestBytes = nil
         output.onExit = nil
         predictor = nil
+        harvestBuffer.reset()
+        harvestGeneration += 1
         // Deregister from the active-purge slot (the VM may be reused on reconnect
         // without deallocating, so the weak ref alone isn't enough).
         if AppStores.shared.activePredictorSession === self {
@@ -604,7 +624,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         lastDropAsSecret = 0
         passwordDetector.reset()          // clear echo/prompt state across sessions
         pendingLineTokens.removeAll()     // drop any un-flushed line tokens
-        predictorVM.setSuggestions([])
+        acceptedThisLine.removeAll()
+        predictorLineGeneration += 1      // orphan any settle still scheduled
+        moshPredictAlways = false
+        clearPredictorChips()
     }
 
     // MARK: - Connection resume
@@ -780,6 +803,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let sess = MoshSession(ip: ip, port: String(record.port), key: keyStr,
                                cols: 80, rows: 24, predictMode: "adaptive",
                                encodedState: isStateResume ? blob : nil)
+        moshPredictAlways = false         // reattach always runs `adaptive` (above)
+        installOutputTap()
         // Mosh callbacks are dispatched to the main queue (MoshSession.h). These mirror
         // the fresh-attach closures' isolation pattern (bare `self.` access), which the
         // App target already compiles: the Obj-C block property is inferred main-actor
@@ -1221,14 +1246,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         connection = conn
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
-        output.onHarvestBytes = { [weak self] bytes in
-            guard let self else { return }
-            // Feed output to the password-prompt gate only. We deliberately no longer
-            // harvest free terminal output as suggestion candidates, that pulled the
-            // shell prompt (Starship) into suggestions. Suggestions now source from
-            // typed-command echo (record) + seed only. (predictor-suggestion-hygiene spec, Fix 1.)
-            self.passwordDetector.noteOutput(bytes)
-        }
+        installOutputTap()
         DebugLog.shared.log(.lifecycle, "openRawShell: shell opened, state=.shell")
         state = .shell
     }
@@ -1354,6 +1372,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // frame, track the last-known terminal grid on the VM and pass it here.
             let sess = MoshSession(ip: moshIP, port: String(port), key: key,
                                    cols: 80, rows: 24, predictMode: predict)
+            // Predictor learning gate: with `always` prediction mosh-client draws
+            // unconfirmed keystrokes, so a grid read at Enter proves nothing.
+            moshPredictAlways = (cfg.predictionMode == .always)
+            installOutputTap()
             // Reset the handshake gate: onEnd before the first frame means the UDP
             // handshake never completed → fall back to SSH on the retained connection;
             // onEnd after a frame is a genuine mid-session exit → crash banner.
@@ -1365,9 +1387,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // `makeUIView`, which is what installs the render sink, so a direct
             // `onBytes?` call would silently drop that frame (nil sink → no-op) and
             // leave the terminal permanently blank. `onOutput` appends to the
-            // `PendingOutputBuffer`, which replays on sink-install. (Harvest stays
-            // off the Mosh path: `onHarvestBytes` is never installed here, so its
-            // pass in `onOutput` is a no-op.)
+            // `PendingOutputBuffer`, which replays on sink-install, and feeds the
+            // predictor output tap (`installOutputTap` above).
             sess.onOutput = { [weak self] data in
                 guard let self else { return }
                 self.output.onOutput(data: data)
@@ -1687,7 +1708,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // Route ET output through the SAME buffered entry point the Mosh path uses
         // (`output.onOutput`): the `PendingOutputBuffer` behind `onOutput` replays on
         // sink-install, so an early frame (before SwiftUI's `makeUIView` installs the
-        // render sink) isn't silently dropped.
+        // render sink) isn't silently dropped. The same pass feeds the predictor tap.
+        installOutputTap()
         etResolved = false
         sess.onOutput = { [weak self] data in
             guard let self else { return }
@@ -1856,9 +1878,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
         plainTmuxSessionNamePendingInstall = tmuxSessionNameForConnection
-        output.onHarvestBytes = { [weak self] bytes in
-            self?.passwordDetector.noteOutput(bytes)
-        }
+        installOutputTap()
         state = .shell
         DebugLog.shared.log(.lifecycle, "attachPlainTmux: exec opened, state=.shell, awaiting tmux output")
     }
@@ -2141,11 +2161,40 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         learnedStore = store
         predictor = PredictorActor(engine: PredictorEngine(
             learned: store.load(),
-            seed: AppStores.shared.predictorSeed(),
-            proseSeed: AppStores.shared.proseSeed(),
+            english: AppStores.shared.englishDictionary(),
+            commands: AppStores.shared.commandTree(),
             filter: AppStores.shared.predictorTokenFilter()))
         // Register as the session a Settings-triggered panic-purge should reset.
         AppStores.shared.activePredictorSession = self
+    }
+
+    /// The one remote-output tap, installed on every attach path (raw SSH, plain
+    /// tmux, Mosh, ET): each chunk feeds the password-prompt gate and the engine's
+    /// screen-word harvest (escape, secret-flag and partial-token context carry
+    /// across chunks inside the engine). Harvest chunks coalesce in `harvestBuffer`
+    /// with at most one in flight. Harvest is a no-op when the predictor is off
+    /// (incognito). `teardown` clears the slot.
+    private func installOutputTap() {
+        output.onHarvestBytes = { [weak self] bytes in
+            guard let self else { return }
+            self.passwordDetector.noteOutput(bytes)
+            guard self.predictor != nil else { return }
+            self.harvestBuffer.append(bytes)
+            self.drainHarvestBuffer()
+        }
+    }
+
+    /// Start one harvest of the coalesced output unless one is already in flight;
+    /// when it finishes, drain whatever accumulated meanwhile.
+    private func drainHarvestBuffer() {
+        guard let predictor, let chunk = harvestBuffer.takeIfIdle() else { return }
+        let generation = harvestGeneration
+        Task { [weak self] in
+            await predictor.harvest(chunk)
+            guard let self, generation == self.harvestGeneration else { return }
+            self.harvestBuffer.finish()
+            self.drainHarvestBuffer()
+        }
     }
 
     /// Fold outgoing bytes into the token tracker, learn committed tokens (unless
@@ -2158,6 +2207,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// so a multi-word line is learned or dropped as a unit. This keeps typed
     /// passwords (sudo / ssh / passphrase prompts) out of the synced vocabulary;
     /// the token filter alone can't catch a short low-entropy password.
+    ///
+    /// Commit-time echo check (every transport): this runs after the bytes were
+    /// handed to the transport, but their echo renders later on main, so a grid read
+    /// here still shows the line as it stood BEFORE this chunk's Enter. The verdict
+    /// is decided right here at the Enter (so input typed on the next line can never
+    /// change it) and the detector is reset for the next line.
     private func observePredictorInput(_ bytes: [UInt8]) {
         guard predictor != nil else { return }
         // L1: snapshot the pre-delivery cursor as THIS call's echo anchor, then
@@ -2167,6 +2222,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let scalars = predictorScalars(bytes)
         let anchor = scalars.isEmpty ? nil : passwordDetector.currentCursor()
         passwordDetector.noteInput(bytes)
+        let hasEnter = bytes.contains { $0 == 0x0d || $0 == 0x0a }
+        // Read the row BEFORE the tracker folds the Enter (which empties `line`).
+        let moshUnconfirmed = moshPredictAlways && moshSession != nil
+        var commitRow: String?
+        var typedLine = ""
+        if hasEnter {
+            typedLine = tracker.line
+            if !moshUnconfirmed {
+                commitRow = renderedTextBeforeCursor(oracle: echoOracle, maxChars: typedLine.count + 1)
+            }
+        }
+        let resetsBefore = tracker.lineResets
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
         }
@@ -2184,21 +2251,22 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 outputs: [("paste", "\(dPaste)"), ("secret", "\(dSecret)")],
                 reason: dSecret > 0 ? "L4b-secret" : "L3-paste"))
         }
-        // If this chunk left the line empty with no usable preceding token (an ESC /
-        // Ctrl-* / control line reset, or a backspace-to-empty), clear stale chips now.
-        // Enter is already handled synchronously below; the normal typing case has a
-        // non-empty `current` so this is a no-op there. (predictor-suggestion-hygiene
-        // spec, Fix 4: "clear on ESC/control line reset".)
-        if tracker.current.isEmpty, tracker.previous?.isEmpty != false {
-            predictorVM.setSuggestions([])
+        if hasEnter {
+            commitPredictorLine(typedLine: typedLine, row: commitRow, moshUnconfirmed: moshUnconfirmed)
+        } else if tracker.lineResets != resetsBefore {
+            // Context break (ESC, Ctrl-C/U/W, cursor keys, other controls): the line
+            // was abandoned, so its buffered tokens and per-line echo state go with it.
+            pendingLineTokens.removeAll(keepingCapacity: true)
+            acceptedThisLine.removeAll()
+            passwordDetector.resetLine()
+            predictorLineGeneration += 1
+            clearPredictorChips()
+        } else if tracker.line.isEmpty {
+            // Backspaced to an empty line: nothing to suggest for.
+            clearPredictorChips()
         }
-        // L4a: the tracker latches the just-committed line's opt-out at its Enter,
-        // so this is correct even when a leading-space line and its Enter arrive in
-        // ONE chunk (paste). (Per-chunk coarseness matches L1's: a chunk with two
-        // full lines of mixed opt-out applies the last line's verdict, a known v1
-        // limit, not a realistic paste-a-secret case.)
-        let optedOut = tracker.lastCommittedLineOptedOut
         let deadline = DispatchTime.now() + .milliseconds(40)
+        let generation = predictorLineGeneration
         // `observePredictorInput` and the coalescer are both @MainActor (this VM is
         // @MainActor; the only caller is `sendTerminalInput`), so no lock is needed.
         // Settle and refresh run in the same hop in program order: no fragile
@@ -2207,8 +2275,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             refreshCoalescer.requestRefresh(at: Date().timeIntervalSinceReferenceDate)
             DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
                 guard let self else { return }
-                // 1) settle echo against the grid (L1), THEN
-                self.passwordDetector.settleLine(scalars: scalars, from: anchor)
+                // 1) settle echo against the grid (L1), unless the line it belongs
+                //    to has already committed or reset, THEN
+                if generation == self.predictorLineGeneration {
+                    self.passwordDetector.settleLine(scalars: scalars, from: anchor)
+                }
                 // 2) recompute suggestions in the same main-actor hop, in program order,
                 //    so the refresh always reflects post-settle state (findings C/D, no
                 //    fragile inter-hop wall-clock offsets). Trailing-debounce preserved:
@@ -2218,89 +2289,97 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 }
             }
         }
-        for b in bytes where b == 0x0d || b == 0x0a {
-            predictorVM.setSuggestions([])   // line committed → clear stale chips immediately
-            // This closure runs on the main queue and touches @MainActor state (passwordDetector,
-            // pendingLineTokens) and the @MainActor DebugLog directly, legal via the closure's
-            // inferred main-actor isolation. If ever extracted to a @Sendable/non-capturing form,
-            // the DebugLog + self accesses need an explicit MainActor.assumeIsolated/await.
-            DispatchQueue.main.asyncAfter(deadline: deadline + .milliseconds(10)) { [weak self] in
-                guard let self else { return }
-                let echoConfirmed = self.passwordDetector.shouldLearnCommittedLine()
-                // Learn only if L1 confirms echo AND the line was not opted out (L4a); the
-                // engine still folds echo/opt-out/L5 into the L7 confidence tier.
-                if !optedOut, echoConfirmed {
-                    let toLearn = self.pendingLineTokens
-                    DebugLog.shared.log(.predictor,
-                        "predictor:record tokens=\(toLearn.count) echo=\(echoConfirmed) optedOut=\(optedOut)")
-                    Task { [predictor = self.predictor] in
-                        await predictor?.beginLine()
-                        await predictor?.record(toLearn, echoConfirmed: echoConfirmed, optedOut: optedOut)
-                    }
-                } else {
-                    DebugLog.shared.log(.predictor,
-                        "predictor:recordSuppressed echo=\(echoConfirmed) optedOut=\(optedOut)")
-                }
-                self.pendingLineTokens.removeAll(keepingCapacity: true)
-                self.passwordDetector.resetLine()
-            }
+    }
+
+    /// The Enter half of `observePredictorInput`: record the commit-time row reading,
+    /// take the learn decision NOW, hand the line's tokens to the engine (or drop
+    /// them), and reset the per-line state for the next line.
+    private func commitPredictorLine(typedLine: String, row: String?, moshUnconfirmed: Bool) {
+        clearPredictorChips()   // line committed: clear stale chips immediately
+        // After the Enter chunk's `noteInput` (which keeps a verdict on control-only
+        // input) and before the verdict is read.
+        passwordDetector.noteCommitRow(typedLine: typedLine, renderedBeforeCursor: row)
+        let verdict = passwordDetector.committedLineVerdict()
+        let learn = verdict.learn && !moshUnconfirmed
+        let reason = moshUnconfirmed ? "mosh-predict-always" : verdict.reason.rawValue
+        DebugLog.shared.log(.predictor, decisionLine(
+            "predictor:echo",
+            inputs: [("row", row == nil ? "nil" : "read")],
+            outputs: [("learn", learn ? "1" : "0")],
+            reason: reason))
+        // L4a: the tracker latches the just-committed line's opt-out at its Enter,
+        // so this is correct even when a leading-space line and its Enter arrive in
+        // ONE chunk (paste).
+        let optedOut = tracker.lastCommittedLineOptedOut
+        let toLearn = pendingLineTokens
+        let accepted = acceptedThisLine
+        pendingLineTokens.removeAll(keepingCapacity: true)
+        acceptedThisLine.removeAll()
+        passwordDetector.resetLine()
+        predictorLineGeneration += 1
+        // Learn only if the echo check confirms AND the line was not opted out (L4a);
+        // the engine still folds echo/opt-out/L5 into the L7 confidence tier.
+        guard !optedOut, learn else {
+            DebugLog.shared.log(.predictor,
+                "predictor:recordSuppressed echo=\(learn) optedOut=\(optedOut)")
+            return
         }
+        DebugLog.shared.log(.predictor,
+            "predictor:record tokens=\(toLearn.count) echo=\(learn) optedOut=\(optedOut)")
+        Task { [predictor] in
+            await predictor?.beginLine()
+            await predictor?.record(toLearn, echoConfirmed: learn, optedOut: optedOut,
+                                    accepted: accepted)
+        }
+    }
+
+    /// Hide the chips and supersede any refresh still in flight (its line is gone):
+    /// the bumped seq makes `PredictorViewModel.apply` drop the older result.
+    private func clearPredictorChips() {
+        predictorRefreshSeq += 1
+        predictorVM.apply([], seq: predictorRefreshSeq)
     }
 
     private func refreshPredictorSuggestions() {
-        guard let predictor else { predictorVM.setSuggestions([]); return }
-        let prefix = tracker.current, prev = tracker.previous
-
-        // Build the prediction context from signals the VM already holds. Any signal
-        // that is not cheaply available stays nil (the bias treats nil as abstain).
-        // No foreground-process signal on the plain tmux / raw paths (the per-pane
-        // process poll went with -CC), so the process abstains.
-        let process: String? = nil
-        let isAlt = activePaneView()?.getTerminal().isCurrentBufferAlternate
-        let ctx = PredictionContext(foregroundProcess: process,
-                                    isAlternateScreen: isAlt,
-                                    line: tracker.line,
-                                    cursorIndex: tracker.cursorIndex)
-
+        guard let predictor else { clearPredictorChips(); return }
+        let line = tracker.line
+        let prefix = tracker.current
         let optedOut = tracker.lineOptedOut
-        let precedingToken = prev   // the token immediately before `current` on this line
-
         predictorRefreshSeq += 1
         let seq = predictorRefreshSeq
+        // Empty line: nothing to ask the engine (it returns no chips there).
+        guard !line.isEmpty else {
+            DebugLog.shared.log(.predictor, "predictor:suggest seq=\(seq) reason=none")
+            predictorVM.apply([], seq: seq)
+            return
+        }
+        let tree = AppStores.shared.commandTree()
+        let kind = lineContext(line: line, isKnownTool: { tree?.isKnownTool($0) ?? false }).kind
         Task { [weak self] in
             guard let self else { return }
-            let minPrefix = await predictor.minPrefix()
-            let request = suggestionRequest(
-                current: prefix, previous: prev, precedingToken: precedingToken,
-                lineOptedOut: optedOut, minPrefix: minPrefix)
-            var chips: [(text: String, kind: SuggestionKind)] = []
-            switch request {
-            case .blended(let current, let previous, let allowNextWord):
-                let blended = await predictor.blendedSuggestions(
-                    current: current, previous: previous, allowNextWord: allowNextWord, context: ctx)
-                chips = blended.map { ($0.token, $0.isNextWord ? .nextWordAfterCurrent : .completeWord) }
-            case .nextWord(let word):
-                let raw = await predictor.suggestions(forPrefix: "", after: word, context: ctx)
-                chips = predictorChips(current: word, suggestions: raw).map { ($0, .nextWordAfterPrevious) }
-            case .none:
-                chips = []
-            }
+            let chips = await predictor.suggestions(line: line, lineOptedOut: optedOut)
             await MainActor.run {
                 DebugLog.shared.log(.predictor,
-                    "predictor:suggest seq=\(seq) prefix='\(prefix)' proc=\(process ?? "nil") alt=\(isAlt.map(String.init) ?? "nil") count=\(chips.count)")
-                self.predictorVM.setChips(chips, seq: seq)
+                    "predictor:suggest seq=\(seq) prefix='\(prefix)' kind=\(kind) count=\(chips.count)")
+                self.predictorVM.apply(chips, seq: seq)
             }
         }
     }
 
-    /// Accept a chip. completeWord chips extend the current token (send the suffix);
-    /// next-word chips insert a fresh word (+ spacing) so the user can keep chaining. The
-    /// inserted bytes flow back through `sendTerminalInput`, so tracker + suggestions update.
-    func acceptSuggestion(_ s: String) {
-        let kind = predictorVM.kindByToken[s] ?? .completeWord
-        guard let insertion = acceptanceInsertion(kind: kind, current: tracker.current, chip: s) else { return }
-        predictorVM.setSuggestions([])   // clear immediately; the echo round-trip repopulates
-        sendTerminalInput(Array(insertion.utf8))
+    /// Accept the chip at `index`. The edit is computed against the CURRENT line (the
+    /// chip may be from a slightly older refresh); nil means the chip no longer
+    /// applies and nothing is sent. Otherwise DEL x `backspaces` then `text` go out
+    /// through `sendTerminalInput`, so tracker + suggestions update from the bytes.
+    func acceptSuggestion(index: Int) {
+        let chips = predictorVM.suggestions
+        guard chips.indices.contains(index) else { return }
+        let chip = chips[index]
+        guard let edit = acceptanceEdit(for: chip, line: tracker.line) else { return }
+        acceptedThisLine.insert(chip.text)
+        DebugLog.shared.log(.predictor,
+            "predictor:accept slot=\(index) kind=\(chip.kind) saved=\(keystrokesSaved(edit))")
+        clearPredictorChips()   // clear immediately; the echo round-trip repopulates
+        sendTerminalInput(Array(repeating: 0x7f, count: edit.backspaces) + Array(edit.text.utf8))
     }
 
     // MARK: - Connect (saved host)

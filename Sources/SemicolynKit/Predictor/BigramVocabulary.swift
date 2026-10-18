@@ -46,7 +46,7 @@ public struct BigramVocabulary: Sendable {
 
     /// A ``CandidateSource`` scoped to the successors of `previous`:
     /// `candidates(forPrefix:)` ranks the next tokens (decoded to bare strings),
-    /// so it plugs straight into ``SeededSuggester`` and ``AggregateCandidateSource``.
+    /// so it plugs straight into ``AggregateCandidateSource``.
     public func nextSource(after previous: String) -> any CandidateSource {
         NextTokenSource(base: vocab, previous: previous)
     }

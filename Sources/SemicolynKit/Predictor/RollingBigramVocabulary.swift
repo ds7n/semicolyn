@@ -38,8 +38,7 @@ public struct RollingBigramVocabulary: Equatable, Sendable {
     }
 
     /// A ``CandidateSource`` of `previous`'s successors over `today ⊕ rolling_W`,
-    /// next tokens decoded to bare strings — plugs straight into
-    /// ``SeededSuggester``.
+    /// next tokens decoded to bare strings, for the ranker's next-word mode.
     public func nextSource(after previous: String, window: RollingWindow) -> any CandidateSource {
         NextTokenSource(base: rolling.learnedSource(window: window), previous: previous)
     }

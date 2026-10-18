@@ -87,25 +87,16 @@ final class BigramVocabularyTests: XCTestCase {
 
     // MARK: - Composition (the design's payoff: windowing/deference come free)
 
-    func testNextSourceRanksByFrequencyThroughSeededSuggester() {
+    func testNextSourceRanksByFrequency() {
         // The marquee: commit `git`, see `status` first because it's most-used.
         var user = bigram()
         for _ in 0..<5 { user.record(previous: "git", next: "status") }
         for _ in 0..<2 { user.record(previous: "git", next: "stash") }
-        let emptySeed = bigram()
-        let s = SeededSuggester(learned: user.nextSource(after: "git"),
-                                seed: emptySeed.nextSource(after: "git"))
-        XCTAssertEqual(s.suggestions(forPrefix: ""), ["status", "stash"])
-    }
-
-    func testSeedSuccessorsSurfaceWhenUserHasNoHistory() {
-        // N-gram deference: no learned `git X` → seed `git push` fills the slot.
-        var seed = bigram()
-        seed.record(previous: "git", next: "push", count: 3)
-        let user = bigram()
-        let s = SeededSuggester(learned: user.nextSource(after: "git"),
-                                seed: seed.nextSource(after: "git"))
-        XCTAssertEqual(s.suggestions(forPrefix: ""), ["push"])
+        let all = user.nextSource(after: "git").candidates(forPrefix: "")
+        XCTAssertEqual(all.sorted { $0.count > $1.count },
+                       [TokenCount(token: "status", count: 5), TokenCount(token: "stash", count: 2)])
+        XCTAssertEqual(user.nextSource(after: "git").candidates(forPrefix: "stas"), [TokenCount(token: "stash", count: 2)])
+        XCTAssertEqual(user.nextSource(after: "status").candidates(forPrefix: ""), [])
     }
 
     // MARK: serialization (Critical tier — this is the seed-blob format)

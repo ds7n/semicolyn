@@ -1,0 +1,23 @@
+english_v2 provenance (GDIC v1, built by scripts/build-english-dict.sh)
+built from semicolyn: 2b28992 (clean tree; builder code unchanged through 90abc5d)
+built at: 2026-10-18T03:06:37Z
+sources:
+  google books ngram v3 eng 20200217 (CC BY 3.0), https://storage.googleapis.com/books/ngrams/books/20200217/eng/
+    1-grams: 24 shards (order=1 min_year=1990 min_count=40 vocab_sha256=none)
+    2-grams: 589 shards (order=2 min_year=1990 min_count=40 vocab_sha256=c5c6731dac32a5ccddc7610a8a2d60a094772f22efadaa71ae2ff777ef633230)
+  scowl=SCOWL 2020.12.07, final/{english,american}-words.{10..70}, https://downloads.sourceforge.net/project/wordlist/SCOWL/2020.12.07/scowl-2020.12.07.tar.gz, sha256 5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc, licence: SCOWL copyright (permissive, see scowl-2020.12.07/Copyright)
+  wiki=Wikipedia enwiki 20261001 all-titles-in-ns0, https://dumps.wikimedia.org/enwiki/20261001/enwiki-20261001-all-titles-in-ns0.gz, sha1 b8c863bd3c2c5892b8b213b2db373274e3e3216d, licence: CC BY-SA 4.0
+  wordfreq=wordfreq 3.1.1 (rspeer), wordfreq/data/large_en.msgpack.gz, https://pypi.org/project/wordfreq/3.1.1/, wheel sha256 4b1c6ecffc6198be3396d5cf871c4423ca71c907c231348d352dd54d62b97473, licence: data CC BY-SA 4.0 (accepted exception: the English blend includes OpenSubtitles 2018, Reddit, Twitter and SUBTLEX counts with unclear upstream terms; the maintainer asserts the blend is redistributable under CC BY-SA 4.0 and SUBTLEX granted any-purpose permission)
+  blocklist: App/Resources/predictor/profanity_blocklist.txt (sha256 4f8f6cb31683ed1c9049fa73510cfdad0e28af10434b33166620e14147c6b5f2)
+config: min_year=1990 min_count=40 builder defaults (max-words 150000, successor-words 40000, successors-per-word 24)
+vocabulary: 147313 folded words (sha256 c5c6731dac32a5ccddc7610a8a2d60a094772f22efadaa71ae2ff777ef633230)
+build output:
+  unigrams: parsed 15022897, skipped 0, dropped 0
+  wordfreq: parsed 321180, skipped 0, dropped 0
+  side files: scowl 111828, titles 1615662, blocklist 1198
+  bigrams: parsed 137425680, skipped 0, dropped 13920622
+  words: 150000
+  pairs: 89073856
+  successor keys: 39874
+changes: reduced to word and word-pair frequency scores
+size: 6368315 bytes raw, 3405666 bytes gzip -9

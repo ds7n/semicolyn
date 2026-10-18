@@ -1,0 +1,6 @@
+SPDX-FileCopyrightText: 2026 True Positive LLC
+SPDX-License-Identifier: GPL-3.0-only
+
+Our own generated AI-prompting corpus (natural prompts a developer types to an AI).
+Evaluation text only (prose replay for semicolyn-predeval); not shipped in the app and
+not used to build any shipped dictionary.

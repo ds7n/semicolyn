@@ -179,4 +179,20 @@ final class RollingVocabularyTests: XCTestCase {
         XCTAssertNil(RollingVocabulary(deserializing: blob(dailies: 91)),
                      "more than the retention horizon must be rejected")
     }
+
+    func testContainsLiteralIsExactByteMatch() {
+        var s = RollingVocabulary()
+        s.record("deploy")
+        XCTAssertTrue(s.containsLiteral("deploy"))
+        XCTAssertFalse(s.containsLiteral("dep"), "a prefix is not the literal")
+        XCTAssertFalse(s.containsLiteral("deploys"), "a longer token is not the literal")
+        XCTAssertFalse(s.containsLiteral("Deploy"), "case differs, bytes differ")
+        XCTAssertFalse(s.containsLiteral(""))
+    }
+
+    func testContainsLiteralFalseForCountOnlyToken() {
+        var s = RollingVocabulary()
+        s.record("hunter2", storeLiteral: false)
+        XCTAssertFalse(s.containsLiteral("hunter2"), "a low-confidence token keeps no literal")
+    }
 }

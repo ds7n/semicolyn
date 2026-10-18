@@ -13,15 +13,15 @@ public struct CommittedToken: Equatable, Sendable {
 /// the user sends to the remote. A terminal has no text field, so the predictor's
 /// prefix is derived here by watching the outgoing stream. Pure and best-effort:
 /// control sequences (arrows, Ctrl-*) reset the line context rather than tracking
-/// cursor motion, and remote-side tab completion (whose result arrives as output)
-/// is not reflected, both are acceptable v1 limitations.
+/// cursor motion, and Tab resets it too, since remote-side completion (whose result
+/// arrives as output) is not reflected; both are acceptable v1 limitations.
 public struct InputTokenTracker: Equatable, Sendable {
     /// The token currently being typed (since the last delimiter).
     public private(set) var current: String = ""
     /// The full input line since the last line reset (for line-shape context).
-    /// Intentionally RETAINS paste-suppressed (L3) and tab-dropped text, unlike
-    /// `current`, which drops it: line-SHAPE detection wants what the user
-    /// physically typed. `line` is a transient shape signal only, it is never
+    /// Intentionally RETAINS paste-suppressed (L3) text, unlike `current`, which
+    /// drops it: line-SHAPE detection wants what the user physically typed. A Tab
+    /// resets it (the remote's completion is not visible here). `line` is a transient shape signal only, it is never
     /// learned or logged verbatim.
     public private(set) var line: String = ""
     /// Cursor position within `line` (cursor is assumed at the end today).
@@ -98,6 +98,11 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// Monotonic tally of tokens DROPPED by the L4b secret-value gate. Privacy-safe
     /// count only (see `droppedInPaste`).
     public private(set) var droppedAsSecret = 0
+    /// Monotonic count of line-context resets (ESC, Tab, Ctrl-C/U/W, cursor keys,
+    /// other controls, an aborted sequence), never Enter. The App compares it across
+    /// `observe` to spot a context break and reset its per-line state. Cleared by
+    /// `reset()`.
+    public private(set) var lineResets = 0
 
     public init() {}
 
@@ -194,8 +199,8 @@ public struct InputTokenTracker: Equatable, Sendable {
         case 0x7f, 0x08:                // backspace → pop one char
             if !current.isEmpty { current.removeLast() }
             if !line.isEmpty { line.removeLast() }
-        case 0x09:                      // tab → remote completion: drop the partial
-            current = ""
+        case 0x09:                      // tab → remote completion: the line is
+            resetLineContext(keepingSecretContext: true)   // now what the remote shows
         case let c where Self.editingC0.contains(c):   // Ctrl-W/U/K/A/C/E → reset
             resetLineContext()
             // The tmux prefix additionally arms a one-shot swallow of the binding key
@@ -400,10 +405,18 @@ public struct InputTokenTracker: Equatable, Sendable {
     }
 
     /// ESC / unknown-control line reset (matches the pre-Phase-2 `default` case).
-    private mutating func resetLineContext() {
+    ///
+    /// `keepingSecretContext` is the Tab variant: the remote completed the word, so
+    /// the typed text no longer matches the screen and is dropped, but the line has
+    /// not ended. The leading-space opt-out (L4a) and the secret-flag predecessor
+    /// (L4b) stay, so `mysql -p <Tab>hunter2` still drops the value and a
+    /// leading-space line stays opted out after a Tab.
+    private mutating func resetLineContext(keepingSecretContext: Bool = false) {
+        lineResets += 1
         current = ""
         line = ""
         previous = nil
+        guard !keepingSecretContext else { return }
         secretCheckPrev = nil
         lineOptedOut = false
         sawLineStart = false
@@ -421,12 +434,6 @@ public struct InputTokenTracker: Equatable, Sendable {
         sawLineStart = false
         droppedInPaste = 0
         droppedAsSecret = 0
+        lineResets = 0
     }
-}
-
-/// The chips to show for `current` given the engine's ranked `suggestions`: the
-/// engine already prefix-matches, applies the confidence floor, and caps at top-K;
-/// the strip only drops the exact token already typed (and any empties).
-public func predictorChips(current: String, suggestions: [String]) -> [String] {
-    suggestions.filter { $0 != current && !$0.isEmpty }
 }

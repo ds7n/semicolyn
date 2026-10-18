@@ -32,6 +32,12 @@ public struct PrefixIndex: Equatable, Sendable {
         tokens.insert(token, at: i)
     }
 
+    /// True when exactly `token` (same UTF-8 bytes) is held. O(log n).
+    public func contains(_ token: String) -> Bool {
+        let i = lowerBound(token)
+        return i < tokens.count && tokens[i].utf8.elementsEqual(token.utf8)
+    }
+
     /// Every token having `prefix` (by bytes), in sorted order. Empty prefix
     /// matches all. O(log n + k) for k matches: binary-search the lower bound,
     /// then scan the contiguous matching run.

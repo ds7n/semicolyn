@@ -27,4 +27,7 @@ public protocol EchoOracle: Sendable {
     func cell(row: Int, col: Int) -> EchoCell?
     /// True when the alternate screen buffer is active (full-screen TUI).
     var isAlternateBuffer: Bool { get }
+    /// The grid width in cells, or nil if unreadable. Used to read whole earlier
+    /// rows when a committed line wrapped.
+    var columns: Int? { get }
 }

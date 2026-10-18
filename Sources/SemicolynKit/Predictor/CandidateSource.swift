@@ -3,8 +3,8 @@
 import Foundation
 
 /// Anything that can answer "which scored tokens have this prefix?" — the one
-/// operation suggestion ranking needs. Lets a ``SeededSuggester`` rank over a
-/// single ``Vocabulary`` or a windowed aggregate without knowing which. See
+/// operation suggestion ranking needs. Lets the ranker read a single
+/// ``Vocabulary`` or a windowed aggregate without knowing which. See
 /// `2026-06-21-predictor-candidate-aggregate-design`.
 public protocol CandidateSource {
     func candidates(forPrefix prefix: String) -> [TokenCount]
