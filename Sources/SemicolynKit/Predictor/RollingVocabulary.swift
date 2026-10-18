@@ -70,6 +70,12 @@ public struct RollingVocabulary: Equatable, Sendable {
         today.add(token, count: count)
     }
 
+    /// True when `token` is stored as a literal (exact UTF-8 byte match). A token
+    /// recorded count-only (`storeLiteral: false`) is never reported.
+    public func containsLiteral(_ token: String) -> Bool {
+        index.contains(token)
+    }
+
     /// Seal today into the rolling pre-aggregates and start a fresh day. Each
     /// `rolling_W` gains today and loses the day that just fell out of its window,
     /// maintaining `rolling_W = sum of the most recent W sealed dailies`.

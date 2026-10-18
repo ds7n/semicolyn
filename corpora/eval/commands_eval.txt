@@ -1,0 +1,3169 @@
+7z a
+7z a -mhe=on
+7z x
+7z x
+stdout
+7z x -so
+7z a
+bzip2
+gzip
+lzip
+tar
+7z l
+7z a
+1
+3
+5
+7
+certbot
+acme.sh dns
+acme.sh --issue --domain --webroot
+acme.sh --issue --standalone --domain --domain
+acme.sh --issue --alpn --domain
+acme.sh --issue --nginx --domain
+acme.sh --issue --apache --domain
+acme.sh --issue --dns --domain
+acme.sh --install-cert -d --key-file --fullchain-file --reloadcmd force-reload
+adb install
+$ANDROID_SERIAL
+adb -s install
+adb install -r
+adb install -d
+adb install -g
+adb install --fastdeploy
+androguard axml
+androguard apkid
+androguard decompile --output
+ani-cli
+animdl download
+animdl download
+animdl download
+animdl grab
+animdl schedule
+animdl search
+animdl stream
+animdl stream
+latest
+ansible-galaxy
+list
+-v
+ansible-galaxy role search
+ansible-galaxy role
+role_name2
+ansible-galaxy role init
+ansible-galaxy role info
+ansible-galaxy collection
+collection_name2
+ansible-galaxy
+ansiweather -u metric -f 7 -l
+ansiweather -F -s true -d true
+ansiweather -w true -h true
+echo
+argon2
+echo
+argon2
+i
+echo
+argon2 -e
+echo
+argon2 -t -m -p
+arthas
+arthas-watch
+trace
+trace '#cost
+trace -E
+method-pattern2
+trace '#cost
+-n 5
+asar pack
+asar extract
+asar extract-file
+asar list
+aspell check
+stdin
+cat
+aspell list
+aspell dicts
+aspell
+aspell
+stdin
+cat
+aspell list
+assimp listext
+assimp listexport
+assimp export
+assimp export
+assimp info
+assimp help
+assimp --help
+eval "$(atuin init
+zsh
+atuin import auto
+atuin search
+atuin register -u -e -p
+atuin login -u -p
+atuin sync
+aws acm import-certificate --certificate-arn --certificate --private-key --certificate-chain
+aws acm list-certificates
+aws acm describe-certificate --certificate-arn
+aws acm request-certificate --domain-name --validation-method
+aws acm delete-certificate --certificate-arn
+aws acm list-certificates --certificate-statuses
+aws acm get-certificate --certificate-arn
+aws acm update-certificate-options --certificate-arn --options
+aws sqs list-queues
+aws sqs get-queue-url --queue-name
+aws sqs create-queue --queue-name --attributes
+aws sqs send-message --queue-url --message-body --delay-seconds --message-attributes
+aws sqs delete-message --queue-url --receipt-handle
+aws sqs delete-queue --queue-url
+aws sqs purge-queue --queue-url
+aws sqs add-permission --queue-url --label --aws-account-ids --actions SendMessage
+azure-cli
+az
+az feedback
+azure-cli
+az
+az login
+az login --service-principal --username --password --tenant
+az login --service-principal --username --password --tenant
+az login --identity
+az login --identity --username
+azure-cli
+az
+az pipelines create --org --project --name --description --repository --branch
+az pipelines delete --org --project --id
+az pipelines list --org --project
+az pipelines run --org --project --name
+az pipelines show --org --project --name
+az pipelines update --org --project --name --new-name --new-folder-path
+az pipelines agent list --org --pool-id
+azure-cli
+az
+az provider register --namespace
+az provider unregister --namespace
+az provider list
+az provider show --namespace
+az provider list --query
+login
+az login
+az account
+az disk list
+az vm list
+az aks
+az network
+az interactive
+az --help
+sudo badblocks
+sudo badblocks -n
+sudo badblocks -w
+sudo badblocks -svw
+sudo badblocks -o -w
+sudo badblocks -w -b -c
+cat
+stdout
+bat path/to/file2
+bat path/to/file2
+--style plain
+-p
+-pp
+bat --style plain --pager never
+bat
+5:10
+:10
+10:
+bat
+bat
+bat
+json
+bat
+berks install
+berks update
+berks upload
+berks contingent
+bfg --delete-files
+bfg --replace-text
+bfs -name
+bfs -path -or -name
+bfs -type d -iname
+bfs -name -not -path
+bfs -maxdepth 1 -size -size
+{}
+bfs -name -exec {} \
+bfs -daystart -mtime -exec -cvf {} \+
+bfs -type
+-empty -delete -print
+bloodhound-python --username --password --domain
+bloodhound-python --collectionmethod --kerberos --domain
+bloodhound-python --collectionmethod --username --hashes --domain
+bloodhound-python --collectionmethod --username --password --domain --nameserver
+bloodhound-python --collectionmethod --username --password --domain --zip
+box compile
+box compile -c
+box info
+box info
+box validate
+box verify
+box help
+brew list
+brew list
+brew list
+brew list --formula
+brew list --cask
+brew list --pinned
+brew search
+brew search
+brew search --desc
+brew search --formula
+brew search --cask
+top
+top
+btm
+top
+btm --basic
+btm --dot_marker
+btm --battery
+btm --rate 250 --default_time_value 30000
+bpytop
+btop
+btop
+btop
+btop --preset
+btop
+btop --tty_on
+btop
+btop --low-color
+btop --update 500
+package.json
+bun run
+bun test
+package.json
+bun install
+package.json
+bun add
+package.json
+bun remove
+bun init
+bun repl
+bun upgrade
+bup -d init
+bup -d index
+bup -d save -n
+bup -d ls
+bup -d restore -C
+tmux
+screen
+byobu
+byobu-config
+byobu-select-backend
+byobu-enable
+byobu-disable
+caller
+caller 0
+n
+caller
+cargo bench
+cargo bench --no-fail-fast
+cargo bench --no-run
+cargo bench --bench
+bench
+cargo bench --profile
+cargo bench --examples
+cargo bench --bins
+cargo bench --lib
+cargo report
+cargo report
+--id
+cargo report
+--package
+(*)
+cargo tree
+n
+cargo tree --depth
+cargo tree --prune
+cargo tree --no-dedupe
+cargo tree --edges
+build
+cf login -a
+cf push
+cf marketplace
+cf create-service
+cf bind-service
+cf run-task --name
+cf ssh
+cf logs --recent
+cheat
+cheat -e
+cheat -l
+cheat -s
+cheat -v
+checkov --directory
+checkov --compact --file
+checkov --list
+chroot
+chroot
+cjxl
+cjxl --distance 0 --effort 9
+cjxl --help --verbose --verbose --verbose --verbose
+stdout
+clang-format
+clang-format -i
+clang-format --style
+GNU
+Google
+Chromium
+Microsoft
+Mozilla
+.clang-format
+clang-format --style=file
+.clang-format
+clang-format --style
+GNU
+Google
+Chromium
+Microsoft
+Mozilla
+--dump-config
+cloc
+cloc --progress=1
+cloc --diff
+.gitignore
+cloc --vcs git
+cloc --by-file
+cloudflared tunnel login
+cloudflared tunnel create
+cloudflared tunnel --hostname
+cloudflared tunnel --hostname --no-tls-verify
+cloudflared tunnel --hostname --loglevel
+fatal
+error
+warn
+info
+--logfile
+cloudflared service install
+colima start
+colima start --edit
+nerdctl
+nerdctl
+colima start --runtime containerd
+kubectl
+colima start --kubernetes
+colima start --cpu --memory --disk
+colima start
+colima list
+colima status
+diff
+combine and
+combine not
+combine or
+combine xor
+ls
+ls
+command
+command -v
+magick compare
+tldr magick compare
+cpdf -o
+cpdf -merge -o
+cpdf -list-bookmarks
+chunk001.pdf
+chunk002.pdf
+cpdf -split -o -chunk
+fred
+joe
+cpdf -encrypt -o
+fred
+cpdf -decrypt -o
+cpdf -list-annotations
+cpdf -set-metadata -o
+stdin
+echo path/to/file2
+cpio -o
+find
+cpio -ov
+cpio -idv
+cradle install
+cradle install --force
+cradle install --skip-sql
+cradle install --skip-versioning
+cradle install -h -u -p
+crane copy
+tldr crane copy
+crane delete
+crane delete
+crane manifest
+crane manifest
+crane pull
+crane pull --annotate-ref
+crane pull
+crane pull
+crane pull
+pull
+push
+copy
+crane
+crane
+crane --allow-nondistributable-artifacts
+crane --insecure
+crane --platform
+crane
+crane
+crictl pods
+crictl ps --all
+crictl images
+crictl inspect container_id2
+crictl exec -it
+crictl pull
+crictl logs -f
+crictl rmi image_id2
+crontab -e
+sudo crontab -e -u
+crontab
+crontab -l
+crontab -r
+0 10 * * *
+*/10 * * * *
+30 2 * * Fri
+csv2tsv path/to/input_csv2
+csv2tsv
+csv2tsv -c'
+'
+cwebp -o
+cwebp -o -q
+cwebp -o -q
+cwebp -o -resize
+cwebp -o -noalpha
+czkawka
+czkawka-cli
+--directories path/to/directory2
+NONE
+czkawka-cli dup --directories path/to/directory2 --delete-method
+AEO
+ON
+OO
+HARD
+bc
+qalc
+dc
+dc
+dc k 3 p'
+dc --expression='4 5 * 17 - p'
+dc --expression='7 k 5 _3 / p'
+dc --expression='100 k 5 v 1 + 2 / p'
+decaffeinate
+decaffeinate --use-cs2
+module.exports
+decaffeinate --use-js-modules
+decaffeinate --loose-js-modules
+docker swarm init
+docker swarm join-token
+docker swarm join --token
+docker swarm leave
+docker swarm ca
+docker swarm ca --rotate
+docker swarm update --cert-expiry
+docker volume create
+docker volume create --label
+tmpfs
+docker volume create --opt --opt --opt
+docker volume ls
+docker volume rm
+docker volume inspect
+docker volume prune
+docker volume --help
+doctl databases
+doctl databases --access-token
+doctl databases get
+doctl databases list
+doctl databases create
+doctl databases delete
+doppler projects
+doppler projects get
+doppler projects create
+doppler projects update
+--name --description
+doppler projects delete
+du
+k
+du -h
+du -sh
+du -ah
+du -h --max-depth=N
+.jpg
+du -ch
+du --all --human-readable --threshold
+1024M
+.[^.]* *
+echo
+echo path is
+echo -n
+echo
+echo -e 1\tColumn
+echo %errorlevel%
+$lastexitcode
+echo $?
+acyclic
+bcomps
+comps
+edgepaint
+gvcolor
+gvpack
+mingle
+nop
+sccmap
+tred
+unflatten
+edgepaint
+edgepaint
+dot
+edgepaint
+dot -T
+edgepaint -?
+electron-packager
+electron-packager --all
+electron-packager
+electron-packager
+elixir
+elixir -e
+ember new
+ember addon
+ember build
+ember build -prod
+ember serve
+ember test
+ember generate
+ember install
+fusermount
+encfs
+encfs --standard
+encfs -f
+encfs --reverse
+sudo esptool.py --port --baud write_flash 0x0
+sudo esptool.py --port --baud erase_flash
+eyuvtoppm --width --height
+factor
+stdin
+echo
+factor
+fakedata --generators
+fakedata
+fakedata --format
+tab
+fakedata --limit
+echo
+fakedata
+fdupes
+fdupes
+fdupes -r
+fdupes -R
+fdupes -rH
+fdupes -rd
+fdupes -rdN
+feh
+feh --recursive
+feh --borderless
+feh --cycle-once
+feh --slideshow-delay
+feh
+fill
+max
+scale
+feh --montage --thumb-height --thumb-width --index-info --output
+finger
+finger
+finger -s
+-s
+finger -l
+finger -m
+fisher
+fisher
+~/.config/fish/fishfile
+fisher
+fisher ls
+fisher update
+fisher remove
+flake8
+flake8 --show-source
+flake8 --ignore
+flake8 --exclude
+fnm install
+fnm list
+fnm use
+fnm default
+fnm uninstall
+stdout
+fold
+fold -w30
+fold -w5 -s
+for
+do
+done
+for in item2
+do "Loop is
+done
+for in
+do "Loop is
+done
+for in path/to/file2
+do "Loop is
+done
+for in path/to/directory2/
+do "Loop is
+done
+for in */
+do (cd
+continue
+"Loop is done
+g++ path/to/source2.cpp
+g++ -Wall
+g++ -Wall
+-Og
+g++
+c++11
+c++14
+g++
+g++
+path/to/source2.cpp
+g++
+path/to/source2.o
+g++
+2
+3
+g++ --version
+gdown
+gdown
+gdown --fuzzy
+gdown
+-O --folder
+stdout
+gdown -O - --quiet
+tar xvf -
+gh
+gh environment
+gh
+jq
+gh formatting
+gh gist create path/to/file2
+gh gist create path/to/file2 --desc
+gh gist edit
+gh gist list --limit
+gh gist view
+--web --raw
+gh pr create
+gh pr create --fill
+gh pr create --draft
+gh pr create --base --title --body
+gh pr create --web
+gh pr merge
+gh pr merge
+gh pr merge --delete-branch
+gh pr merge
+squash
+gh pr merge
+squash
+--subject
+gh pr merge --squash
+gh pr merge --help
+gh extension
+gh screensaver
+gh screensaver --saver
+life
+marquee
+pipes
+pollock
+gh screensaver --saver --
+gh screensaver --saver -- --density --speed
+gh screensaver --list
+ghcid
+ghcid
+ghcid
+ghcid --command ghci
+main
+ghcid
+ghcid
+ghcid
+--
+1+1
+ghcid --allow-eval
+git bisect start
+git bisect
+git bisect
+git bisect
+git bisect reset
+git bisect skip
+git bisect log
+*
+git branch --all
+git branch --all --contains
+git branch --show-current
+git branch
+git branch
+git branch
+git branch
+git push --delete
+git bugreport
+git bugreport
+strftime
+git bugreport
+git-extras
+History.md
+git changelog
+git changelog --list
+2.1.0
+git changelog --list --start-tag
+0.5.0
+1.0.0
+git changelog --start-tag --final-tag
+0b97430
+1.0.0
+git changelog --start-commit --final-tag
+CHANGELOG.md
+git changelog
+git changelog --prune-old
+git check-ref-format
+git check-ref-format --branch @{-1}
+git check-ref-format --normalize
+.gitignore
+git-extras
+git clear-soft
+git daemon --export-all
+git daemon --export-all --reuseaddr
+git daemon --enable=receive-pack --informative-errors --verbose
+git feature
+git feature finish
+git feature finish --squash
+git feature --remote
+grep
+git grep
+git grep --
+git grep --recurse-submodules
+git grep
+git grep $(git rev-list --all)
+git-extras
+git locked
+git remote
+git remote show
+git remote add
+--add
+git remote set-url
+git remote get-url
+git remote remove
+git remote rename
+git checkout
+git reset
+git restore
+git restore --source
+git restore :/
+git restore --staged
+git restore --staged :/
+git restore --worktree --staged :/
+git restore --patch
+git-extras
+git root
+git root --relative
+git-extras
+git sed
+git sed -c
+git sed -f g
+git sed --
+git log
+git shortlog
+git shortlog
+git shortlog
+git shortlog HEAD~5..HEAD
+git shortlog
+git shortlog
+--all
+git show-branch
+ref
+git show-branch
+ref1
+commit1 branch_name2
+ref2
+commit2
+git show-branch --remotes
+git show-branch --all
+git show-branch --all --list
+git show-branch --current
+branch_name
+git show-branch --sha1-name --current
+branch_name
+git show-branch --more
+branch_name
+branch_name
+git-extras
+git show-tree
+git status
+git status --short
+git status --verbose --verbose
+git status --branch
+git status --short --branch
+git status --show-stash
+git status --untracked-files=no
+git tag
+git tag
+git tag
+git tag -m
+git tag
+git fetch --tags
+git push origin tag
+git tag --contains
+git-extras
+git lock
+git unlock
+git write-tree
+git write-tree --missing-ok
+git write-tree --prefix
+glab alias
+glab
+glab alias list
+glab
+glab alias set
+glab
+glab alias set --shell
+glab alias delete
+glab mr create
+glab mr create --fill
+glab mr create --draft
+glab mr create --target-branch --title --description
+glab mr create --web
+glow
+glow
+glow -p
+glow
+glow
+gnmic --address get --path
+gnmic -a get --path --path
+gnmic -a get --prefix --path --path
+gnmic -a get --path --encoding json_ietf
+gnucash
+gnucash
+gnucash --nofile
+go bug
+_test.go
+go test
+go test -v
+...
+go test -v ./...
+go test -v -bench .
+go test -v -bench . -benchtime
+go test -cover
+project.godot
+godot
+project.godot
+godot -e
+project.godot
+godot -p
+godot --export
+SceneTree
+MainLoop
+godot -s
+goenv commands
+goenv install
+goenv local
+goenv global
+goenv versions
+goenv uninstall
+goenv exec go run
+gotty
+gotty -w
+gotty -w -c
+*.gpr
+gprbuild
+gprbuild
+gprclean
+gprinstall --prefix
+grafana-cli plugins
+update
+plugin_id2
+grafana-cli plugins ls
+hadolint
+hadolint --format
+hadolint --format
+json
+checkstyle
+codeclimate
+hadolint --ignore --ignore
+hadolint --trusted-registry --trusted-registry path/to/Dockerfile2
+hcloud
+hcloud -h
+hcloud
+hcloud context
+help
+while
+help while
+for
+help for
+[[ ]]
+help [[ ]]
+(( ))
+help \( \)
+cd
+help cd
+hg pull
+hg pull
+hg pull --update
+hg pull --force
+hg pull --rev
+hg pull --branch
+hg pull --bookmark
+commit
+hg
+hg help
+hg help
+hg --version
+hledger print
+hledger print --explicit --infer-costs
+hledger print --file --file --cost
+$
+*food*
+*groceries*
+hledger print cur:\\$ food not:groceries date:thismonth
+whole foods
+hledger print
+desc:'whole foods'
+EUR
+hledger print --cleared --commodity '1000, EUR' --round hard
+foo.journal
+hledger print --file --output-file
+bug
+hub issue list --limit --labels
+hub issue show
+hub issue --state --assignee --limit
+sunicontopnm
+tldr sunicontopnm
+idevicebackup2
+idevicebackup backup
+idevicebackup restore
+idevicediagnostics diagnostics
+idevicediagnostics mobilegestalt
+idevicediagnostics
+restart
+ideviceinfo
+ideviceinfo --udid
+img2pdf path/to/image2.ext --output
+img2pdf --first-frame-only --output
+img2pdf --auto-orient --pagesize --border --output
+img2pdf --pagesize --imgsize --fit --output
+img2pdf --title --author --creationdate --keywords --subject --output
+imgcat
+interdiff
+interdiff -w
+ipcs -a
+ipcs
+-q
+ipcs -b
+ipcs -c
+ipcs -p
+ipcs -t
+ipcs -o
+ispell
+ispell
+ispell -v
+isutf8 path/to/file2
+isutf8 --verbose path/to/file2
+stdout
+isutf8 --quiet path/to/file2
+isutf8 --list path/to/file2
+--list
+isutf8 --invert path/to/file2
+fastd
+mozillavpn
+mullvad
+warp-cli
+ivpn status
+ivpn servers
+jenv add
+jenv version
+jenv versions
+jenv global
+jenv shell
+jenv enable-plugin
+jmeter --nongui --testfile
+jmeter --nogui --testfile --logfile
+jmeter --nongui --testfile --proxyHost --proxyPort
+jmeter --jmeterproperty --nongui --testfile
+jpegoptim
+jpegoptim --strip-all
+jpegoptim --all-progressive
+jpegoptim
+julia
+julia
+julia
+julia -e
+julia -e x in ARGS
+println(x)
+julia -E -
+julia -t
+keytool -genkeypair -v -keystore -alias
+keytool -storepasswd -keystore
+keytool -keypasswd -alias -keystore
+sudo kismet -c
+sudo kismet -c -m
+sudo kismet -c -d
+sudo kismet -c -f
+sudo kismet -c --log-to-db
+sudo kismet -c
+sudo kismet -c
+sudo kismet -c --info
+knife bootstrap
+knife node list
+knife node show
+knife node edit
+knife role edit
+knife data bag show
+knife cookbook upload
+stdin
+kubectl apply -f
+kubectl apply edit-last-applied -f
+kubectl apply set-last-applied -f
+kubectl apply view-last-applied -f
+latexdiff
+latexdiff --type=BOLD
+latexdiff --math-markup=fine --graphics-markup=both
+stdout
+license
+license -o
+license ls
+license --name --year
+stdout
+LICENSE
+licensor
+LICENSE
+licensor -p
+licensor
+licensor WITH
+licensor --licenses
+licensor --exceptions
+linkchecker
+linkchecker --check-extern
+linkchecker --ignore-url
+linkchecker --file-output
+linode-cli
+linode-cli linodes list
+linode-cli linodes create --type --region --image
+linode-cli linodes view
+linode-cli linodes update --label
+linode-cli linodes delete
+linode-cli linodes
+reboot
+linode-cli linodes backups-list
+linode-cli linodes backups-restore --backup-id
+lit
+lit
+lit --time-tests
+lit --vg --vg-leak
+lli
+lli argument2
+lli -O3
+lli
+nm
+tldr nm
+.mmp
+.mmpz
+.mmpz
+mixxx
+lmms
+lmms --config
+lmms --import
+lmms --geometry
+.mmpz
+lmms dump
+lmms render
+lmms rendertracks
+lmms render --samplerate --format --loop --output
+lpoptions
+lpadmin -d
+lpadmin -x
+lpadmin -p -c
+lpadmin -p -r
+lpq
+lprm
+lprm -h
+lprm -E job_id2
+lprm -
+lprm -P
+ls
+lsd -1
+lsd -a
+/
+lsd -F
+lsd -lha
+lsd -lS
+lsd -ltr
+lsd -d
+lsd --tree -d
+lynx
+lynx -anonymous
+lynx -use_mouse
+lynx -color
+lynx
+arrow key
+Down arrow
+arrow key
+q + y
+xzless
+tldr xzless
+makensis
+makensis -WX
+makensis -CMDHELP
+matlab -nosplash
+matlab -r
+matlab -r
+maza update
+sudo maza start
+sudo maza stop
+maza status
+mdp
+mdp --nofade
+mdp --invert
+mdp --notrans
+medusa -d
+medusa -d
+medusa -M
+http
+web-form
+postgres
+ftp
+mysql
+-q
+medusa -M ftp -h host -U -P
+medusa -M HTTP -h host -u -p -m
+medusa -M mysql -h host -U -p -m PASS:HASH
+medusa -M smbnt -H -C -u -m PASS:HASH
+meshlabserver -i -o
+meshlabserver -i -o -om vn fn
+meshlabserver -d
+meshlabserver -i -o -s
+meshlabserver -i -o -s -l
+middleman init
+middleman server
+middleman server -p
+bundle exec middleman build
+middleman deploy
+mitmweb
+mitmdump
+mitmproxy
+8080
+mitmproxy
+mitmproxy
+mitmproxy --listen-host
+mitmproxy
+mitmproxy
+mitmproxy
+regular
+mitmproxy
+transparent
+socks5
+mitmproxy --console-layout
+single
+mmdc --input --output
+mmdc --input --output --theme
+dark
+neutral
+lime
+#D8064F
+transparent
+mmdc --input --output --backgroundColor
+mosh
+mosh
+mosh
+mosh --ssh="ssh -i
+mosh --ssh="ssh -p
+mosh -- -with
+remote_host
+mosh -p
+mosh-server
+mosh
+most
+most path/to/file2
+most
+:O n
+e
+o
+Q
+mpc
+ncmpcpp
+mpd
+mpd --no-config
+mpd --no-daemon
+mpd --kill
+stdin
+~/.msmtprc
+echo
+msmtp
+~/.msmtprc
+echo
+msmtp
+~/.msmtprc
+echo
+msmtp
+gcc
+gcc
+gcc
+tldr gcc
+nbtscan
+nbtscan
+nbtscan -v
+/etc/hosts
+nbtscan -e
+nbtscan -f
+mpd
+mpc
+qmmp
+termusic
+ncmpcpp --host --port
+ncmpcpp --current-song
+ncmpcpp --config
+ncmpcpp --bindings
+nhentai --cookie
+nhentai --id
+nhentai --favorites --download --delay 1
+nhentai --favorites --pages --download --delay 1
+acyclic
+bcomps
+comps
+edgepaint
+gvcolor
+gvpack
+mingle
+nop
+sccmap
+tred
+unflatten
+nop
+nop -p
+nop -?
+npm
+npm-home
+npm-home -g
+npm-home -y
+stdout
+stdout
+npm ls
+npm ls --all
+npm ls --long
+npm ls --parseable
+npm ls --json
+npm view
+npm view
+npm view versions
+npm view description
+npm view dependencies
+npm view repository
+npm view maintainers
+package.json
+--yes
+npm init
+package.json
+npm install
+package.json
+npm install
+package.json
+npm install
+npm install
+package.json
+npm uninstall
+npm list
+npm list
+--depth
+nslookup
+nslookup -type=NS
+nslookup -type=PTR
+nslookup -vc -type=ANY
+nslookup -vc -type=AXFR
+nslookup -type=MX -debug
+nslookup -type=TXT
+elvish
+nu
+nu --commands 'nu is
+nu
+nu --log-level
+warn
+info
+debug
+nvm install
+nvm use
+set nvm_default_version
+nvm list
+nvm uninstall
+nxc nfs
+nxc nfs --shares
+nxc nfs --enum-shares
+nxc nfs --get-file
+nxc nfs --put-file
+ocamlc
+ocamlc -o
+ocamlc -i
+octez-client -E config update
+octez-client gen keys
+octez-client get balance for
+octez-client transfer from
+to
+octez-client originate contract transferring from
+running --init --burn_cap
+octez-client transfer from
+to --entrypoint --arg --burn-cap
+octez-client man
+.onion
+onionsearch
+localhost:9050
+.onion
+onionsearch
+onionsearch --engines deeplink phobos
+onionsearch --exclude ahmia
+onionsearch --engines deeplink phobos --limit
+onionsearch --help
+grep -A1 -i "supported engines"
+op signin
+op vault list
+op item get --format json
+op item create --category
+stdout
+op read
+op run --
+op run --env-file --
+op inject --in-file --out-file
+openssl dgst -sha256 -binary -out
+openssl dgst -sign -sha256 -sigopt rsa_padding_mode:pss -out
+openssl dgst -verify -signature -sigopt rsa_padding_mode:pss
+openssl dgst -sign -sha256 -out
+openssl dgst -verify -signature
+clustered
+graphviz
+dot
+neato
+twopi
+circo
+fdp
+sfdp
+osage
+patchwork
+osage -T -O
+osage -T -o
+osage -T -O
+stdin
+stdout
+echo {this
+that}
+osage -T
+osage -?
+paci
+paci refresh
+paci configure
+paci search
+paci install
+paci update
+packwiz init
+packwiz
+add
+slug
+packwiz list
+index.toml
+packwiz refresh
+.mrpack
+packwiz
+export
+pamdepth
+pbmreduce
+ppmditherbw
+ppmditherbw
+fs
+atkinson
+threshold
+hilbert
+ppmditherbw -atkinson -randomseed
+ppmditherbw
+atkinson
+-value
+fitstopnm
+pamtofits
+giftopnm
+gifsicle
+pamtogif
+pamtogif -transparent
+pamtogif -comment
+paste -s
+paste -s -d
+paste
+paste -d
+paste -d \n
+pamenlarge
+pamditherbw
+pbmreduce
+pbmreduce -threshold
+pbmreduce -value
+ppmtoterm
+pbmtoascii
+pbmto4425
+ppmtoascii
+asciitopgm
+ppmtoterm
+pbmtoascii
+pbmtoascii
+pbmtoascii
+pbmtoascii -version
+pbmtobbnbg
+pbmtobbnbg
+macptopbm
+pbmtomacp
+pbmtomacp -norle
+pbmupc
+pbmupc -s2
+pcdovtoppm
+tldr pcdovtoppm
+pdfseparate
+pdfseparate -f
+pdfseparate -l
+pdftex
+pdftex
+pdftex -halt-on-error
+pdftk cat 5 output
+pdftk file2.pdf cat output
+pdftk burst output
+pdftk cat output
+pdftk cat 3east output
+phpcpd
+phpcpd --fuzzy
+phpcpd --min-lines
+phpcpd --min-tokens
+phpcpd --exclude
+phpcpd --log-pmd
+phpmd
+phpmd
+text
+phpmd
+text
+--minimumpriority
+phpmd
+text
+--suffixes
+phpmd
+text
+--exclude
+stdout
+phpmd
+text
+--reportfile
+phpmd
+text
+--strict
+picotool info
+picotool load
+picotool uf2 convert
+picotool reboot
+picotool otp list
+picotool version
+picotool help
+finger
+pinky
+pinky
+pinky -l
+pinky -lb
+pinky -lh
+pinky -f
+pio project init
+tldr pio project
+chafa
+catimg
+pixterm
+pixterm -s 2
+pixterm -tr -tc
+pixterm -m -d 2
+pkg-config --libs library2
+pkg-config --cflags --libs library2
+c++ example.cpp $(pkg-config --cflags --libs gtk+-3.0 webkit2gtk-4.0) -o example
+plantuml
+png
+pdf
+svg
+txt
+plantuml -t
+plantuml
+plantuml -o
+-nometadata
+plantuml -nometadata
+plantuml
+plantuml -metadata
+plantuml -config
+plantuml -help
+plesk login
+plesk version
+plesk bin domain --list
+panel.log
+plesk log
+plesk db
+plesk conf
+pngtopam
+tldr pngtopam
+pnmalias
+pnmalias -bcolor -fcolor
+pnmalias -fonly
+pnmalias -balias
+pamfile
+tldr pamfile
+pnmhisteq
+pnmhisteq -grey
+pnmhisteq
+pamstretch
+tldr pamstretch
+pamsplit
+tldr pamsplit
+pnmtoddif
+pnmtoddif -resolution
+pnmtofiasco
+pnmtofiasco --image-name
+pnmtofiasco --quality
+pnmtofiasco --config
+pnmtops
+pnmtops -imagewidth -imageheight
+pnmtops -width -height
+pnpm audit
+pnpm audit fix
+pnpm audit --json
+pnpm audit --dev
+pnpm audit --prod
+pnpm audit --no-optional
+pnpm audit --ignore-registry-errors
+pnpm audit --audit-level
+podman build
+podman import
+podman pull
+podman image ls
+podman image prune
+podman image prune --all
+podman image history
+podman machine ls
+podman machine init
+podman machine init
+podman machine init
+podman machine
+podman machine ssh
+podman machine inspect
+podman ps
+podman ps --all
+podman ps --latest
+podman ps --filter
+podman ps --filter
+podman ps --all --filter
+podman ps --filter
+podman ps --filter --format "table
+podman run
+podman run --detach
+podman run --rm --interactive --tty
+podman run --env --env
+podman run --volume
+podman run --publish
+podman run --entrypoint
+podman run --network
+asdf
+poetry new
+pyproject.toml
+poetry add
+pyproject.toml
+poetry install
+poetry init
+poetry.lock
+poetry update
+poetry run
+pyproject.toml
+poetry version
+minor
+major
+prepatch
+preminor
+premajor
+poetry shell
+pushd
+dirs
+popd
+dirs
+popd +N
+dirs
+popd -N
+dirs
+popd -n
+pamfunc -multiplier
+ppmdim
+ppmdraw -script 50 50
+text_here hello!
+ppmdraw -scriptfile
+ppmlabel -x -y -text
+ppmlabel -x -y -text -x -y -text
+ppmlabel -x -y -color -background -angle -size -text
+pnmquantall
+tldr pnmquantall
+ppmshift
+ppmtoxpm
+ppmtoxpm -name
+ppmtoxpm -hexonly
+ppmtoxpm -alphamask
+pprof -top
+pprof -svg
+pprof
+pprof
+pprof
+pprof
+pprof
+stdout
+prettier
+prettier --check
+prettier --config
+prettier --write
+prettier --single-quote --trailing-comma --write
+prettier --write **/*.{js,jsx,ts,tsx}
+printf
+printf
+printf
+printf %s\tvar2:
+printf -v is %s = %d\n" "a year"
+printf octal=%o
+procs
+procs --tree
+procs
+procs
+cpu
+41
+firefox
+procs --or
+command
+41
+zsh
+procs --and
+progress
+progress -q
+progress --monitor --pid $!
+progress --wait --command
+.proto
+.proto
+protoc
+.proto
+.proto
+protoc
+protoc
+.proto
+protoc
+.proto
+protoc
+protoc --decode_raw
+psidtopgm
+pulumi destroy
+pulumi destroy --stack
+pulumi destroy --yes
+pulumi destroy --exclude-protected
+pulumi destroy --remove
+pulumi destroy --continue-on-error
+pulumi stack init
+pulumi stack --show-urns
+pulumi stack ls
+pulumi stack ls --all
+pulumi stack select
+pulumi stack rm
+pulumi stack output --show-secrets
+pulumi stack export --file
+cat
+pup --color
+cat
+pup
+cat
+pup
+cat
+pup
+cat
+pup text{}'
+cat
+pup json{}'
+clementine
+ncmpcpp
+cmus
+qmmp
+qmmp --play-pause
+qmmp
+qmmp --next
+qmmp --previous
+qmmp --volume-status
+qmmp
+qutebrowser --basedir
+qutebrowser --set
+qutebrowser --restore
+qutebrowser --target
+tab
+tab-bg
+tab-silent
+tab-bg-silent
+window
+stdout
+qutebrowser --temp-basedir --json-logging
+radare2 -nw
+radare2 -d
+radare2 -i
+pr
+rails console
+rails console --sandbox
+rails console --environment
+test
+production
+rails console --help
+rake
+default
+rake
+rake
+n
+rake --jobs
+rake --rakefile
+rake
+rake --directory
+clifm
+vifm
+mc
+dolphin
+ranger
+ranger --show-only-dirs
+ranger
+ranger
+ranger --profile
+rdfind -dryrun true
+rdfind -makehardlinks true
+rdfind -makesymlinks true
+rdfind -deleteduplicates true -ignoreempty false
+reflac
+reflac --best
+reflac --verbose
+reflac --recursive
+reflac --preserve
+rip
+rip --inspect
+rip --seance
+rip --decompose
+rip --unbury
+rip --seance
+rip --seance --unbury
+rmdir
+rm path/to/file2
+rm -f path/to/file2
+rm -i path/to/file2
+rm -v path/to/file2
+rm -r path/to/file_or_directory2
+route -n
+sudo route add -net netmask gw
+sudo route del -net netmask dev
+rustfmt
+rustfmt --check
+.bk
+rustfmt --backup
+nmap
+rustscan --addresses
+rustscan --top --addresses
+rustscan --ports --addresses
+rustscan --range --addresses
+nmap
+rustscan --addresses -- -A -sC
+rustscan --batch-size --timeout --addresses
+rustscan --scan-order
+--addresses
+nmap
+rustscan --greppable --addresses
+--toolchain
+rustup
+rustup help toolchain
+rustup component add --toolchain
+rustup component remove --toolchain
+rustup component list --toolchain
+rustup component list --toolchain --installed
+rustup update
+rustup help toolchain
+rustup install
+rustc
+rustup show
+rustup show active-toolchain
+rustup show home
+--toolchain
+rustup
+rustup help toolchain
+rustup target add --toolchain
+rustup target remove --toolchain
+rustup target list --toolchain
+rustup target list --toolchain --installed
+sbt
+sbt new
+sbt test
+target
+sbt clean
+src/main/scala
+src/main/java
+sbt compile
+sbt -sbt-version
+sbt -sbt-jar
+sbt -h
+chroot
+sbuild
+sbuild
+sbuild --dist
+.deb
+sbuild --extra-package
+sbuild --build-failed-commands=%SBUILD_SHELL
+sbuild --host
+sbuild --arch
+stdout
+'lorem ipsum 23
+sd \s+$
+stdout
+'cargo +nightly
+sd (\w+)\s+\+(\w+)\s+(\w+) 'cmd: $1, channel: $2, subcmd: $3'
+stdout
+sd -p
+stdout
+sd "$(find . -type f)"
+searchsploit
+searchsploit sudo 1.8.27
+searchsploit --www
+searchsploit --mirror
+$PAGER
+searchsploit --examine
+searchsploit --update
+searchsploit --cve
+nmap
+nmap -sV -oX nmap-output.xml
+searchsploit --nmap
+figlet
+showfigfonts
+showfigfonts
+silicon --output
+rust
+py
+js
+silicon --output --language
+stdin
+silicon --output
+singularity pull --name
+singularity build
+singularity shell
+singularity exec
+singularity run
+sudo singularity build
+sldtoppm
+sldtoppm -adjust
+sleep
+sleep 20
+smalltalkci
+.smalltalk.ston
+smalltalkci
+smalltalkci --headful
+smalltalkci --smalltalk
+smalltalkci --image --vm
+smalltalkci --clean
+snmpwalk -v 1 -c
+snmpwalk -v 2c -c
+snmpwalk -v 3 -l -u -a
+-A
+snmpwalk -v 3 -l -u -a
+-A -x
+-X
+snmpwalk -v 3 -l -u
+speedtest
+speedtest-cli
+librespeed
+speedtest
+speedtest
+speedtest
+auto-decimal-bytes
+auto-binary-bits
+speedtest
+csv
+tsv
+json
+jsonl
+speedtest
+human-readable
+json
+speedtest
+speedtest.net
+speedtest --servers
+speedtest.net
+speedtest
+stdin
+stdin
+sshpass -d ssh
+sshpass -p ssh -o StrictHostKeyChecking=no
+sshpass -f ssh -o StrictHostKeyChecking=no
+stl2gts
+stl2gts --revert
+stl2gts --nomerge
+stl2gts --verbose
+stl2gts --help
+streamlit hello
+streamlit run
+streamlit --help
+streamlit --version
+stressapptest -M
+stressapptest -M -f
+stressapptest -M -v
+sudo
+sudo --edit
+sudo
+sudo
+sudo !!
+.profile
+.bash_profile
+sudo --login
+sudo --shell
+.profile
+.bash_profile
+sudo --login
+sudo --list
+sui move new
+sui move test
+sui move test --coverage
+sui move coverage summary
+sui move coverage source --module
+sui move build
+sui move build --path
+sui move migrate
+sudo tailscale up
+tailscale ssh
+/usr/local/etc/tarsnap.conf
+~/.tarsnaprc
+tarsnap-keygen
+tarsnap -c --keyfile --cachedir -f path/to/file_or_directory2
+tarsnap -c --dry-run --print-stats --keyfile --cachedir -f path/to/file_or_directory2
+tarsnap --list-archives --keyfile
+tarsnap -d --keyfile --cachedir -f
+tarsnap -tv --keyfile -f
+tarsnap -x --keyfile -f path/to/file_or_directory2
+tarsnap -c --keyfile -f
+task add
+task modify
+M
+task done
+task delete
+task list
+task list
+task burndown.daily
+task reports
+tectonic -X compile
+tectonic -X compile --synctex
+tectonic -X init
+tectonic -X new
+tectonic -X build
+tectonic -X watch
+tex-fmt
+tex-fmt --check
+stdin
+stdout
+cat
+tex-fmt --stdin
+time
+command
+stdout
+time
+time read
+tlmgr check all
+tlmgr check all -v
+tlmgr check depends
+tlmgr check executes
+tlmgr check files
+tlmgr check runfiles
+tlmgr paper
+sudo tlmgr paper
+tlmgr paper
+sudo tlmgr paper
+tlmgr paper --list
+tlmgr paper --json
+./tlpkg/backups
+sudo tlmgr remove
+tlmgr remove --dry-run
+sudo tlmgr remove --no-depends
+sudo tlmgr remove --backupdir
+sudo tlmgr remove --all
+topydo add
+A
+topydo add "(A)
+topydo add
+topydo add "water flowers
+topydo add
+topydo
+topydo revert
+transcode -J stabilize -i
+transcode -J transform -i -y xvid -o
+transcode -Z 640x480 -i -y xvid -o
+tts --text
+tts --list_models
+tts --model_info_by_idx
+tts --model_info_by_name
+tts --text --model_name
+tts --text --model_path --config_path --out_path
+twine upload dist/*
+twine upload -r testpypi dist/*
+twine upload -u -p dist/*
+twine upload --repository-url dist/*
+twine check dist/*
+twine upload --config-file dist/*
+twine upload --skip-existing dist/*
+twine upload --verbose dist/*
+ugrep --query
+ugrep
+ugrep --line-number
+ugrep --files-with-matches
+ugrep
+ugrep --decompress
+ugrep
+--file-type=list
+ugrep --file-type=cpp
+unrar
+unp
+unp
+vagrant
+vagrant plugin list
+vagrant plugin install
+vagrant plugin install
+vagrant plugin update
+vagrant plugin update
+vagrant plugin uninstall
+varnishlog
+varnishlog -q 'ReqHeader eq "Host:
+varnishlog -q 'ReqMethod eq
+varnishlog -q 'ReqURL eq
+varnishlog -q 'ReqURL ~
+VBoxManage controlvm
+pause
+VBoxManage controlvm
+resume
+VBoxManage controlvm
+reset
+VBoxManage controlvm
+poweroff
+VBoxManage controlvm
+savestate
+VBoxManage controlvm
+acpipowerbutton
+VBoxManage controlvm
+reboot
+VBoxManage controlvm
+shutdown
+VBoxManage export --output
+VBoxManage export --legacy09
+VBoxManage export
+ovf10
+VBoxManage export --manifest
+VBoxManage export --description
+velero backup create
+velero backup get
+velero backup delete
+velero schedule create --ttl
+velero restore create --from-schedule
+vim
+vim -R
+view
+virsh
+virsh connect
+virsh connect qemu:///system
+virsh connect qemu:///session
+virsh connect
+virsh
+virsh-pool-destroy
+virsh-pool-undefine
+virsh pool-list
+virsh pool-delete --pool
+mpv
+mplayer
+ytfzf
+vlc
+vlc --fullscreen
+vlc --no-audio
+vlc --loop
+vlc
+@vue/cli
+@vue/cli-service-global
+.js
+.vue
+vue build
+w
+w -h
+w3m
+w3m -M
+w3m -no-mouse
++ T
++ H
+q + y
+wafw00f
+wafw00f --findall
+wafw00f --proxy
+wafw00f -l
+wafw00f --test
+Cloudfront
+Fastly
+ZScaler
+wafw00f --headers
+v
+wafw00f --input
+wafw00f --list
+wait
+wait
+wait
+wapm.toml
+wapm init
+wapm.toml
+wapm install
+wapm.toml
+wapm install
+wapm install --global
+wapm.toml
+wapm uninstall
+wapm list
+wapm list --global
+wapm run
+webstorm
+webstorm
+webstorm -e path/to/file2
+webstorm --wait -e
+webstorm --line
+webstorm diff path/to/file2
+webstorm merge
+xbmtopbm
+xcv x
+xcv c
+xcv v
+xcv l
+xe
+{}
+xe {}
+N
+echo -e a\nb
+xe -s 'echo $2 $1'
+.backup
+find . -name
+xe rm -v
+max-jobs
+max-jobs
+xe -j
+xpmtoppm
+xpmtoppm --alphaout
+xsv headers
+xsv count
+xsv stats
+xsv table
+xsv select
+xsv sample
+xsv join --no-case
+xsv table
+xvminitoppm
+yadm alt
+yadm encrypt
+touch
+mkdir
+yadm
+yadm introspect commands
+yadm introspect configs
+yadm
+yadm introspect switches
+yadm introspect repo
+build
+init
+scaffold
+push
+test
+zapier login
+zapier init
+zapier scaffold
+create
+search
+zapier test
+zapier push
+zapier help
+zapier help
+sudo zeek --iface
+sudo zeek --iface
+sudo zeek --bare-mode --iface
+tcpdump
+sudo zeek --filter --iface
+sudo zeek --watchdog --iface
+zeek --readfile
+zm new
+zm edit
+zm publish
+zcp
+zln
+zmv
+zmv -n
+zmv -i
+zmv -v
+zotero
+zotero --headless
+zotero -P
+zotero --migration
+zrun path/to/file1.gz path/to/file2.bz2
+sudo a2dismod
+sudo a2dismod --quiet
+sudo a2query -m
+sudo a2query -m
+sudo a2query -s
+sudo a2query -M
+sudo a2query -v
+aa-complain
+aa-disable
+aa-enforce
+sudo aa-status
+sudo aa-status --profiled
+sudo aa-status --enforced
+sudo aa-status --complaining
+sudo aa-status --kill
+apt-key
+apt-key del
+apt-key list
+apt-key add
+apt-key del
+wget -qO -
+apt-key add -
+apt-key adv --keyserver --recv
+APT
+apt moo
+apt-get
+apt
+sudo apt update
+apt search
+apt show
+sudo apt install
+purge
+sudo apt remove
+sudo apt upgrade
+apt list
+apt list --installed
+apx
+~/.local/share/apx/stacks
+apx stacks new
+apx stacks update
+apx stacks list
+apx stacks rm --name
+apx stacks import --input
+apx stacks export --name --output
+.iso
+.cdr
+bchunk
+bchunk -v
+bchunk -w
+blkdiscard
+blkdiscard --secure
+blkdiscard --length
+bootc status
+bootc upgrade --check
+bootc upgrade --apply
+bootc switch
+bootc rollback
+sudo btrfs property list
+sudo btrfs property get
+label
+sudo btrfs property get label
+sudo btrfs property get -t
+filesystem
+inode
+compression
+sudo btrfs property set compression
+zlib
+lzo
+sudo btrfs scrub start
+sudo btrfs scrub status
+sudo btrfs scrub cancel
+sudo btrfs scrub resume
+sudo btrfs scrub start -B
+sudo btrfs scrub start -q
+cacaview
+nautilus
+dolphin
+thunar
+ranger
+caja
+caja path/to/directory2
+caja --tabs path/to/directory2
+caja
+caja --quit
+cgclassify
+tldr cgclassify
+cgcreate
+tldr cgcreate
+cgexec
+tldr cgexec
+secon
+restorecon
+semanage-fcontext
+ls -lZ
+chcon
+chcon
+chcon -u
+chcon -r
+chcon -t
+chcon -l
+chrt --pid
+chrt --all-tasks --pid
+chrt
+chrt --max
+chrt --pid
+chrt
+idle
+batch
+rr
+fifo
+--pid
+cockpit-ws
+9090
+cockpit-tls --port
+cockpit-tls --help
+stdin
+stdin
+colrm
+colrm
+colrm
+cpufreq-info -l
+sudo cpufreq-set -c -g
+sudo cpufreq-set -c --min
+sudo cpufreq-set -c --max
+sudo cpufreq-set -c -f
+dconf
+dconf read
+dconf read -d
+i2c-dev
+modprobe
+ddcutil detect
+ddcutil --display setvcp
+ddcutil -d setvcp
+ddcutil -d getvcp
+debuild
+debuild -b
+debuild --no-lintian
+dirb
+dirb
+dirb -r
+dirb -a -c
+tldr distrobox
+--headless
+distrobox-enter
+distrobox-enter --
+distrobox-enter --name --
+tldr distrobox
+distrobox-host-exec
+ls
+distrobox-host-exec ls
+tldr distrobox
+distrobox-list
+distrobox-list --verbose
+ls
+dmenu
+\n
+echo -e
+dmenu
+echo -e
+dmenu
+ls
+dmenu -m
+ls
+dmenu -b
+dnsmap
+dnsmap -w
+dnsmap -c
+dnsmap -i
+zip
+tar
+engrampa
+engrampa path/to/archive2.tar
+engrampa path/to/file_or_directory2
+engrampa path/to/archive2.tar
+eselect
+eselect news list
+eselect news read number2
+eselect news read
+eselect news unread number2
+eselect news purge
+eselect news count
+eselect
+/etc/portage/make.profile
+eselect profile list
+/etc/portage/make.profile
+list
+eselect profile set
+eselect profile show
+extrepo search
+sudo extrepo enable
+sudo extrepo disable
+sudo extrepo update
+fallocate --length
+fallocate --collapse-range --length
+fallocate --collapse-range --offset --length
+partprobe
+sudo fdisk -l
+sudo fdisk
+n
+d
+p
+w
+q
+m
+flatpak remote-info
+flatpak remote-info --log
+flatpak remote-info
+flatpak run
+flatpak run
+beta
+master
+flatpak run
+flatpak run
+master
+stable
+flatpak run
+flatpak run
+flatpak install
+flatpak list --app
+flatpak update
+flatpak remote-add --if-not-exists
+flatpak remove
+flatpak remove --unused
+flatpak info
+fold --width
+fold --bytes --width
+fold --spaces --width
+gbp import-dsc
+debuild
+gbp buildpackage -jauto -us -uc
+pbuilder
+gbp buildpackage -jauto -us -uc
+.changes
+gbp buildpackage -jauto -us -uc
+gbp import-orig --pristine-tar
+file.cpp.gcov
+gcov
+gcov --all-blocks
+stdout
+gcov --branch-probabilities
+gcov --branch-counts
+gcov
+gcov --no-output
+gcov --function-summaries
+gnome-terminal
+gnome-terminal --
+gnome-terminal --tab
+gnome-terminal --tab --title
+grub-script-check
+stdin
+grub-script-check
+grub-script-check --verbose
+grub-script-check --help
+grub-script-check --version
+sudo grub-set-default
+sudo grub-set-default --boot-directory
+stdout
+sudo grub2-mkpasswd-pbkdf2
+gummy --temperature
+gummy --backlight
+gummy --brightness
+gummy --brightness
+gummy --brightness
+gummy --screen --temperature --brightness
+http-prompt
+http-prompt
+http-prompt --auth
+hwinfo --gfxcard
+hwinfo --network
+hwinfo --short --disk --cdrom
+hwinfo --all --log
+hwinfo --help
+ifstat
+ifstat
+ifstat
+ikaros install
+ikaros auto-install
+ikaros list-devices
+lsipc
+ipcmk
+ipcrm
+ipcs
+ipcs
+--queues
+ipcs
+--queues
+--id
+ipcs --limits
+ipcs --summary
+ipcs --creator
+ipcs --pid
+ipcs --time
+just
+just
+just eval
+just init
+just build --static
+/boot
+sudo kernel-install add
+sudo kernel-install remove
+sudo kernel-install inspect
+lsmod
+rmmod
+insmod
+modinfo
+modprobe
+depmod
+kmod list
+kmod static-nodes
+konsave --save
+konsave --apply
+konsave -s --force
+konsave --list
+konsave --remove
+.knsv
+konsave --export-profile
+.knsv
+konsave --import-profile
+Passwords
+kdewallet
+kwallet-query
+kwallet-query
+kwallet-query
+larasail setup
+larasail setup
+larasail host
+larasail pass
+larasail mysqlpass
+apk
+include
+/etc
+lbu commit
+/etc
+lbu
+commit
+lbu
+commit
+lbu diff
+apk
+lbu
+inc
+/etc
+apk
+lbu
+exclude
+lbu
+include
+ex
+-l
+lbu
+lbu revert
+git switch
+git sync
+git publish
+git unpublish
+git branches
+git undo
+libtool
+libtool --mode=compile gcc -c -o
+libtool --mode=link gcc -o
+libtool
+libtool --mode=execute gdb
+libtool --mode=install cp
+libtool
+libtool --mode=finish
+libtool --mode=uninstall
+libtool --mode=clean rm
+lxc profile list
+lxc profile show
+lxc profile edit
+lxc profile edit
+lxc launch --profile --profile
+lxc profile assign
+mangohud
+mangohud
+mashtree --numcpus
+mashtree --mindepth --numcpus
+mashtree
+--
+mashtree_bootstrap.pl --reps --numcpus -- --min-depth
+mate-calc
+mate-calc --solve +
+sudo mdadm --create --level --raid-devices
+sudo mdadm --stop
+sudo mdadm --fail
+sudo mdadm --remove
+sudo mdadm --assemble
+sudo mdadm --detail
+sudo mdadm --zero-superblock
+mediamtx
+mediamtx
+systemctl start mediamtx
+microcom --port --speed
+microcom --telnet
+mkinitcpio
+linux
+mkinitcpio --preset
+linux-lts
+mkinitcpio --preset
+/etc/mkinitcpio.conf
+mkinitcpio --allpresets
+mkinitcpio --config --generate
+/usr/lib/modules/
+mkinitcpio --kernel --generate
+mkinitcpio --listhooks
+mkinitcpio --hookhelp
+sudo mknod b
+sudo mknod c
+sudo mknod p
+sudo mknod -Z
+path/to/file
+sudo mkswap
+sudo mkswap -c
+swapon
+sudo mkswap -L
+debootstrap
+sudo mmdebstrap stable
+mmdebstrap bookworm
+mmdebstrap sid
+mocp
+mocp
+mocp --server
+mocp --enqueue
+mocp --append
+mocp --clear
+mocp
+mocp --exit
+mountpoint
+mountpoint -q
+mountpoint --fs-devno
+mpstat
+mpstat
+mpstat -P
+mssh
+~/.mssh_clusters
+mssh --alias
+mt -f status
+mt -f rewind
+mt -f fsf
+mt -f asf
+mt -f eod
+mt -f eject
+mt -f eof
+newgrp
+/etc/passwd
+newgrp
+optimus-manager --switch
+integrated
+optimus-manager --cleanup
+pacman --deptest
+tldr pacman deptest
+pacman4console
+pacman4console
+pacman4consoleedit
+pacman4console
+sudo partprobe
+sudo partprobe --summary
+sudo partprobe --summary --dry-run
+pdfxup -o
+pdfxup -x -y -o
+pdfxup -b -o
+perf stat
+sudo perf top
+perf.data
+sudo perf record
+perf.data
+sudo perf record -p
+perf.data
+perf record
+sudo perf report
+sudo phpenmod
+sudo phpenmod -v -s
+pkcon install
+pkcon remove
+pkcon refresh
+pkcon update
+pkcon search
+pkcon get-packages
+pkgadd
+pkgadd -u
+po4a-gettextize
+po4a-translate --format --master --po --localized
+po4a-translate --help-format
+prlimit
+prlimit --pid
+prlimit
+pveversion
+pveversion
+pw-loopback
+pw-loopback -m
+pw-loopback -m
+pw-loopback -m
+pw-loopback audio.position=[FL
+pw-loopback audio.position=[FL
+qm cleanup
+qm cloudinit dump
+network
+qm rollback
+qm snapshot
+qm snapshot --description
+qm snapshot --description --vmstate 1
+qm start
+qm start --machine
+qm start --timeout
+qm stop
+qm stop --timeout
+qm stop --skiplock
+qm stop --keepActive
+qm unlock
+reboot
+poweroff
+reboot --poweroff
+halt
+reboot --halt
+reboot --force
+reboot --wtmp-only
+resolvectl status
+resolvectl query domain2
+resolvectl query
+resolvectl flush-caches
+resolvectl statistics
+resolvectl query
+resolvectl service
+resolvectl tlsa tcp
+rmdir
+rm path/to/file2
+rm --force path/to/file2
+rm --interactive path/to/file2
+rm --verbose path/to/file2
+rm --recursive path/to/file_or_directory2
+rm --dir
+rpicam-jpeg
+rpicam-still -e
+png
+rgb
+-o
+png
+rgb
+rpicam-still -r -o
+rpicam-still -o --shutter 100000
+ruget
+ruget --output
+sudo
+systemd
+run0
+run0
+sam init
+sam init --runtime
+sam package
+sam build
+sam local start-api
+sam deploy
+screenkey
+screenkey --mouse
+screenkey --show-settings
+screenkey --position
+center
+bottom
+screenkey --mods-mode
+emacs
+mac
+win
+screenkey --bg-color --font --font-color --opacity
+screenkey --position fixed --geometry -n -f
+libsecret
+gnome-keyring
+secret-tool store
+secret-tool lookup key
+secret-tool search key
+secret-tool clear key
+semanage
+matchpathcon
+secon
+chcon
+restorecon
+sudo semanage fcontext --list
+sudo semanage fcontext --list --locallist --noheading
+sudo semanage fcontext --add --type
+sudo semanage fcontext --delete
+restorecon -R -v
+sensors
+sensors --fahrenheit
+sherlock --output
+sherlock username2 --folderoutput
+sherlock --tor
+sherlock --unique-tor
+sherlock --proxy
+sherlock --browse
+sherlock --help
+slapt-src --update
+slapt-src --list
+slapt-src --install
+slapt-src --search
+slapt-src --show
+sleep
+sleep
+sleep 1d 3h
+sleep 20m
+snake4scores
+stdout
+sqfscat file2
+sreport --parsable cluster utilization
+sreport job sizes printjobcount
+sreport user topuser
+steamos-add-to-steam
+sudo steamos-readonly disable
+sudo steamos-readonly enable
+strigger --set
+primary_slurmdbd_failure
+primary_slurmctld_acct_buffer_full
+primary_slurmctld_failure
+strigger --set --fini argument2
+strigger --get
+strigger --get
+strigger --clear
+sudo swupd update
+swupd check-update
+swupd bundle-list
+swupd search -b
+sudo swupd bundle-add
+sudo swupd bundle-remove
+sudo swupd verify
+synopkg list --name
+synopkg list --depend-on
+sudo synopkg
+synopkg status
+sudo synopkg uninstall
+synopkg checkupdate
+sudo synopkg upgradeall
+sudo synopkg install
+sudo synoupgrade --check
+sudo synoupgrade --check-smallupdate
+--download-smallupdate
+sudo synoupgrade --download
+sudo synoupgrade --start
+sudo synoupgrade --auto
+sudo synoupgrade --auto-smallupdate
+sudo synoupgrade --patch
+synoupgrade
+sysdig
+sysdig -w
+sysdig -r
+sysdig proc.name=cat and evt.type=open
+sysdig -I
+sysdig -cl
+sysdig -c spy_ip
+systemd-creds encrypt
+systemd-creds decrypt
+stdin
+echo -n
+systemd-creds encrypt -
+$CREDENTIALS_DIRECTORY
+echo -n
+systemd-creds encrypt --pretty - -
+systemd-creds encrypt
+/run/media/system/LABEL
+systemd-mount
+systemd-mount
+systemd-mount --list
+systemd-mount --automount=yes
+systemd-mount --umount
+systemd-mount
+systemd-mount
+stdin
+stdout
+stdin
+stdout
+stdin
+stdout
+systemd-stdio-bridge
+stdin
+stdout
+systemd-stdio-bridge
+stdin
+stdout
+systemd-stdio-bridge
+stdin
+stdout
+systemd-stdio-bridge
+tcpkill -i host and port
+tcptraceroute
+tcptraceroute
+tcptraceroute -p -s
+tcptraceroute -f -m
+tcptraceroute -w -q
+tcptraceroute -i
+telinit 0
+telinit 6
+telinit
+3
+4
+telinit 1
+telinit q
+telinit --no-wall
+sudo timeshift --list
+sudo timeshift --check
+sudo timeshift --create
+sudo timeshift --restore
+sudo timeshift --restore --snapshot
+sudo timeshift --delete --snapshot
+tlp
+sudo tlp-stat
+sudo tlp-stat
+disk
+processor
+graphics
+pcie
+rfkill
+sudo tlp-stat --verbose
+processor
+pcie
+sudo tlp-stat
+udev
+sudo tlp-stat
+sudo tlp-stat --psup
+sudo tlp-stat
+sudo tlp-stat
+tmt run
+tmt run discover -v
+tmt run --all provision --how --image
+tmt run plan --name test --name
+tmt run --last report --how --open
+tmt run --context -c
+tmt run --all execute --how --interactive
+tmt run --dry -vvv
+tod project import
+tod --quickadd more milk
+tod task create
+tod task create --content more --project
+tod task next
+tod task list --scheduled --project
+tod task list --project
+top
+top
+top -i
+top -u
+top -o
+top -Hp
+top -p $(pgrep -d ,
+?
+rm
+trash-cli
+trash
+trash path/to/file2
+trash list
+trash restore
+trash empty
+trash restore --all
+trash empty --all
+ul
+-
+ul -i
+locate
+sudo updatedb
+sudo updatedb --verbose
+uprecords
+uprecords -m
+uprecords -d
+uprecords -B
+uprecords -w
+urpm.update
+urpme
+urpmi.addmedia
+urpmi.removemedia
+urpmf
+urpmq
+sudo urpmi
+urpmi --no-install
+urpmi.update -a
+sudo urpmi --auto-select
+/etc/urpmi/parallel.cfg
+sudo urpmi --parallel local
+sudo urpmi $(urpmq --auto-orphans -f)
+usbip list --local
+usbip
+systemctl start usbipd
+usbip
+sudo usbip bind
+usbip
+sudo modprobe vhci-hcd
+usbip
+sudo usbip attach -r
+usbip port
+sudo usbip detach
+usbip unbind
+uuid
+uuidgen --random
+uuidgen --time
+uuidgen --sha1 --namespace
+@url
+@oid
+--name
+vcgencmd commands
+vcgencmd measure_temp
+vcgencmd measure_volts
+vcgencmd get_throttled
+vcgencmd bootloader_config
+vcgencmd --help
+chromium
+tldr chromium
+vmstat
+vmstat
+sudo vpnc
+sudo vpnc-disconnect
+w
+w
+w --no-header
+w --short
+stdin
+wpa_passphrase
+wpa_passphrase
+tldr xbps-install
+tldr xbps-remove
+tldr xbps-query
+yakuake
+Shift
+Shift
+pacman
+yay
+yay
+yay -Sua
+yay -S
+yay -Rns
+yay -Ss
+yay -Yc
+yay -Ps
+zathura
+J
+K
+L
+arrow
+r
++ R
+:blist
+mkfs
+mkswap
+lsmod
+grep -i zram
+zramctl
+sudo modprobe zram
+sudo modprobe zram
+sudo zramctl --find --size --algorithm
+sudo zramctl
+bnepd
+CFPreferences
+NSUserDefaults
+cfprefsd
+dockutil --add
+dockutil --add --replacing
+dockutil --add --view
+fan
+list
+--display
+dockutil --add --label --after
+dockutil --remove
+dockutil --add --type
+small-spacer
+--section --after
+dockutil --remove spacer-tiles
+dtrace -arch
+dtrace -a
+k
+m
+g
+t
+dtrace -b
+dtrace -s
+dtrace -c
+provider:module:function
+module:function
+function
+dtrace -f
+dtrace -p
+dtrace -a -b -f -p
+du
+m
+du -h
+du -sh
+du -ah
+du -h -d
+.jpg
+du -ch
+fontd
+base32
+tldr -p linux base32
+chgrp
+tldr -p linux chgrp
+comm
+tldr -p linux comm
+grep
+tldr -p linux grep
+make
+tldr -p linux make
+mkfifo
+tldr -p linux mkfifo
+nproc
+tldr -p linux nproc
+sed
+tldr -p linux sed
+sha384sum
+tldr -p linux sha384sum
+shred
+tldr -p linux shred
+stat
+tldr -p linux stat
+ipconfig getiflist
+ipconfig getifaddr
+/sbin/launchd
+tldr launchctl
+m battery status
+m bluetooth off
+m disk filesystems
+m dock autohide YES
+m firewall disable
+mist list firmware
+mist list installer
+mist list installer --compatible
+mist list installer --include-betas
+mist list installer --latest "macOS Sonoma"
+mist list installer --export
+mist download firmware "macOS Sonoma" --firmware-name %NAME%
+mist download installer application
+notifyd
+/var/log/notifyd.log
+notifyd -d
+notifyd -d -log_file
+ocspd
+stdout
+pbpaste
+pbpaste
+grep foo
+port search
+sudo port install
+port installed
+sudo port selfupdate
+sudo port upgrade outdated
+sudo port uninstall inactive
+sudo reboot
+sudo reboot -q
+sudo route add
+sudo route add
+sudo route -t add
+sudo route flush
+sudo route delete
+sudo route get
+say like to ride my
+say
+say sorry Dave, I can't let you do
+say --voice="?"
+say ojczyzno
+say to the Crazy
+sw_vers
+sw_vers -productVersion
+sw_vers -buildVersion
+terminal-notifier -group -title -message
+echo Message
+terminal-notifier -sound
+terminal-notifier -message your Apple -open
+terminal-notifier -message 42 -activate
+top
+top
+top
+top -o mem
+top
+top -o cpu -O time
+top
+top -user
+?
+translationd
+usernoted
+uuidgen
+w
+w -h
+w -i
+webinspectord

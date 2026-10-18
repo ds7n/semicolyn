@@ -12,6 +12,13 @@ public enum ExcludePattern: Sendable, Equatable {
     /// substring match: only whole-token equality excludes, so "class" is safe even
     /// if "ass" is listed.
     case blocklist(Set<String>)
+    /// Case-insensitive substring that excludes unless the WHOLE lowercased token is
+    /// in the allowed set (ordinary inflections like "tokens"). Membership is
+    /// case-insensitive on both sides. Trailing clause punctuation (`.` `,` `;` `:`,
+    /// only at the end) is ignored for the membership test, so "passwords," and
+    /// "tokens." still learn; any other extra text ("Password!", "secrets.yaml",
+    /// "token=abc") makes the token not a member and it stays excluded.
+    case containsExceptWords(String, Set<String>)
 }
 
 /// Write-time privacy filter: decides whether a token must never be recorded by
@@ -29,7 +36,11 @@ public struct TokenFilter: Sendable {
 
     /// The exclude rules shipped with the app.
     public static let defaultPatterns: [ExcludePattern] = [
-        .contains("password"), .contains("token"), .contains("secret"),
+        .containsExceptWords("password", ["password", "passwords", "passworded", "passwordless"]),
+        .containsExceptWords("token", ["token", "tokens", "tokenize", "tokenized", "tokenizer", "tokenizers",
+                                       "tokenizing", "tokenization", "tokenise", "tokenised"]),
+        .containsExceptWords("secret", ["secret", "secrets", "secretly", "secretive", "secretary",
+                                        "secretaries", "secretariat", "secrete", "secreted", "secretion"]),
         .hasPrefix("ghp_"), .hasPrefix("gho_"), .hasPrefix("ghs_"),  // GitHub classic PATs
         .hasPrefix("github_pat_"),                                   // GitHub fine-grained PATs
         .hasPrefix("sk-"),                                           // OpenAI API keys
@@ -63,9 +74,14 @@ public struct TokenFilter: Sendable {
                 if !prefix.isEmpty, token.hasPrefix(prefix) { return true }
             case .blocklist(let words):
                 if words.contains(lowered) { return true }
+            case .containsExceptWords(let needle, let allowed):
+                guard !needle.isEmpty, lowered.contains(needle.lowercased()) else { break }
+                let word = lowered.trimmingTrailingClausePunctuation()
+                if !allowed.contains(where: { $0.lowercased() == word }) { return true }
             }
         }
         if isStructuredSecret(token) { return true }
+        if isLongHex(token) { return true }
         if let threshold = entropyThreshold,
            token.unicodeScalars.count >= entropyMinLength,
            shannonEntropy(token) >= threshold {
@@ -111,6 +127,21 @@ func isStructuredSecret(_ token: String) -> Bool {
     return false
 }
 
+/// Minimum length of a pure-hex token treated as an API key / token shape. Hex
+/// entropy tops out at 4.0 bits/char so the entropy backstop cannot catch these;
+/// 7 to 12 char abbreviated git SHAs and 31-char hex stay allowed. Full 40-char git
+/// SHAs are excluded too (indistinguishable from a token shape).
+private let longHexMinLength = 32
+
+/// True if `token` is entirely hex digits (after an optional `0x`/`0X` prefix) and
+/// at least `longHexMinLength` hex digits long.
+func isLongHex(_ token: String) -> Bool {
+    var scalars = token.unicodeScalars[...]
+    if token.hasPrefix("0x") || token.hasPrefix("0X") { scalars = scalars.dropFirst(2) }
+    guard scalars.count >= longHexMinLength else { return false }
+    return scalars.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) || ("A"..."F").contains($0) }
+}
+
 /// True if `s` contains only base64url characters (A-Z a-z 0-9 - _ =).
 private func isBase64URL(_ s: Substring) -> Bool {
     s.allSatisfy { c in
@@ -133,4 +164,13 @@ func shannonEntropy(_ s: String) -> Double {
         entropy -= p * log2(p)
     }
     return entropy
+}
+
+private extension String {
+    /// Removes a trailing run of `.` `,` `;` `:` (nothing else, nothing mid-string).
+    func trimmingTrailingClausePunctuation() -> String {
+        var result = self
+        while let last = result.last, ".,;:".contains(last) { result.removeLast() }
+        return result
+    }
 }

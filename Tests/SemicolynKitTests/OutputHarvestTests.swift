@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// OutputHarvest — Core tier. A bounded recency store of command-output tokens
+/// OutputHarvest, Core tier. A bounded recency store of command-output tokens
 /// that surface as prefix suggestions. See
 /// `2026-06-21-predictor-output-harvesting-design`.
 final class OutputHarvestTests: XCTestCase {
@@ -59,6 +59,60 @@ final class OutputHarvestTests: XCTestCase {
         var h = OutputHarvest()
         h.harvest(["alpha", "beta"])
         XCTAssertEqual(tokens(h, "z"), [])
+    }
+
+    /// The pre-index implementation (linear duplicate scan over a recency array),
+    /// kept here as the reference the indexed store must match exactly.
+    private struct ReferenceHarvest {
+        var order: [String] = []
+        let capacity: Int
+        mutating func harvest(_ token: String) {
+            guard !token.isEmpty else { return }
+            if let i = order.firstIndex(where: { $0.utf8.elementsEqual(token.utf8) }) { order.remove(at: i) }
+            order.append(token)
+            if order.count > capacity { order.removeFirst(order.count - capacity) }
+        }
+        func candidates(forPrefix prefix: String) -> [TokenCount] {
+            let p = Array(prefix.utf8)
+            return order.enumerated().reversed()
+                .filter { p.isEmpty || $0.element.utf8.starts(with: p) }
+                .map { TokenCount(token: $0.element, count: UInt32($0.offset + 1)) }
+        }
+    }
+
+    /// Timing-free equivalence: a long deterministic stream with heavy repeats,
+    /// evictions and clears gives exactly the reference's tokens AND recency counts
+    /// after every step, for several prefixes and capacities.
+    func testIndexedStoreMatchesReferenceSemantics() {
+        let vocab = ["a1", "a2", "ab", "abc", "b1", "b2", "bb", "c", "", "a1", "cafe\u{301}", "caf\u{e9}"]
+        for capacity in [1, 2, 3, 5, 8] {
+            var h = OutputHarvest(capacity: capacity)
+            var ref = ReferenceHarvest(capacity: capacity)
+            var seed: UInt64 = 0x9E37_79B9_7F4A_7C15 &+ UInt64(capacity)
+            for step in 0..<3000 {
+                seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+                let token = vocab[Int((seed >> 33) % UInt64(vocab.count))]
+                if step % 997 == 996 {
+                    h.clear()
+                    ref.order.removeAll()
+                } else {
+                    h.harvest(token)
+                    ref.harvest(token)
+                }
+                for prefix in ["", "a", "ab", "b", "c", "caf", "z"] {
+                    XCTAssertEqual(h.candidates(forPrefix: prefix), ref.candidates(forPrefix: prefix),
+                                   "capacity \(capacity) step \(step) prefix \(prefix)")
+                }
+            }
+        }
+    }
+
+    /// Byte identity, as before: canonically-equal but byte-different tokens are
+    /// two entries (the store compares UTF-8 bytes, not `String` equality).
+    func testCanonicallyEqualButByteDifferentTokensAreDistinct() {
+        var h = OutputHarvest()
+        h.harvest(["cafe\u{301}", "caf\u{e9}"])
+        XCTAssertEqual(h.candidates(forPrefix: "caf").count, 2)
     }
 
     func testRecencyCountIsHigherForNewer() {

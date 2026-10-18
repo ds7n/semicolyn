@@ -3,7 +3,7 @@
 import XCTest
 @testable import SeedKit
 
-/// TldrParser — Core tier. Markdown tldr page → command-invocation token
+/// TldrParser, Core tier. Markdown tldr page → command-invocation token
 /// sequences. See `2026-06-21-predictor-seed-ingestion-design`.
 final class TldrParserTests: XCTestCase {
     func testExtractsCommandTokensFromCodeSpan() {
@@ -99,5 +99,29 @@ final class TldrParserTests: XCTestCase {
         // not be erased by over-eager quote stripping.
         let page = "`tr \"'\" x`"
         XCTAssertEqual(TldrParser.invocations(fromPage: page), [["tr", "'", "x"]])
+    }
+
+    func testExampleSpansAreRawCodeSpans() {
+        let page = "# git\n\n- Commit:\n\n`git commit -m \"{{msg}}\" | wc`\n\nprose `a` and `b`\n`unpaired"
+        XCTAssertEqual(TldrParser.exampleSpans(fromPage: page), ["git commit -m \"{{msg}}\" | wc", "a", "b"])
+        XCTAssertEqual(TldrParser.exampleSpans(fromPage: "no code here"), [])
+    }
+
+    // Shape of a real tldr page (CC BY 4.0): descriptions carry inline code such as `stdout`.
+    func testExampleCommandsSkipInlineCodeInDescriptions() {
+        let page = """
+        # zstd
+
+        > Compress or decompress files with Zstandard compression.
+
+        - Decompress a file to `stdout`:
+
+        `zstd {{[-d|--decompress]}} {{[-c|--stdout]}} {{path/to/file}}.zst`
+
+          `indented example`
+        """
+        XCTAssertEqual(TldrParser.exampleCommands(fromPage: page),
+                       ["zstd {{[-d|--decompress]}} {{[-c|--stdout]}} {{path/to/file}}.zst", "indented example"])
+        XCTAssertEqual(TldrParser.exampleCommands(fromPage: "- Only `prose` here:"), [])
     }
 }

@@ -9,6 +9,7 @@ final class ScriptedEchoOracle: EchoOracle, @unchecked Sendable {
     var nextCursor: EchoCursor? = EchoCursor(row: 0, col: 0)
     var cellAt: (Int, Int) -> EchoCell? = { _, _ in EchoCell(scalar: nil) }
     var isAlternateBuffer: Bool = false
+    var columns: Int? = 80
 
     func cursor() -> EchoCursor? { nextCursor }
     func cell(row: Int, col: Int) -> EchoCell? { cellAt(row, col) }

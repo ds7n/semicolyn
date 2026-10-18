@@ -3,101 +3,71 @@
 import XCTest
 @testable import SemicolynKit
 
-/// PredictorEngine — Core tier. The runtime facade composing privacy filter +
-/// learned stores + seed + seed-deferring ranker. See
-/// `2026-06-21-predictor-engine-design`.
+/// PredictorEngine: Core tier (privacy rules: Critical). The runtime facade composing
+/// the privacy filter, the learned stores, screen-word harvest and the single ranker.
+/// Engines here carry no dictionaries unless a test says so, so every suggestion comes
+/// from what the test recorded or harvested. See `2026-06-21-predictor-engine-design`.
 final class PredictorEngineTests: XCTestCase {
-    private func engine(seed: PredictorSeed? = nil,
-                        config: SuggestionConfig = .init()) -> PredictorEngine {
-        PredictorEngine(learned: .empty, seed: seed, config: config)
+    private func engine(filter: TokenFilter = .init(), english: WordDictionary? = nil) -> PredictorEngine {
+        PredictorEngine(learned: .empty, english: english, commands: nil, filter: filter)
     }
 
-    /// A seed with `git → status` (bigram) and `git`/`grep` (unigram).
-    private func sampleSeed() -> PredictorSeed {
-        var uni = Vocabulary(depth: 4, width: 1 << 14)
-        uni.record("git"); uni.record("grep")
-        var bi = BigramVocabulary()
-        bi.record(previous: "git", next: "status")
-        return PredictorSeed(unigram: uni, bigram: bi)
+    private func texts(_ e: PredictorEngine, _ line: String) -> [String] {
+        e.suggestions(line: line, lineOptedOut: false).map(\.text)
     }
 
-    // MARK: harvest (output → suggestable tokens)
+    /// The learned successors of `previous` in the persisted state, with their counts.
+    private func learnedSuccessors(_ e: PredictorEngine, after previous: String) -> [String: UInt32] {
+        Dictionary(uniqueKeysWithValues: e.state.bigram.candidates(after: previous, window: .days30)
+            .map { ($0.token, $0.count) })
+    }
+
+    // MARK: harvest (output -> screen words)
 
     /// Regression (device bug): a colored prompt line harvested from output must
-    /// contribute the visible WORD, never the SGR escape codes around it. Before the
-    /// fix the raw split fused `\u{1b}[38;2;…m` onto `user`, so escape codes
-    /// leaked into suggestions.
+    /// contribute the visible WORD, never the SGR escape codes around it.
     func testHarvestStripsEscapeCodesFromColoredOutput() {
-        // minPrefix: 0 so the 1-char ESC-prefix assertion below exercises the real
-        // escape-strip filter rather than being short-circuited by the min-prefix gate.
-        var e = engine(config: SuggestionConfig(minPrefix: 0))
-        e.harvest(output: "\u{1b}[38;2;122;162;247muser\u{1b}[0m@host")
-        // The visible text is suggestable with the color codes gone. The reset
-        // `\u{1b}[0m` between `user` and `@host` is stripped, so they fuse into
-        // one contiguous token (correct — no whitespace ever separated them), and
-        // that token surfaces when its own visible prefix is typed.
-        XCTAssertEqual(e.suggestions(forPrefix: "user"), ["user@host"])
-        // Crucially, nothing beginning with an escape or its SGR numeric params is
-        // suggestable — the escape codes never entered the vocabulary.
-        XCTAssertTrue(e.suggestions(forPrefix: "\u{1b}").isEmpty,
-                      "No suggestion may start with an ESC byte")
-        XCTAssertTrue(e.suggestions(forPrefix: "38").isEmpty,
-                      "SGR numeric params must not become suggestable tokens")
-    }
-
-    // MARK: unigram
-
-    func testLearnedUnigramSuggested() {
         var e = engine()
-        for _ in 0..<4 { e.record("claude") }   // 4 nil → graduates; higher count
-        for _ in 0..<3 { e.record("clasp") }    // 3 nil → graduates; claude (4) strictly outranks clasp (3)
-        XCTAssertEqual(e.suggestions(forPrefix: "cl"), ["claude", "clasp"])
+        e.harvest(output: "\u{1b}[38;2;122;162;247muser\u{1b}[0m.host\n")
+        // The reset between `user` and `.host` is stripped, so they fuse into one token.
+        XCTAssertEqual(texts(e, "user"), ["user.host"])
+        XCTAssertEqual(texts(e, "u"), ["user.host"])
+        // The SGR numeric params never became words.
+        XCTAssertEqual(texts(e, "38"), [])
     }
 
-    func testSeedFillsUnigramWhenLearnedEmpty() {
-        let e = engine(seed: sampleSeed())
-        XCTAssertEqual(e.suggestions(forPrefix: "gi"), ["git"])
-    }
-
-    func testSeedlessEngineStillSuggestsFromLearned() {
-        var e = engine()   // no seed
-        for _ in 0..<3 { e.record("deploy") }   // ≥ 3 nil → graduates
-        XCTAssertEqual(e.suggestions(forPrefix: "de"), ["deploy"])
-    }
-
-    // MARK: bigram (next-token)
-
-    func testLearnedNextTokenSuggested() {
+    func testHarvestRespectsPrivacyFilter() {
         var e = engine()
-        // Graduate both tokens via 3 nil occurrences first; then the after-"git"
-        // records persist directly (already graduated). Relative ranking preserved.
+        e.harvest(output: "build.log secret-aikey\n")   // "secret" excluded by default
+        XCTAssertEqual(texts(e, "secret"), [], "an excluded output token must never be harvested or surfaced")
+        XCTAssertEqual(texts(e, "build"), ["build.log"])
+    }
+
+    func testClearHarvestDropsOutputTokens() {
+        var e = engine()
+        e.harvest(output: "ephemeral.tmp\n")
+        XCTAssertEqual(texts(e, "eph"), ["ephemeral.tmp"])
+        e.clearHarvest()
+        XCTAssertEqual(texts(e, "eph"), [])
+    }
+
+    // MARK: learned words
+
+    func testLearnedUnigramRanksByCount() {
+        var e = engine()
+        for _ in 0..<4 { e.record("claude") }
+        for _ in 0..<3 { e.record("clasp") }
+        XCTAssertEqual(texts(e, "cl"), ["claude", "clasp"])
+    }
+
+    func testLearnedNextWordAfterPrevious() {
+        var e = engine()
         for _ in 0..<3 { e.record("status") }
         for _ in 0..<3 { e.record("status", after: "git") }
         for _ in 0..<3 { e.record("commit") }
-        for _ in 0..<2 { e.record("commit", after: "git") }   // ≥ floor; commit < status
-        XCTAssertEqual(e.suggestions(forPrefix: "", after: "git"), ["status", "commit"])
-    }
-
-    func testSeedNextTokenSurfacesWhenUserHasNoHistory() {
-        let e = engine(seed: sampleSeed())
-        XCTAssertEqual(e.suggestions(forPrefix: "", after: "git"), ["status"])
-    }
-
-    func testLearnedNextTokenOutranksSeed() {
-        // User's git→commit (3, ≥ floor) should appear; seed git→status fills.
-        // Graduate commit via 3 nil first, then record 3× after "git".
-        var e = engine(seed: sampleSeed())
-        for _ in 0..<3 { e.record("commit") }       // graduate via nil count
-        for _ in 0..<3 { e.record("commit", after: "git") }   // now persists directly
-        XCTAssertEqual(e.suggestions(forPrefix: "", after: "git"), ["commit", "status"])
-    }
-
-    func testEmptyPreviousFallsBackToUnigram() {
-        // An empty `previous` (start of line) must query the unigram axis, not a
-        // dead bigram axis that would return nothing.
-        var e = engine()
-        for _ in 0..<3 { e.record("deploy") }   // ≥ 3 nil → graduates
-        XCTAssertEqual(e.suggestions(forPrefix: "de", after: ""), ["deploy"])
+        for _ in 0..<2 { e.record("commit", after: "git") }
+        XCTAssertEqual(texts(e, "git "), ["status", "commit"])
+        XCTAssertEqual(learnedSuccessors(e, after: "git"), ["status": 3, "commit": 2])
     }
 
     // MARK: privacy (write-time)
@@ -105,295 +75,158 @@ final class PredictorEngineTests: XCTestCase {
     func testExcludedTokenNeverLearned() {
         var e = engine()
         for _ in 0..<5 { e.record("mypassword") }   // matches default .contains("password")
-        XCTAssertEqual(e.suggestions(forPrefix: "my"), [],
-                       "an excluded token must be learned nowhere")
+        XCTAssertEqual(texts(e, "my"), [], "an excluded token must be learned nowhere")
+        XCTAssertFalse(e.state.unigram.containsLiteral("mypassword"))
     }
 
     func testExcludedPreviousSuppressesAdjacencyButNotUnigram() {
         var e = engine()
-        // previous is excluded ("secret-token"); next ("deploy") is fine.
-        // Graduate deploy via 3 nil first so the unigram assertion holds; then record
-        // the excluded-previous contexts (adjacency still suppressed by filter).
         for _ in 0..<3 { e.record("deploy") }
         for _ in 0..<2 { e.record("deploy", after: "secret-token") }
-        XCTAssertEqual(e.suggestions(forPrefix: "de"), ["deploy"],
-                       "the non-excluded next token is still a valid unigram")
-        XCTAssertEqual(e.suggestions(forPrefix: "", after: "secret-token"), [],
+        XCTAssertEqual(texts(e, "de"), ["deploy"], "the non-excluded next token is still a valid unigram")
+        XCTAssertEqual(learnedSuccessors(e, after: "secret-token"), [:],
                        "no adjacency may be learned from an excluded previous token")
     }
 
     func testExcludedNextTokenSuppressesBothAxes() {
         var e = engine()
         for _ in 0..<3 { e.record("apitoken", after: "curl") }   // "token" excluded
-        XCTAssertEqual(e.suggestions(forPrefix: "api"), [])
-        XCTAssertEqual(e.suggestions(forPrefix: "", after: "curl"), [])
+        XCTAssertEqual(texts(e, "api"), [])
+        XCTAssertEqual(texts(e, "curl "), [])
+        XCTAssertEqual(learnedSuccessors(e, after: "curl"), [:])
     }
 
     // MARK: lifecycle
 
     func testRolloverPreservesInWindowSuggestions() {
         var e = engine()
-        for _ in 0..<3 { e.record("deploy") }   // ≥ 3 nil → graduates
+        for _ in 0..<3 { e.record("deploy") }
         e.rollover()
-        XCTAssertEqual(e.suggestions(forPrefix: "de"), ["deploy"],
-                       "sealed-day learning still suggests within the window")
+        XCTAssertEqual(texts(e, "de"), ["deploy"], "sealed-day learning still suggests within the window")
     }
 
     func testStateExposesLearnedForPersistence() {
         var e = engine()
-        // Graduate "status" via 3 nil first so the git→status bigram persists into state.
         for _ in 0..<3 { e.record("status") }
         e.record("status", after: "git")
-        let state = e.state
-        // The exposed state round-trips through the rolling stores' own query path.
-        XCTAssertEqual(state.bigram.candidates(after: "git", window: .days30).map { $0.token },
-                       ["status"])
+        XCTAssertEqual(learnedSuccessors(e, after: "git"), ["status": 1])
     }
 
-    func testTopKConfigCapsResults() {
-        var e = engine(config: SuggestionConfig(topK: 2))
-        e.record("xeaa", count: 5); e.record("xebb", count: 4); e.record("xecc", count: 3)
-        XCTAssertEqual(e.suggestions(forPrefix: "xe"), ["xeaa", "xebb"])
-    }
-
-    // MARK: output-token harvesting
-
-    func testHarvestedOutputLeadsSuggestions() {
-        var e = engine()
-        for _ in 0..<5 { e.record("status", after: "git") }   // strong learned
-        e.harvest(output: "deploy.log status.txt")            // just-seen output
-        // The harvested "status.txt" leads even over a frequent learned token.
-        XCTAssertEqual(e.suggestions(forPrefix: "st").first, "status.txt")
-    }
-
-    func testHarvestedAndLearnedMergeDeduped() {
-        var e = engine(config: SuggestionConfig(topK: 3))
-        for _ in 0..<3 { e.record("stage") }   // ≥ 3 nil → graduates
-        e.harvest(output: "stash-pop")
-        let s = e.suggestions(forPrefix: "st")
-        XCTAssertEqual(s, ["stash-pop", "stage"], "harvested leads, learned fills, no dup")
-    }
-
-    func testHarvestRespectsPrivacyFilter() {
-        var e = engine()
-        e.harvest(output: "build.log secret-aikey")   // "secret" excluded by default
-        XCTAssertEqual(e.suggestions(forPrefix: "secret"), [],
-                       "an excluded output token must never be harvested or surfaced")
-        XCTAssertEqual(e.suggestions(forPrefix: "build"), ["build.log"])
-    }
-
-    func testHarvestedLeadsNextTokenAxisToo() {
-        var e = engine()
-        e.harvest(output: "config.yaml")
-        // `cat <harvested-file>`: after "cat", the harvested filename leads.
-        XCTAssertEqual(e.suggestions(forPrefix: "config", after: "cat").first, "config.yaml")
-    }
-
-    func testNonPositiveTopKReturnsEmptyEvenWithHarvest() {
-        // The harvest path is not otherwise capped; topK <= 0 must still yield [].
-        var e = engine(config: SuggestionConfig(topK: 0))
-        e.harvest(output: "a1 a2 a3")
-        XCTAssertEqual(e.suggestions(forPrefix: "a"), [],
-                       "topK <= 0 must return nothing, not the whole harvest")
-    }
-
-    func testClearHarvestDropsOutputTokens() {
-        var e = engine()
-        e.harvest(output: "ephemeral.tmp")
-        XCTAssertEqual(e.suggestions(forPrefix: "eph"), ["ephemeral.tmp"])
-        e.clearHarvest()
-        XCTAssertEqual(e.suggestions(forPrefix: "eph"), [])
-    }
-
-    // MARK: - L6 frequency graduation through the engine
-
-    /// Build a seedless engine on an empty learned state.
-    private func freshEngine() -> PredictorEngine {
-        PredictorEngine(learned: .empty, seed: nil)
-    }
+    // MARK: L6 frequency graduation through the engine
 
     func testTokenNotLearnedBeforeThreeDistinctContexts() {
-        var e = freshEngine()
-        e.record("hunter2", after: "sudo")           // ctx 1 (one-off password)
-        // A single-context token must NOT be suggestable from the learned store.
-        // Prefix "hunter" should yield nothing learned (no seed, no harvest).
-        XCTAssertFalse(e.suggestions(forPrefix: "hunter", after: nil).contains("hunter2"))
-        XCTAssertFalse(e.suggestions(forPrefix: "hunter", after: "sudo").contains("hunter2"))
+        var e = engine()
+        e.record("hunter2", after: "sudo")           // one context (a one-off password)
+        XCTAssertEqual(texts(e, "hunter"), [])
+        XCTAssertEqual(texts(e, "sudo "), [])
+        XCTAssertFalse(e.state.unigram.containsLiteral("hunter2"))
     }
 
     func testTokenLearnedAfterThreeDistinctContexts() {
-        var e = freshEngine()
-        e.record("deploy", after: "git")             // ctx 1
-        e.record("deploy", after: "make")            // ctx 2
-        e.record("deploy", after: "npm")             // ctx 3 → graduates
-        // Now "deploy" is in the learned unigram store and suggestable.
-        XCTAssertTrue(e.suggestions(forPrefix: "dep", after: nil).contains("deploy"))
+        var e = engine()
+        e.record("deploy", after: "git")
+        e.record("deploy", after: "make")
+        XCTAssertEqual(texts(e, "dep"), [], "two contexts are not enough for an unknown word")
+        e.record("deploy", after: "npm")             // third context graduates
+        XCTAssertEqual(texts(e, "dep"), ["deploy"])
+    }
+
+    func testOrdinaryWordWithClausePunctuationLearnsTrimmedLiteral() {
+        var e = engine()
+        for prev in ["git", "make", "npm"] { e.record("passwords,", after: prev) }
+        XCTAssertEqual(texts(e, "pass"), ["passwords"])
     }
 
     func testGraduationBackfillsBigramContexts() {
-        var e = freshEngine()
-        // Give the "git" context count 2 so the backfilled bigram clears the
-        // confidenceFloor (default 2); the two other distinct contexts still drive
-        // graduation (3 distinct contexts: git, make, npm).
-        e.record("deploy", after: "git")             // ctx "git" (count 1)
-        e.record("deploy", after: "git")             // ctx "git" (count 2, still 1 distinct)
-        e.record("deploy", after: "make")            // ctx "make" (2 distinct)
-        e.record("deploy", after: "npm")             // ctx "npm" (3 distinct) → graduates, backfills all
-        // A backfilled bigram context at/above the floor is suggestable: after
-        // "git" (count 2), "deploy" ranks.
-        XCTAssertTrue(e.suggestions(forPrefix: "dep", after: "git").contains("deploy"))
+        var e = engine()
+        e.record("deploy", after: "git")
+        e.record("deploy", after: "git")
+        e.record("deploy", after: "make")
+        e.record("deploy", after: "npm")             // graduates and backfills every context
+        XCTAssertEqual(learnedSuccessors(e, after: "git"), ["deploy": 2])
+        XCTAssertEqual(learnedSuccessors(e, after: "make"), ["deploy": 1])
+        XCTAssertEqual(texts(e, "git "), ["deploy"])
     }
 
     func testFilterExcludedTokenNeverEntersTierOrStore() {
-        var e = freshEngine()
-        // ghp_ is L5-excluded → filtered at the top of record, never graduates even
-        // across many distinct contexts.
-        e.record("ghp_secretA", after: "a")
-        e.record("ghp_secretA", after: "b")
-        e.record("ghp_secretA", after: "c")
-        e.record("ghp_secretA", after: "d")
-        XCTAssertFalse(e.suggestions(forPrefix: "ghp", after: nil).contains("ghp_secretA"))
+        var e = engine()
+        for prev in ["a", "b", "c", "d"] { e.record("ghp_secretA", after: prev) }
+        XCTAssertEqual(texts(e, "ghp"), [])
+        XCTAssertFalse(e.state.unigram.containsLiteral("ghp_secretA"))
     }
 
     func testResetGraduationClearsDeferredCounts() {
-        var e = freshEngine()
+        var e = engine()
         e.record("deploy", after: "git")
         e.record("deploy", after: "make")
         e.resetGraduation()
         e.record("deploy", after: "npm")             // only 1 context post-reset
-        XCTAssertFalse(e.suggestions(forPrefix: "dep", after: nil).contains("deploy"))
+        XCTAssertEqual(texts(e, "dep"), [])
     }
 
-    // MARK: - L7 confidence derivation + storeLiteral wiring
+    // MARK: L7 confidence derivation + storeLiteral wiring
 
-    func testLowConfidenceTokenNeverCompletesButCounts() {
-        var engine = PredictorEngine(learned: .empty, seed: nil)
-        // Graduate a token low-confidence via 3 distinct contexts (default threshold 3),
-        // each with echoConfirmed:false so it graduates .low.
+    func testLowConfidenceTokenNeverCompletes() {
+        var e = engine()
         for prev in ["run", "make", "just"] {
-            engine.record("deploysecretxyz", count: 2, after: prev, echoConfirmed: false)
+            e.record("deploysecretxyz", count: 2, after: prev, echoConfirmed: false)
         }
-        // It graduated (count is on disk) but has NO literal → never a completion.
-        XCTAssertTrue(engine.suggestions(forPrefix: "deploy").isEmpty,
-                      "low-confidence token must never surface as a literal completion")
+        XCTAssertEqual(texts(e, "deploy"), [], "low-confidence token must never surface as a literal completion")
+        XCTAssertFalse(e.state.unigram.containsLiteral("deploysecretxyz"))
     }
 
     func testHighConfidenceTokenCompletes() {
-        var engine = PredictorEngine(learned: .empty, seed: nil)
+        var e = engine()
         for prev in ["run", "make", "just"] {
-            engine.record("deployprod", count: 2, after: prev, echoConfirmed: true)
+            e.record("deployprod", count: 2, after: prev, echoConfirmed: true)
         }
-        XCTAssertEqual(engine.suggestions(forPrefix: "deploy"), ["deployprod"])
+        XCTAssertEqual(texts(e, "deploy"), ["deployprod"])
     }
 
     func testOptedOutForcesLowConfidence() {
-        var engine = PredictorEngine(learned: .empty, seed: nil)
+        var e = engine()
         for prev in ["run", "make", "just"] {
-            engine.record("deployxyz", count: 2, after: prev, echoConfirmed: true, optedOut: true)
+            e.record("deployxyz", count: 2, after: prev, echoConfirmed: true, optedOut: true)
         }
-        XCTAssertTrue(engine.suggestions(forPrefix: "deploy").isEmpty,
-                      "opted-out line forces low-confidence → no literal")
+        XCTAssertEqual(texts(e, "deploy"), [], "opted-out line forces low confidence, so no literal")
     }
 
-    /// Positive control: mirrors `testHighConfidenceTokenCompletes` but with a
-    /// pattern-adjacent token, so the ONLY difference is the third signal
-    /// (`filter.isPatternAdjacent`). The token graduates (3 distinct contexts,
-    /// count ≥ floor), and `echoConfirmed:true`/`optedOut:false` are both correct —
-    /// the sole thing forcing `.low` is `isPatternAdjacent`. If that term were
-    /// dropped from the derivation, the literal would surface and this test would
-    /// FAIL, catching the regression.
+    /// Positive control for `testHighConfidenceTokenCompletes`: the only difference is a
+    /// pattern-adjacent token (entropy about 3.32 bits/char, inside the soft band [3.25, 4.0)
+    /// for threshold 4.0), so dropping `isPatternAdjacent` from the derivation fails this.
     func testPatternAdjacentForcesLowConfidence() {
-        // "aabbccddeeffgghhiijj": Shannon entropy ≈ 3.32 bits/char, which falls
-        // inside the soft band [threshold − softMargin, threshold) = [3.25, 4.0)
-        // when entropyThreshold:4.0 — so isPatternAdjacent == true, but
-        // excludes == false (not hard-excluded; it reaches the confidence step).
-        var engine = PredictorEngine(
-            learned: .empty, seed: nil,
-            filter: TokenFilter(entropyThreshold: 4.0, entropyMinLength: 16)
-        )
+        var e = engine(filter: TokenFilter(entropyThreshold: 4.0, entropyMinLength: 16))
         let token = "aabbccddeeffgghhiijj"
+        XCTAssertFalse(e.filter.excludes(token))
+        XCTAssertTrue(e.filter.isPatternAdjacent(token))
         for prev in ["run", "make", "just"] {
-            engine.record(token, count: 2, after: prev, echoConfirmed: true, optedOut: false)
+            e.record(token, count: 2, after: prev, echoConfirmed: true, optedOut: false)
         }
-        // The token is graduated (3 distinct contexts, count 2 ≥ confidenceFloor 2)
-        // but confidence is .low because isPatternAdjacent == true. No literal is
-        // stored, so suggestions must be empty.
-        XCTAssertTrue(engine.suggestions(forPrefix: "aabb").isEmpty,
-                      "isPatternAdjacent must force low-confidence even when echoConfirmed:true and optedOut:false — the third signal in the derivation")
+        XCTAssertEqual(texts(e, "aabb"), [])
     }
 
-    // MARK: - Min-prefix gate (bugs 3/4)
+    // MARK: purgeLearned + forgetLastLine + beginLine
 
-    // Min-prefix gate (bugs 3/4): no suggestions below the threshold on the FROM-SCRATCH
-    // (no preceding token) path, even when the vocabulary would match. Default minPrefix 2.
-    func testEmptyPrefixNoPreviousReturnsNoSuggestions() {
-        var e = engine(config: SuggestionConfig(topK: 3))
-        for _ in 0..<3 { e.record("git") }   // graduate via 3 nil occurrences
-        XCTAssertEqual(e.suggestions(forPrefix: ""), [])
-    }
-    func testOneCharPrefixReturnsNoSuggestionsAtDefaultMinPrefix() {
-        var e = engine(config: SuggestionConfig(topK: 3))
-        for _ in 0..<3 { e.record("git") }
-        XCTAssertEqual(e.suggestions(forPrefix: "g"), [])
-    }
-    func testTwoCharPrefixReturnsSuggestions() {
-        var e = engine(config: SuggestionConfig(topK: 3))
-        for _ in 0..<3 { e.record("git") }
-        XCTAssertEqual(e.suggestions(forPrefix: "gi"), ["git"])
-    }
-    func testMinPrefixIsConfigurable() {
-        var e = engine(config: SuggestionConfig(topK: 3, minPrefix: 1))
-        for _ in 0..<3 { e.record("git") }
-        XCTAssertEqual(e.suggestions(forPrefix: "g"), ["git"])   // 1-char allowed when minPrefix=1
-    }
-    // REGRESSION GUARD: the bigram (next-token) path must STILL work with an empty
-    // prefix + a preceding token — the gate must not touch it.
-    func testEmptyPrefixWithPreviousStillSuggests() {
-        var e = engine(config: SuggestionConfig(topK: 3))
-        for _ in 0..<3 { e.record("status") }
-        for _ in 0..<3 { e.record("status", after: "git") }
-        XCTAssertEqual(e.suggestions(forPrefix: "", after: "git"), ["status"])
-    }
-
-    // MARK: - Bug 2 guard: un-recorded tokens must never surface
-
-    // Bug 2 (leak guard): a token that was neither typed/learned nor seeded must never
-    // be suggested. After Fix 1 the App stops feeding output to `harvest`, so the only
-    // way a token reaches suggestions is via `record` (typed) or the seed. This pins
-    // that a never-recorded token is absent — a regression here would mean output is
-    // leaking back into candidates.
-    func testUnrecordedTokenIsNotSuggested() {
-        var e = engine(config: SuggestionConfig(topK: 3))
-        for _ in 0..<3 { e.record("git") }   // graduate the only recorded token (String API)
-        // "gitprompt" was never recorded; a 2-char prefix that would match it must only
-        // surface the recorded "git", never an un-recorded token.
-        XCTAssertEqual(e.suggestions(forPrefix: "gi"), ["git"])
-    }
-
-    // MARK: - Task 6: purgeLearned + forgetLastLine + beginLine
-
-    func testPurgeLearnedClearsUserStateKeepsSeed() {
-        // Seed provides "sshd"; learned provides "sshconfig".
-        var uni = Vocabulary(depth: 4, width: 1 << 14)
-        uni.record("sshd")
-        let seed = PredictorSeed(unigram: uni, bigram: BigramVocabulary())
-        var engine = PredictorEngine(learned: .empty, seed: seed)
-        for prev in ["a", "b", "c"] { engine.record("sshconfig", count: 2, after: prev, echoConfirmed: true) }
-        XCTAssertTrue(engine.suggestions(forPrefix: "ssh").contains("sshconfig"))  // precondition
-        engine.purgeLearned()
-        let after = engine.suggestions(forPrefix: "ssh")
-        XCTAssertFalse(after.contains("sshconfig"), "learned literal is gone after purge")
-        XCTAssertTrue(after.contains("sshd"), "bundled seed survives purge")
+    func testPurgeLearnedClearsUserStateKeepsDictionary() throws {
+        let english = try XCTUnwrap(WordDictionary(deserializing: try WordDictionary(
+            entries: [ScoredWord(text: "sshd", score: 100)], successors: [:]).serialize()))
+        var e = engine(english: english)
+        for prev in ["a", "b", "c"] { e.record("sshconfig", count: 2, after: prev, echoConfirmed: true) }
+        e.harvest(output: "sshkeys.txt\n")
+        XCTAssertEqual(Set(texts(e, "ssh")), ["sshconfig", "sshd", "sshkeys.txt"])  // precondition
+        e.purgeLearned()
+        XCTAssertEqual(texts(e, "ssh"), ["sshd"], "learned and harvested words are gone; the dictionary stays")
+        XCTAssertFalse(e.state.unigram.containsLiteral("sshconfig"))
     }
 
     func testForgetLastLineOnEngineDropsPendingLine() {
-        var engine = PredictorEngine(learned: .empty, seed: nil)
-        engine.beginLine()
-        engine.record("hunter2pass", count: 1, after: "sudo", echoConfirmed: false)  // pending, not graduated
-        engine.forgetLastLine()
-        // Never graduated and now forgotten → still absent even after two more distinct contexts.
-        engine.record("hunter2pass", count: 1, after: "x", echoConfirmed: false)
-        engine.record("hunter2pass", count: 1, after: "y", echoConfirmed: false)
-        XCTAssertTrue(engine.suggestions(forPrefix: "hunter").isEmpty)
+        var e = engine()
+        e.beginLine()
+        e.record("hunter2pass", count: 1, after: "sudo", echoConfirmed: true)   // pending, not graduated
+        e.forgetLastLine()
+        // Forgotten, so two more distinct contexts still leave it short of three.
+        e.record("hunter2pass", count: 1, after: "x", echoConfirmed: true)
+        e.record("hunter2pass", count: 1, after: "y", echoConfirmed: true)
+        XCTAssertEqual(texts(e, "hunter"), [])
     }
 }

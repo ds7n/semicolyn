@@ -24,17 +24,20 @@ public enum FigSpecParser {
 
     // MARK: - Tokenizing
 
-    private enum Token: Equatable {
-        case punct(Character)            // one of { } [ ] : ,
+    enum Token: Equatable {
+        case punct(Character)            // one of { } [ ] : , (plus ( ) = . with operators)
         case string(String, template: Bool)
         case ident(String)
+        case spread                      // `...`, only with operators
     }
 
     /// Reduce TS source to the only tokens that matter — `{}[]:,`, string/template
     /// literals, identifiers — skipping comments, whitespace, and everything else
     /// (operators, numbers, parens, `;`). Every brace/bracket outside a string or
-    /// comment is preserved, so nesting stays balanced.
-    private static func tokenize(_ source: String) -> [Token] {
+    /// comment is preserved, so nesting stays balanced. With `operators`, the tokens
+    /// needed to resolve references are kept too: `(`, `)`, `.`, a lone assignment
+    /// `=` (not `==`, `=>`, `<=`, ...) and `...` as ``Token/spread``.
+    static func tokenize(_ source: String, operators: Bool = false) -> [Token] {
         var tokens: [Token] = []
         let chars = Array(source)
         let n = chars.count
@@ -78,12 +81,39 @@ public enum FigSpecParser {
                     lastSig = chars[j - 1]
                     i = j
                 } else {
+                    if operators, let (token, width) = operatorToken(chars, at: i) {
+                        tokens.append(token)
+                        i += width
+                        lastSig = c
+                        continue
+                    }
                     i += 1   // operators, digits, parens, `;`, `=>` — irrelevant
                     lastSig = c
                 }
             }
         }
         return tokens
+    }
+
+    /// The reference-resolution token starting at `i` and its width, or nil.
+    private static func operatorToken(_ chars: [Character], at i: Int) -> (Token, Int)? {
+        let n = chars.count
+        switch chars[i] {
+        case "(", ")":
+            return (.punct(chars[i]), 1)
+        case "." where i + 2 < n && chars[i + 1] == "." && chars[i + 2] == ".":
+            return (.spread, 3)
+        case ".":
+            return (.punct("."), 1)
+        case "=":
+            let next: Character? = i + 1 < n ? chars[i + 1] : nil
+            let previous: Character? = i > 0 ? chars[i - 1] : nil
+            if next == "=" || next == ">" { return nil }
+            if let previous, "=!<>+-*/%&|^?".contains(previous) { return nil }
+            return (.punct("="), 1)
+        default:
+            return nil
+        }
     }
 
     /// Whether a `/` in this position opens a regex literal (vs. a division

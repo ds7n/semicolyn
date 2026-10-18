@@ -4,7 +4,7 @@ import XCTest
 @testable import SemicolynKit
 
 /// Critical-tier: a false negative here is a leaked plaintext password, so the
-/// suite is adversarial — every password vector is a negative that must FAIL to
+/// suite is adversarial, every password vector is a negative that must FAIL to
 /// learn, and the positive cases prove we didn't just suppress everything.
 final class PasswordEntryDetectorTests: XCTestCase {
     /// Drive a full line through the detector: prime with `output`, type `input`
@@ -21,6 +21,42 @@ final class PasswordEntryDetectorTests: XCTestCase {
         let learn = d.shouldLearnCommittedLine()
         d.noteInput([0x0d])                            // Enter
         return learn
+    }
+
+    // MARK: - Escape-aware output reading
+
+    func testNoteOutputIgnoresEscapeBytes() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("abc".utf8))
+        d.noteOutput(Array("\u{1b}[31m\u{1b}[0m".utf8))        // colour only, no echo
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+
+        var e = PasswordEntryDetector()
+        e.noteInput(Array("abc".utf8))
+        e.noteOutput(Array("\u{1b}[31ma".utf8))
+        e.noteOutput(Array("b\u{1b}[0mc".utf8))
+        XCTAssertTrue(e.shouldLearnCommittedLine())
+    }
+
+    func testPromptTailSeenThroughColour() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("\u{1b}[1mPassword:\u{1b}[0m ".utf8))
+        d.resetLine()
+        for ch in "abc" {
+            let b = Array(String(ch).utf8)
+            d.noteInput(b)
+            d.noteOutput(b)
+        }
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testResetClearsFilterState() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("\u{1b}]0;never-terminated".utf8))   // stuck inside an OSC
+        d.reset()
+        d.noteInput(Array("abc".utf8))
+        d.noteOutput(Array("abc".utf8))
+        XCTAssertTrue(d.shouldLearnCommittedLine())
     }
 
     // MARK: - Echo inference (the primary, prompt-independent signal)
@@ -48,7 +84,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
         }
         // Prompt text alone already suppresses; assert the verdict is false and
         // that it holds via the prompt path (masking is the belt, prompt the
-        // suspenders — either is sufficient).
+        // suspenders, either is sufficient).
         XCTAssertFalse(d.shouldLearnCommittedLine())
     }
 
@@ -58,6 +94,45 @@ final class PasswordEntryDetectorTests: XCTestCase {
         // The classic leak: `sudo` asks, user types the login password.
         XCTAssertFalse(verdict(promptOutput: "[sudo] password for alice: ",
                                typed: "hunter2", echoed: false))
+    }
+
+    /// The bare tail, with the prompt as the very last output (no line was reset
+    /// after it): `password for <word>:` must match as a suffix on its own, not only
+    /// through the `password for` partial-arrival pattern.
+    func testSudoPromptTailIsAPrompt() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("[sudo] password for alice: ".utf8))
+        d.noteInput(Array("hunter2".utf8))             // sudo does not echo
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: false, reason: .prompt))
+    }
+
+    func testPasswordForEmailAccountIsAPrompt() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("Password for alice@example.com:".utf8))
+        d.noteInput(Array("hunter2".utf8))
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: false, reason: .prompt))
+    }
+
+    /// Negative: the phrase mid-sentence (several words after it, no trailing colon)
+    /// is ordinary output, so an echoed command after it is learned by bytes.
+    func testPasswordForInASentenceIsNotAPrompt() {
+        XCTAssertTrue(verdict(promptOutput: "the password for alice is in the vault\n$ ",
+                              typed: "ls", echoed: true))
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("the password for alice is in the vault".utf8))
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: true, reason: .bytes))
+    }
+
+    /// Negative: two words between `password for` and the colon is not the prompt
+    /// shape (`<word>` is one token).
+    func testPasswordForTwoWordsColonIsNotAPrompt() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("note: password for alice is: ".utf8))
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: true, reason: .bytes))
     }
 
     func testSshPasswordPromptSuppresses() {
@@ -78,7 +153,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
 
     func testPromptSuppressesEvenIfSomehowEchoed() {
         // Adversarial: even if a password prompt DID echo (e.g. a broken TUI),
-        // the prompt-text suppressor must still fire — OR semantics.
+        // the prompt-text suppressor must still fire, OR semantics.
         XCTAssertFalse(verdict(promptOutput: "Password: ", typed: "hunter2", echoed: true))
     }
 
@@ -94,7 +169,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
 
     func testWordPasswordMidOutputDoesNotSuppress() {
         // "password" appearing in normal output (not as a trailing prompt) must
-        // NOT suppress the next command — the match is a suffix of the last line.
+        // NOT suppress the next command, the match is a suffix of the last line.
         XCTAssertTrue(verdict(promptOutput: "changing password policy\n$ ",
                               typed: "kubectl", echoed: true))
     }
@@ -325,7 +400,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
     }
 
     func testExactTieSuppressed() {
-        // Exactly 50% echoed (4 of 8): a tie must SUPPRESS — exclusion wins ties.
+        // Exactly 50% echoed (4 of 8): a tie must SUPPRESS, exclusion wins ties.
         // Guards the strict `>` in the majority test against a `>=` regression.
         // 4*2 = 8, and 8 > 8 is false → suppress; 8 >= 8 would be true → learn.
         let s = Array("passw0rd".unicodeScalars)
@@ -454,5 +529,358 @@ final class PasswordEntryDetectorTests: XCTestCase {
             d.settleLine(scalars: [ch], from: EchoCursor(row: 0, col: 0))
         }
         XCTAssertFalse(d.shouldLearnCommittedLine())      // all hidden → suppress
+    }
+
+    // MARK: - Commit-time echo check (transport-agnostic)
+
+    func testCommitRowVerdictWins() {
+        // No oracle and nothing output: bytes alone would say "not echoed".
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ls".utf8))
+        XCTAssertFalse(d.shouldLearnCommittedLine())     // baseline: byte path suppresses
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+    }
+
+    func testCommitRowCannotOverridePrompt() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("password: ".utf8))
+        d.resetLine()
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testCommitRowVerdictLearnsUnderAlternateBuffer() {
+        // Plain tmux / Mosh keep the outer terminal on the alternate buffer for the
+        // whole session; a row that visibly shows the typed line is still learned.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+    }
+
+    func testAlternateBufferWithoutVerdictStillSuppresses() {
+        // No commit-row verdict: the oracle path's alt-screen suppression applies
+        // as before, even though every keystroke classified echoed.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        oracle.cellAt = { r, c in
+            guard r == 0 else { return EchoCell(scalar: nil) }
+            return c == 0 ? EchoCell(scalar: "a") : (c == 1 ? EchoCell(scalar: "b") : EchoCell(scalar: nil))
+        }
+        oracle.nextCursor = EchoCursor(row: 0, col: 2)
+        d.settleLine(scalars: Array("ab".unicodeScalars), from: EchoCursor(row: 0, col: 0))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+        // Control: the same line on the primary buffer is learned.
+        oracle.isAlternateBuffer = false
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+    }
+
+    func testAlternateBufferWithFalseVerdictSuppresses() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("hunter2".utf8))
+        d.noteOutput(Array("hunter2".utf8))
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testPromptBeatsTrueVerdictUnderAlternateBuffer() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteOutput(Array("Password: ".utf8))
+        d.resetLine()
+        d.noteInput(Array("ls".utf8))
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testNoteInputClearsVerdict() {
+        // A verdict read before more typing is stale: more keys arrived after it.
+        var d = PasswordEntryDetector()
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+        d.noteInput(Array("xy".utf8))                    // no echo for the new keys
+        XCTAssertFalse(d.shouldLearnCommittedLine())     // byte path: 2 typed, 0 echoed
+
+        var e = PasswordEntryDetector()
+        e.noteInput(Array("hunter2".utf8))
+        e.noteOutput(Array("hunter2".utf8))
+        e.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        e.noteInput(Array("x".utf8))
+        e.noteOutput(Array("x".utf8))
+        XCTAssertTrue(e.shouldLearnCommittedLine())      // false verdict also cleared
+    }
+
+    func testNilReadingClearsEarlierTrueVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ls".utf8))                     // nothing echoed in bytes
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: nil)
+        XCTAssertFalse(d.shouldLearnCommittedLine())      // falls back to bytes: suppress
+    }
+
+    func testCommitRowFalseSuppresses() {
+        // Bytes echoed fully (a byte-path "yes"), but the screen shows no echo.
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("hunter2".utf8))
+        d.noteOutput(Array("hunter2".utf8))
+        XCTAssertTrue(d.shouldLearnCommittedLine())      // baseline: byte path would learn
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testCommitRowFalseOverridesOracleEchoed() {
+        // The per-keystroke oracle path says echoed; the commit row says not.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        oracle.cellAt = { r, c in
+            guard r == 0 else { return EchoCell(scalar: nil) }
+            return c == 0 ? EchoCell(scalar: "a") : (c == 1 ? EchoCell(scalar: "b") : EchoCell(scalar: nil))
+        }
+        oracle.nextCursor = EchoCursor(row: 0, col: 2)
+        d.settleLine(scalars: Array("ab".unicodeScalars), from: EchoCursor(row: 0, col: 0))
+        XCTAssertTrue(d.shouldLearnCommittedLine())      // baseline: oracle path would learn
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: "pin: ")
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testNilRowFallsBack() {
+        var echoed = PasswordEntryDetector()
+        echoed.noteInput(Array("ls".utf8))
+        echoed.noteOutput(Array("ls".utf8))
+        echoed.noteCommitRow(typedLine: "ls", renderedBeforeCursor: nil)
+        XCTAssertTrue(echoed.shouldLearnCommittedLine())
+
+        var silent = PasswordEntryDetector()
+        silent.noteInput(Array("ls".utf8))
+        silent.noteCommitRow(typedLine: "ls", renderedBeforeCursor: nil)
+        XCTAssertFalse(silent.shouldLearnCommittedLine())
+    }
+
+    func testNilRowDoesNotEraseEarlierFalseVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("hunter2".utf8))
+        d.noteOutput(Array("hunter2".utf8))
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: nil)
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testVerdictClearedOnReset() {
+        var d = PasswordEntryDetector()
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+        d.resetLine()
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testVerdictClearedOnFullReset() {
+        var d = PasswordEntryDetector()
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+        d.reset()
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    // MARK: - Alt buffer applies whenever no verdict exists (fix round 2)
+
+    func testAltBufferNoSettleNoVerdictSuppressesMaskedEcho() {
+        // Byte path would count the mask as echo; the alt-buffer check must stop it.
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("**".utf8))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+        // Control: the same bytes on the primary buffer pass the byte path.
+        oracle.isAlternateBuffer = false
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+    }
+
+    func testAltBufferNoSettleNoVerdictSuppressesRealEcho() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testAltBufferNilReadingAfterTrueVerdictSuppresses() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("**".utf8))
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: "> ab")
+        XCTAssertTrue(d.shouldLearnCommittedLine())          // verdict wins under alt
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: nil)
+        XCTAssertFalse(d.shouldLearnCommittedLine())         // no verdict: alt suppresses
+    }
+
+    // MARK: - Only line-changing input clears the verdict
+
+    func testEnterOrControlChunkKeepsFalseVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("hunter2".utf8))
+        d.noteOutput(Array("hunter2".utf8))                  // byte path alone would learn
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        d.noteInput([0x0d])
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+        d.noteInput([0x0d, 0x0a, 0x03, 0x1b])
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testPrintableClearsTrueVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ab".utf8))                         // no echo: byte path says no
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: "$ ab")
+        XCTAssertTrue(d.shouldLearnCommittedLine())
+        d.noteInput(Array("x".utf8))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testSpaceClearsTrueVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ab".utf8))
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: "$ ab")
+        d.noteInput([0x20])
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testBackspaceClearsTrueVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("abc".utf8))
+        d.noteCommitRow(typedLine: "abc", renderedBeforeCursor: "$ abc")
+        d.noteInput([0x7f])                                   // 2 typed, 0 echoed
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+
+        var e = PasswordEntryDetector()
+        e.noteInput(Array("abc".utf8))
+        e.noteCommitRow(typedLine: "abc", renderedBeforeCursor: "$ abc")
+        e.noteInput([0x08])
+        XCTAssertFalse(e.shouldLearnCommittedLine())
+    }
+
+    func testNonASCIITextClearsTrueVerdict() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ab".utf8))
+        d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: "$ ab")
+        d.noteInput(Array("é".utf8))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    // MARK: - Verdict reason (decision log)
+
+    func testVerdictReasonPromptOutranksTrueRow() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("alice@host's password: ".utf8))
+        d.resetLine()
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .prompt))
+    }
+
+    func testVerdictReasonRowTrueAndFalse() {
+        var d = PasswordEntryDetector()
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: true, reason: .row))
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .row))
+    }
+
+    func testVerdictReasonAltWithoutRow() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .alt))
+    }
+
+    func testVerdictReasonOracleTally() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        oracle.cellAt = { r, c in r == 0 && c == 0 ? EchoCell(scalar: "a") : (c == 1 ? EchoCell(scalar: "b") : nil) }
+        oracle.nextCursor = EchoCursor(row: 0, col: 2)
+        d.settleLine(scalars: ["a", "b"], from: EchoCursor(row: 0, col: 0))
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: true, reason: .oracle))
+        // No output this line: the same tally is a stall and suppresses.
+        var e = PasswordEntryDetector()
+        e.setOracle(oracle)
+        e.noteInput(Array("ab".utf8))
+        e.settleLine(scalars: ["a", "b"], from: EchoCursor(row: 0, col: 0))
+        XCTAssertEqual(e.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .oracle))
+    }
+
+    func testVerdictReasonBytesFallback() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: true, reason: .bytes))
+        var e = PasswordEntryDetector()
+        e.noteInput(Array("hunter2".utf8))
+        XCTAssertEqual(e.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .bytes))
+        XCTAssertFalse(e.shouldLearnCommittedLine())
+    }
+
+    // MARK: - Prompt that arrives after the previous line's reset
+
+    func testPromptArrivingAfterResetSuppressesSilentLineEvenIfRowWouldConfirm() {
+        // The App resets at the Enter of `ssh host`, before the password prompt arrives.
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("$ ".utf8))
+        d.resetLine()
+        d.noteOutput(Array("alice@host's password: ".utf8))
+        d.noteInput(Array("hunter2".utf8))                    // silent prompt: no echo
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "hunter2")
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .prompt))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    func testEchoAfterPromptLikeOutputIsNotPromptSuppressed() {
+        // The tail ends with the echoed line, not the prompt, so the row decides.
+        var d = PasswordEntryDetector()
+        d.resetLine()
+        d.noteOutput(Array("Password:\r\n$ ".utf8))
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: true, reason: .row))
     }
 }

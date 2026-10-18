@@ -50,5 +50,9 @@ struct SwiftTermEchoOracle: EchoOracle, @unchecked Sendable {
             resolveActiveView()?.getTerminal().isCurrentBufferAlternate ?? false
         }
     }
+
+    var columns: Int? {
+        MainActor.assumeIsolated { resolveActiveView()?.getTerminal().cols }
+    }
 }
 #endif

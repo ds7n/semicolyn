@@ -13,14 +13,111 @@ final class TokenFilterTests: XCTestCase {
     // MARK: deterministic patterns — positives
 
     func testContainsPasswordTokenSecret() {
-        XCTAssertTrue(filter.excludes("password"))
+        // Bare "password" is an ordinary word now (spec 6.9); see testOrdinaryWordsAllowed.
+        XCTAssertTrue(filter.excludes("password1"))
         XCTAssertTrue(filter.excludes("hunter2password"), "substring anywhere")
         XCTAssertTrue(filter.excludes("api_token"))
         XCTAssertTrue(filter.excludes("topsecret"))
     }
 
+    // MARK: ordinary words and hex (Task 17, spec 6.9)
+
+    func testOrdinaryWordsAllowed() {
+        for w in ["tokens", "Tokens", "TOKENS", "password", "Passwords", "PASSWORD", "secretly", "secretary",
+                  "tokenizer", "passwordless", "tokenization", "secretariat", "Secrete"] {
+            XCTAssertFalse(filter.excludes(w), w)
+        }
+    }
+
+    func testSecretShapesStillExcluded() {
+        for w in ["password1", "mypassword", "Password!", "--password", "passwords!", "token=abc", "GITHUB_TOKEN",
+                  "api_token", "tokenABC", "secret_key", "MY_SECRET", "secrets.yaml", "x-secret",
+                  "tokensx", "secretsauce", "passwordsx"] {
+            XCTAssertTrue(filter.excludes(w), w)
+        }
+    }
+
+    func testEmptyNeedleNeverMatches() {
+        XCTAssertFalse(TokenFilter(patterns: [.containsExceptWords("", [])], entropyThreshold: nil).excludes("anything"))
+    }
+
+    func testContainsExceptWordsDirect() {
+        let f = TokenFilter(patterns: [.containsExceptWords("foo", ["foos"])], entropyThreshold: nil)
+        XCTAssertFalse(f.excludes("foos"))
+        XCTAssertFalse(f.excludes("FOOS"))
+        XCTAssertTrue(f.excludes("foo"), "needle itself not in allowed set")
+        XCTAssertFalse(f.excludes("foos."), "trailing clause punctuation ignored")
+        XCTAssertTrue(f.excludes("foos!"))
+        XCTAssertFalse(f.excludes("bar"))
+    }
+
+    func testClausePunctuationAfterAllowedWordAllowed() {
+        for w in ["passwords,", "tokens.", "Secret;", "token:"] {
+            XCTAssertFalse(filter.excludes(w), w)
+        }
+    }
+
+    func testOtherSuffixesAfterAllowedWordExcluded() {
+        for w in ["Password!", "secrets.yaml", "tokens.json", "password1,", ".tokens", ",tokens"] {
+            XCTAssertTrue(filter.excludes(w), w)
+        }
+    }
+
+    func testUppercaseNeedleAndMixedCaseAllowedSet() {
+        let f = TokenFilter(patterns: [.containsExceptWords("FOO", ["foos"])], entropyThreshold: nil)
+        XCTAssertTrue(f.excludes("xfoo"), "uppercase needle still matches lowercased token")
+        XCTAssertFalse(f.excludes("foos"))
+        let g = TokenFilter(patterns: [.containsExceptWords("foo", ["FOOS"])], entropyThreshold: nil)
+        XCTAssertFalse(g.excludes("foos"), "uppercase allowed entry still allows")
+    }
+
+    func testTurkishDottedIFailsSafe() {
+        // lowercased() yields "i" + combining dot, which is not the allowed "tokenize".
+        XCTAssertTrue(filter.excludes("TOKEN\u{130}ZE"))
+    }
+
+    func testHexZeroXPrefix() {
+        let unit = "deadbeef"
+        XCTAssertTrue(filter.excludes("0x" + String(repeating: unit, count: 4)), "0x + 32")
+        XCTAssertTrue(filter.excludes("0X" + String(repeating: unit, count: 4)), "0X + 32")
+        XCTAssertFalse(filter.excludes("0x" + String(repeating: unit, count: 3) + "deadbee"), "0x + 31")
+        XCTAssertFalse(filter.excludes("0x" + "deadbeeg" + String(repeating: unit, count: 3)), "non-hex after prefix")
+    }
+
+    func testHexLengthBoundary() {
+        let unit = "deadbeef"  // low entropy, so only the hex rule can decide
+        XCTAssertFalse(filter.excludes(String(repeating: unit, count: 3) + "deadbee"), "31 hex")
+        XCTAssertTrue(filter.excludes(String(repeating: unit, count: 4)), "32 hex")
+        XCTAssertTrue(filter.excludes(String(repeating: unit, count: 5)), "40 hex")
+        XCTAssertTrue(filter.excludes(String(repeating: unit, count: 8)), "64 hex")
+    }
+
+    func testHexMixedCaseExcluded() {
+        XCTAssertTrue(filter.excludes(String(repeating: "DeadBEEF", count: 4)))
+    }
+
+    func testShortHexAllowed() {
+        XCTAssertFalse(filter.excludes("a1b2c3d"), "7 char git sha")
+        XCTAssertFalse(filter.excludes("a1b2c3d4e5f6"), "12 char git sha")
+    }
+
+    func testThirtyTwoCharsWithOneNonHexNotHexExcluded() {
+        // Low entropy: nothing else in the filter excludes it, so the hex rule must not.
+        XCTAssertFalse(filter.excludes(String(repeating: "deadbeef", count: 3) + "deadbeeg"))
+        // High entropy variant is excluded, but by the entropy backstop (H > 4.0), not hex.
+        let noEntropy = TokenFilter(entropyThreshold: nil)
+        XCTAssertFalse(noEntropy.excludes("0123456789abcdef0123456789abcdeg"))
+        XCTAssertTrue(filter.excludes("0123456789abcdef0123456789abcdeg"))
+    }
+
+    func testHexRuleIndependentOfEntropyBackstop() {
+        let noEntropy = TokenFilter(entropyThreshold: nil)
+        XCTAssertTrue(noEntropy.excludes(String(repeating: "deadbeef", count: 4)))
+        XCTAssertFalse(noEntropy.excludes(String(repeating: "deadbeef", count: 3) + "deadbee"))
+    }
+
     func testContainsIsCaseInsensitive() {
-        XCTAssertTrue(filter.excludes("PASSWORD"))
+        XCTAssertTrue(filter.excludes("PASSWORD1"))
         XCTAssertTrue(filter.excludes("API_TOKEN"))
         XCTAssertTrue(filter.excludes("MySecret"))
     }
@@ -74,7 +171,8 @@ final class TokenFilterTests: XCTestCase {
     }
 
     func testLongLowEntropyNotExcluded() {
-        XCTAssertFalse(filter.excludes(String(repeating: "a", count: 32)))
+        // "z" not "a": 32 x "a" is pure hex and excluded by the Task 17 hex rule.
+        XCTAssertFalse(filter.excludes(String(repeating: "z", count: 32)))
         XCTAssertFalse(filter.excludes("aaaaaaaaaabbbbbbbbbb"), "len 20 but entropy 1.0 < 4.0")
     }
 
