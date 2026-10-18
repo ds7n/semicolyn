@@ -142,4 +142,11 @@ final class CommandTreeTests: XCTestCase {
         node += [1, 0x78, 1, 0, 0]
         XCTAssertNil(CommandTree(deserializing: blob(node: node)))
     }
+
+    func testToolCount() throws {
+        XCTAssertEqual(tree.toolCount, 4)
+        XCTAssertEqual(CommandTree(tools: [], pipeTargets: []).toolCount, 0)
+        let back = try XCTUnwrap(CommandTree(deserializing: tree.serialize()))
+        XCTAssertEqual(back.toolCount, 4)
+    }
 }

@@ -4,7 +4,7 @@ import SwiftUI
 
 /// The predictive-input row: a **constant-height** strip of accent chips above the
 /// keybar (predictor spec §"Suggestion surface"). The row is ALWAYS present at a fixed
-/// 18pt — empty when there are no suggestions, chips (one line, scroll-overflow) when
+/// 18pt, empty when there are no suggestions, chips (one line, scroll-overflow) when
 /// there are. This is what "never reflows the keybar" requires: the earlier design
 /// collapsed the row to zero when empty, so a suggestion tick grew the whole input
 /// accessory (40→74pt) and jumped the terminal (device 2026-07-24). A fixed height
@@ -12,7 +12,7 @@ import SwiftUI
 /// WITHIN the reserved row, never resizing it.
 struct PredictorStripView: View {
     /// Fixed row height (pt). Reserved whether or not suggestions are present, so the
-    /// input-accessory height — and thus the terminal grid — never changes. Tuned with
+    /// input-accessory height, and thus the terminal grid, never changes. Tuned with
     /// the tightened keybar (2026-07-24 input-area redesign).
     static let rowHeight: CGFloat = 18
 
@@ -31,15 +31,15 @@ struct PredictorStripView: View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 5) {
-                    ForEach(predictorVM.suggestions, id: \.self) { s in
-                        Text(s)
+                    ForEach(Array(predictorVM.suggestions.enumerated()), id: \.offset) { index, s in
+                        Text(s.text)
                             .font(.system(size: 11, design: .monospaced))
                             .lineLimit(1)                                   // one line, always
                             .foregroundStyle(Color(theme.predictor.suggestionText))
                             .padding(.horizontal, 8).padding(.vertical, 1)  // tight capsule
                             .background(Color(theme.predictor.suggestionBg))
                             .clipShape(Capsule())
-                            .onInputClickTap { vm.acceptSuggestion(s) }
+                            .onInputClickTap { vm.acceptSuggestion(index: index) }
                     }
                 }
                 .padding(.horizontal, 8)
@@ -65,7 +65,7 @@ struct PredictorStripView: View {
                 .buttonStyle(.plain)
             }
         }
-        .frame(height: Self.rowHeight)                 // CONSTANT — reserved even when empty
+        .frame(height: Self.rowHeight)                 // CONSTANT, reserved even when empty
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(theme.predictor.stripBg))
         .overlay(alignment: .trailing) {
@@ -80,7 +80,7 @@ struct PredictorStripView: View {
                     .transition(.opacity)
             }
         }
-        // Fade chips in/out WITHIN the fixed row — no height change, so the keybar and
+        // Fade chips in/out WITHIN the fixed row, no height change, so the keybar and
         // terminal never reflow. (The old `.move(edge:.bottom)` transition combined with
         // a collapsing row was the reflow source.)
         .animation(.easeInOut(duration: 0.12), value: predictorVM.suggestions)

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-/// Decides, per input line, whether the predictor may LEARN that line — the
+/// Decides, per input line, whether the predictor may LEARN that line, the
 /// write-time gate that keeps typed **passwords** out of the learned vocabulary.
 ///
 /// ## Why this is needed
@@ -9,7 +9,7 @@
 /// The predictor observes the *outgoing* keystroke stream, so a password typed at
 /// an in-session prompt (`sudo`, nested `ssh`, a TUI password field) would be
 /// learned like any other token. The token filter (`TokenFilter`) cannot catch a
-/// short low-entropy human password (`hunter2` — 7 chars, no matching pattern,
+/// short low-entropy human password (`hunter2`, 7 chars, no matching pattern,
 /// below the entropy floor), so a second, orthogonal defense is required.
 ///
 /// ## Why it is heuristic
@@ -23,17 +23,17 @@
 /// liveness); when no oracle is injected it falls back to the byte-count inference
 /// below. The observable signals are:
 ///
-///  1. **Echo inference** — printable characters the user types are, in a normal
+///  1. **Echo inference**, printable characters the user types are, in a normal
 ///     (echoing) shell, streamed back in the output within a few milliseconds. At
 ///     a non-echoing password prompt they are not (or a constant mask like `*` is
 ///     echoed instead). If a line's typed characters are **not positively observed
 ///     echoed back**, the line is treated as a password and not learned.
-///  2. **Prompt text** — the output immediately before the line matches a known
+///  2. **Prompt text**, the output immediately before the line matches a known
 ///     password-prompt pattern (`password:`, `passphrase`, `[sudo] password for`).
 ///
 /// The two are OR-combined: a line is suppressed if EITHER fires. Neither alone is
 /// safe, and a missed password is an irreversible plaintext leak, so the gate is
-/// **biased hard toward suppression** — `shouldLearnCommittedLine` returns `true`
+/// **biased hard toward suppression**, `shouldLearnCommittedLine` returns `true`
 /// only when echo was positively confirmed AND no password prompt preceded it.
 /// The cost of a false positive is a harmless, silent learning miss (a legitimate
 /// fast-typed command over high latency may not be learned); the cost of a false
@@ -100,7 +100,7 @@ public struct PasswordEntryDetector: Sendable {
         "passphrase for",
         "enter passphrase",
         "'s password:",       // "alice@host's password:"
-        "verification code:", // 2FA / OTP — also secret-shaped
+        "verification code:", // 2FA / OTP, also secret-shaped
     ]
 
     public init() {}
@@ -113,7 +113,7 @@ public struct PasswordEntryDetector: Sendable {
         for b in bytes {
             // Count a printable output byte as an echo of a pending typed char,
             // up to the number typed. Masked prompts echo a constant char, which
-            // still increments here — but a TRUE non-echoing prompt emits none of
+            // still increments here, but a TRUE non-echoing prompt emits none of
             // the line's characters as fresh output, so the ratio test below
             // separates the two: an echoing line matches ~1:1, a masked/silent
             // line does not reach the confirmation threshold relative to length.
@@ -169,7 +169,7 @@ public struct PasswordEntryDetector: Sendable {
 
     /// Call AFTER the settle window with the batch's printable `scalars` (in order)
     /// and `from` = the cursor cell snapshotted BEFORE those keystrokes were
-    /// delivered (this call's own anchor — NOT shared struct state, so concurrent
+    /// delivered (this call's own anchor, NOT shared struct state, so concurrent
     /// per-keystroke settles don't clobber each other). Reads the now-rendered
     /// cumulative grid once and classifies EACH keystroke against its expected echo
     /// cell (`from.col + i`), folding all into the line tally. Fail-safe: no oracle
@@ -178,7 +178,7 @@ public struct PasswordEntryDetector: Sendable {
     public mutating func settleLine(scalars: [Unicode.Scalar], from start: EchoCursor?) {
         guard let oracle, let start, !scalars.isEmpty else { return }
         // Non-echoing prompt: if the cursor never advanced past the anchor, the
-        // keystrokes were swallowed — classify every one hidden.
+        // keystrokes were swallowed, classify every one hidden.
         let post = oracle.cursor()
         let advanced = (post?.col ?? start.col) > start.col
             || (post?.row ?? start.row) > start.row
@@ -200,8 +200,8 @@ public struct PasswordEntryDetector: Sendable {
     }
 
     /// Pure per-cell classifier: echoed (expected scalar rendered at the cell),
-    /// masked (a different non-nil glyph rendered — a mask like `*`), hidden (blank
-    /// cell or unreadable). No cursor-advance check here — the caller (`settleLine`)
+    /// masked (a different non-nil glyph rendered, a mask like `*`), hidden (blank
+    /// cell or unreadable). No cursor-advance check here, the caller (`settleLine`)
     /// gates the whole batch on cursor advance; per-cell we only compare glyphs.
     private static func classifyCell(
         oracle: EchoOracle, row: Int, col: Int, scalar: Unicode.Scalar
@@ -241,24 +241,57 @@ public struct PasswordEntryDetector: Sendable {
     ///
     /// Call once, at the moment a line commits, BEFORE `resetLine`.
     public func shouldLearnCommittedLine() -> Bool {
-        if promptSuppressedThisLine { return false }
-        if let commitRowVerdict { return commitRowVerdict }
-        if oracle?.isAlternateBuffer == true { return false }       // alt-screen ⇒ suppress
+        committedLineVerdict().learn
+    }
+
+    /// Which rule decided a ``CommitVerdict``, in precedence order.
+    public enum VerdictReason: String, Equatable, Sendable {
+        /// A password prompt preceded the line.
+        case prompt
+        /// The commit-time row check (``noteCommitRow(typedLine:renderedBeforeCursor:)``).
+        case row
+        /// No row verdict and the terminal is on the alternate buffer.
+        case alt
+        /// The per-keystroke oracle tally.
+        case oracle
+        /// The byte-count fallback.
+        case bytes
+    }
+
+    /// The learn decision for the committed line and the rule that made it.
+    public struct CommitVerdict: Equatable, Sendable {
+        public let learn: Bool
+        public let reason: VerdictReason
+
+        public init(learn: Bool, reason: VerdictReason) {
+            self.learn = learn
+            self.reason = reason
+        }
+    }
+
+    /// ``shouldLearnCommittedLine()`` with the deciding rule, for the decision log.
+    /// Same precedence and fail-safe contract.
+    public func committedLineVerdict() -> CommitVerdict {
+        if promptSuppressedThisLine { return CommitVerdict(learn: false, reason: .prompt) }
+        if let commitRowVerdict { return CommitVerdict(learn: commitRowVerdict, reason: .row) }
+        if oracle?.isAlternateBuffer == true {                       // alt-screen ⇒ suppress
+            return CommitVerdict(learn: false, reason: .alt)
+        }
         // Oracle path: when the buffer check classified this line, trust the
         // majority-echoed statistic (the far stronger signal per spec L1).
         if oracleActiveThisLine {
-            guard outputSeenThisLine else { return false }          // stall ⇒ ambiguous ⇒ suppress
-            guard oracleClassifiedThisLine > 0 else { return false }
-            // Strong majority required (> 50%). A tie or worse suppresses —
-            // exclusion wins ties.
-            return oracleEchoedThisLine * 2 > oracleClassifiedThisLine
+            // Stall ⇒ ambiguous ⇒ suppress. Strong majority required (> 50%); a tie
+            // or worse suppresses (exclusion wins ties).
+            let learn = outputSeenThisLine && oracleClassifiedThisLine > 0
+                && oracleEchoedThisLine * 2 > oracleClassifiedThisLine
+            return CommitVerdict(learn: learn, reason: .oracle)
         }
-        // Byte-count fallback (no oracle set): positive-echo-required — the line's
+        // Byte-count fallback (no oracle set): positive-echo-required, the line's
         // characters must have come back in output. A short slack (1 char) tolerates
         // a trailing byte still in flight at commit without opening the door to a
         // fully-silent password.
-        guard typedThisLine > 0 else { return false }
-        return echoedThisLine + 1 >= typedThisLine
+        let learn = typedThisLine > 0 && echoedThisLine + 1 >= typedThisLine
+        return CommitVerdict(learn: learn, reason: .bytes)
     }
 
     /// Reset per-line state after a commit (Enter) or a context break (ESC /

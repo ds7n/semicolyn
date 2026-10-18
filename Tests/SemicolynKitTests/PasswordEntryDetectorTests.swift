@@ -4,7 +4,7 @@ import XCTest
 @testable import SemicolynKit
 
 /// Critical-tier: a false negative here is a leaked plaintext password, so the
-/// suite is adversarial — every password vector is a negative that must FAIL to
+/// suite is adversarial, every password vector is a negative that must FAIL to
 /// learn, and the positive cases prove we didn't just suppress everything.
 final class PasswordEntryDetectorTests: XCTestCase {
     /// Drive a full line through the detector: prime with `output`, type `input`
@@ -84,7 +84,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
         }
         // Prompt text alone already suppresses; assert the verdict is false and
         // that it holds via the prompt path (masking is the belt, prompt the
-        // suspenders — either is sufficient).
+        // suspenders, either is sufficient).
         XCTAssertFalse(d.shouldLearnCommittedLine())
     }
 
@@ -114,7 +114,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
 
     func testPromptSuppressesEvenIfSomehowEchoed() {
         // Adversarial: even if a password prompt DID echo (e.g. a broken TUI),
-        // the prompt-text suppressor must still fire — OR semantics.
+        // the prompt-text suppressor must still fire, OR semantics.
         XCTAssertFalse(verdict(promptOutput: "Password: ", typed: "hunter2", echoed: true))
     }
 
@@ -130,7 +130,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
 
     func testWordPasswordMidOutputDoesNotSuppress() {
         // "password" appearing in normal output (not as a trailing prompt) must
-        // NOT suppress the next command — the match is a suffix of the last line.
+        // NOT suppress the next command, the match is a suffix of the last line.
         XCTAssertTrue(verdict(promptOutput: "changing password policy\n$ ",
                               typed: "kubectl", echoed: true))
     }
@@ -361,7 +361,7 @@ final class PasswordEntryDetectorTests: XCTestCase {
     }
 
     func testExactTieSuppressed() {
-        // Exactly 50% echoed (4 of 8): a tie must SUPPRESS — exclusion wins ties.
+        // Exactly 50% echoed (4 of 8): a tie must SUPPRESS, exclusion wins ties.
         // Guards the strict `>` in the majority test against a `>=` regression.
         // 4*2 = 8, and 8 > 8 is false → suppress; 8 >= 8 would be true → learn.
         let s = Array("passw0rd".unicodeScalars)
@@ -751,5 +751,70 @@ final class PasswordEntryDetectorTests: XCTestCase {
         d.noteCommitRow(typedLine: "ab", renderedBeforeCursor: "$ ab")
         d.noteInput(Array("é".utf8))
         XCTAssertFalse(d.shouldLearnCommittedLine())
+    }
+
+    // MARK: - Verdict reason (decision log)
+
+    func testVerdictReasonPromptOutranksTrueRow() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("alice@host's password: ".utf8))
+        d.resetLine()
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .prompt))
+    }
+
+    func testVerdictReasonRowTrueAndFalse() {
+        var d = PasswordEntryDetector()
+        d.noteCommitRow(typedLine: "ls", renderedBeforeCursor: "$ ls")
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: true, reason: .row))
+        d.noteCommitRow(typedLine: "hunter2", renderedBeforeCursor: "Password: ")
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .row))
+    }
+
+    func testVerdictReasonAltWithoutRow() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .alt))
+    }
+
+    func testVerdictReasonOracleTally() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        d.setOracle(oracle)
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        oracle.cellAt = { r, c in r == 0 && c == 0 ? EchoCell(scalar: "a") : (c == 1 ? EchoCell(scalar: "b") : nil) }
+        oracle.nextCursor = EchoCursor(row: 0, col: 2)
+        d.settleLine(scalars: ["a", "b"], from: EchoCursor(row: 0, col: 0))
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: true, reason: .oracle))
+        // No output this line: the same tally is a stall and suppresses.
+        var e = PasswordEntryDetector()
+        e.setOracle(oracle)
+        e.noteInput(Array("ab".utf8))
+        e.settleLine(scalars: ["a", "b"], from: EchoCursor(row: 0, col: 0))
+        XCTAssertEqual(e.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .oracle))
+    }
+
+    func testVerdictReasonBytesFallback() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ab".utf8))
+        d.noteOutput(Array("ab".utf8))
+        XCTAssertEqual(d.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: true, reason: .bytes))
+        var e = PasswordEntryDetector()
+        e.noteInput(Array("hunter2".utf8))
+        XCTAssertEqual(e.committedLineVerdict(),
+                       PasswordEntryDetector.CommitVerdict(learn: false, reason: .bytes))
+        XCTAssertFalse(e.shouldLearnCommittedLine())
     }
 }

@@ -98,6 +98,11 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// Monotonic tally of tokens DROPPED by the L4b secret-value gate. Privacy-safe
     /// count only (see `droppedInPaste`).
     public private(set) var droppedAsSecret = 0
+    /// Monotonic count of line-context resets (ESC, Ctrl-C/U/W, cursor keys, other
+    /// controls, an aborted sequence), never Enter. The App compares it across
+    /// `observe` to spot a context break and reset its per-line state. Cleared by
+    /// `reset()`.
+    public private(set) var lineResets = 0
 
     public init() {}
 
@@ -401,6 +406,7 @@ public struct InputTokenTracker: Equatable, Sendable {
 
     /// ESC / unknown-control line reset (matches the pre-Phase-2 `default` case).
     private mutating func resetLineContext() {
+        lineResets += 1
         current = ""
         line = ""
         previous = nil
@@ -421,6 +427,7 @@ public struct InputTokenTracker: Equatable, Sendable {
         sawLineStart = false
         droppedInPaste = 0
         droppedAsSecret = 0
+        lineResets = 0
     }
 }
 

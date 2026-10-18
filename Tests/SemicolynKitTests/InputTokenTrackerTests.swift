@@ -591,4 +591,37 @@ final class InputTokenTrackerTests: XCTestCase {
         _ = t.observe(Array("tle".utf8) + [0x07] + Array("hi".utf8))
         XCTAssertEqual(t.current, "hi")
     }
+
+    // MARK: - lineResets (App context-break signal)
+
+    func testLineResetsCountsContextBreaksNotEnterOrText() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("git st"))
+        XCTAssertEqual(t.lineResets, 0)
+        _ = t.observe([0x03])                         // Ctrl-C
+        XCTAssertEqual(t.lineResets, 1)
+        _ = t.observe(bytes("ls\r"))                  // text + Enter: not a break
+        XCTAssertEqual(t.lineResets, 1)
+        _ = t.observe([0x1b, 0x5b, 0x44])            // cursor left (editing CSI)
+        XCTAssertEqual(t.lineResets, 2)
+        _ = t.observe([0x15])                         // Ctrl-U
+        XCTAssertEqual(t.lineResets, 3)
+        _ = t.observe([0x7f, 0x09])                   // backspace, tab: not breaks
+        XCTAssertEqual(t.lineResets, 3)
+    }
+
+    func testLineResetsUnchangedByResponseAndPasteMarkers() {
+        var t = InputTokenTracker()
+        _ = t.observe([0x1b] + bytes("[?1;2c"))       // DA response: swallowed
+        _ = t.observe([0x1b] + bytes("[200~ab") + [0x1b] + bytes("[201~"))
+        XCTAssertEqual(t.lineResets, 0)
+    }
+
+    func testLineResetsClearedByReset() {
+        var t = InputTokenTracker()
+        _ = t.observe([0x03, 0x03])
+        XCTAssertEqual(t.lineResets, 2)
+        t.reset()
+        XCTAssertEqual(t.lineResets, 0)
+    }
 }

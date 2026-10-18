@@ -36,6 +36,9 @@ public struct CommandTree: Sendable {
         self.pipeTargets = pipeTargets
     }
 
+    /// Number of top-level tools (for the App's load log).
+    public var toolCount: Int { tools.count }
+
     /// Exact, case-sensitive tool-name lookup.
     public func isKnownTool(_ word: String) -> Bool {
         tools.contains { $0.name == word }
