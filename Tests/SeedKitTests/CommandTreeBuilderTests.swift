@@ -170,4 +170,51 @@ final class CommandTreeBuilderTests: XCTestCase {
             XCTAssertEqual(got.map(\.score), [255, 161], alias)
         }
     }
+    // Real tldr v2.3 lines (CC BY 4.0): placeholders hold spaces and `|` alternatives.
+    func testPlaceholderSpansWithSpacesAndPipesAreOneDroppedWord() {
+        var u = CommandUsage()
+        u.ingest(example: "xml canonic {{path/to/input.xml|URI}} > {{path/to/output.xml}}")
+        u.ingest(example: "difft --syntax-highlight {{on|off}} {{path/to/file1}} {{path/to/file2}}")
+        u.ingest(example: "git commit {{path/to/file1 path/to/file2 ...}}")
+        u.ingest(example: "xmake config --plat={{macosx|linux|iphoneos|...}} --arch={{x86_64|i386}}")
+        XCTAssertEqual(u.toolCounts, ["xml": 1, "difft": 1, "git": 1, "xmake": 1])
+        XCTAssertEqual(u.pipeTargetCounts, [:])
+        XCTAssertEqual(u.pathCounts, [["xml", "canonic"]: 1, ["git", "commit"]: 1, ["xmake", "config"]: 1])
+        XCTAssertEqual(u.flagCounts[["difft"]], ["--syntax-highlight": 1])
+        XCTAssertEqual(u.flagCounts[["xmake", "config"]], ["--plat": 1, "--arch": 1])
+    }
+
+    func testPlaceholderEndsPathAndUnterminatedPlaceholderIsSkipped() {
+        var u = CommandUsage()
+        u.ingest(example: "git {{some branch}} status")
+        u.ingest(example: "tool {{open | x")
+        XCTAssertEqual(u.toolCounts, ["git": 1, "tool": 1, "x": 1])
+        XCTAssertEqual(u.pathCounts, [:])
+    }
+
+    func testWordsThatCannotBeCommandNamesAreNotTools() {
+        var u = CommandUsage()
+        for example in ["cmd 2>&1 | 2", "x | ${EDITOR}", "x | a=b", "x | ...", "x | ./run.sh", "x | 7z a", "x | g++ -o"] {
+            u.ingest(example: example)
+        }
+        XCTAssertEqual(u.pipeTargetCounts, ["7z": 1, "g++": 1])
+        XCTAssertEqual(u.toolCounts, ["cmd": 1, "x": 6, "7z": 1, "g++": 1])
+    }
+
+    func testToolsNeedFigSpecOrTldrPage() {
+        let fig = FigCommandSpec(names: ["git"], subcommands: [], options: [])
+        var u = CommandUsage()
+        for _ in 0..<5 { u.ingest(example: "stdout | grep x") }
+        u.ingest(example: "git log | less")
+        u.ingest(example: "ls | stdin")
+        let t = buildCommandTree(specs: [fig], usage: u, pages: ["grep", "ls", "less"])
+        XCTAssertEqual(t.candidates(segmentWords: [], typed: "", afterPipe: false, limit: 10).map(\.text),
+                       ["grep", "git", "less", "ls"])
+        XCTAssertFalse(t.isKnownTool("stdout"))
+        XCTAssertFalse(t.isKnownTool("stdin"))
+        let parts = buildCommandTreeParts(specs: [fig], usage: u, pages: ["grep", "ls", "less"])
+        XCTAssertEqual(parts.pipeTargets.map(\.text), ["grep", "less"])
+        // Without a page set every counted tool stays eligible.
+        XCTAssertTrue(buildCommandTree(specs: [fig], usage: u).isKnownTool("stdout"))
+    }
 }

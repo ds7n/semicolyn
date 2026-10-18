@@ -22,12 +22,15 @@ private func isStorable(_ name: String) -> Bool {
 }
 
 /// Builds the shipped command tree. Tools are those with a Fig spec or a usage count (top
-/// `maxTools` by count, ties by name). Children come only from Fig structure and are ranked by
-/// how often tldr uses their path; each alias is its own child. A node's flags are those seen in
-/// tldr for its path plus `--help` when Fig declares it. Names that cannot be serialized are
-/// skipped and each node is capped to its 255 best children and flags.
-public func buildCommandTree(specs: [FigCommandSpec], usage: CommandUsage, maxTools: Int = 400) -> CommandTree {
-    let parts = buildCommandTreeParts(specs: specs, usage: usage, maxTools: maxTools)
+/// `maxTools` by count, ties by name). When `pages` (the names that have their own tldr page)
+/// is given, a usage-only tool or pipe target must also be in it, so words tldr merely shows
+/// in command position (`stdout`) are not tools. Children come only from Fig structure and are
+/// ranked by how often tldr uses their path; each alias is its own child. A node's flags are
+/// those seen in tldr for its path plus `--help` when Fig declares it. Names that cannot be
+/// serialized are skipped and each node is capped to its 255 best children and flags.
+public func buildCommandTree(specs: [FigCommandSpec], usage: CommandUsage, maxTools: Int = 400,
+                             pages: Set<String>? = nil) -> CommandTree {
+    let parts = buildCommandTreeParts(specs: specs, usage: usage, maxTools: maxTools, pages: pages)
     return CommandTree(tools: parts.tools, pipeTargets: parts.pipeTargets)
 }
 
@@ -37,15 +40,18 @@ public func countNodes(_ nodes: [CommandNode]) -> Int {
 }
 
 /// The tools and pipe targets ``buildCommandTree`` wraps, exposed so callers can report counts.
-public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage,
-                                  maxTools: Int = 400) -> (tools: [CommandNode], pipeTargets: [ScoredWord]) {
+public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage, maxTools: Int = 400,
+                                  pages: Set<String>? = nil) -> (tools: [CommandNode], pipeTargets: [ScoredWord]) {
     var figByTool: [String: FigCommandSpec] = [:]
     for spec in specs {
         for name in spec.names where isStorable(name) && figByTool[name] == nil { figByTool[name] = spec }
     }
     var usage = usage
     usage.flagCounts = rolledUpFlags(usage.flagCounts, figByTool: figByTool)
-    let candidates = Set(figByTool.keys).union(usage.toolCounts.keys.filter(isStorable))
+    let isEligible = { (name: String) -> Bool in
+        isStorable(name) && (figByTool[name] != nil || pages?.contains(name) ?? true)
+    }
+    let candidates = Set(figByTool.keys).union(usage.toolCounts.keys.filter(isEligible))
     let ranked = candidates.sorted { a, b in
         let ca = usage.toolCounts[a] ?? 0, cb = usage.toolCounts[b] ?? 0
         return ca != cb ? ca > cb : a.utf8.lexicographicallyPrecedes(b.utf8)
@@ -58,7 +64,7 @@ public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage,
                     fig: figByTool[name], usage: usage, depth: 1, flagPaths: [[name]])
     }
 
-    let pipeRanked = usage.pipeTargetCounts.filter { isStorable($0.key) }.sorted { a, b in
+    let pipeRanked = usage.pipeTargetCounts.filter { isEligible($0.key) }.sorted { a, b in
         a.value != b.value ? a.value > b.value : a.key.utf8.lexicographicallyPrecedes(b.key.utf8)
     }.prefix(max(0, maxTools))
     let pipeBest = pipeRanked.first?.value ?? 0

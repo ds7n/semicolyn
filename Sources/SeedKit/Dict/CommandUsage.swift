@@ -12,13 +12,16 @@ public struct CommandUsage {
 
     public init() {}
 
-    /// Counts every command segment of `example`. Wrappers (`sudo`, ...) are stripped first.
+    /// Counts every command segment of `example`. Each `{{...}}` placeholder (which may hold
+    /// spaces and `|` alternatives) is first collapsed to one opaque word, so its contents never
+    /// become words, segments or pipe targets. Wrappers (`sudo`, ...) are stripped next.
     /// The path grows by non-flag words in the second and third positions; the first flag or
     /// placeholder ends it. Flags are cut at `=` or a glued `{{` and counted against the path so far.
+    /// A segment whose first word cannot be a command name (see ``isCommandName(_:)``) is skipped.
     public mutating func ingest(example: String) {
-        for segment in commandSegments(of: example) {
+        for segment in commandSegments(of: collapsingPlaceholders(example)) {
             let words = strippingWrappers(segment.words)
-            guard let tool = words.first, Self.isCountable(tool) else { continue }
+            guard let tool = words.first, isCommandName(tool) else { continue }
             toolCounts[tool, default: 0] += 1
             if segment.afterPipe { pipeTargetCounts[tool, default: 0] += 1 }
 
@@ -50,8 +53,38 @@ public struct CommandUsage {
             }
         }
     }
+}
 
-    private static func isCountable(_ tool: String) -> Bool {
-        !tool.isEmpty && !tool.hasPrefix("-") && !tool.contains("{{")
+/// The placeholder word every `{{...}}` span collapses to.
+private let placeholderWord = "{{}}"
+
+/// `line` with each `{{...}}` span (up to the first following `}}`, across spaces and `|`)
+/// replaced by ``placeholderWord``. An unterminated `{{` is left as is.
+private func collapsingPlaceholders(_ line: String) -> String {
+    var out = ""
+    var rest = Substring(line)
+    while let open = rest.range(of: "{{") {
+        guard let close = rest[open.upperBound...].range(of: "}}") else { break }
+        out += rest[..<open.lowerBound]
+        out += placeholderWord
+        rest = rest[close.upperBound...]
     }
+    out += rest
+    return out
+}
+
+/// Whether `word` can name a command: ASCII letters, digits and `.`, `_`, `+`, `-` only, at
+/// least one letter, not starting with `-` or `.`. Rejects placeholders, paths, variables
+/// (`$X`), assignments (`a=b`), redirection numbers (`2`) and punctuation (`...`).
+public func isCommandName(_ word: String) -> Bool {
+    guard let first = word.unicodeScalars.first, first != "-", first != "." else { return false }
+    var sawLetter = false
+    for scalar in word.unicodeScalars {
+        switch scalar {
+        case "a"..."z", "A"..."Z": sawLetter = true
+        case "0"..."9", ".", "_", "+", "-": continue
+        default: return false
+        }
+    }
+    return sawLetter
 }

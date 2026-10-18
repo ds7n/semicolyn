@@ -280,6 +280,7 @@ func runCommands(_ args: [String]) {
     let fm = FileManager.default
 
     var observed = CommandUsage()
+    var pageNames: Set<String> = []
     var pagesRead = 0
     var heldOut = 0
     for platform in ["common", "linux", "osx"] {
@@ -292,7 +293,8 @@ func runCommands(_ args: [String]) {
             if TldrHoldout.isHeldOut(pageStem: String(name.dropLast(3))) { heldOut += 1; continue }
             guard let data = fm.contents(atPath: dir + "/" + name) else { fail("cannot read file: \(dir)/\(name)") }
             pagesRead += 1
-            for span in TldrParser.exampleSpans(fromPage: String(decoding: data, as: UTF8.self)) {
+            pageNames.insert(String(name.dropLast(3)))
+            for span in TldrParser.exampleCommands(fromPage: String(decoding: data, as: UTF8.self)) {
                 observed.ingest(example: span)
             }
         }
@@ -310,7 +312,7 @@ func runCommands(_ args: [String]) {
     }
     guard !specs.isEmpty else { fail("no Fig specs parsed under \(figDir); check the path") }
 
-    let parts = buildCommandTreeParts(specs: specs, usage: observed)
+    let parts = buildCommandTreeParts(specs: specs, usage: observed, pages: pageNames)
     let blob = CommandTree(tools: parts.tools, pipeTargets: parts.pipeTargets).serialize()
     let outPath = required("out")
     guard fm.createFile(atPath: outPath, contents: Data(blob)) else { fail("cannot write file: \(outPath)") }
