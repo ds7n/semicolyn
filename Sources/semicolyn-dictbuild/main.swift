@@ -290,13 +290,18 @@ func runCommands(_ args: [String]) {
             continue
         }
         for name in names.sorted() where name.hasSuffix(".md") {
-            if TldrHoldout.isHeldOut(pageStem: String(name.dropLast(3))) { heldOut += 1; continue }
+            let stem = String(name.dropLast(3))
+            // A held-out page still exists (own-page credit, family count, admission);
+            // ingest(page:markdown:) skips its examples.
+            pageNames.insert(stem)
+            if TldrHoldout.isHeldOut(pageStem: stem) {
+                heldOut += 1
+                observed.ingest(page: stem, markdown: "")
+                continue
+            }
             guard let data = fm.contents(atPath: dir + "/" + name) else { fail("cannot read file: \(dir)/\(name)") }
             pagesRead += 1
-            let stem = String(name.dropLast(3))
-            pageNames.insert(stem)
-            observed.ingest(page: stem,
-                            examples: TldrParser.exampleCommands(fromPage: String(decoding: data, as: UTF8.self)))
+            observed.ingest(page: stem, markdown: String(decoding: data, as: UTF8.self))
         }
     }
     guard pagesRead > 0 else { fail("no tldr pages read under \(required("tldr")); check the path") }

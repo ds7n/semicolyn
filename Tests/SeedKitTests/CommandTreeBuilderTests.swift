@@ -41,7 +41,7 @@ final class CommandTreeBuilderTests: XCTestCase {
         var u = CommandUsage()
         u.ingest(example: "cat f | sudo -n sort | uniq -c")
         u.ingest(example: "aa && bb ; cc || dd")
-        XCTAssertEqual(u.pipeTargetCounts, ["sudo": 1, "sort": 1, "uniq": 1])
+        XCTAssertEqual(u.pipeTargetCounts, ["sudo": 1, "uniq": 1])
         XCTAssertEqual(u.toolCounts["sort"], 1)
         XCTAssertEqual(u.toolCounts["sudo"], 1)
         XCTAssertEqual(u.toolCounts["aa"], 1)
@@ -309,12 +309,30 @@ final class CommandTreeBuilderTests: XCTestCase {
         var u = CommandUsage()
         u.ingest(page: "find", examples: ["find . -name {{x}} | xargs rm"])
         u.ingest(page: "apt", examples: ["sudo apt update", "sudo env FOO=1 nohup apt upgrade"])
-        // find: own page only. xargs: tool and pipe target; rm: tool and, as before for the
-        // wrapped command of a piped segment, pipe target. sudo, env, nohup: tools on page apt
-        // (FOO=1 is an assignment); apt: own family only, plus its own page.
+        // find: own page only. xargs: tool and pipe target (first word after `|`); rm: tool only.
+        // sudo, env, nohup: tools on page apt (FOO=1 is an assignment); apt: own family only,
+        // plus its own page.
         XCTAssertEqual(u.toolCounts, ["find": 1, "xargs": 1, "rm": 1, "sudo": 1, "env": 1, "nohup": 1, "apt": 1])
-        XCTAssertEqual(u.pipeTargetCounts, ["xargs": 1, "rm": 1])
+        XCTAssertEqual(u.pipeTargetCounts, ["xargs": 1])
         XCTAssertEqual(u.pathCounts[["apt", "update"]], 1)
         XCTAssertNil(u.flagCounts[["sudo"]])
+    }
+
+    func testHeldOutPageCountsAsExistingButItsExamplesAreSkipped() {
+        // "npm" is held out under the FNV rule; "npm-ci" is not.
+        XCTAssertTrue(TldrHoldout.isHeldOut(pageStem: "npm"))
+        XCTAssertFalse(TldrHoldout.isHeldOut(pageStem: "npm-ci"))
+        var u = CommandUsage()
+        u.ingest(page: "npm", markdown: "# npm\n\n- Install:\n\n`npm install --global {{pkg}}`\n")
+        u.ingest(page: "npm-ci", markdown: "- Clean install:\n\n`npm ci --omit dev`\n")
+        u.ingest(page: "nvm", markdown: "- Then:\n\n`npm ci`\n")
+        // One page outside the family (nvm) plus the held-out own page.
+        XCTAssertEqual(u.toolCounts, ["npm": 2])
+        XCTAssertEqual(u.pathCounts, [["npm", "ci"]: 2])
+        XCTAssertEqual(u.flagCounts, [["npm", "ci"]: ["--omit": 1]])
+        // Admitted through the held-out page alone (no Fig spec).
+        let t = buildCommandTree(specs: [], usage: u, pages: ["npm", "npm-ci", "nvm"])
+        XCTAssertTrue(t.isKnownTool("npm"))
+        XCTAssertFalse(buildCommandTree(specs: [], usage: u, pages: ["npm-ci", "nvm"]).isKnownTool("npm"))
     }
 }

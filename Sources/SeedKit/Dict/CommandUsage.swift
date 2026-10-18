@@ -62,6 +62,14 @@ public struct CommandUsage {
         }
     }
 
+    /// Counts the tldr page `page` (file stem) from its markdown. A held-out page
+    /// (``TldrHoldout``) still exists: it gives its tool the own-page credit, but its examples
+    /// are not read, so evaluation pages never feed paths, flags or tool use.
+    public mutating func ingest(page: String, markdown: String) {
+        let examples = TldrHoldout.isHeldOut(pageStem: page) ? [] : TldrParser.exampleCommands(fromPage: markdown)
+        ingest(page: page, examples: examples)
+    }
+
     /// Records path and flag counts for each command segment of `example` and returns the
     /// segment commands. Each `{{...}}` placeholder (which may hold spaces and `|` alternatives)
     /// is first collapsed to one opaque word, so its contents never become words, segments or
@@ -70,7 +78,7 @@ public struct CommandUsage {
     /// non-flag words in the second and third positions; the first flag or placeholder ends it.
     /// Flags are cut at `=` or a glued `{{` and counted against the path so far. Each removed
     /// wrapper (`sudo`, `xargs`, ...) is itself a use, and a pipe target when it is the first
-    /// word after `|`; the wrapped command follows. Only words that can be command names (see
+    /// word after `|` (the wrapped command then counts as a tool only). Only words that can be command names (see
     /// ``isCommandName(_:)``) are used; a segment whose command cannot be one adds no path.
     private mutating func countSegments(of example: String) -> [(tool: String, afterPipe: Bool)] {
         let segments = commandSegments(of: collapsingPlaceholders(example))
@@ -85,7 +93,8 @@ public struct CommandUsage {
                 uses.append((word, segment.afterPipe && position == 0))
             }
             guard let tool = words.first, isCommandName(tool) else { continue }
-            uses.append((tool, segment.afterPipe))
+            // Only the first word after `|` is a pipe target: a wrapper there takes that role.
+            uses.append((tool, segment.afterPipe && removed.isEmpty))
 
             var path = [tool]
             var extending = true
