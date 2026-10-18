@@ -96,6 +96,45 @@ final class PasswordEntryDetectorTests: XCTestCase {
                                typed: "hunter2", echoed: false))
     }
 
+    /// The bare tail, with the prompt as the very last output (no line was reset
+    /// after it): `password for <word>:` must match as a suffix on its own, not only
+    /// through the `password for` partial-arrival pattern.
+    func testSudoPromptTailIsAPrompt() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("[sudo] password for alice: ".utf8))
+        d.noteInput(Array("hunter2".utf8))             // sudo does not echo
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: false, reason: .prompt))
+    }
+
+    func testPasswordForEmailAccountIsAPrompt() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("Password for alice@example.com:".utf8))
+        d.noteInput(Array("hunter2".utf8))
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: false, reason: .prompt))
+    }
+
+    /// Negative: the phrase mid-sentence (several words after it, no trailing colon)
+    /// is ordinary output, so an echoed command after it is learned by bytes.
+    func testPasswordForInASentenceIsNotAPrompt() {
+        XCTAssertTrue(verdict(promptOutput: "the password for alice is in the vault\n$ ",
+                              typed: "ls", echoed: true))
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("the password for alice is in the vault".utf8))
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: true, reason: .bytes))
+    }
+
+    /// Negative: two words between `password for` and the colon is not the prompt
+    /// shape (`<word>` is one token).
+    func testPasswordForTwoWordsColonIsNotAPrompt() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("note: password for alice is: ".utf8))
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: true, reason: .bytes))
+    }
+
     func testSshPasswordPromptSuppresses() {
         XCTAssertFalse(verdict(promptOutput: "alice@build-01's password: ",
                                typed: "hunter2", echoed: false))

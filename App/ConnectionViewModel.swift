@@ -110,6 +110,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Nil when the predictor is disabled for this session (incognito).
     private var predictor: PredictorActor?
     private var tracker = InputTokenTracker()
+    /// Coalesces remote output for the screen-word harvest: capped at 8 KiB (newest
+    /// bytes win) with at most one harvest in flight, so a big `cat` costs bounded
+    /// work and memory instead of one queued Task per chunk. Main-actor only.
+    private var harvestBuffer = HarvestBuffer()
+    /// Bumped at teardown so a harvest still in flight from the old session does not
+    /// clear the new session's in-flight mark or drain its buffer.
+    private var harvestGeneration = 0
     /// Last-observed values of the tracker's monotonic secret-exclusion drop tallies,
     /// so `observePredictorInput` can log the PER-CHUNK delta (privacy-safe: counts of
     /// tokens the L3-paste / L4b-secret gates dropped, never the token text). Reset to 0
@@ -605,6 +612,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         output.onHarvestBytes = nil
         output.onExit = nil
         predictor = nil
+        harvestBuffer.reset()
+        harvestGeneration += 1
         // Deregister from the active-purge slot (the VM may be reused on reconnect
         // without deallocating, so the weak ref alone isn't enough).
         if AppStores.shared.activePredictorSession === self {
@@ -2162,15 +2171,29 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// The one remote-output tap, installed on every attach path (raw SSH, plain
     /// tmux, Mosh, ET): each chunk feeds the password-prompt gate and the engine's
     /// screen-word harvest (escape, secret-flag and partial-token context carry
-    /// across chunks inside the engine). Harvest is a no-op when the predictor is
-    /// off (incognito). `teardown` clears the slot.
+    /// across chunks inside the engine). Harvest chunks coalesce in `harvestBuffer`
+    /// with at most one in flight. Harvest is a no-op when the predictor is off
+    /// (incognito). `teardown` clears the slot.
     private func installOutputTap() {
         output.onHarvestBytes = { [weak self] bytes in
             guard let self else { return }
             self.passwordDetector.noteOutput(bytes)
-            guard let predictor = self.predictor else { return }
-            let text = String(decoding: bytes, as: UTF8.self)
-            Task { await predictor.harvest(output: text) }
+            guard self.predictor != nil else { return }
+            self.harvestBuffer.append(bytes)
+            self.drainHarvestBuffer()
+        }
+    }
+
+    /// Start one harvest of the coalesced output unless one is already in flight;
+    /// when it finishes, drain whatever accumulated meanwhile.
+    private func drainHarvestBuffer() {
+        guard let predictor, let chunk = harvestBuffer.takeIfIdle() else { return }
+        let generation = harvestGeneration
+        Task { [weak self] in
+            await predictor.harvest(chunk)
+            guard let self, generation == self.harvestGeneration else { return }
+            self.harvestBuffer.finish()
+            self.drainHarvestBuffer()
         }
     }
 

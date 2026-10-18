@@ -156,13 +156,27 @@ public struct PredictorEngine: Sendable {
     /// `filter`, and is not the value of a secret flag. Rejected tokens are
     /// harvested nowhere.
     public mutating func harvest(output: String) {
-        let clean = harvestFilter.filter(Array(output.utf8))
+        harvest(HarvestChunk(bytes: Array(output.utf8), droppedBefore: false))
+    }
+
+    /// Harvest one coalesced output chunk (see ``HarvestBuffer``). When
+    /// `droppedBefore` is set, output was lost right before the chunk, so nothing
+    /// carries across the gap: the escape, secret-flag and partial-token context
+    /// resets, and the chunk's leading fragment (up to its first whitespace, which
+    /// may be the tail of a cut word or escape sequence) is not harvested.
+    public mutating func harvest(_ chunk: HarvestChunk) {
+        if chunk.droppedBefore { resetHarvestContext() }
+        var clean = harvestFilter.filter(chunk.bytes)
+        if chunk.droppedBefore {
+            let start = clean.firstIndex(where: Self.isHarvestDelimiter) ?? clean.endIndex
+            clean.removeSubrange(clean.startIndex..<start)
+        }
         let bytes = harvestPartial + clean
         harvestPartial = []
         var tokens: [[UInt8]] = []
         var current: [UInt8] = []
         for b in bytes {
-            if b == 0x20 || b == 0x09 || b == 0x0a || b == 0x0d {
+            if Self.isHarvestDelimiter(b) {
                 if !current.isEmpty { tokens.append(current); current = [] }
             } else {
                 current.append(b)
@@ -180,6 +194,11 @@ public struct PredictorEngine: Sendable {
             kept.append(token)
         }
         self.output.harvest(kept)
+    }
+
+    /// Whitespace that ends a harvested token: space, tab, LF, CR.
+    private static func isHarvestDelimiter(_ b: UInt8) -> Bool {
+        b == 0x20 || b == 0x09 || b == 0x0a || b == 0x0d
     }
 
     private mutating func resetHarvestContext() {

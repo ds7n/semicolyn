@@ -29,7 +29,8 @@
 ///     echoed instead). If a line's typed characters are **not positively observed
 ///     echoed back**, the line is treated as a password and not learned.
 ///  2. **Prompt text**, the output immediately before the line matches a known
-///     password-prompt pattern (`password:`, `passphrase`, `[sudo] password for`).
+///     password-prompt pattern (`password:`, `passphrase`, `[sudo] password for`,
+///     `password for <word>:`).
 ///
 /// The two are OR-combined: a line is suppressed if EITHER fires. Neither alone is
 /// safe, and a missed password is an irreversible plaintext leak, so the gate is
@@ -356,6 +357,19 @@ public struct PasswordEntryDetector: Sendable {
             .last.map(String.init) ?? outputTail
         let trimmed = lastLine.trimmingTrailingSpaces()
         return Self.promptPatterns.contains { trimmed.hasSuffix($0) }
+            || Self.endsWithAccountPrompt(trimmed)
+    }
+
+    /// True if `line` ends with `password for <word>:`, one non-space word then the
+    /// colon (`[sudo] password for alice:`, `password for alice@example.com:`). A
+    /// sentence that only contains the phrase (`the password for alice is in the
+    /// vault`) has more words after it and does not match.
+    private static func endsWithAccountPrompt(_ line: String) -> Bool {
+        guard line.hasSuffix(":") else { return false }
+        let body = line.dropLast()
+        guard let space = body.lastIndex(of: " ") else { return false }
+        let word = body[body.index(after: space)...]
+        return !word.isEmpty && body[...space].hasSuffix("password for ")
     }
 }
 

@@ -6,7 +6,7 @@ import SemicolynKit
 /// Observable slice holding the predictor strip's suggestion chips, split out of
 /// `ConnectionViewModel` (Plan B §B1) so a suggestion recompute invalidates only the
 /// predictor-strip views, not the whole session view tree. `ConnectionViewModel`
-/// owns an instance and pushes updates via `apply` / `clear`; the keybar/predictor
+/// owns an instance and pushes updates via `apply` (an empty list hides the chips); the keybar/predictor
 /// views observe it directly.
 @MainActor
 final class PredictorViewModel: ObservableObject {
@@ -30,11 +30,5 @@ final class PredictorViewModel: ObservableObject {
         suggestions = s
         DebugLog.shared.log(.predictor,
             "predictor:surface count=\(s.count) seq=\(seq) stale=0 applied=1")
-    }
-
-    /// Hide every chip now (line committed, line reset, chip tapped, teardown).
-    func clear() {
-        guard !suggestions.isEmpty else { return }
-        suggestions = []
     }
 }

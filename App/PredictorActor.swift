@@ -36,7 +36,8 @@ actor PredictorActor {
         engine.suggestions(line: line, lineOptedOut: lineOptedOut)
     }
 
-    func harvest(output: String) { engine.harvest(output: output) }
+    /// Harvest one coalesced output chunk. See `PredictorEngine.harvest(_:)`.
+    func harvest(_ chunk: HarvestChunk) { engine.harvest(chunk) }
 
     func snapshotState() -> LearnedState { engine.state }
     func purgeLearned() { engine.purgeLearned() }

@@ -63,6 +63,64 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertEqual(t.current, "")
     }
 
+    /// Probe (final review): `git che` Tab `m` left `line == "git chem"` while the
+    /// remote showed `git checkout m`, so accepting `chemical` sent `ical `. Tab is a
+    /// line-context reset: the line restarts at what is typed after it.
+    func testTabResetsLineSoTrackerMatchesOnlyPostTabText() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("git che"))
+        let before = t.lineResets
+        _ = t.observe([0x09])
+        XCTAssertEqual(t.lineResets, before + 1)
+        XCTAssertEqual(t.line, "")
+        _ = t.observe(bytes("m"))
+        XCTAssertEqual(t.line, "m")
+        XCTAssertEqual(t.current, "m")
+        XCTAssertNil(t.previous)
+        XCTAssertEqual(t.lineResets, before + 1)
+    }
+
+    /// The accepted chip edits only what was typed after the Tab.
+    func testAcceptanceAfterTabReplacesOnlyPostTabText() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("git che") + [0x09] + bytes("m"))
+        XCTAssertEqual(acceptanceEdit(for: Suggestion(text: "main", kind: .completion, score: 1), line: t.line),
+                       AcceptanceEdit(backspaces: 0, text: "ain "))
+        XCTAssertEqual(acceptanceEdit(for: Suggestion(text: "Makefile", kind: .completion, score: 1), line: t.line),
+                       AcceptanceEdit(backspaces: 1, text: "Makefile "))
+        XCTAssertNil(acceptanceEdit(for: Suggestion(text: "chemical", kind: .completion, score: 1), line: t.line))
+    }
+
+    /// Security (L4a): a Tab does not end the line, so a leading-space opt-out holds
+    /// for the text typed after it.
+    func testTabKeepsLeadingSpaceOptOut() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes(" export TOK") + [0x09] + bytes("abc"))
+        XCTAssertTrue(t.lineOptedOut)
+        _ = t.observe([0x0d])
+        XCTAssertTrue(t.lastCommittedLineOptedOut)
+    }
+
+    /// Security (L4b): a Tab between a secret flag and its value must not hide the
+    /// flag from the value check.
+    func testTabKeepsSecretFlagContext() {
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("mysql -p ") + [0x09] + bytes("hunter2 "))
+        XCTAssertEqual(committed.map(\.token), ["mysql", "-p"])
+        XCTAssertEqual(t.droppedAsSecret, 1)
+    }
+
+    /// A Tab on a fresh line is still a reset, and the line's opt-out is evaluated
+    /// from the first real byte as before (no space first, so not opted out).
+    func testTabOnEmptyLineCountsAsResetAndDoesNotOptOut() {
+        var t = InputTokenTracker()
+        _ = t.observe([0x09])
+        XCTAssertEqual(t.lineResets, 1)
+        _ = t.observe(bytes("ls"))
+        XCTAssertFalse(t.lineOptedOut)
+        XCTAssertEqual(t.line, "ls")
+    }
+
     func testControlByteResetsLineContext() {
         var t = InputTokenTracker()
         _ = t.observe(bytes("git commit"))
@@ -598,8 +656,10 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertEqual(t.lineResets, 2)
         _ = t.observe([0x15])                         // Ctrl-U
         XCTAssertEqual(t.lineResets, 3)
-        _ = t.observe([0x7f, 0x09])                   // backspace, tab: not breaks
+        _ = t.observe([0x7f])                         // backspace: not a break
         XCTAssertEqual(t.lineResets, 3)
+        _ = t.observe([0x09])                         // tab: remote completion, a break
+        XCTAssertEqual(t.lineResets, 4)
     }
 
     func testLineResetsUnchangedByResponseAndPasteMarkers() {
