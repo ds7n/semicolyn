@@ -217,4 +217,56 @@ final class CommandTreeBuilderTests: XCTestCase {
         // Without a page set every counted tool stays eligible.
         XCTAssertTrue(buildCommandTree(specs: [fig], usage: u).isKnownTool("stdout"))
     }
+
+    // Alias pages end with the stock "View documentation for the original command" example.
+    func testExamplesWhoseCommandIsTldrAreDropped() {
+        var u = CommandUsage()
+        u.ingest(example: "tldr git checkout")
+        u.ingest(example: "sudo tldr --update")
+        u.ingest(page: "gco", examples: ["tldr git-checkout", "git checkout -b x"])
+        XCTAssertEqual(u.toolCounts, ["git": 1])
+        XCTAssertNil(u.flagCounts[["tldr"]])
+        XCTAssertNil(u.pathCounts[["tldr", "git"]])
+        XCTAssertEqual(u.pathCounts[["git", "checkout"]], 1)
+    }
+
+    func testToolCountsAreDistinctPagesOutsideTheToolsFamily() {
+        var u = CommandUsage()
+        u.ingest(page: "cat", examples: ["cat f | grep x"])
+        u.ingest(page: "dmesg", examples: ["dmesg | grep -i y", "dmesg | grep z"])
+        u.ingest(page: "vegeta", examples: Array(repeating: "echo t | vegeta attack", count: 5))
+        u.ingest(page: "vegeta-report", examples: ["vegeta report"])
+        // grep: pages cat and dmesg, no own page. vegeta: own family only, plus its own page.
+        // echo: one page outside its family, no own page. cat and dmesg: own page only.
+        XCTAssertEqual(u.toolCounts, ["grep": 2, "vegeta": 1, "echo": 1, "cat": 1, "dmesg": 1])
+        XCTAssertEqual(u.pipeTargetCounts, ["grep": 2, "vegeta": 1])
+        // Paths and flags stay per example.
+        XCTAssertEqual(u.pathCounts[["vegeta", "attack"]], 5)
+        XCTAssertEqual(u.flagCounts[["grep"]], ["-i": 1])
+    }
+
+    func testOwnPageBonusOnceAndIndependentOfOrder() {
+        var u = CommandUsage()
+        u.ingest(page: "a", examples: ["grep x"])
+        u.ingest(page: "a", examples: ["grep y"])            // same stem (linux and osx): one page
+        u.ingest(page: "grep", examples: ["grep foo"])       // own page arrives after the use
+        u.ingest(page: "grep", examples: ["grep bar"])
+        u.ingest(page: "jq", examples: ["echo {} | gron"])   // own page, never used as a command
+        u.ingest(page: "b", examples: ["sed s/a/b/ f"])
+        u.ingest(page: "sed", examples: ["echo x"])          // own page does not use it
+        XCTAssertEqual(u.toolCounts, ["grep": 2, "echo": 2, "gron": 1, "sed": 2])
+        XCTAssertEqual(u.pipeTargetCounts, ["gron": 1])
+    }
+
+    func testCrossPageCountsDecideRankInTheBuiltTree() {
+        var u = CommandUsage()
+        u.ingest(page: "x", examples: ["x | grep a"])
+        u.ingest(page: "y", examples: ["y | grep b"])
+        u.ingest(page: "vegeta", examples: Array(repeating: "echo t | vegeta attack", count: 5))
+        let t = buildCommandTree(specs: [], usage: u, pages: ["x", "y", "vegeta", "grep", "echo"])
+        let parts = buildCommandTreeParts(specs: [], usage: u, pages: ["x", "y", "vegeta", "grep", "echo"])
+        XCTAssertEqual(parts.pipeTargets.map(\.text), ["grep", "vegeta"])
+        XCTAssertEqual(parts.pipeTargets.map(\.score), [255, 161])
+        XCTAssertEqual(t.candidates(segmentWords: [], typed: "", afterPipe: false, limit: 2).map(\.text), ["grep", "echo"])
+    }
 }

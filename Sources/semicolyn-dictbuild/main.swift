@@ -293,10 +293,10 @@ func runCommands(_ args: [String]) {
             if TldrHoldout.isHeldOut(pageStem: String(name.dropLast(3))) { heldOut += 1; continue }
             guard let data = fm.contents(atPath: dir + "/" + name) else { fail("cannot read file: \(dir)/\(name)") }
             pagesRead += 1
-            pageNames.insert(String(name.dropLast(3)))
-            for span in TldrParser.exampleCommands(fromPage: String(decoding: data, as: UTF8.self)) {
-                observed.ingest(example: span)
-            }
+            let stem = String(name.dropLast(3))
+            pageNames.insert(stem)
+            observed.ingest(page: stem,
+                            examples: TldrParser.exampleCommands(fromPage: String(decoding: data, as: UTF8.self)))
         }
     }
     guard pagesRead > 0 else { fail("no tldr pages read under \(required("tldr")); check the path") }
