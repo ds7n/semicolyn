@@ -324,7 +324,7 @@ func runCommands(_ args: [String]) {
     guard fm.createFile(atPath: outPath, contents: Data(blob)) else { fail("cannot write file: \(outPath)") }
     print("""
         pages read: \(pagesRead)
-        held out skipped: \(heldOut)
+        held out (title only, examples skipped): \(heldOut)
         specs parsed: \(specs.count)
         tools kept: \(parts.tools.count)
         tldr page-only tools (no Fig spec, no usage): \(tldrOnly)

@@ -73,7 +73,7 @@ base="${out%.bin}"
   echo "built at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "sources:"
   grep -E '^(tldr|fig)=' "$sources/manifest.txt" | sed 's/^/  /'
-  echo "  tldr: pages/{common,linux,osx}, held-out eval pages skipped (TldrHoldout)"
+  echo "  tldr: pages/{common,linux,osx}; held-out eval pages give their tool name only, examples skipped (TldrHoldout)"
   echo "  fig: top-level src/*.ts specs"
   echo "build output:"
   sed 's/^/  /' "$work/logs/commands-build.log"
