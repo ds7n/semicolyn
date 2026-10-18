@@ -35,7 +35,7 @@ public struct RankingWeights: Equatable, Sendable {
     /// English dictionary weight on a command line.
     public var englishInCommand: Double = 0.5
     /// Command tree weight (not used on prose lines).
-    public var commands: Double = 1.0
+    public var commands: Double = 3.0
     /// Learned count at which the learned term reaches its maximum of 1.
     public var learnedSaturation: UInt32 = 64
     /// Weight of the newest screen word; older ones decay linearly.

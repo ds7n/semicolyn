@@ -51,8 +51,9 @@ final class SuggestionRankerTests: XCTestCase {
     func testCommandLineScoresSumEnglishHalfWeightAndCommand() throws {
         let s = try RankFixture.engine().suggestions(line: "git st", lineOptedOut: false)
         XCTAssertEqual(s.map(\.text), ["status", "stash", "still"])
-        XCTAssertEqual(s[0].score, 1.0 + 0.5 * 60 / 255, accuracy: 1e-9)
-        XCTAssertEqual(s[1].score, 180.0 / 255, accuracy: 1e-9)
+        // Command term at the default weight 3.0.
+        XCTAssertEqual(s[0].score, 3.0 * 255 / 255 + 0.5 * 60 / 255, accuracy: 1e-9)
+        XCTAssertEqual(s[1].score, 3.0 * 180 / 255, accuracy: 1e-9)
         // English at half weight plus the "git -> still" successor context term.
         XCTAssertEqual(s[2].score, 0.5 * 240 / 255 + 0.5 * 10 / 255, accuracy: 1e-9)
     }
@@ -183,7 +184,7 @@ final class SuggestionRankerTests: XCTestCase {
 
     func testDefaultWeights() {
         let w = RankingWeights()
-        XCTAssertEqual(w.english, 1.0); XCTAssertEqual(w.englishInCommand, 0.5); XCTAssertEqual(w.commands, 1.0)
+        XCTAssertEqual(w.english, 1.0); XCTAssertEqual(w.englishInCommand, 0.5); XCTAssertEqual(w.commands, 3.0)
         XCTAssertEqual(w.learnedSaturation, 64); XCTAssertEqual(w.screen, 0.6); XCTAssertEqual(w.correction, 0.7)
         XCTAssertEqual(w.nextWord, 0.9); XCTAssertEqual(w.nextWordAfterWord, 0.45); XCTAssertEqual(w.context, 0.5)
     }
