@@ -114,17 +114,14 @@ struct KeybarView: View {
     }
 
     private var scrollItems: [KeybarScrollItem] {
-        // Promotions were fed only by the removed -CC per-pane process poll.
-        keybarScrollItems(promotions: [],
-                          scrollSlots: layout.middle,
+        keybarScrollItems(scrollSlots: layout.middle,
                           fnEngaged: vm.fnState.engaged)
     }
 
     @ViewBuilder private func scrollItemView(_ item: KeybarScrollItem) -> some View {
         switch item {
-        case .promotion(let s): PromotionSlotView(slot: s, vm: vm)
-        case .fkey(let n):      FkeySlotView(n: n, vm: vm, keybarSettings: keybarSettings)
-        case .slot(let slot):   slotView(slot)
+        case .fkey(let n):    FkeySlotView(n: n, vm: vm, keybarSettings: keybarSettings)
+        case .slot(let slot): slotView(slot)
         }
     }
 

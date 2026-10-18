@@ -475,17 +475,14 @@ impl Connection {
     }
 
     /// Exec `command` on a PTY-backed session channel and pump its stdio to
-    /// `output`. This is the transport for tmux control mode: the caller passes
-    /// `TmuxSessionController.start()`'s `tmux -CC new-session -A -s <name>`
-    /// string and drives the resulting control-mode stream (and it serves any
-    /// other run-a-remote-command need, e.g. the future mosh bootstrap).
+    /// `output`. This serves the app's run-a-remote-command needs: the `tmux -V`
+    /// version probe and the mosh-server bootstrap.
     ///
-    /// A PTY **is** requested: `tmux -CC` calls `tcgetattr` on startup and exits
-    /// without a controlling terminal, then disables echo itself (the second
-    /// `C`), so the control-mode protocol rides a PTY cleanly. `cols`/`rows` set
-    /// the initial control-client size; `ShellSession::resize` (a `window_change`)
-    /// works as for a shell. Returns once the channel is open; output and the
-    /// close event arrive asynchronously via the delegate.
+    /// A PTY is requested (the channel was first built for a command that needed
+    /// a controlling terminal, and the current callers run fine on one).
+    /// `cols`/`rows` set the initial PTY size; `ShellSession::resize` (a
+    /// `window_change`) works as for a shell. Returns once the channel is open;
+    /// output and the close event arrive asynchronously via the delegate.
     pub async fn open_exec(
         &self,
         command: String,

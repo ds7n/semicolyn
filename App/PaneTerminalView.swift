@@ -10,12 +10,11 @@ import SemicolynKit
 /// declares them `open` for exactly this: subclass and override. We `super`-call
 /// first (preserve SwiftTerm's own scroller / mouse-pan-gesture side effects), then
 /// hand the live `Terminal` to `onModeRelevantChange`, which each mount wires to its
-/// `PaneModeTracker.recompute(...)`.
+/// `PaneModeTracker.recompute(terminal:)`.
 
-/// Which mode-relevant SwiftTerm event fired. `bufferActivated` is a real alternate-screen
-/// (`?1049`) transition, so the live `isCurrentBufferAlternate` flag is authoritative at that
-/// instant. `mouseModeChanged` is NOT an alt-screen transition, so the tracked alt-state must
-/// be preserved across it (see `PaneModeTracker.AltSource`).
+/// Which mode-relevant SwiftTerm event fired: `bufferActivated` (a real alternate-screen
+/// `?1049` transition) or `mouseModeChanged` (the mount also uses this one as tmux's
+/// "attached" signal for the connecting overlay).
 enum ModeRelevantEvent { case bufferChanged, mouseChanged }
 
 final class PaneTerminalView: TerminalView {

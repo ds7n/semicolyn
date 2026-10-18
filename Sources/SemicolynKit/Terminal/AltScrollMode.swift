@@ -2,69 +2,43 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 /// How an alt-screen scroll gesture synthesizes input. Two mutually-exclusive modes.
+/// The raw values are persisted in `TerminalSettings`, so they must not change.
 public enum AltScrollMode: String, Sendable, CaseIterable, Codable {
     case wheel           // synthesize SGR mouse-wheel events for every alt-screen app [DEFAULT]
-    case pageKeysArrows  // FALLBACK: arrows (less/vim) vs PgUp/PgDn (registered AI-CLIs)
+    case pageKeysArrows  // FALLBACK: arrow keys (the name predates dropping the PgUp/PgDn branch)
 }
 
 /// The input family an alt-screen drag emits.
-public enum AltScrollKeys: Sendable, Equatable { case arrows, pageKeys, wheel }
+public enum AltScrollKeys: Sendable, Equatable { case arrows, wheel }
 
-/// A resolved alt-screen scroll decision: the chosen key family PLUS the inputs and the
-/// branch reason that produced it. Returned by `altScrollDecision(...)` so the App can log a
+/// A resolved alt-screen scroll decision: the chosen key family PLUS the input and the
+/// branch reason that produced it. Returned by `altScrollDecision(mode:)` so the App can log a
 /// self-contained line (`decision.logLine`) reflecting exactly what the pure decider saw:
 /// the reason is derived from the branch taken, so it can never disagree with `keys`.
-/// - paneCommand: tmux `pane_current_command` for this pane; nil on raw/mosh.
 public struct AltScrollDecision: Sendable, Equatable {
     public let keys: AltScrollKeys
     public let mode: AltScrollMode
-    public let paneCommand: String?
     public let reason: String
 
-    /// Explicit public memberwise init: a `public struct`'s synthesized init is `internal`,
-    /// so the App tier (which constructs a default `AltScrollDecision` as the drag snapshot's
-    /// initial value) cannot reach the synthesized one across the module boundary.
-    public init(keys: AltScrollKeys, mode: AltScrollMode, paneCommand: String?, reason: String) {
+    /// Explicit public memberwise init: a `public struct`'s synthesized init is `internal`.
+    public init(keys: AltScrollKeys, mode: AltScrollMode, reason: String) {
         self.keys = keys
         self.mode = mode
-        self.paneCommand = paneCommand
         self.reason = reason
     }
 
-    /// Self-contained one-liner (no pane id: the App prepends `pane=%N`, since the pure
-    /// decider does not know the pane id). Format: `mode=X app=Y → keys=Z reason=R`.
+    /// Self-contained one-liner. Format: `mode=X → keys=Z reason=R`.
     public var logLine: String {
-        "mode=\(mode.rawValue) app=\(paneCommand ?? "nil") → keys=\(keys) reason=\(reason)"
+        "mode=\(mode.rawValue) → keys=\(keys) reason=\(reason)"
     }
 }
 
 /// The pure alt-scroll decision the App snapshots once at drag `.began`. `.wheel` (default) is
 /// app-agnostic: every alt-screen app scrolls via synthetic mouse-wheel events (the Blink model,
-/// ~1 line each). `.pageKeysArrows` is the fallback for setups where wheel bytes do not reach the
-/// app under tmux -CC: registered AI-CLIs -> PgUp/PgDn, everything else -> arrows.
-/// - windowTitle: retained for signature stability; not consulted in either current mode.
-public func altScrollDecision(mode: AltScrollMode,
-                              paneCommand: String?,
-                              windowTitle: String?,
-                              registry: AltScrollRegistry) -> AltScrollDecision {
-    let (keys, reason): (AltScrollKeys, String)
+/// ~1 line each). `.pageKeysArrows` is the fallback for apps that ignore wheel events: arrows.
+public func altScrollDecision(mode: AltScrollMode) -> AltScrollDecision {
     switch mode {
-    case .wheel:
-        (keys, reason) = (.wheel, "wheel")
-    case .pageKeysArrows:
-        let page = registry.wantsPageKeys(command: paneCommand)
-        (keys, reason) = (page ? .pageKeys : .arrows,
-                          page ? "fallback:registered" : "fallback:unregistered")
+    case .wheel:          return AltScrollDecision(keys: .wheel, mode: mode, reason: "wheel")
+    case .pageKeysArrows: return AltScrollDecision(keys: .arrows, mode: mode, reason: "fallback")
     }
-    return AltScrollDecision(keys: keys, mode: mode, paneCommand: paneCommand, reason: reason)
-}
-
-/// Behavior-preserving wrapper: existing callers and tests keep the `-> AltScrollKeys`
-/// signature. Delegates to `altScrollDecision(...)` so the two can never drift.
-public func altScrollKeys(mode: AltScrollMode,
-                          paneCommand: String?,
-                          windowTitle: String?,
-                          registry: AltScrollRegistry) -> AltScrollKeys {
-    altScrollDecision(mode: mode, paneCommand: paneCommand,
-                      windowTitle: windowTitle, registry: registry).keys
 }
