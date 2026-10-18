@@ -618,7 +618,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         acceptedThisLine.removeAll()
         predictorLineGeneration += 1      // orphan any settle still scheduled
         moshPredictAlways = false
-        predictorVM.clear()
+        clearPredictorChips()
     }
 
     // MARK: - Connection resume
