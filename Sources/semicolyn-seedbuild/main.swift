@@ -13,6 +13,8 @@ import SemicolynKit
 /// At least one source is required. Writes `seed_unigram_v1.sketch` and
 /// `seed_bigram_v1.sketch` into the out directory. `--combined <file>` additionally
 /// writes the single seed_pinned-format blob the app installs directly.
+/// `--tldr-holdout` skips the tldr pages ``TldrHoldout`` holds out for evaluation (a fair
+/// baseline seed for `semicolyn-predeval`; never used for the shipped seed).
 ///
 /// `--dev <dir>`, `--tech <dir>`, `--prompt <dir>` ingest running-text prose corpora
 /// (one directory of `.txt` files per layer) through `LayeredSeedBuilder`, blending
@@ -30,20 +32,28 @@ func warn(_ message: String) {
     FileHandle.standardError.write(Data((message + "\n").utf8))
 }
 
-let usage = "usage: semicolyn-seedbuild --out <dir> [--tldr <dir>] [--fig <dir>] [--combined <file>]"
+let usage = "usage: semicolyn-seedbuild --out <dir> [--tldr <dir> [--tldr-holdout]] [--fig <dir>] [--combined <file>]"
     + " [--dev <dir>] [--tech <dir>] [--prompt <dir>] [--prose-combined <file>] [--blocklist <file>]"
 let knownFlags: Set<String> = [
     "--out", "--tldr", "--fig", "--combined", "--dev", "--tech", "--prompt", "--prose-combined",
     "--blocklist",
 ]
+/// Flags that take no value.
+let knownSwitches: Set<String> = ["--tldr-holdout"]
 
-/// Parse `--flag value` options into a dictionary. An unknown flag, a valueless
-/// flag, or a non-flag argument is a usage error, never a silent skip.
+/// Parse `--flag value` options into a dictionary; a switch (``knownSwitches``) maps to an
+/// empty value. An unknown flag, a valueless flag, or a non-flag argument is a usage error,
+/// never a silent skip.
 func parseOptions(_ args: [String]) -> [String: String] {
     var options: [String: String] = [:]
     var i = 0
     while i < args.count {
         let arg = args[i]
+        if knownSwitches.contains(arg) {
+            options[arg] = ""
+            i += 1
+            continue
+        }
         guard knownFlags.contains(arg), i + 1 < args.count else {
             fail(usage)
         }
@@ -96,10 +106,14 @@ var totalFiles = 0
 
 if let tldrPath = options["--tldr"] {
     let dir = URL(fileURLWithPath: tldrPath, isDirectory: true)
-    let n = ingestDirectory(dir, ext: "md", recursive: true, into: &builder) { text, _ in
-        TldrParser.invocations(fromPage: text)
+    let holdOut = options["--tldr-holdout"] != nil
+    var heldOut = 0
+    let n = ingestDirectory(dir, ext: "md", recursive: true, into: &builder) { text, url in
+        let stem = url.deletingPathExtension().lastPathComponent
+        if holdOut && TldrHoldout.isHeldOut(pageStem: stem) { heldOut += 1 }
+        return TldrHoldout.seedInvocations(pageStem: stem, markdown: text, excludingHeldOut: holdOut)
     }
-    print("tldr: ingested \(n) pages")
+    print("tldr: ingested \(n) pages" + (holdOut ? " (\(heldOut) held-out pages skipped)" : ""))
     totalFiles += n
 }
 
