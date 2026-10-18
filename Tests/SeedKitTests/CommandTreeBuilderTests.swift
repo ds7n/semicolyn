@@ -10,7 +10,7 @@ final class CommandTreeBuilderTests: XCTestCase {
         u.ingest(example: "git commit -m {{message}}")
         u.ingest(example: "git commit --amend")
         u.ingest(example: "sudo git status | grep -i {{x}}")
-        XCTAssertEqual(u.toolCounts, ["git": 3, "grep": 1])
+        XCTAssertEqual(u.toolCounts, ["git": 3, "grep": 1, "sudo": 1])
         XCTAssertEqual(u.pathCounts[["git", "commit"]], 2)
         XCTAssertEqual(u.flagCounts[["git", "commit"]], ["-m": 1, "--amend": 1])
         XCTAssertEqual(u.flagCounts[["grep"]], ["-i": 1])
@@ -40,10 +40,12 @@ final class CommandTreeBuilderTests: XCTestCase {
     func testPipeTargetsOnlyAfterSinglePipeAndStripWrappers() {
         var u = CommandUsage()
         u.ingest(example: "cat f | sudo -n sort | uniq -c")
-        u.ingest(example: "a && b ; c || d")
-        XCTAssertEqual(u.pipeTargetCounts, ["sort": 1, "uniq": 1])
+        u.ingest(example: "aa && bb ; cc || dd")
+        XCTAssertEqual(u.pipeTargetCounts, ["sudo": 1, "sort": 1, "uniq": 1])
         XCTAssertEqual(u.toolCounts["sort"], 1)
-        XCTAssertEqual(u.toolCounts["a"], 1)
+        XCTAssertEqual(u.toolCounts["sudo"], 1)
+        XCTAssertEqual(u.toolCounts["aa"], 1)
+        XCTAssertEqual(u.toolCounts["dd"], 1)
         XCTAssertEqual(u.flagCounts[["uniq"]], ["-c": 1])
     }
 
@@ -61,27 +63,27 @@ final class CommandTreeBuilderTests: XCTestCase {
     }
 
     func testScoreFormulaAndZeroCountSibling() {
-        let fig = FigCommandSpec(names: ["t"], subcommands: [
+        let fig = FigCommandSpec(names: ["tt"], subcommands: [
             FigCommandSpec(names: ["a"], subcommands: [], options: []),
             FigCommandSpec(names: ["b"], subcommands: [], options: []),
             FigCommandSpec(names: ["c"], subcommands: [], options: [])], options: [])
         var u = CommandUsage()
-        for _ in 0..<3 { u.ingest(example: "t a") }
-        u.ingest(example: "t b")
+        for _ in 0..<3 { u.ingest(example: "tt a") }
+        u.ingest(example: "tt b")
         let t = buildCommandTree(specs: [fig], usage: u)
-        let got = t.candidates(segmentWords: ["t"], typed: "", afterPipe: false, limit: 5)
+        let got = t.candidates(segmentWords: ["tt"], typed: "", afterPipe: false, limit: 5)
         // b: 1 + round(254 * ln2 / ln4) = 128; c has zero count -> 1
         XCTAssertEqual(got.map(\.text), ["a", "b", "c"])
         XCTAssertEqual(got.map(\.score), [255, 128, 1])
     }
 
     func testNoUsageGivesAllChildrenScoreOne() {
-        let fig = FigCommandSpec(names: ["t"], subcommands: [
+        let fig = FigCommandSpec(names: ["tt"], subcommands: [
             FigCommandSpec(names: ["zeta"], subcommands: [], options: []),
             FigCommandSpec(names: ["alpha"], subcommands: [], options: [])], options: [])
         let t = buildCommandTree(specs: [fig], usage: CommandUsage())
-        XCTAssertTrue(t.isKnownTool("t"))
-        XCTAssertEqual(t.candidates(segmentWords: ["t"], typed: "", afterPipe: false, limit: 5).map(\.score), [1, 1])
+        XCTAssertTrue(t.isKnownTool("tt"))
+        XCTAssertEqual(t.candidates(segmentWords: ["tt"], typed: "", afterPipe: false, limit: 5).map(\.score), [1, 1])
     }
 
     func testAliasesBecomeSeparateChildren() {
@@ -99,11 +101,11 @@ final class CommandTreeBuilderTests: XCTestCase {
 
     func testMaxToolsBoundary() {
         var u = CommandUsage()
-        for (tool, n) in [("a", 3), ("b", 2), ("c", 1)] { for _ in 0..<n { u.ingest(example: tool) } }
+        for (tool, n) in [("aa", 3), ("bb", 2), ("cc", 1)] { for _ in 0..<n { u.ingest(example: tool) } }
         let t = buildCommandTree(specs: [], usage: u, maxTools: 2)
-        XCTAssertTrue(t.isKnownTool("b")); XCTAssertFalse(t.isKnownTool("c"))
+        XCTAssertTrue(t.isKnownTool("bb")); XCTAssertFalse(t.isKnownTool("cc"))
         let all = buildCommandTree(specs: [], usage: u, maxTools: 3)
-        XCTAssertTrue(all.isKnownTool("c"))
+        XCTAssertTrue(all.isKnownTool("cc"))
     }
 
     func testPipeTargetsScored() {
@@ -187,18 +189,18 @@ final class CommandTreeBuilderTests: XCTestCase {
     func testPlaceholderEndsPathAndUnterminatedPlaceholderIsSkipped() {
         var u = CommandUsage()
         u.ingest(example: "git {{some branch}} status")
-        u.ingest(example: "tool {{open | x")
-        XCTAssertEqual(u.toolCounts, ["git": 1, "tool": 1, "x": 1])
+        u.ingest(example: "tool {{open | xz")
+        XCTAssertEqual(u.toolCounts, ["git": 1, "tool": 1, "xz": 1])
         XCTAssertEqual(u.pathCounts, [:])
     }
 
     func testWordsThatCannotBeCommandNamesAreNotTools() {
         var u = CommandUsage()
-        for example in ["cmd 2>&1 | 2", "x | ${EDITOR}", "x | a=b", "x | ...", "x | ./run.sh", "x | 7z a", "x | g++ -o"] {
+        for example in ["cmd 2>&1 | 2", "xx | ${EDITOR}", "xx | a=b", "xx | ...", "xx | ./run.sh", "xx | 7z a", "xx | g++ -o"] {
             u.ingest(example: example)
         }
         XCTAssertEqual(u.pipeTargetCounts, ["7z": 1, "g++": 1])
-        XCTAssertEqual(u.toolCounts, ["cmd": 1, "x": 6, "7z": 1, "g++": 1])
+        XCTAssertEqual(u.toolCounts, ["cmd": 1, "xx": 6, "7z": 1, "g++": 1])
     }
 
     func testToolsNeedFigSpecOrTldrPage() {
@@ -268,5 +270,51 @@ final class CommandTreeBuilderTests: XCTestCase {
         XCTAssertEqual(parts.pipeTargets.map(\.text), ["grep", "vegeta"])
         XCTAssertEqual(parts.pipeTargets.map(\.score), [255, 161])
         XCTAssertEqual(t.candidates(segmentWords: [], typed: "", afterPipe: false, limit: 2).map(\.text), ["grep", "echo"])
+    }
+
+    func testMaxToolsTiesBrokenByOwnFamilyPageCount() {
+        var u = CommandUsage()
+        u.ingest(page: "aa", examples: ["npm install", "gcloud init"])
+        u.ingest(page: "bb", examples: ["npm test", "gcloud auth"])
+        let pages: Set<String> = ["aa", "bb", "npm", "npm-run", "npm-ci", "gcloud", "gcloud-sql", "npmx"]
+        // Both used by 2 other pages; npm has 3 own-family pages (npm, npm-ci, npm-run; not npmx),
+        // gcloud 2. Name order alone would put gcloud first.
+        XCTAssertEqual(u.toolCounts, ["npm": 2, "gcloud": 2])
+        let parts = buildCommandTreeParts(specs: [], usage: u, maxTools: 1, pages: pages)
+        XCTAssertEqual(parts.tools.map(\.name), ["npm"])
+        let both = buildCommandTreeParts(specs: [], usage: u, maxTools: 2, pages: pages)
+        XCTAssertEqual(both.tools.map(\.name), ["npm", "gcloud"])
+        // Without family information the name decides.
+        XCTAssertEqual(buildCommandTreeParts(specs: [], usage: u, maxTools: 1, pages: nil).tools.map(\.name), ["gcloud"])
+    }
+
+    func testSingleCharactersAndReservedWordsAreNotCommands() {
+        for word in ["q", "s", "w", "if", "then", "else", "elif", "fi", "for", "while", "until", "do",
+                     "done", "case", "esac", "function", "select", "in", "{", "}"] {
+            XCTAssertFalse(isCommandName(word), word)
+        }
+        for word in ["cd", "export", "source", "exit", "eval", "alias", "ls", "fio", "done2"] {
+            XCTAssertTrue(isCommandName(word), word)
+        }
+        var u = CommandUsage()
+        u.ingest(page: "clifm", examples: ["q", "s *.png", "for f in *; do echo $f; done", "cd {{path}}", "ls | q"])
+        // `do echo $f` starts with a reserved word, so the segment adds nothing.
+        XCTAssertEqual(u.toolCounts, ["cd": 1, "ls": 1])
+        XCTAssertEqual(u.pipeTargetCounts, [:])
+        let fig = FigCommandSpec(names: ["q"], subcommands: [], options: ["--help"])
+        XCTAssertFalse(buildCommandTree(specs: [fig], usage: u).isKnownTool("q"))
+    }
+
+    func testWrappersAreCreditedAlongsideTheWrappedCommand() {
+        var u = CommandUsage()
+        u.ingest(page: "find", examples: ["find . -name {{x}} | xargs rm"])
+        u.ingest(page: "apt", examples: ["sudo apt update", "sudo env FOO=1 nohup apt upgrade"])
+        // find: own page only. xargs: tool and pipe target; rm: tool and, as before for the
+        // wrapped command of a piped segment, pipe target. sudo, env, nohup: tools on page apt
+        // (FOO=1 is an assignment); apt: own family only, plus its own page.
+        XCTAssertEqual(u.toolCounts, ["find": 1, "xargs": 1, "rm": 1, "sudo": 1, "env": 1, "nohup": 1, "apt": 1])
+        XCTAssertEqual(u.pipeTargetCounts, ["xargs": 1, "rm": 1])
+        XCTAssertEqual(u.pathCounts[["apt", "update"]], 1)
+        XCTAssertNil(u.flagCounts[["sudo"]])
     }
 }

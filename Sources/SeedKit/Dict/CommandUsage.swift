@@ -68,14 +68,22 @@ public struct CommandUsage {
     /// pipe targets. An example whose command is `tldr` itself (the stock "View documentation"
     /// line of alias pages) is dropped. Wrappers (`sudo`, ...) are stripped. The path grows by
     /// non-flag words in the second and third positions; the first flag or placeholder ends it.
-    /// Flags are cut at `=` or a glued `{{` and counted against the path so far. A segment whose
-    /// first word cannot be a command name (see ``isCommandName(_:)``) is skipped.
+    /// Flags are cut at `=` or a glued `{{` and counted against the path so far. Each removed
+    /// wrapper (`sudo`, `xargs`, ...) is itself a use, and a pipe target when it is the first
+    /// word after `|`; the wrapped command follows. Only words that can be command names (see
+    /// ``isCommandName(_:)``) are used; a segment whose command cannot be one adds no path.
     private mutating func countSegments(of example: String) -> [(tool: String, afterPipe: Bool)] {
         let segments = commandSegments(of: collapsingPlaceholders(example))
         if let first = segments.first, strippingWrappers(first.words).first == "tldr" { return [] }
         var uses: [(tool: String, afterPipe: Bool)] = []
         for segment in segments {
             let words = strippingWrappers(segment.words)
+            // The removed prefix is wrappers plus their options and assignments.
+            let removed = segment.words.prefix(segment.words.count - words.count)
+            for (position, word) in removed.enumerated()
+            where !word.hasPrefix("-") && !word.contains("=") && isCommandName(word) {
+                uses.append((word, segment.afterPipe && position == 0))
+            }
             guard let tool = words.first, isCommandName(tool) else { continue }
             uses.append((tool, segment.afterPipe))
 
@@ -128,10 +136,19 @@ private func collapsingPlaceholders(_ line: String) -> String {
     return out
 }
 
-/// Whether `word` can name a command: ASCII letters, digits and `.`, `_`, `+`, `-` only, at
-/// least one letter, not starting with `-` or `.`. Rejects placeholders, paths, variables
-/// (`$X`), assignments (`a=b`), redirection numbers (`2`) and punctuation (`...`).
+/// Shell reserved words: syntax, not commands.
+private let shellReservedWords: Set<String> = [
+    "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac",
+    "function", "select", "in", "{", "}",
+]
+
+/// Whether `word` can name a command: at least two characters, ASCII letters, digits and `.`,
+/// `_`, `+`, `-` only, at least one letter, not starting with `-` or `.`, and not a shell
+/// reserved word. Rejects placeholders, paths, variables (`$X`), assignments (`a=b`),
+/// redirection numbers (`2`), punctuation (`...`), keystrokes (`q`) and `while`/`do`/...
+/// Builtins people type (`cd`, `export`, `source`) are names.
 public func isCommandName(_ word: String) -> Bool {
+    guard word.unicodeScalars.count >= 2, !shellReservedWords.contains(word) else { return false }
     guard let first = word.unicodeScalars.first, first != "-", first != "." else { return false }
     var sawLetter = false
     for scalar in word.unicodeScalars {

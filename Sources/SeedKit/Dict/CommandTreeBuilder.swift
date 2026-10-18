@@ -21,14 +21,16 @@ private func isStorable(_ name: String) -> Bool {
     !name.isEmpty && name.utf8.count <= maxNameBytes
 }
 
-/// Builds the shipped command tree. Tools are those with a Fig spec or a usage count (top
-/// `maxTools` by count, ties by name). When `pages` (the names that have their own tldr page)
+/// Builds the shipped command tree. Tools are command names (``isCommandName(_:)``) with a
+/// Fig spec or a usage count: the top `maxTools` by count, ties broken by the number of `pages`
+/// in the tool's own family (stem equal to the tool or starting with `tool-`, more first), then
+/// by name. When `pages` (the names that have their own tldr page)
 /// is given, a usage-only tool or pipe target must also be in it, so words tldr merely shows
 /// in command position (`stdout`) are not tools. Children come only from Fig structure and are
 /// ranked by how often tldr uses their path; each alias is its own child. A node's flags are
 /// those seen in tldr for its path plus `--help` when Fig declares it. Names that cannot be
 /// serialized are skipped and each node is capped to its 255 best children and flags.
-public func buildCommandTree(specs: [FigCommandSpec], usage: CommandUsage, maxTools: Int = 400,
+public func buildCommandTree(specs: [FigCommandSpec], usage: CommandUsage, maxTools: Int = 800,
                              pages: Set<String>? = nil) -> CommandTree {
     let parts = buildCommandTreeParts(specs: specs, usage: usage, maxTools: maxTools, pages: pages)
     return CommandTree(tools: parts.tools, pipeTargets: parts.pipeTargets)
@@ -40,7 +42,7 @@ public func countNodes(_ nodes: [CommandNode]) -> Int {
 }
 
 /// The tools and pipe targets ``buildCommandTree`` wraps, exposed so callers can report counts.
-public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage, maxTools: Int = 400,
+public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage, maxTools: Int = 800,
                                   pages: Set<String>? = nil) -> (tools: [CommandNode], pipeTargets: [ScoredWord]) {
     var figByTool: [String: FigCommandSpec] = [:]
     for spec in specs {
@@ -49,12 +51,15 @@ public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage, 
     var usage = usage
     usage.flagCounts = rolledUpFlags(usage.flagCounts, figByTool: figByTool)
     let isEligible = { (name: String) -> Bool in
-        isStorable(name) && (figByTool[name] != nil || pages?.contains(name) ?? true)
+        isStorable(name) && isCommandName(name) && (figByTool[name] != nil || pages?.contains(name) ?? true)
     }
-    let candidates = Set(figByTool.keys).union(usage.toolCounts.keys.filter(isEligible))
+    let family = familyPageCounts(pages ?? [])
+    let candidates = Set(figByTool.keys).union(usage.toolCounts.keys).filter(isEligible)
     let ranked = candidates.sorted { a, b in
         let ca = usage.toolCounts[a] ?? 0, cb = usage.toolCounts[b] ?? 0
-        return ca != cb ? ca > cb : a.utf8.lexicographicallyPrecedes(b.utf8)
+        if ca != cb { return ca > cb }
+        let fa = family[a] ?? 0, fb = family[b] ?? 0
+        return fa != fb ? fa > fb : a.utf8.lexicographicallyPrecedes(b.utf8)
     }
     let kept = Array(ranked.prefix(max(0, maxTools)))
     let best = kept.map { usage.toolCounts[$0] ?? 0 }.max() ?? 0
@@ -70,6 +75,20 @@ public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage, 
     let pipeBest = pipeRanked.first?.value ?? 0
     let pipes = pipeRanked.map { ScoredWord(text: $0.key, score: relativeScore($0.value, max: pipeBest)) }
     return (tools, pipes)
+}
+
+/// For every name, how many of `pages` are in its family: the stem itself and each prefix of a
+/// stem that ends just before a `-` (`git-commit-tree` counts for `git`, `git-commit` and
+/// `git-commit-tree`).
+private func familyPageCounts(_ pages: Set<String>) -> [String: Int] {
+    var counts: [String: Int] = [:]
+    for page in pages {
+        counts[page, default: 0] += 1
+        for index in page.indices where page[index] == "-" && index > page.startIndex {
+            counts[String(page[..<index]), default: 0] += 1
+        }
+    }
+    return counts
 }
 
 private func node(name: String, score: UInt8, path: [String], fig: FigCommandSpec?,
