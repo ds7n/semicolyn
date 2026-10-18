@@ -13,9 +13,11 @@ public enum ExcludePattern: Sendable, Equatable {
     /// if "ass" is listed.
     case blocklist(Set<String>)
     /// Case-insensitive substring that excludes unless the WHOLE lowercased token is
-    /// in the allowed set (ordinary inflections like "tokens"). Allowed words must be
-    /// lowercase. Trailing punctuation or any extra text makes the token not a member,
-    /// so it stays excluded.
+    /// in the allowed set (ordinary inflections like "tokens"). Membership is
+    /// case-insensitive on both sides. Trailing clause punctuation (`.` `,` `;` `:`,
+    /// only at the end) is ignored for the membership test, so "passwords," and
+    /// "tokens." still learn; any other extra text ("Password!", "secrets.yaml",
+    /// "token=abc") makes the token not a member and it stays excluded.
     case containsExceptWords(String, Set<String>)
 }
 
@@ -74,7 +76,8 @@ public struct TokenFilter: Sendable {
                 if words.contains(lowered) { return true }
             case .containsExceptWords(let needle, let allowed):
                 guard !needle.isEmpty, lowered.contains(needle.lowercased()) else { break }
-                if !allowed.contains(lowered) { return true }
+                let word = lowered.trimmingTrailingClausePunctuation()
+                if !allowed.contains(where: { $0.lowercased() == word }) { return true }
             }
         }
         if isStructuredSecret(token) { return true }
@@ -126,12 +129,15 @@ func isStructuredSecret(_ token: String) -> Bool {
 
 /// Minimum length of a pure-hex token treated as an API key / token shape. Hex
 /// entropy tops out at 4.0 bits/char so the entropy backstop cannot catch these;
-/// 7 to 12 char git SHAs and 31-char hex stay allowed.
+/// 7 to 12 char abbreviated git SHAs and 31-char hex stay allowed. Full 40-char git
+/// SHAs are excluded too (indistinguishable from a token shape).
 private let longHexMinLength = 32
 
-/// True if `token` is entirely hex digits and at least `longHexMinLength` long.
+/// True if `token` is entirely hex digits (after an optional `0x`/`0X` prefix) and
+/// at least `longHexMinLength` hex digits long.
 func isLongHex(_ token: String) -> Bool {
-    let scalars = token.unicodeScalars
+    var scalars = token.unicodeScalars[...]
+    if token.hasPrefix("0x") || token.hasPrefix("0X") { scalars = scalars.dropFirst(2) }
     guard scalars.count >= longHexMinLength else { return false }
     return scalars.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) || ("A"..."F").contains($0) }
 }
@@ -158,4 +164,13 @@ func shannonEntropy(_ s: String) -> Double {
         entropy -= p * log2(p)
     }
     return entropy
+}
+
+private extension String {
+    /// Removes a trailing run of `.` `,` `;` `:` (nothing else, nothing mid-string).
+    func trimmingTrailingClausePunctuation() -> String {
+        var result = self
+        while let last = result.last, ".,;:".contains(last) { result.removeLast() }
+        return result
+    }
 }

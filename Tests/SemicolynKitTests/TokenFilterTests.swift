@@ -30,7 +30,7 @@ final class TokenFilterTests: XCTestCase {
     }
 
     func testSecretShapesStillExcluded() {
-        for w in ["password1", "mypassword", "Password!", "--password", "passwords,", "token=abc", "GITHUB_TOKEN",
+        for w in ["password1", "mypassword", "Password!", "--password", "passwords!", "token=abc", "GITHUB_TOKEN",
                   "api_token", "tokenABC", "secret_key", "MY_SECRET", "secrets.yaml", "x-secret",
                   "tokensx", "secretsauce", "passwordsx"] {
             XCTAssertTrue(filter.excludes(w), w)
@@ -46,8 +46,42 @@ final class TokenFilterTests: XCTestCase {
         XCTAssertFalse(f.excludes("foos"))
         XCTAssertFalse(f.excludes("FOOS"))
         XCTAssertTrue(f.excludes("foo"), "needle itself not in allowed set")
-        XCTAssertTrue(f.excludes("foos."))
+        XCTAssertFalse(f.excludes("foos."), "trailing clause punctuation ignored")
+        XCTAssertTrue(f.excludes("foos!"))
         XCTAssertFalse(f.excludes("bar"))
+    }
+
+    func testClausePunctuationAfterAllowedWordAllowed() {
+        for w in ["passwords,", "tokens.", "Secret;", "token:"] {
+            XCTAssertFalse(filter.excludes(w), w)
+        }
+    }
+
+    func testOtherSuffixesAfterAllowedWordExcluded() {
+        for w in ["Password!", "secrets.yaml", "tokens.json", "password1,", ".tokens", ",tokens"] {
+            XCTAssertTrue(filter.excludes(w), w)
+        }
+    }
+
+    func testUppercaseNeedleAndMixedCaseAllowedSet() {
+        let f = TokenFilter(patterns: [.containsExceptWords("FOO", ["foos"])], entropyThreshold: nil)
+        XCTAssertTrue(f.excludes("xfoo"), "uppercase needle still matches lowercased token")
+        XCTAssertFalse(f.excludes("foos"))
+        let g = TokenFilter(patterns: [.containsExceptWords("foo", ["FOOS"])], entropyThreshold: nil)
+        XCTAssertFalse(g.excludes("foos"), "uppercase allowed entry still allows")
+    }
+
+    func testTurkishDottedIFailsSafe() {
+        // lowercased() yields "i" + combining dot, which is not the allowed "tokenize".
+        XCTAssertTrue(filter.excludes("TOKEN\u{130}ZE"))
+    }
+
+    func testHexZeroXPrefix() {
+        let unit = "deadbeef"
+        XCTAssertTrue(filter.excludes("0x" + String(repeating: unit, count: 4)), "0x + 32")
+        XCTAssertTrue(filter.excludes("0X" + String(repeating: unit, count: 4)), "0X + 32")
+        XCTAssertFalse(filter.excludes("0x" + String(repeating: unit, count: 3) + "deadbee"), "0x + 31")
+        XCTAssertFalse(filter.excludes("0x" + "deadbeeg" + String(repeating: unit, count: 3)), "non-hex after prefix")
     }
 
     func testHexLengthBoundary() {

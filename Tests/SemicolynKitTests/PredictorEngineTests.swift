@@ -230,6 +230,16 @@ final class PredictorEngineTests: XCTestCase {
         XCTAssertTrue(e.suggestions(forPrefix: "dep", after: nil).contains("deploy"))
     }
 
+    func testOrdinaryWordWithClausePunctuationLearnsTrimmedLiteral() {
+        var e = freshEngine()
+        e.record("passwords,", after: "git")
+        e.record("passwords,", after: "make")
+        e.record("passwords,", after: "npm")
+        let got = e.suggestions(forPrefix: "pass", after: nil)
+        XCTAssertTrue(got.contains("passwords"), "\(got)")
+        XCTAssertFalse(got.contains("passwords,"), "\(got)")
+    }
+
     func testGraduationBackfillsBigramContexts() {
         var e = freshEngine()
         // Give the "git" context count 2 so the backfilled bigram clears the
