@@ -12,6 +12,11 @@ public enum ExcludePattern: Sendable, Equatable {
     /// substring match: only whole-token equality excludes, so "class" is safe even
     /// if "ass" is listed.
     case blocklist(Set<String>)
+    /// Case-insensitive substring that excludes unless the WHOLE lowercased token is
+    /// in the allowed set (ordinary inflections like "tokens"). Allowed words must be
+    /// lowercase. Trailing punctuation or any extra text makes the token not a member,
+    /// so it stays excluded.
+    case containsExceptWords(String, Set<String>)
 }
 
 /// Write-time privacy filter: decides whether a token must never be recorded by
@@ -29,7 +34,11 @@ public struct TokenFilter: Sendable {
 
     /// The exclude rules shipped with the app.
     public static let defaultPatterns: [ExcludePattern] = [
-        .contains("password"), .contains("token"), .contains("secret"),
+        .containsExceptWords("password", ["password", "passwords", "passworded", "passwordless"]),
+        .containsExceptWords("token", ["token", "tokens", "tokenize", "tokenized", "tokenizer", "tokenizers",
+                                       "tokenizing", "tokenization", "tokenise", "tokenised"]),
+        .containsExceptWords("secret", ["secret", "secrets", "secretly", "secretive", "secretary",
+                                        "secretaries", "secretariat", "secrete", "secreted", "secretion"]),
         .hasPrefix("ghp_"), .hasPrefix("gho_"), .hasPrefix("ghs_"),  // GitHub classic PATs
         .hasPrefix("github_pat_"),                                   // GitHub fine-grained PATs
         .hasPrefix("sk-"),                                           // OpenAI API keys
@@ -63,9 +72,13 @@ public struct TokenFilter: Sendable {
                 if !prefix.isEmpty, token.hasPrefix(prefix) { return true }
             case .blocklist(let words):
                 if words.contains(lowered) { return true }
+            case .containsExceptWords(let needle, let allowed):
+                guard !needle.isEmpty, lowered.contains(needle.lowercased()) else { break }
+                if !allowed.contains(lowered) { return true }
             }
         }
         if isStructuredSecret(token) { return true }
+        if isLongHex(token) { return true }
         if let threshold = entropyThreshold,
            token.unicodeScalars.count >= entropyMinLength,
            shannonEntropy(token) >= threshold {
@@ -109,6 +122,18 @@ func isStructuredSecret(_ token: String) -> Bool {
         return true
     }
     return false
+}
+
+/// Minimum length of a pure-hex token treated as an API key / token shape. Hex
+/// entropy tops out at 4.0 bits/char so the entropy backstop cannot catch these;
+/// 7 to 12 char git SHAs and 31-char hex stay allowed.
+private let longHexMinLength = 32
+
+/// True if `token` is entirely hex digits and at least `longHexMinLength` long.
+func isLongHex(_ token: String) -> Bool {
+    let scalars = token.unicodeScalars
+    guard scalars.count >= longHexMinLength else { return false }
+    return scalars.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) || ("A"..."F").contains($0) }
 }
 
 /// True if `s` contains only base64url characters (A-Z a-z 0-9 - _ =).
