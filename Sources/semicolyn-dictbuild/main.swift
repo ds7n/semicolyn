@@ -96,9 +96,13 @@ func runNgramFilter(_ args: [String]) {
     flush()
 }
 
-func readLines(_ path: String) -> [Substring] {
-    guard let data = FileManager.default.contents(atPath: path) else { fail("cannot read file: \(path)") }
-    return String(decoding: data, as: UTF8.self).split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+/// Streams `path` line by line, exiting with a message if it cannot be read.
+func streamLines(_ path: String, _ body: (Substring) -> Void) {
+    do {
+        try forEachLine(inFile: path, body)
+    } catch {
+        fail("cannot read file: \(path)")
+    }
 }
 
 /// `*.tsv` files in `dir`, sorted by name.
@@ -115,6 +119,23 @@ func tsvFiles(in dir: String) -> [String] {
 func splitTSV(_ line: Substring) -> (Substring, Substring)? {
     let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
     return parts.count == 2 ? (parts[0], parts[1]) : nil
+}
+
+/// Per-input line accounting, printed to stderr; `dropped` counts well-formed lines that
+/// contributed nothing (e.g. a bigram whose words have no kept form).
+struct InputStats {
+    let kind: String
+    var parsed = 0
+    var skipped = 0
+    var dropped = 0
+
+    func report() {
+        FileHandle.standardError.write(Data("\(kind): parsed \(parsed), skipped \(skipped), dropped \(dropped)\n".utf8))
+    }
+
+    func requireParsed() {
+        if parsed == 0 { fail("no \(kind) lines parsed (\(skipped) malformed); check the input path and format") }
+    }
 }
 
 func runEnglish(_ args: [String]) {
@@ -149,35 +170,58 @@ func runEnglish(_ args: [String]) {
         apply(n)
     }
 
+    var unigramStats = InputStats(kind: "unigrams")
     var books: [String: UInt64] = [:]
     for file in tsvFiles(in: required("unigrams")) {
-        for line in readLines(file) {
-            guard let (word, count) = splitTSV(line), let n = UInt64(count) else { continue }
+        streamLines(file) { line in
+            guard let (word, count) = splitTSV(line), let n = UInt64(count) else { unigramStats.skipped += 1; return }
+            unigramStats.parsed += 1
             books[String(word), default: 0] &+= n
         }
     }
+    unigramStats.report()
+    unigramStats.requireParsed()
+
+    var wordfreqStats = InputStats(kind: "wordfreq")
     var wordfreq: [String: Double] = [:]
-    for line in readLines(required("wordfreq")) {
-        guard let (word, freq) = splitTSV(line), let f = Double(freq), f > 0 else { continue }
-        wordfreq[String(word).lowercased()] = f
+    streamLines(required("wordfreq")) { line in
+        guard let (word, freq) = splitTSV(line), let f = Double(freq), f > 0, f.isFinite else { wordfreqStats.skipped += 1; return }
+        wordfreqStats.parsed += 1
+        wordfreq[String(word).lowercased(), default: 0] += f
     }
-    let sources = EnglishSources(
-        books: books, wordfreq: wordfreq,
-        realWords: Set(readLines(required("scowl")).map { String($0).lowercased() }),
-        titleWords: Set(readLines(required("titles")).filter { !$0.contains(" ") }.map(String.init)),
-        blocklist: Set(readLines(required("blocklist")).map { String($0).lowercased() }))
+    wordfreqStats.report()
+    wordfreqStats.requireParsed()
+
+    var realWords = Set<String>()
+    streamLines(required("scowl")) { realWords.insert(String($0).lowercased()) }
+    var blocklist = Set<String>()
+    streamLines(required("blocklist")) { blocklist.insert(String($0).lowercased()) }
+    var titleWords = Set<String>()
+    streamLines(required("titles")) { line in
+        let title = line.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespaces)
+        if !title.isEmpty, !title.contains(" ") { titleWords.insert(title) }
+    }
+    FileHandle.standardError.write(Data("side files: scowl \(realWords.count), titles \(titleWords.count), blocklist \(blocklist.count)\n".utf8))
+
+    let sources = EnglishSources(books: books, wordfreq: wordfreq, realWords: realWords,
+                                 titleWords: titleWords, blocklist: blocklist)
     let entries = buildEnglishEntries(sources, config: config)
 
     let index = SuccessorIndex(entries: entries, config: config)
+    var bigramStats = InputStats(kind: "bigrams")
     var packed: [UInt64: UInt64] = [:]
     for file in tsvFiles(in: required("bigrams")) {
-        for line in readLines(file) {
-            guard let (gram, count) = splitTSV(line), let n = UInt64(count) else { continue }
+        streamLines(file) { line in
+            guard let (gram, count) = splitTSV(line), let n = UInt64(count) else { bigramStats.skipped += 1; return }
             let tokens = gram.split(separator: " ", omittingEmptySubsequences: true)
-            guard tokens.count == 2, let key = index.pack(prev: String(tokens[0]), next: String(tokens[1])) else { continue }
+            guard tokens.count == 2 else { bigramStats.skipped += 1; return }
+            bigramStats.parsed += 1
+            guard let key = index.pack(prev: String(tokens[0]), next: String(tokens[1])) else { bigramStats.dropped += 1; return }
             packed[key, default: 0] &+= n
         }
     }
+    bigramStats.report()
+    bigramStats.requireParsed()
     let successors = index.successors(from: packed, config: config)
 
     let blob: [UInt8]

@@ -105,6 +105,20 @@ final class EnglishBuilderTests: XCTestCase {
         XCTAssertEqual(buildSuccessors(pairs: pairs, entries: entries, config: c), ["the": [.init(text: "cat", score: 255)]])
     }
 
+    func testSuccessorsAcceptedWhenMaxWordsDropsWords() throws {
+        var c = EnglishBuildConfig(); c.maxWords = 2
+        let s = EnglishSources(books: [:], wordfreq: ["the": 5e-2, "cat": 1e-2, "dog": 1e-3, "emu": 1e-4],
+                               realWords: ["the", "cat", "dog", "emu"], titleWords: [], blocklist: [])
+        let entries = buildEnglishEntries(s, config: c)
+        XCTAssertEqual(entries.map(\.text), ["the", "cat"])
+        let pairs: [(prev: String, next: String, count: UInt64)] = [
+            ("the", "cat", 5), ("the", "dog", 9), ("dog", "the", 4), ("cat", "emu", 3), ("cat", "the", 2),
+        ]
+        let successors = buildSuccessors(pairs: pairs, entries: entries, config: c)
+        XCTAssertEqual(successors, ["the": [.init(text: "cat", score: 255)], "cat": [.init(text: "the", score: 255)]])
+        XCTAssertEqual(try WordDictionary(entries: entries, successors: successors).wordCount, 2)
+    }
+
     func testSuccessorKeysAlwaysAcceptedByWordDictionary() throws {
         let s = EnglishSources(
             books: ["The": 40, "the": 60, "Linux": 95, "linux": 5, "us": 70, "US": 30, "cat": 10],
