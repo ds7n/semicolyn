@@ -291,16 +291,15 @@ func runCommands(_ args: [String]) {
         }
         for name in names.sorted() where name.hasSuffix(".md") {
             let stem = String(name.dropLast(3))
-            // A held-out page still exists (own-page credit, family count, admission);
-            // ingest(page:markdown:) skips its examples.
+            // A held-out page still exists (own-page credit, family count, admission, its
+            // tool name from the title); ingest(page:markdown:) skips its examples.
             pageNames.insert(stem)
+            guard let data = fm.contents(atPath: dir + "/" + name) else { fail("cannot read file: \(dir)/\(name)") }
             if TldrHoldout.isHeldOut(pageStem: stem) {
                 heldOut += 1
-                observed.ingest(page: stem, markdown: "")
-                continue
+            } else {
+                pagesRead += 1
             }
-            guard let data = fm.contents(atPath: dir + "/" + name) else { fail("cannot read file: \(dir)/\(name)") }
-            pagesRead += 1
             observed.ingest(page: stem, markdown: String(decoding: data, as: UTF8.self))
         }
     }
@@ -318,6 +317,8 @@ func runCommands(_ args: [String]) {
     guard !specs.isEmpty else { fail("no Fig specs parsed under \(figDir); check the path") }
 
     let parts = buildCommandTreeParts(specs: specs, usage: observed, pages: pageNames)
+    let figToolNames = Set(specs.flatMap(\.names))
+    let tldrOnly = parts.tools.filter { !figToolNames.contains($0.name) && observed.toolCounts[$0.name] == nil }.count
     let blob = CommandTree(tools: parts.tools, pipeTargets: parts.pipeTargets).serialize()
     let outPath = required("out")
     guard fm.createFile(atPath: outPath, contents: Data(blob)) else { fail("cannot write file: \(outPath)") }
@@ -326,6 +327,7 @@ func runCommands(_ args: [String]) {
         held out skipped: \(heldOut)
         specs parsed: \(specs.count)
         tools kept: \(parts.tools.count)
+        tldr page-only tools (no Fig spec, no usage): \(tldrOnly)
         total nodes: \(countNodes(parts.tools))
         pipe targets: \(parts.pipeTargets.count)
         bytes: \(blob.count)

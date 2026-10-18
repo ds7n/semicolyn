@@ -26,7 +26,8 @@ private func isStorable(_ name: String) -> Bool {
 }
 
 /// Builds the shipped command tree. Tools are command names (``isCommandName(_:)``) with a
-/// Fig spec or a usage count, all of them by default (a Fig tool with no usage scores 1). They
+/// Fig spec, a tldr page of their own (``CommandUsage/pageTools``) or a usage count, all of them
+/// by default (a tool with no usage scores 1; a tool without a Fig spec has no children). They
 /// are ranked by count, ties broken by the number of `pages` in the tool's own family (stem
 /// equal to the tool or starting with `tool-`, more first), then by name, and the top
 /// `maxTools` are kept (never more than ``maxCommandTreeTools``; pipe targets likewise). When
@@ -56,10 +57,11 @@ public func buildCommandTreeParts(specs: [FigCommandSpec], usage: CommandUsage, 
     var usage = usage
     usage.flagCounts = rolledUpFlags(usage.flagCounts, figByTool: figByTool)
     let isEligible = { (name: String) -> Bool in
-        isStorable(name) && isCommandName(name) && (figByTool[name] != nil || pages?.contains(name) ?? true)
+        isStorable(name) && isCommandName(name)
+            && (figByTool[name] != nil || usage.pageTools.contains(name) || pages?.contains(name) ?? true)
     }
     let family = familyPageCounts(pages ?? [])
-    let candidates = Set(figByTool.keys).union(usage.toolCounts.keys).filter(isEligible)
+    let candidates = Set(figByTool.keys).union(usage.toolCounts.keys).union(usage.pageTools).filter(isEligible)
     let ranked = candidates.sorted { a, b in
         let ca = usage.toolCounts[a] ?? 0, cb = usage.toolCounts[b] ?? 0
         if ca != cb { return ca > cb }

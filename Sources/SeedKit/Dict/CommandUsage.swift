@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
+import Foundation
 import SemicolynKit
 
 /// Usage statistics gathered from tldr example lines: how often each tool, subcommand path,
@@ -12,6 +13,10 @@ public struct CommandUsage {
     public var pathCounts: [[String]: Int] = [:]
     public var flagCounts: [[String]: [String: Int]] = [:]
     public var pipeTargetCounts: [String: Int] = [:]
+    /// Tools named by a tldr page of their own (``tldrPageToolName(stem:markdown:)``), recorded
+    /// by ``ingest(page:markdown:)`` for held-out pages too; the tree admits each even with no
+    /// usage and no Fig spec.
+    public var pageTools: Set<String> = []
 
     /// Page stems already credited per tool (cross-family use) and per pipe target.
     private var toolPages: Set<[String]> = []
@@ -63,9 +68,11 @@ public struct CommandUsage {
     }
 
     /// Counts the tldr page `page` (file stem) from its markdown. A held-out page
-    /// (``TldrHoldout``) still exists: it gives its tool the own-page credit, but its examples
-    /// are not read, so evaluation pages never feed paths, flags or tool use.
+    /// (``TldrHoldout``) still exists: it gives its tool the own-page credit and its name (see
+    /// ``pageTools``), but its examples are not read, so evaluation pages never feed paths,
+    /// flags or tool use.
     public mutating func ingest(page: String, markdown: String) {
+        if let name = tldrPageToolName(stem: page, markdown: markdown) { pageTools.insert(name) }
         let examples = TldrHoldout.isHeldOut(pageStem: page) ? [] : TldrParser.exampleCommands(fromPage: markdown)
         ingest(page: page, examples: examples)
     }
@@ -125,6 +132,18 @@ public struct CommandUsage {
         }
         return uses
     }
+}
+
+/// The tool a tldr page documents: its stem, when the page title (the first line, `# title`)
+/// equals the stem ignoring case and the stem is a command name (``isCommandName(_:)``).
+/// Subcommand pages (`adb-connect`, titled `adb connect`) and concept pages (`!`, titled
+/// `Exclamation mark`) name no tool. Only the title line is read, never the examples.
+public func tldrPageToolName(stem: String, markdown: String) -> String? {
+    guard isCommandName(stem) else { return nil }
+    let firstLine = markdown.prefix { !$0.isNewline }
+    guard firstLine.hasPrefix("# ") else { return nil }
+    let title = firstLine.dropFirst(2).trimmingCharacters(in: .whitespaces)
+    return title.lowercased() == stem.lowercased() ? stem : nil
 }
 
 /// The placeholder word every `{{...}}` span collapses to.

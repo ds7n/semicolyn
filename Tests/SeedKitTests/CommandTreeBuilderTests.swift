@@ -386,6 +386,78 @@ final class CommandTreeBuilderTests: XCTestCase {
         // Admitted through the held-out page alone (no Fig spec).
         let t = buildCommandTree(specs: [], usage: u, pages: ["npm", "npm-ci", "nvm"])
         XCTAssertTrue(t.isKnownTool("npm"))
-        XCTAssertFalse(buildCommandTree(specs: [], usage: u, pages: ["npm-ci", "nvm"]).isKnownTool("npm"))
+        // Without its page title and outside the page set, the use alone does not admit it.
+        var untitled = u
+        untitled.pageTools = []
+        XCTAssertFalse(buildCommandTree(specs: [], usage: untitled, pages: ["npm-ci", "nvm"]).isKnownTool("npm"))
+    }
+
+    func testTldrPageToolNameNeedsATitleEqualToTheStem() {
+        XCTAssertEqual(tldrPageToolName(stem: "vi", markdown: "# vi\n\n> Alias.\n"), "vi")
+        XCTAssertEqual(tldrPageToolName(stem: "vi", markdown: "# vi  \r\n\n> Alias.\n"), "vi")
+        // A title that differs only in case still names the stem (the tree's tool name).
+        XCTAssertEqual(tldrPageToolName(stem: "vboxmanage", markdown: "# VBoxManage\n"), "vboxmanage")
+        // Subcommand and concept pages name no tool.
+        XCTAssertNil(tldrPageToolName(stem: "adb-connect", markdown: "# adb connect\n"))
+        XCTAssertNil(tldrPageToolName(stem: "!", markdown: "# Exclamation mark\n"))
+        XCTAssertNil(tldrPageToolName(stem: "just.1", markdown: "# just\n"))
+        // The title must be the first line, in `# ` form.
+        XCTAssertNil(tldrPageToolName(stem: "vi", markdown: ""))
+        XCTAssertNil(tldrPageToolName(stem: "vi", markdown: "> Alias.\n# vi\n"))
+        XCTAssertNil(tldrPageToolName(stem: "vi", markdown: "#vi\n"))
+        // Existing exclusions: single characters and shell reserved words.
+        XCTAssertNil(tldrPageToolName(stem: "w", markdown: "# w\n"))
+        XCTAssertNil(tldrPageToolName(stem: "if", markdown: "# if\n"))
+    }
+
+    func testTldrOnlyToolAppearsWithLowestScoreAndNoChildren() {
+        XCTAssertFalse(TldrHoldout.isHeldOut(pageStem: "vi"))
+        XCTAssertFalse(TldrHoldout.isHeldOut(pageStem: "zork"))
+        var u = CommandUsage()
+        u.ingest(page: "vi", markdown: "# vi\n\n> Alias of vim.\n\n- View documentation:\n\n`tldr vim`\n")
+        u.ingest(page: "zork", markdown: "# zork\n\n- Play quietly:\n\n`zork --quiet`\n")
+        XCTAssertEqual(u.pageTools, ["vi", "zork"])
+        XCTAssertEqual(u.toolCounts, ["zork": 1])
+        let parts = buildCommandTreeParts(specs: [], usage: u, pages: ["vi", "zork"])
+        XCTAssertEqual(parts.tools.map(\.name), ["zork", "vi"])
+        XCTAssertEqual(parts.tools.map(\.score), [255, 1])
+        // vi: no usage, so no children and no flags; zork: flags from its (not held-out) examples.
+        XCTAssertEqual(parts.tools[1].children.map(\.name), [])
+        XCTAssertEqual(parts.tools[1].flags.map(\.text), [])
+        XCTAssertEqual(parts.tools[0].children.map(\.name), [])
+        XCTAssertEqual(parts.tools[0].flags.map(\.text), ["--quiet"])
+        // Admitted by the page title alone, even without a page set.
+        XCTAssertTrue(buildCommandTree(specs: [], usage: u).isKnownTool("vi"))
+    }
+
+    func testHeldOutTldrOnlyToolAppearsWithZeroChildren() {
+        XCTAssertTrue(TldrHoldout.isHeldOut(pageStem: "ipcs"))
+        var u = CommandUsage()
+        u.ingest(page: "ipcs", markdown: "# ipcs\n\n- Show all:\n\n`ipcs -a`\n\n- Queues:\n\n`ipcs queue --human`\n")
+        XCTAssertEqual(u.pageTools, ["ipcs"])
+        XCTAssertEqual(u.toolCounts, [:])
+        XCTAssertEqual(u.pathCounts, [:])
+        XCTAssertEqual(u.flagCounts, [:])
+        let parts = buildCommandTreeParts(specs: [], usage: u, pages: ["ipcs"])
+        XCTAssertEqual(parts.tools.map(\.name), ["ipcs"])
+        XCTAssertEqual(parts.tools[0].score, 1)
+        XCTAssertEqual(parts.tools[0].children.count, 0)
+        XCTAssertEqual(parts.tools[0].flags.count, 0)
+        XCTAssertEqual(parts.pipeTargets.map(\.text), [])
+    }
+
+    func testToolWithNeitherFigSpecNorTldrPageIsAbsent() {
+        var u = CommandUsage()
+        u.ingest(page: "cat", markdown: "# cat\n\n- Print:\n\n`cat {{file}}`\n\n- Pipe:\n\n`stdout | cat`\n")
+        u.ingest(page: "adb-connect", markdown: "# adb connect\n\n- Connect:\n\n`adb connect {{ip}}`\n")
+        u.ingest(page: "!", markdown: "# Exclamation mark\n\n- Repeat:\n\n`!!`\n")
+        XCTAssertEqual(u.pageTools, ["cat"])
+        XCTAssertEqual(u.toolCounts["stdout"], 1)
+        let t = buildCommandTree(specs: [], usage: u, pages: ["cat", "adb-connect", "!"])
+        XCTAssertEqual(t.candidates(segmentWords: [], typed: "", afterPipe: false, limit: 10).map(\.text), ["cat"])
+        XCTAssertFalse(t.isKnownTool("adb"))
+        XCTAssertFalse(t.isKnownTool("stdout"))
+        XCTAssertFalse(t.isKnownTool("adb-connect"))
+        XCTAssertFalse(t.isKnownTool("!"))
     }
 }
