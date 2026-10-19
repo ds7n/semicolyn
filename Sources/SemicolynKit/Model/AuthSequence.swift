@@ -29,13 +29,18 @@ public struct AuthSequenceOutcome: Equatable, Sendable {
     public var attempts: [AuthAttempt]
     /// Identities skipped because their private key is not on this device.
     public var skippedWithoutKey: [IdentityRef]
+    /// Identities skipped because reading or using their key threw (a Keychain read
+    /// error, or a stored key the SSH core can't parse), in order.
+    public var keyErrors: [IdentityRef]
     /// The final result: `.success` as soon as any attempt succeeds, otherwise
     /// the result of the last attempt made (`.failure` when nothing was tried).
     public var result: AuthAttemptResult
 
-    public init(attempts: [AuthAttempt], skippedWithoutKey: [IdentityRef], result: AuthAttemptResult) {
+    public init(attempts: [AuthAttempt], skippedWithoutKey: [IdentityRef],
+                keyErrors: [IdentityRef] = [], result: AuthAttemptResult) {
         self.attempts = attempts
         self.skippedWithoutKey = skippedWithoutKey
+        self.keyErrors = keyErrors
         self.result = result
     }
 }
@@ -54,35 +59,64 @@ public struct AuthSequenceOutcome: Equatable, Sendable {
 ///   attempted the password is always tried, as before, so a host with no key
 ///   behaves exactly as it did.
 ///
-/// A genuine `loadKey` error (for example a Keychain read failure) or a thrown
-/// attempt aborts the sequence and propagates: only a truly absent key is skipped.
+/// One bad key never ends the sequence: a `loadKey` throw (for example a Keychain
+/// read failure) or a `tryKey` throw (for example a stored key the SSH core can't
+/// parse) skips that identity, is reported through `onKeyError` and `keyErrors`,
+/// and the next key (then the password) is tried. A `tryPassword` throw propagates,
+/// since nothing is left to try after it. When there is no password to try and
+/// every key attempt threw (no server verdict at all, e.g. the connection dropped),
+/// the last key error propagates rather than reading as a plain auth failure.
 public func authenticateInOrder(
     identities: [IdentityRef],
     password: String,
     loadKey: (IdentityRef) throws -> String?,
     tryKey: (IdentityRef, String) async throws -> AuthAttemptResult,
     tryPassword: (String) async throws -> AuthAttemptResult,
+    onKeyError: (IdentityRef, any Error) -> Void = { _, _ in },
     isolation: isolated (any Actor)? = #isolation
 ) async throws -> AuthSequenceOutcome {
     var attempts: [AuthAttempt] = []
     var skipped: [IdentityRef] = []
+    var keyErrors: [IdentityRef] = []
     var last: AuthAttemptResult = .failure
+    var gotKeyVerdict = false
+    var lastKeyError: (any Error)?
+    func outcome(_ result: AuthAttemptResult) -> AuthSequenceOutcome {
+        AuthSequenceOutcome(attempts: attempts, skippedWithoutKey: skipped,
+                            keyErrors: keyErrors, result: result)
+    }
     for id in identities {
-        guard let key = try loadKey(id) else {
+        let key: String?
+        do {
+            key = try loadKey(id)
+        } catch {
+            keyErrors.append(id)
+            onKeyError(id, error)
+            continue
+        }
+        guard let key else {
             skipped.append(id)
             continue
         }
         attempts.append(.publickey(id))
-        last = try await tryKey(id, key)
-        if last == .success {
-            return AuthSequenceOutcome(attempts: attempts, skippedWithoutKey: skipped, result: .success)
+        do {
+            last = try await tryKey(id, key)
+        } catch {
+            keyErrors.append(id)
+            onKeyError(id, error)
+            lastKeyError = error
+            last = .failure
+            continue
         }
+        gotKeyVerdict = true
+        if last == .success { return outcome(.success) }
     }
     let triedKey = !attempts.isEmpty
     if triedKey && password.isEmpty {
-        return AuthSequenceOutcome(attempts: attempts, skippedWithoutKey: skipped, result: last)
+        if !gotKeyVerdict, let lastKeyError { throw lastKeyError }
+        return outcome(last)
     }
     attempts.append(.password)
     last = try await tryPassword(password)
-    return AuthSequenceOutcome(attempts: attempts, skippedWithoutKey: skipped, result: last)
+    return outcome(last)
 }

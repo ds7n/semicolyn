@@ -152,24 +152,97 @@ final class AuthSequenceTests: XCTestCase {
         XCTAssertEqual(out, AuthSequenceOutcome(attempts: [.password], skippedWithoutKey: [a, b], result: .failure))
     }
 
-    func testKeychainErrorPropagatesAndStopsTheSequence() async {
-        var passwordTried = false
+    // Review fix: one bad key never aborts the sequence.
+
+    func testKeychainErrorSkipsThatKeyAndTriesTheNext() async throws {
+        var keysSent: [String] = []
+        var reported: [UUID] = []
+        let out = try await authenticateInOrder(
+            identities: [a, b], password: "pw",
+            loadKey: { id in
+                if id == self.a { throw KeychainBroken.instance }
+                return "KEY-B"
+            },
+            tryKey: { _, key in keysSent.append(key); return .success },
+            tryPassword: { _ in XCTFail("password must not be needed"); return .failure },
+            onKeyError: { id, error in
+                reported.append(id)
+                XCTAssertEqual(error as? KeychainBroken, .instance)
+            })
+        XCTAssertEqual(out, AuthSequenceOutcome(attempts: [.publickey(b)], skippedWithoutKey: [],
+                                                keyErrors: [a], result: .success))
+        XCTAssertEqual(keysSent, ["KEY-B"])
+        XCTAssertEqual(reported, [a])
+    }
+
+    func testCorruptKeyThatThrowsOnUseFallsBackToPassword() async throws {
+        var passwords: [String] = []
+        let out = try await authenticateInOrder(
+            identities: [a], password: "pw",
+            loadKey: { _ in "GARBAGE" },
+            tryKey: { _, _ in throw KeychainBroken.instance },   // e.g. "invalid private key"
+            tryPassword: { pw in passwords.append(pw); return .success })
+        XCTAssertEqual(out, AuthSequenceOutcome(attempts: [.publickey(a), .password], skippedWithoutKey: [],
+                                                keyErrors: [a], result: .success))
+        XCTAssertEqual(passwords, ["pw"])
+    }
+
+    func testEveryKeyErrorThenPasswordStillRuns() async throws {
+        var passwords: [String] = []
+        let out = try await authenticateInOrder(
+            identities: [a, b], password: "pw",
+            loadKey: { id in
+                if id == self.a { throw KeychainBroken.instance }
+                return "KEY-B"
+            },
+            tryKey: { _, _ in throw KeychainBroken.instance },
+            tryPassword: { pw in passwords.append(pw); return .failure })
+        XCTAssertEqual(out, AuthSequenceOutcome(attempts: [.publickey(b), .password], skippedWithoutKey: [],
+                                                keyErrors: [a, b], result: .failure))
+        XCTAssertEqual(passwords, ["pw"])
+    }
+
+    func testOnlyKeyErrorsAndNoPasswordRethrowsTheLastError() async {
         do {
             _ = try await authenticateInOrder(
-                identities: [a, b], password: "pw",
-                loadKey: { id in
-                    if id == self.a { throw KeychainBroken.instance }
-                    return "KEY"
-                },
-                tryKey: { _, _ in .success },
-                tryPassword: { _ in passwordTried = true; return .success })
-            XCTFail("expected the Keychain error to propagate")
+                identities: [a], password: "",
+                loadKey: { _ in "KEY" },
+                tryKey: { _, _ in throw KeychainBroken.instance },
+                tryPassword: { _ in XCTFail("no empty password after a key"); return .failure })
+            XCTFail("expected the key error to propagate")
         } catch let e as KeychainBroken {
             XCTAssertEqual(e, .instance)
         } catch {
             XCTFail("unexpected error \(error)")
         }
-        XCTAssertFalse(passwordTried)
+    }
+
+    func testKeyErrorThenRejectedKeyAndNoPasswordIsAPlainFailure() async throws {
+        let out = try await authenticateInOrder(
+            identities: [a, b], password: "",
+            loadKey: { _ in "KEY" },
+            tryKey: { id, _ in
+                if id == self.a { throw KeychainBroken.instance }
+                return .failure
+            },
+            tryPassword: { _ in XCTFail("no empty password after a key"); return .failure })
+        XCTAssertEqual(out, AuthSequenceOutcome(attempts: [.publickey(a), .publickey(b)], skippedWithoutKey: [],
+                                                keyErrors: [a], result: .failure))
+    }
+
+    func testPasswordErrorPropagates() async {
+        do {
+            _ = try await authenticateInOrder(
+                identities: [], password: "pw",
+                loadKey: { _ in nil },
+                tryKey: { _, _ in .success },
+                tryPassword: { _ in throw KeychainBroken.instance })
+            XCTFail("expected the password error to propagate")
+        } catch let e as KeychainBroken {
+            XCTAssertEqual(e, .instance)
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
     }
 
     private enum KeychainBroken: Error, Equatable { case instance }

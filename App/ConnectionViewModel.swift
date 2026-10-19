@@ -1276,9 +1276,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                               defaults: Defaults, password: String) async throws -> AuthOutcome {
         // Resolve identities through Defaults inheritance, not just the host's explicit
         // value. Each key on this device is tried in order, then the password
-        // (`authenticateInOrder`). A genuine Keychain read failure surfaces (no `try?`);
-        // only a truly absent private key is skipped (e.g. an SE-flavor identity whose
-        // key isn't stored on this device).
+        // (`authenticateInOrder`). A key that can't be read or used (Keychain error,
+        // corrupt key) is logged and skipped, like an absent key, so it never blocks
+        // the next key or the password.
         let identities = resolveIdentities(host: host, defaults: defaults)
         let sequence = try await authenticateInOrder(
             identities: identities,
@@ -1294,6 +1294,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 let outcome = try await conn.authenticatePassword(user: user, password: pw)
                 DebugLog.shared.log(.connect, "authenticate: password → \(String(describing: outcome))")
                 return AuthAttemptResult(outcome)
+            },
+            onKeyError: { identityID, error in
+                DebugLog.shared.log(.connect, "authenticate: key \(identityID) skipped, error \(String(describing: error))")
             })
         DebugLog.shared.log(.connect, decisionLine(
             "authenticate",
@@ -1301,6 +1304,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                      ("hasPassword", "\(!password.isEmpty)")],
             outputs: [("attempts", "\(sequence.attempts.count)"),
                       ("skippedNoKey", "\(sequence.skippedWithoutKey.count)"),
+                      ("keyErrors", "\(sequence.keyErrors.count)"),
                       ("result", "\(sequence.result)")],
             reason: nil))
         return AuthOutcome(sequence.result)
