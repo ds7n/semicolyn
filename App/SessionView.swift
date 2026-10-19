@@ -44,6 +44,8 @@ struct SessionView: View {
     /// Set to true when the stored secret lookup failed to find a password,
     /// indicating the user must provide one manually.
     @State private var needsPasswordEntry = false
+    /// The password typed into the Reconnect prompt (`vm.reconnectNeedsPassword`).
+    @State private var reconnectPassword = ""
     /// True while `resolveCredentials()` has not yet run (first `onAppear` not
     /// yet fired). Guards against showing a misleading "Connecting to …" spinner
     /// before we know whether a stored credential exists.
@@ -276,6 +278,20 @@ struct SessionView: View {
         .sheet(item: $vm.presentedSheet) { sheet in
             sessionSheet(sheet)
         }
+        // Reconnect with nothing to sign in with (a cold-reattached password host):
+        // ask here; the live session stays up until the user confirms.
+        .alert("Reconnect to \(host.label)", isPresented: $vm.reconnectNeedsPassword) {
+            SecureField("Password", text: $reconnectPassword)
+            Button("Reconnect") {
+                InputClickFeedback.play()
+                let typed = reconnectPassword
+                reconnectPassword = ""
+                vm.reconnect(withPassword: typed)
+            }
+            Button("Cancel", role: .cancel) { reconnectPassword = "" }
+        } message: {
+            Text("Enter your password to reconnect.")
+        }
         // Confirmed ssh:// link → open a nested session for the (found-or-created) host.
         .fullScreenCover(item: $quickConnectHost) { wrapper in
             SessionView(host: wrapper.host)
@@ -406,25 +422,13 @@ struct SessionView: View {
 
     /// The host's non-empty stored password, or nil (absent, unreadable, or empty).
     private func storedPassword() -> String? {
-        guard let passwordID = host.passwordRef.value,
-              let data = try? AppStores.shared.secrets.getSecret(.password(id: passwordID))
-        else { return nil }
-        let stored = String(decoding: data, as: UTF8.self)
-        return stored.isEmpty ? nil : stored
+        ConnectionViewModel.storedPassword(for: host)
     }
 
     /// True if any identity the host resolves to has its private key on this
     /// device, the same check `ConnectionViewModel.authenticate` gates on.
-    /// A Keychain read error is treated as "no usable key" here (the connect path
-    /// re-reads and surfaces a genuine failure), so a transient error only means we
-    /// fall back to the password prompt rather than silently blocking.
     private func hostHasUsableKey(defaults: Defaults) -> Bool {
-        // privateKeyOpenSSH returns String? (nil = absent); `try?` collapses a read
-        // error to nil too. Either nil → no usable key on this device.
-        resolveIdentities(host: host, defaults: defaults).contains { identityID in
-            let key = try? AppStores.shared.identities.privateKeyOpenSSH(for: identityID)
-            return (key ?? nil) != nil
-        }
+        ConnectionViewModel.hasUsableKey(host: host, defaults: defaults)
     }
 
     // MARK: - Password prompt

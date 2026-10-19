@@ -37,4 +37,31 @@ final class CredentialResolutionTests: XCTestCase {
             credentialResolution(hasUsableKey: false, hasStoredPassword: false),
             .promptForPassword)
     }
+
+    // MARK: - Reconnect credential (review fix 2)
+
+    func testReconnectPrefersThePasswordThisSessionUsed() {
+        XCTAssertEqual(reconnectCredential(lastPassword: "typed", storedPassword: "stored", hasUsableKey: true),
+                       .password("typed"))
+    }
+
+    func testColdReattachWithoutLastPasswordUsesTheStoredOne() {
+        XCTAssertEqual(reconnectCredential(lastPassword: nil, storedPassword: "stored", hasUsableKey: false),
+                       .password("stored"))
+        XCTAssertEqual(reconnectCredential(lastPassword: "", storedPassword: "stored", hasUsableKey: false),
+                       .password("stored"))
+    }
+
+    func testKeysOnlyWhenNoPasswordButAUsableKey() {
+        XCTAssertEqual(reconnectCredential(lastPassword: nil, storedPassword: nil, hasUsableKey: true), .keysOnly)
+        XCTAssertEqual(reconnectCredential(lastPassword: "", storedPassword: "", hasUsableKey: true), .keysOnly)
+    }
+
+    func testAsksWhenThereIsNothingToSignInWith() {
+        // Never an empty password for a password-only host.
+        XCTAssertEqual(reconnectCredential(lastPassword: nil, storedPassword: nil, hasUsableKey: false),
+                       .askForPassword)
+        XCTAssertEqual(reconnectCredential(lastPassword: "", storedPassword: "", hasUsableKey: false),
+                       .askForPassword)
+    }
 }

@@ -74,6 +74,28 @@ public func credentialResolution(hasUsableKey: Bool, hasStoredPassword: Bool) ->
     return .promptForPassword
 }
 
+/// What a Reconnect signs in with. A session that started from a cold reattach
+/// never ran `credentialResolution` (no password was typed or read), so Reconnect
+/// re-derives the credential instead of sending an empty password.
+public enum ReconnectCredential: Equatable, Sendable {
+    /// Reconnect with this password (keys, if any, are still tried first).
+    case password(String)
+    /// Reconnect with the host's keys only (no password to offer).
+    case keysOnly
+    /// Nothing to sign in with: ask for the password before tearing anything down.
+    case askForPassword
+}
+
+/// Decide the Reconnect credential: the password this session connected with, else
+/// the host's stored password, else its keys; with none of them, ask. Empty strings
+/// count as absent.
+public func reconnectCredential(lastPassword: String?, storedPassword: String?,
+                                hasUsableKey: Bool) -> ReconnectCredential {
+    if let p = lastPassword, !p.isEmpty { return .password(p) }
+    if let p = storedPassword, !p.isEmpty { return .password(p) }
+    return hasUsableKey ? .keysOnly : .askForPassword
+}
+
 // MARK: Tier 1 list fields (fallback: empty)
 
 public func resolveIdentities(host: Host, defaults: Defaults) -> [IdentityRef] {

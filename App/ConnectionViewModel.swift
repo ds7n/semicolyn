@@ -540,17 +540,46 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     }
 
     /// Re-run the last saved-host connect (`⇧⌘R`, the Session menu, the session-ended
-    /// banner). No-op if nothing connected yet. A live or half-open session is torn
-    /// down first: `connect` ignores calls while `.shell`/`.connecting`, which made
-    /// Reconnect a silent no-op from inside a session. `state` passes through `.idle`
-    /// only synchronously (`connect` flips it to `.connecting` in the same turn), so
-    /// SessionView's dismiss-on-idle never sees it, the same hand-off the Mosh
-    /// reattach watchdogs use.
+    /// banner). No-op if nothing connected yet. The credential is re-derived
+    /// (`reconnectCredential`): a session that began as a cold reattach never had a
+    /// password typed or read, so an empty one must not be sent. With nothing to sign
+    /// in with, the live session is kept and SessionView asks for the password
+    /// (`reconnectNeedsPassword`).
     func reconnect() {
         guard let host = lastSavedHost else {
             DebugLog.shared.log(.connect, "reconnect: ABORT no lastSavedHost")
             return
         }
+        let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+        let credential = reconnectCredential(lastPassword: lastPassword,
+                                             storedPassword: Self.storedPassword(for: host),
+                                             hasUsableKey: Self.hasUsableKey(host: host, defaults: defaults))
+        switch credential {
+        case .password(let password): performReconnect(host: host, password: password)
+        case .keysOnly:               performReconnect(host: host, password: "")
+        case .askForPassword:
+            DebugLog.shared.log(.connect, "reconnect: no key or password for \(host.hostName) → ask, session kept")
+            reconnectNeedsPassword = true
+        }
+    }
+
+    /// Reconnect with the password typed into SessionView's prompt.
+    func reconnect(withPassword password: String) {
+        reconnectNeedsPassword = false
+        guard let host = lastSavedHost, !password.isEmpty else { return }
+        performReconnect(host: host, password: password)
+    }
+
+    /// Set when Reconnect has nothing to sign in with; SessionView shows a password
+    /// prompt and calls `reconnect(withPassword:)`.
+    @Published var reconnectNeedsPassword = false
+
+    /// A live or half-open session is torn down first: `connect` ignores calls while
+    /// `.shell`/`.connecting`, which made Reconnect a silent no-op from inside a
+    /// session. `state` passes through `.idle` only synchronously (`connect` flips it
+    /// to `.connecting` in the same turn), so SessionView's dismiss-on-idle never sees
+    /// it, the same hand-off the Mosh reattach watchdogs use.
+    private func performReconnect(host: Host, password: String) {
         let wasLive = state == .shell || state == .connecting
         DebugLog.shared.log(.connect, "reconnect: triggered for \(host.hostName) wasLive=\(wasLive)")
         if wasLive {
@@ -558,7 +587,40 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             teardown()
             state = .idle
         }
-        connect(savedHost: host, password: lastPassword ?? "")
+        connect(savedHost: host, password: password)
+    }
+
+    /// The password for a fresh connect that no prompt ran for (resume banners, the
+    /// dead-server watchdogs): this session's password, else the stored one, else ""
+    /// (keys only, or the server rejects it as before).
+    private func freshConnectPassword(for host: Host) -> String {
+        if case .password(let p) = reconnectCredential(lastPassword: lastPassword,
+                                                       storedPassword: Self.storedPassword(for: host),
+                                                       hasUsableKey: false) {
+            return p
+        }
+        return ""
+    }
+
+    /// The host's non-empty stored password, or nil (absent, unreadable, or empty).
+    static func storedPassword(for host: Host) -> String? {
+        guard let passwordID = host.passwordRef.value,
+              let data = try? AppStores.shared.secrets.getSecret(.password(id: passwordID))
+        else { return nil }
+        let stored = String(decoding: data, as: UTF8.self)
+        return stored.isEmpty ? nil : stored
+    }
+
+    /// True if any identity the host resolves to has its private key on this device.
+    /// A Keychain read error counts as "no usable key" here (the connect path re-reads
+    /// and logs a genuine failure).
+    static func hasUsableKey(host: Host, defaults: Defaults) -> Bool {
+        // privateKeyOpenSSH returns String? (nil = absent); `try?` collapses a read
+        // error to nil too. Either nil → no usable key on this device.
+        resolveIdentities(host: host, defaults: defaults).contains { identityID in
+            let key = try? AppStores.shared.identities.privateKeyOpenSSH(for: identityID)
+            return (key ?? nil) != nil
+        }
     }
 
     /// Asks SessionView to show the "Disconnect from <host>?" confirmation (`⇧⌘W`).
@@ -1082,9 +1144,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // `connect` immediately tears down + flips to `.connecting`.
             self.state = .idle
             // Full fresh connect (SSH auth -> new mosh bootstrap) using stored
-            // creds, the same entry the host list uses; password "" defers to the
-            // saved key/credential resolution.
-            self.connect(savedHost: host, password: "")
+            // creds, the same entry the host list uses (the stored password when
+            // there is one, else keys only).
+            self.connect(savedHost: host, password: self.freshConnectPassword(for: host))
         }
     }
 
@@ -1132,7 +1194,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // the fresh-relaunch watchdog; connect() then tears down + flips to
             // `.connecting`, which also resets the state-resume flags via teardown().
             self.state = .idle
-            self.connect(savedHost: host, password: "")
+            self.connect(savedHost: host, password: self.freshConnectPassword(for: host))
         }
     }
 
@@ -1170,7 +1232,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         DebugLog.shared.log(.connect, "resume:startFresh host=\(mem.host.label)")
         resumeFailure = nil
         resumeInMemory = nil
-        connect(savedHost: mem.host, password: lastPassword ?? "")
+        connect(savedHost: mem.host, password: freshConnectPassword(for: mem.host))
     }
 
     /// Banner Back to hosts: drop the in-memory copy and dismiss to the host list.
@@ -1187,7 +1249,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         DebugLog.shared.log(.connect, "resume:rawReconnect host=\(host.label)")
         resumeRawPrompt = nil
         resumeRawRecord = nil
-        connect(savedHost: host, password: lastPassword ?? "")
+        connect(savedHost: host, password: freshConnectPassword(for: host))
     }
 
     /// Raw-SSH prompt Not now: clear the resumed record and dismiss to the host list.
