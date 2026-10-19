@@ -1258,13 +1258,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Find an existing saved host matching an ssh:// target, or create + persist one.
     /// A target without a user inherits the default user (`.inherit`).
     func hostForSSHTarget(_ target: SSHConnectTarget) throws -> Host {
-        let port = target.port ?? 22
-        let existing = try AppStores.shared.hosts.allHosts()
-            .first { $0.hostName == target.host && ($0.port.value ?? 22) == port && $0.user.value == target.user }
-        if let existing { return existing }
-        let host = Host(id: UUID(), label: target.host, hostName: target.host,
-                        user: target.user.map { Inherited.explicit($0) } ?? .inherit,
-                        port: .explicit(port))
+        try Self.savedOrNewHost(for: target)
+    }
+
+    /// Find-or-create for a quick-connect target (`savedHost(for:in:)` /
+    /// `newHost(for:id:)`); a new host is saved. Shared with the Hosts list's
+    /// "Connect to user@host…".
+    static func savedOrNewHost(for target: SSHConnectTarget) throws -> Host {
+        if let existing = savedHost(for: target, in: try AppStores.shared.hosts.allHosts()) {
+            return existing
+        }
+        let host = newHost(for: target, id: UUID())
         try AppStores.shared.hosts.saveHost(host)
         return host
     }

@@ -18,8 +18,9 @@ private struct ResumeTarget: Identifiable {
 }
 
 /// Root host-library screen. Shows an empty-state CTA when no hosts exist;
-/// otherwise a list where each row can be tapped to connect or swiped for
-/// Edit / Delete actions.
+/// otherwise a searchable list where each row can be tapped to connect, swiped for
+/// Edit / Delete, or long-pressed for Connect / Edit / Duplicate / Delete. The
+/// toolbar also offers "Connect to user@host…" (`QuickConnectEntrySheet`).
 struct HostListView: View {
     @StateObject private var vm = HostListViewModel()
     @Environment(\.theme) private var theme
@@ -38,6 +39,12 @@ struct HostListView: View {
     @State private var didRunResume = false
     /// A host swiped for Delete, awaiting confirmation.
     @State private var pendingDelete: Host?
+    /// The Hosts search text (`filterHosts`).
+    @State private var search = ""
+    /// Whether the "Connect to user@host…" sheet is up.
+    @State private var showingQuickConnect = false
+    /// The host chosen in that sheet, connected once the sheet has gone away.
+    @State private var quickConnectHost: Host?
 
     var body: some View {
         NavigationStack {
@@ -59,7 +66,14 @@ struct HostListView: View {
                     }
                     .accessibilityLabel("Settings")
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Button {
+                        InputClickFeedback.play()
+                        showingQuickConnect = true
+                    } label: {
+                        Image(systemName: "bolt.horizontal")
+                    }
+                    .accessibilityLabel("Connect to user@host…")
                     Button {
                         InputClickFeedback.play()
                         editorMode = .creating
@@ -75,8 +89,24 @@ struct HostListView: View {
             }
             // Settings sheet, Task 4.
             .sheet(isPresented: $showingSettings) {
-                SettingsView(context: .preConnect,
-                             keybarSettings: AppStores.shared.keybarSettings)
+                SettingsView(keybarSettings: AppStores.shared.keybarSettings)
+            }
+            // Connect to user@host…: find-or-create the host, then connect.
+            // The session cover opens once the sheet is gone (two presentations at once
+            // would drop the second).
+            .sheet(isPresented: $showingQuickConnect, onDismiss: {
+                vm.reload()
+                if let host = quickConnectHost {
+                    quickConnectHost = nil
+                    connectingHost = IdentifiableHost(host)
+                }
+            }) {
+                QuickConnectEntrySheet(
+                    onConnect: { target in
+                        quickConnectHost = try? ConnectionViewModel.savedOrNewHost(for: target)
+                        showingQuickConnect = false
+                    },
+                    onCancel: { showingQuickConnect = false })
             }
             // Session cover, Task 8: tap a saved host to connect.
             .fullScreenCover(item: $connectingHost) { wrapper in
@@ -124,6 +154,17 @@ struct HostListView: View {
                 Button("OK", role: .cancel) { InputClickFeedback.play(); vm.deleteError = nil }
             } message: {
                 Text(vm.deleteError ?? "")
+            }
+            .alert(
+                "Couldn't Duplicate Host",
+                isPresented: Binding(
+                    get: { vm.duplicateError != nil },
+                    set: { if !$0 { vm.duplicateError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { InputClickFeedback.play(); vm.duplicateError = nil }
+            } message: {
+                Text(vm.duplicateError ?? "")
             }
         }
     }
@@ -180,7 +221,7 @@ struct HostListView: View {
 
     private var hostList: some View {
         List {
-            ForEach(vm.hosts, id: \.id) { host in
+            ForEach(filterHosts(vm.hosts, query: search), id: \.id) { host in
                 Button {
                     InputClickFeedback.play()
                     connectingHost = IdentifiableHost(host)
@@ -188,6 +229,29 @@ struct HostListView: View {
                     HostRow(host: host)
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        connectingHost = IdentifiableHost(host)
+                    } label: {
+                        Label("Connect", systemImage: "play")
+                    }
+                    Button {
+                        editorMode = .editing(host)
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    Button {
+                        if let copy = vm.duplicate(host) { editorMode = .editing(copy) }
+                    } label: {
+                        Label("Duplicate", systemImage: "plus.square.on.square")
+                    }
+                    // Confirmed first, same dialog as the swipe.
+                    Button(role: .destructive) {
+                        pendingDelete = host
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     // Delete action: confirmed first. Not `role: .destructive`, which
                     // animates the row away before the user has confirmed.
@@ -208,6 +272,12 @@ struct HostListView: View {
                     }
                     .tint(Color(theme.accent.primary))
                 }
+            }
+        }
+        .searchable(text: $search, prompt: "Search hosts")
+        .overlay {
+            if filterHosts(vm.hosts, query: search).isEmpty {
+                ContentUnavailableView.search(text: search)
             }
         }
     }

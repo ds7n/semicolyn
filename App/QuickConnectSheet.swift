@@ -47,3 +47,52 @@ struct QuickConnectSheet: View {
         .presentationDetents([.height(240)])
     }
 }
+
+/// Hosts → "Connect to user@host…": type `[user@]host[:port]` (or an `ssh://` link)
+/// and connect. The host is saved to the list on connect (the same find-or-create
+/// as a tapped ssh:// link), so an existing match is reused instead of duplicated.
+struct QuickConnectEntrySheet: View {
+    let onConnect: (SSHConnectTarget) -> Void
+    let onCancel: () -> Void
+    @State private var address = ""
+    @FocusState private var focused: Bool
+
+    private var target: SSHConnectTarget? { parseQuickConnectAddress(address) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("user@host", text: $address)
+                        .font(.system(.body, design: .monospaced))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .submitLabel(.go)
+                        .focused($focused)
+                        .onSubmit { if let target { InputClickFeedback.play(); onConnect(target) } }
+                } footer: {
+                    Text("For example alice@example.com or example.com:2222. It's saved to your hosts so you can connect again.")
+                }
+            }
+            .navigationTitle("Connect to user@host")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { InputClickFeedback.play(); onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Connect") {
+                        guard let target else { return }
+                        InputClickFeedback.play()
+                        onConnect(target)
+                    }
+                    .bold()
+                    .disabled(target == nil)
+                }
+            }
+            .onAppear { focused = true }
+        }
+        .presentationDetents([.medium])
+    }
+}

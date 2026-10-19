@@ -13,11 +13,27 @@ final class HostListViewModel: ObservableObject {
     @Published var deleteError: String?
     /// The label of the host whose delete failed, for the alert title.
     @Published var deleteErrorHostLabel = ""
+    /// Non-nil when saving a duplicate failed. Cleared after the alert.
+    @Published var duplicateError: String?
 
     /// Reloads `hosts` from `HostStore`. Silences errors, a missing or
     /// unreadable store is treated as an empty library rather than a crash.
     func reload() {
         hosts = (try? AppStores.shared.hosts.allHosts()) ?? []
+    }
+
+    /// Saves a copy of `host` (`duplicateHost`: "<label> copy", no password) and
+    /// returns it, or nil when the save failed (`duplicateError`).
+    func duplicate(_ host: Host) -> Host? {
+        let copy = duplicateHost(host, id: UUID(), existingLabels: hosts.map(\.label))
+        do {
+            try AppStores.shared.hosts.saveHost(copy)
+            reload()
+            return copy
+        } catch {
+            duplicateError = error.localizedDescription
+            return nil
+        }
     }
 
     /// Attempts to delete `host`. On success, removes it from the in-memory
