@@ -23,7 +23,7 @@ import SemicolynKit
         }
     }
 
-    /// Restores the free default (Neon Midnight). Intentional forward seam for a future Settings "Reset" affordance (mirrors `KeybarSettingsStore.resetToDefaults`).
+    /// Restores the free default (Neon Midnight). Intentional forward seam for a future Settings "Reset" affordance (mirrors `KeybarSettingsStore.resetKeepingLibrary`).
     func resetToDefault() {
         selectedThemeID = Theme.defaultDescriptor.id
     }

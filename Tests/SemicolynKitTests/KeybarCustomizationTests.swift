@@ -21,10 +21,11 @@ final class KeybarCustomizationTests: XCTestCase {
 
     // MARK: - Sticky-rule predicates
 
-    func testOnlyEscAndPadAreNotRemovable() {
+    func testOnlyEscPadAndModifierAreNotRemovable() {
         XCTAssertFalse(KeybarLayout.isRemovable(.escPill))
         XCTAssertFalse(KeybarLayout.isRemovable(.pad))
-        XCTAssertTrue(KeybarLayout.isRemovable(.modifier))
+        // D-18: the Modifier is the only touch path to Ctrl, so it cannot be removed.
+        XCTAssertFalse(KeybarLayout.isRemovable(.modifier))
         XCTAssertTrue(KeybarLayout.isRemovable(.tab))
         XCTAssertTrue(KeybarLayout.isRemovable(.fn))
         XCTAssertTrue(KeybarLayout.isRemovable(.symbol("/")))
@@ -323,5 +324,12 @@ final class KeybarCustomizationTests: XCTestCase {
         let blob = Data(#"{"layout":{"left":[{"kind":"escPill"}],"middle":[],"right":[{"kind":"pad"}]},"direction":"lockedRight"}"#.utf8)
         let decoded = try JSONDecoder().decode(KeybarSettings.self, from: blob)
         XCTAssertEqual(decoded.layout, KeybarLayout(left: [.escPill], middle: [], right: [.pad]))
+    }
+
+    // D-18: removing the Modifier is refused, but it still moves between regions.
+    func testModifierRemovalRefusedButMoveAllowed() {
+        XCTAssertNil(KeybarLayout.default.removing(.modifier))
+        XCTAssertEqual(KeybarLayout.allowedRegions(for: .modifier), [.left, .middle, .right])
+        XCTAssertEqual(KeybarLayout.default.moving(.modifier, to: .right)?.right, [.pad, .modifier])
     }
 }

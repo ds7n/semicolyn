@@ -28,9 +28,11 @@ import SemicolynKit
         }
     }
 
-    /// Resets the layout to the v1 defaults (Settings→Keybar "Reset to defaults").
-    func resetToDefaults() {
-        settings = .default
+    /// Settings > Keybar > "Reset Keybar…": layout, swipes and the hardware-keyboard
+    /// toggle return to the defaults; macros and gesture keys are kept
+    /// (`KeybarSettings.resettingKeepingLibrary`).
+    func resetKeepingLibrary() {
+        settings = settings.resettingKeepingLibrary()
     }
 
     // MARK: - Library (4d-2 macros + custom slots)
