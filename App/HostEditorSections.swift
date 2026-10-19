@@ -577,37 +577,14 @@ extension HostEditorView {
     }
 }
 
-// MARK: - Semicolyn behavior section
+// MARK: - tmux and Privacy sections
 
 extension HostEditorView {
 
-    /// Semicolyn behavior section: private mode, tmux and OSC 52 toggles.
-    /// Collapsed by default; auto-expands on edit when `semicolyn` is explicitly configured.
-    var semicolynSection: some View {
-        DisclosureGroup(isExpanded: $semicolynExpanded) {
-
-            // Private mode ("incognito" in the model), default false per resolution
-            Toggle(isOn: Binding(
-                get: { vm.host.semicolyn.value?.predictor?.incognito ?? false },
-                set: { newIncognito in
-                    var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
-                    var predictor = cfg.predictor ?? PredictorConfig()
-                    predictor.incognito = newIncognito
-                    cfg.predictor = predictor
-                    vm.host.semicolyn = .explicit(cfg)
-                    vm.revalidate()
-                }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(privateModeLabel)
-                        .foregroundStyle(Color(theme.text.primary))
-                    Text("Word suggestions still appear, but nothing you type or see on this host is learned.")
-                        .font(.caption)
-                        .foregroundStyle(Color(theme.text.secondary))
-                }
-            }
-            .onChange(of: vm.host.semicolyn) { _, _ in vm.revalidate() }
-
+    /// tmux section: Use tmux and the session name. Collapsed by default; expands on
+    /// edit when the host sets either.
+    var tmuxSection: some View {
+        DisclosureGroup(isExpanded: $tmuxExpanded) {
             // Use tmux, default true per resolution. Shown for all transports:
             // native gestures (swipe, long-press, tap) drive plain tmux over
             // SSH/Mosh/ET alike.
@@ -652,7 +629,7 @@ extension HostEditorView {
                 .autocorrectionDisabled()
                 .onChange(of: vm.host.semicolyn) { _, _ in vm.revalidate() }
             } label: {
-                Text("tmux session name")
+                Text("Session name")
                     .foregroundStyle(Color(theme.text.primary))
             }
             .disabled(!useTmuxOn)
@@ -665,28 +642,65 @@ extension HostEditorView {
                     .font(.caption)
                     .foregroundStyle(Color(theme.state.broken))
             }
+        } label: {
+            Text("tmux")
+                .font(.headline)
+                .foregroundStyle(Color(theme.text.primary))
+        }
+    }
 
-            // OSC 52 clipboard, default true per resolution
-            Toggle(isOn: Binding(
-                get: { vm.host.semicolyn.value?.osc52?.allow ?? true },
-                set: { newAllow in
-                    var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
-                    var osc52 = cfg.osc52 ?? Osc52Config()
-                    osc52.allow = newAllow
-                    cfg.osc52 = osc52
-                    vm.host.semicolyn = .explicit(cfg)
-                    vm.revalidate()
+    /// Privacy section: private mode and OSC 52, both inheritable ("Default (X)" is
+    /// the Connection Defaults value, else the built-in). Collapsed by default;
+    /// expands on edit when the host sets either.
+    var privacySection: some View {
+        DisclosureGroup(isExpanded: $privacyExpanded) {
+            // Private mode ("incognito" in the model), built-in default off
+            VStack(alignment: .leading, spacing: 2) {
+                Picker(selection: Binding(
+                    get: { vm.host.semicolyn.value?.predictor?.incognito },
+                    set: { newIncognito in
+                        var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
+                        cfg.predictor = newIncognito.map { PredictorConfig(incognito: $0) }
+                        vm.host.semicolyn = .explicit(cfg)
+                        vm.revalidate()
+                    }
+                )) {
+                    Text(defaultChoiceLabel(onOffLabel(fallbacks.privateMode))).tag(Bool?.none)
+                    Text("On").tag(Bool?.some(true))
+                    Text("Off").tag(Bool?.some(false))
+                } label: {
+                    Text(privateModeLabel)
+                        .foregroundStyle(Color(theme.text.primary))
                 }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Allow OSC 52 clipboard").foregroundStyle(Color(theme.text.primary))
-                    Text("Let remote programs copy to your clipboard (default on).")
-                        .font(.caption).foregroundStyle(Color(theme.text.secondary))
-                }
+                Text("Word suggestions still appear, but nothing you type or see on this host is learned.")
+                    .font(.caption)
+                    .foregroundStyle(Color(theme.text.secondary))
             }
 
+            // OSC 52 clipboard, built-in default on
+            VStack(alignment: .leading, spacing: 2) {
+                Picker(selection: Binding(
+                    get: { vm.host.semicolyn.value?.osc52?.allow },
+                    set: { newAllow in
+                        var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
+                        cfg.osc52 = newAllow.map { Osc52Config(allow: $0) }
+                        vm.host.semicolyn = .explicit(cfg)
+                        vm.revalidate()
+                    }
+                )) {
+                    Text(defaultChoiceLabel(onOffLabel(fallbacks.osc52Allow))).tag(Bool?.none)
+                    Text("On").tag(Bool?.some(true))
+                    Text("Off").tag(Bool?.some(false))
+                } label: {
+                    Text(osc52Label)
+                        .foregroundStyle(Color(theme.text.primary))
+                }
+                Text(osc52Caption)
+                    .font(.caption)
+                    .foregroundStyle(Color(theme.text.secondary))
+            }
         } label: {
-            Text("Semicolyn behavior")
+            Text("Privacy")
                 .font(.headline)
                 .foregroundStyle(Color(theme.text.primary))
         }

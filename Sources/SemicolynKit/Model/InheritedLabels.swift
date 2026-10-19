@@ -30,6 +30,12 @@ public struct InheritedFallbacks: Equatable, Sendable {
     public let keepAliveInterval: Int
     public let keepAliveRetries: Int
     public let tmuxSessionName: String
+    /// "Don't learn from my typing" (`predictor.incognito`).
+    public let privateMode: Bool
+    /// "Let server copy to clipboard" (`osc52.allow`).
+    public let osc52Allow: Bool
+    /// The SSH keys a host with none of its own uses (`Defaults.identities`).
+    public let identities: [IdentityRef]
 
     public init(defaults: Defaults) {
         let bare = Host(id: UUID(), label: "", hostName: "")
@@ -39,6 +45,9 @@ public struct InheritedFallbacks: Equatable, Sendable {
         keepAliveInterval = resolveServerAliveInterval(host: bare, defaults: defaults)
         keepAliveRetries = resolveServerAliveCountMax(host: bare, defaults: defaults)
         tmuxSessionName = resolveTmuxSessionName(host: bare, defaults: defaults)
+        privateMode = resolvePredictorIncognito(host: bare, defaults: defaults)
+        osc52Allow = resolveOsc52Allow(host: bare, defaults: defaults)
+        identities = resolveIdentities(host: bare, defaults: defaults)
     }
 
     /// The built-in fallbacks (an empty Defaults record).
@@ -57,4 +66,31 @@ public struct InheritedFallbacks: Equatable, Sendable {
 /// matching a row instead of showing a blank picker.
 public func moshLocalEchoSelection(_ mode: MoshPredictionMode?) -> MoshPredictionMode? {
     mode == .adaptive ? nil : mode
+}
+
+/// "On" / "Off", the wording of an inheritable on/off row ("Default (On)").
+public func onOffLabel(_ on: Bool) -> String {
+    on ? "On" : "Off"
+}
+
+/// The Connection Defaults "Default SSH key" picker selection: the first default key,
+/// or nil for none (unset, or an explicit empty list).
+public func defaultKeySelection(_ identities: Inherited<[IdentityRef]>) -> IdentityRef? {
+    identities.value?.first
+}
+
+/// The `Defaults.identities` value for a "Default SSH key" choice: one key, or
+/// `.inherit` for none.
+public func defaultKeyIdentities(_ selection: IdentityRef?) -> Inherited<[IdentityRef]> {
+    selection.map { .explicit([$0]) } ?? .inherit
+}
+
+/// A host's keys after removing one from the host editor. Removing the last key
+/// returns `.inherit`, so the host falls back to the Connection Defaults key instead
+/// of explicitly having none. Removing a key the host doesn't list changes nothing.
+public func removingIdentity(_ ref: IdentityRef,
+                             from identities: Inherited<[IdentityRef]>) -> Inherited<[IdentityRef]> {
+    guard case .explicit(let list?) = identities, list.contains(ref) else { return identities }
+    let rest = list.filter { $0 != ref }
+    return rest.isEmpty ? .inherit : .explicit(rest)
 }

@@ -18,3 +18,13 @@ public func keystrokeLogDecision(event: String, content: String,
     if isPasswordLine { return "\(event)(REDACTED len=\(len) reason=password-line)" }
     return "\(event)(\"\(content)\")"
 }
+
+/// The read-only "Keystroke logging" value in Settings > Suggestions & Privacy.
+/// Keystrokes are recorded only when the master logging switch AND the Input category
+/// are on; then content is either structural only ("Lengths only") or the actual keys
+/// ("On", password lines still redacted).
+public func keystrokeLoggingSummary(loggingEnabled: Bool, inputCategoryOn: Bool,
+                                    contentOn: Bool) -> String {
+    guard loggingEnabled && inputCategoryOn else { return "Off" }
+    return contentOn ? "On" : "Lengths only"
+}

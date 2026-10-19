@@ -27,6 +27,7 @@ struct DefaultsEditorView: View {
     var body: some View {
         List {
             basicsSection
+            signInSection
             connectionSection
             keepAliveSection
             moshSection
@@ -545,27 +546,54 @@ struct DefaultsEditorView: View {
 
     // MARK: - Privacy
 
+    /// "Let server copy to clipboard" (OSC 52). The all-hosts "Don't learn from my
+    /// typing" default lives in Settings > Suggestions & Privacy.
     private var privacySection: some View {
         Section {
-            // Private mode, built-in fallback: false
-            Toggle(isOn: Binding(
-                get: { vm.defaults.semicolyn.value?.predictor?.incognito ?? false },
-                set: { newIncognito in
-                    var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
-                    var predictor = cfg.predictor ?? PredictorConfig()
-                    predictor.incognito = newIncognito
-                    cfg.predictor = predictor
-                    vm.defaults.semicolyn = .explicit(cfg)
-                }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(privateModeLabel)
+            VStack(alignment: .leading, spacing: 4) {
+                Picker(selection: Binding(
+                    get: { vm.defaults.semicolyn.value?.osc52?.allow },
+                    set: { newAllow in
+                        var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
+                        cfg.osc52 = newAllow.map { Osc52Config(allow: $0) }
+                        vm.defaults.semicolyn = .explicit(cfg)
+                    }
+                )) {
+                    Text(defaultChoiceLabel(onOffLabel(builtIn.osc52Allow))).tag(Bool?.none)
+                    Text("On").tag(Bool?.some(true))
+                    Text("Off").tag(Bool?.some(false))
+                } label: {
+                    Text(osc52Label)
                         .foregroundStyle(Color(theme.text.primary))
-                    caption("Applies to every host unless the host changes it. Word suggestions still appear from the built-in dictionary.")
                 }
+                caption(osc52Caption)
             }
         } header: {
             Text("Privacy")
+        }
+    }
+
+    // MARK: - Sign-in
+
+    /// The SSH key a host with no key of its own uses (`Defaults.identities`).
+    private var signInSection: some View {
+        Section {
+            Picker(selection: Binding(
+                get: { defaultKeySelection(vm.defaults.identities) },
+                set: { vm.defaults.identities = defaultKeyIdentities($0) }
+            )) {
+                Text("None").tag(IdentityRef?.none)
+                ForEach(vm.identities, id: \.id) { identity in
+                    Text(identity.displayName).tag(IdentityRef?.some(identity.id))
+                }
+            } label: {
+                Text("Default SSH key")
+                    .foregroundStyle(Color(theme.text.primary))
+            }
+        } header: {
+            Text("Sign-in")
+        } footer: {
+            Text("Used by hosts that have no SSH key of their own.")
         }
     }
 }
@@ -578,5 +606,9 @@ let useTmuxCaption = "Opens (or creates) a tmux session when you connect, so you
 /// tmux session name caption, shared by both editors.
 let tmuxSessionNameCaption = "Hosts with the same name share one session. Leave blank to use “semicolyn”."
 
-/// The private-mode toggle label, shared by both editors.
+/// The private-mode toggle label, shared by the host editor and Suggestions & Privacy.
 let privateModeLabel = "Don't learn from my typing"
+
+/// The OSC 52 row label and caption, shared by both editors.
+let osc52Label = "Let server copy to clipboard"
+let osc52Caption = "Programs on the server can write to your clipboard (OSC 52)."

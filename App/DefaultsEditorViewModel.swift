@@ -17,8 +17,12 @@ import SemicolynKit
     /// The last store failure, shown as an alert; nil when the last write succeeded.
     @Published var saveError: String?
 
+    /// The saved SSH keys, for the "Default SSH key" picker.
+    let identities: [Identity]
+
     init() {
         defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+        identities = (try? AppStores.shared.hosts.allIdentities()) ?? []
     }
 
     /// The values unset fields fall back to on this screen (the built-ins).

@@ -44,8 +44,10 @@ struct HostEditorView: View {
     @State var moshExpanded = false
     /// Whether the Tailscale section is expanded.
     @State var tailscaleExpanded = false
-    /// Whether the Semicolyn behavior section is expanded.
-    @State var semicolynExpanded = false
+    /// Whether the tmux section is expanded.
+    @State var tmuxExpanded = false
+    /// Whether the Privacy section is expanded.
+    @State var privacyExpanded = false
 
     // Task 6, identity picker state
     /// Whether the inline identity picker half-sheet is presented.
@@ -95,14 +97,15 @@ struct HostEditorView: View {
                 basicsSection
                 authSection
                 connectionSection
-                // Stored but not applied yet: hidden until wired (`UnwiredOptions`).
-                if UnwiredOptions.jumpChain { jumpChainSection }
-                if UnwiredOptions.portForwarding { portForwardingSection }
+                tmuxSection
+                privacySection
                 if selectedTransport == .mosh {
                     moshSection
                 }
+                // Stored but not applied yet: hidden until wired (`UnwiredOptions`).
+                if UnwiredOptions.jumpChain { jumpChainSection }
+                if UnwiredOptions.portForwarding { portForwardingSection }
                 if UnwiredOptions.tailscale { tailscaleSection }
-                semicolynSection
                 if !vm.isNew {
                     deleteSection
                 }
@@ -347,11 +350,20 @@ struct HostEditorView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(identityRefs, id: \.self) { ref in
-                            IdentityPill(identityRef: ref)
+                            IdentityPill(identityRef: ref) {
+                                vm.host.identities = removingIdentity(ref, from: vm.host.identities)
+                                vm.revalidate()
+                            }
                         }
                     }
                     .padding(.vertical, 4)
                 }
+            }
+
+            // No key of its own: the Connection Defaults key (if any) is used.
+            if vm.host.identities == .inherit,
+               let defaultKey = fallbacks.identities.first {
+                LabeledContent("SSH Key", value: defaultChoiceLabel(identityName(defaultKey)))
             }
 
             // Identity add button
@@ -409,6 +421,13 @@ struct HostEditorView: View {
         }
     }
 
+    /// A saved key's display name, or a short id when it is not on this device.
+    private func identityName(_ ref: IdentityRef) -> String {
+        let all = (try? AppStores.shared.hosts.allIdentities()) ?? []
+        return all.first(where: { $0.id == ref })?.displayName
+            ?? String(ref.uuidString.prefix(8).lowercased())
+    }
+
     // MARK: - Validation helpers
 
     // `internal` (not `private`): called from the section extensions in a separate file.
@@ -464,8 +483,10 @@ struct HostEditorView: View {
             // Tailscale: expand if tailscale is explicitly configured
             tailscaleExpanded = vm.host.tailscale != .inherit
 
-            // Semicolyn: expand if semicolyn is explicitly configured
-            semicolynExpanded = vm.host.semicolyn != .inherit
+            // tmux / Privacy: expand if the host sets any of their leaves
+            let cfg = vm.host.semicolyn.value
+            tmuxExpanded = cfg?.tmux?.useTmux != nil || cfg?.tmux?.sessionName != nil
+            privacyExpanded = cfg?.predictor?.incognito != nil || cfg?.osc52?.allow != nil
         }
         // Auto-expand on hard issues (also triggered live via onChange → revalidate)
         syncSectionAutoExpand()
@@ -536,11 +557,13 @@ struct HostEditorView: View {
 
 // MARK: - Identity pill
 
-/// A small rounded pill showing the identity's display name. Resolves the
-/// `IdentityRef` (UUID) against `allIdentities()` at render time; falls back
-/// to a truncated UUID if the identity is not found.
+/// A small rounded pill showing the identity's display name, with an xmark (and a
+/// "Remove from Host" context menu) that removes the key from this host. Resolves
+/// the `IdentityRef` (UUID) against `allIdentities()` at render time; falls back to
+/// a truncated UUID if the identity is not found.
 private struct IdentityPill: View {
     let identityRef: IdentityRef
+    let onRemove: () -> Void
     @Environment(\.theme) private var theme
 
     private var label: String {
@@ -552,13 +575,31 @@ private struct IdentityPill: View {
     }
 
     var body: some View {
-        Text(label)
-            .font(.caption)
-            .foregroundStyle(Color(theme.text.primary))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Color(theme.surface.panelHigh))
-            .clipShape(Capsule())
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(Color(theme.text.primary))
+            Button {
+                InputClickFeedback.play()
+                onRemove()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color(theme.text.secondary))
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Remove \(label) from host")
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .padding(.vertical, 4)
+        .background(Color(theme.surface.panelHigh))
+        .clipShape(Capsule())
+        .contextMenu {
+            Button(role: .destructive) { onRemove() } label: {
+                Label("Remove from Host", systemImage: "minus.circle")
+            }
+        }
     }
 }
 
