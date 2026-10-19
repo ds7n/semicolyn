@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
+import LocalAuthentication
 import SemicolynKit
 
-/// Half-sheet inline identity picker opened from the Auth section's "+" button.
+/// Half-sheet SSH key picker opened from the Auth section's "Add SSH Key" button
+/// (the model calls a key an `Identity`).
 ///
-/// Plan 2 ships the **Pick existing** tab. **Create new** mints an ed25519 key
-/// and **Import existing** ingests an OpenSSH private key blob.
+/// **Saved** lists existing keys, **Create** mints an Ed25519 key and **Import**
+/// ingests an OpenSSH private key blob.
 struct IdentityPickerSheet: View {
     /// Called when the user selects an existing identity. The sheet dismisses itself.
     let onPick: (Identity) -> Void
@@ -14,7 +16,7 @@ struct IdentityPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) private var theme
 
-    /// Selected tab index: 0 = Pick existing, 1 = Create new, 2 = Import existing.
+    /// Selected tab index: 0 = Saved, 1 = Create, 2 = Import.
     @State private var selectedTab = 0
 
     // All identities loaded once on appear.
@@ -33,9 +35,9 @@ struct IdentityPickerSheet: View {
             VStack(spacing: 0) {
                 // Segmented tab picker
                 Picker("", selection: $selectedTab) {
-                    Text("Pick existing").tag(0)
-                    Text("Create new").tag(1)
-                    Text("Import existing").tag(2)
+                    Text("Saved").tag(0)
+                    Text("Create").tag(1)
+                    Text("Import").tag(2)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
@@ -56,7 +58,7 @@ struct IdentityPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Add Identity")
+                    Text("Add SSH Key")
                         .font(.headline)
                         .foregroundStyle(Color(theme.text.primary))
                 }
@@ -90,10 +92,12 @@ struct IdentityPickerSheet: View {
     }
 
     private var emptyState: some View {
-        VStack {
+        VStack(spacing: 12) {
             Spacer()
-            Text("No identities yet")
+            Text("No saved keys yet.")
                 .foregroundStyle(Color(theme.text.secondary))
+            Button("Create a Key") { InputClickFeedback.play(); selectedTab = 1 }
+                .buttonStyle(.bordered)
             Spacer()
         }
     }
@@ -102,9 +106,13 @@ struct IdentityPickerSheet: View {
 
     private var createNewTab: some View {
         Form {
-            Section("New ed25519 key") {
+            Section {
                 TextField("Display name", text: $newName)
                 biometricPolicyPicker
+            } header: {
+                Text("New SSH Key")
+            } footer: {
+                Text("Ed25519")
             }
             Section {
                 Button("Generate & Save") { InputClickFeedback.play(); generate() }
@@ -112,7 +120,6 @@ struct IdentityPickerSheet: View {
             } footer: {
                 if let errorText { Text(errorText).foregroundStyle(.red) }
             }
-            secureEnclaveExplainer
         }
     }
 
@@ -138,19 +145,18 @@ struct IdentityPickerSheet: View {
     }
 
     private var biometricPolicyPicker: some View {
-        Picker("Biometric", selection: $biometricPolicy) {
+        Picker("Require \(biometryName)", selection: $biometricPolicy) {
             Text("Never").tag(BiometricPolicy.never)
-            Text("Per-unlock").tag(BiometricPolicy.afterUnlock)
-            Text("Per-use").tag(BiometricPolicy.anyUse)
+            Text("Once per Unlock").tag(BiometricPolicy.afterUnlock)
+            Text("Every Use").tag(BiometricPolicy.anyUse)
         }
     }
 
-    /// SE deferral explainer (Phase 2b-i: iCloud Keychain only).
-    private var secureEnclaveExplainer: some View {
-        Section {
-            Label("Secure Enclave keys arrive in a later update.", systemImage: "bolt.slash")
-                .font(.caption).foregroundStyle(Color(theme.text.secondary))
-        }
+    /// "Touch ID" on Touch ID devices, otherwise "Face ID".
+    private var biometryName: String {
+        let context = LAContext()
+        _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        return context.biometryType == .touchID ? "Touch ID" : "Face ID"
     }
 
     private func generate() {
@@ -178,7 +184,7 @@ struct IdentityPickerSheet: View {
     private func friendly(_ error: Error) -> String {
         switch error as? IdentityServiceError {
         case .minting(let m): return "Couldn't read that key: \(m)"
-        case nil: return "Couldn't save the identity: \(error.localizedDescription)"
+        case nil: return "Couldn't save the key: \(error.localizedDescription)"
         }
     }
 }
