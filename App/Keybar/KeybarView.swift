@@ -39,7 +39,7 @@ struct KeybarView: View {
         // provided by `KeybarInputAccessory` (this keybar is hosted as the terminal's
         // real inputAccessoryView), so no in-view audio-feedback host is needed here.
         .sheet(isPresented: $showingSettings, onDismiss: { vm.requestKeyboardFocus() }) {
-            SettingsView(context: .inSession, keybarSettings: keybarSettings,
+            SettingsView(keybarSettings: keybarSettings,
                          session: vm.sessionControls)
         }
     }

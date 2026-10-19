@@ -15,6 +15,9 @@ struct MacroLibraryView: View {
     @ObservedObject var store: KeybarSettingsStore
     @Environment(\.dismiss) private var dismiss
     var onPick: ((Macro) -> Void)?
+    /// Show a trailing Done: true when presented as its own sheet (the ⇧⌘P
+    /// launcher, Keybar > Add Macro Key), false when pushed from Settings.
+    var showsDoneButton = false
 
     @State private var search = ""
     @State private var creating = false
@@ -48,6 +51,11 @@ struct MacroLibraryView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { creating = true } label: { Label("New Macro", systemImage: "plus") }
+            }
+            if showsDoneButton {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { InputClickFeedback.play(); dismiss() }
+                }
             }
         }
         .confirmationDialog("Delete “\(pendingDelete?.name ?? "")”?",

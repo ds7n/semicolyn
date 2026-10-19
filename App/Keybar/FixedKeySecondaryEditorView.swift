@@ -28,7 +28,7 @@ struct FixedKeySecondaryEditorView: View {
             }
         }
         .navigationTitle(title)
-        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { InputClickFeedback.play(); dismiss() } } }
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { InputClickFeedback.play(); dismiss() } } }
     }
 
     private var title: String {

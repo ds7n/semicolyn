@@ -43,6 +43,17 @@ public struct KeyboardChord: Equatable, Hashable, Sendable {
         self.control = control
         self.option = option
     }
+
+    /// The chord as Mac modifier glyphs in Apple's order (⌃⌥⇧⌘) plus the key, e.g.
+    /// "⇧⌘P", as listed in Tips and Settings > Keyboard.
+    public var glyphs: String {
+        var out = ""
+        if control { out += "⌃" }
+        if option { out += "⌥" }
+        if shift { out += "⇧" }
+        if command { out += "⌘" }
+        return out + input.uppercased()
+    }
 }
 
 /// One catalog entry: the chord, the action it fires, and the title iOS shows in

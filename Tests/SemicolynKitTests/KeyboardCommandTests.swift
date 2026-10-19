@@ -144,4 +144,13 @@ final class KeyboardCommandTests: XCTestCase {
             XCTAssertEqual(resolve(command: String(n)), .switchWindow(n))
         }
     }
+
+    // Tips and Settings > Keyboard list chords as glyphs in Apple's order (⌃⌥⇧⌘).
+    func testChordGlyphs() {
+        XCTAssertEqual(KeyboardChord(input: "p", command: true, shift: true).glyphs, "⇧⌘P")
+        XCTAssertEqual(KeyboardChord(input: ",", command: true).glyphs, "⌘,")
+        XCTAssertEqual(KeyboardChord(input: "x", command: true, shift: true, control: true, option: true).glyphs,
+                       "⌃⌥⇧⌘X")
+        XCTAssertEqual(KeyboardChord(input: "a").glyphs, "A")
+    }
 }

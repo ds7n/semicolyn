@@ -14,12 +14,11 @@ struct SessionSettingsControls {
     let onDisconnect: () -> Void
 }
 
-/// The single unified Settings screen. Reached from the host-list gear
-/// (`.preConnect`), and in a session from long-press-Esc, `⌘,` or the "≡" corner
-/// button (`.inSession`, with a Session section on top). Sections that don't apply
-/// to the current context (Keybar, Macros pre-connect) render dimmed + disabled.
+/// The single unified Settings screen. Reached from the host-list gear, and in a
+/// session from long-press-Esc, `⌘,` or the "≡" corner button (with a Session
+/// section on top). Rows follow `SettingsLayout`; all of them work before connecting
+/// too (Keybar and Macros edit the same global store either way).
 struct SettingsView: View {
-    let context: SettingsContext
     @ObservedObject var keybarSettings: KeybarSettingsStore
     /// The live session's controls; nil pre-connect (no Session section).
     var session: SessionSettingsControls? = nil
@@ -37,18 +36,21 @@ struct SettingsView: View {
                 if let session {
                     sessionSection(session)
                 }
-                row(.appearance, "Appearance", "paintpalette") { ThemePickerView() }
-                row(.terminal, "Terminal", "terminal") { TerminalSettingsView() }
-                row(.keybar, "Keybar", "keyboard") { KeybarEditorView(store: keybarSettings) }
-                row(.launcher, "Macros", "command") { MacroLibraryView(store: keybarSettings) }
-                row(.defaults, "Connection Defaults", "slider.horizontal.3") { DefaultsEditorView() }
-                row(.privacy, "Privacy", "hand.raised") { PrivacySettingsView() }
-                row(.tips, "Tips & Gestures", "questionmark.circle") { TipsView(showsDoneButton: false) }
-                row(.diagnostics, "Diagnostics", "ladybug") { DiagnosticsSettingsView() }
+                ForEach(SettingsLayout.groups, id: \.sections) { group in
+                    Section {
+                        ForEach(group.sections, id: \.self) { section in
+                            NavigationLink { destination(section) } label: {
+                                Label(section.title, systemImage: section.symbol)
+                            }
+                        }
+                    } header: {
+                        if let header = group.header { Text(header) }
+                    }
+                }
             }
             .navigationTitle("Settings")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { InputClickFeedback.play(); dismiss() }
                 }
             }
@@ -96,18 +98,19 @@ struct SettingsView: View {
         }
     }
 
-    /// One Settings row. Disabled + dimmed when the gate says the section doesn't
-    /// apply in the current context.
+    /// The screen each Settings row pushes.
     @ViewBuilder
-    private func row<Destination: View>(_ section: SettingsSection,
-                                        _ title: String,
-                                        _ symbol: String,
-                                        @ViewBuilder destination: @escaping () -> Destination) -> some View {
-        let enabled = SettingsGate.isEnabled(section, in: context)
-        NavigationLink { destination() } label: {
-            Label(title, systemImage: symbol)
-                .opacity(enabled ? 1.0 : 0.4)   // dim when the section doesn't apply
+    private func destination(_ section: SettingsSection) -> some View {
+        switch section {
+        case .appearance:  AppearanceSettingsView()
+        case .terminal:    TerminalSettingsView()
+        case .keybar:      KeybarEditorView(store: keybarSettings)
+        case .macros:      MacroLibraryView(store: keybarSettings)
+        case .keyboard:    KeyboardSettingsView(store: keybarSettings)
+        case .defaults:    DefaultsEditorView()
+        case .privacy:     PrivacySettingsView()
+        case .tips:        TipsView(showsDoneButton: false)
+        case .diagnostics: DiagnosticsSettingsView()
         }
-        .disabled(!enabled)
     }
 }

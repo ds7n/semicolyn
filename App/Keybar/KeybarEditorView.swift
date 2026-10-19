@@ -23,7 +23,8 @@ private enum KeybarEditorSheet: Identifiable {
 /// scroll) and Right regions. Reorder via drag handles, delete via swipe (Esc,
 /// Pad and the Modifier excluded), move between regions via each row's menu.
 /// "Reset Keybar…" (confirmed) restores the layout, swipes and the
-/// hardware-keyboard toggle; macros and gesture keys are kept.
+/// hardware-keyboard toggle (edited in Settings > Keyboard); macros and gesture keys
+/// are kept.
 ///
 /// Note: SwiftUI cross-section drag is unreliable, so moving between regions
 /// uses an explicit per-row "Move to" menu instead of dragging across sections.
@@ -36,12 +37,6 @@ struct KeybarEditorView: View {
 
     var body: some View {
         List {
-            Section {
-                Toggle("Hide when hardware keyboard connected", isOn: hideWithHardwareKeyboardBinding)
-            } footer: {
-                Text("Hides the extra key row while a hardware keyboard is attached. Word suggestions stay visible.")
-            }
-
             ForEach(KeybarRegion.allCases, id: \.self) { region in
                 regionSection(region)
             }
@@ -65,7 +60,7 @@ struct KeybarEditorView: View {
         .sheet(item: $editorSheet) { which in
             NavigationStack {
                 switch which {
-                case .launcher:        MacroLibraryView(store: store)
+                case .launcher:        MacroLibraryView(store: store, showsDoneButton: true)
                 case .createMacro:
                     // From the Add menu a new macro lands on the bar as a macro key.
                     MacroCreationView(store: store) { store.appendToMiddle(.pinnedMacro($0.id)) }
@@ -172,11 +167,6 @@ struct KeybarEditorView: View {
     }
 
     // MARK: - Actions
-
-    private var hideWithHardwareKeyboardBinding: Binding<Bool> {
-        Binding(get: { store.settings.hideKeybarWithHardwareKeyboard },
-                set: { store.settings.hideKeybarWithHardwareKeyboard = $0 })
-    }
 
     /// Handles a swipe-to-delete on a region. Single-row deletes only; slots that
     /// cannot be removed (Esc, Pad, Modifier) are skipped.

@@ -42,22 +42,12 @@ struct TipsView: View {
                     "⌘C / ⌘V use the standard terminal copy-paste; the touch long-press menu still works too.")
             }
 
-            Section("Keyboard shortcuts") {
-                ForEach(Array(KeyboardCommandCatalog.all.enumerated()), id: \.offset) { _, spec in
-                    HStack {
-                        Text(glyphs(for: spec.chord))
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minWidth: 56, alignment: .leading)
-                        Text(spec.title).foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                }
-            }
+            KeyboardShortcutsSection()
         }
         .navigationTitle("Tips & Gestures")
         .toolbar {
             if showsDoneButton {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
     }
@@ -69,15 +59,22 @@ struct TipsView: View {
         }
         .padding(.vertical, 2)
     }
+}
 
-    /// Renders a chord as modifier glyphs + the key, e.g. ⇧⌘P.
-    private func glyphs(for chord: KeyboardChord) -> String {
-        var out = ""
-        if chord.control { out += "⌃" }
-        if chord.option { out += "⌥" }
-        if chord.shift { out += "⇧" }
-        if chord.command { out += "⌘" }
-        out += chord.input.uppercased()
-        return out
+/// The hardware-keyboard shortcut list (`KeyboardCommandCatalog`), shared by Tips &
+/// Gestures and Settings > Keyboard.
+struct KeyboardShortcutsSection: View {
+    var body: some View {
+        Section("Keyboard shortcuts") {
+            ForEach(Array(KeyboardCommandCatalog.all.enumerated()), id: \.offset) { _, spec in
+                HStack {
+                    Text(spec.chord.glyphs)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minWidth: 56, alignment: .leading)
+                    Text(spec.title).foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
+        }
     }
 }

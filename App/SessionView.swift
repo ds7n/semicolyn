@@ -315,10 +315,10 @@ struct SessionView: View {
     @ViewBuilder private func sessionSheet(_ sheet: SessionSheet) -> some View {
         switch sheet {
         case .settings:
-            SettingsView(context: .inSession, keybarSettings: AppStores.shared.keybarSettings,
+            SettingsView(keybarSettings: AppStores.shared.keybarSettings,
                          session: vm.sessionControls)
         case .launcher:
-            NavigationStack { MacroLibraryView(store: AppStores.shared.keybarSettings) }
+            NavigationStack { MacroLibraryView(store: AppStores.shared.keybarSettings, showsDoneButton: true) }
         case .tips:
             NavigationStack { TipsView() }
         case .hostPicker:
