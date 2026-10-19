@@ -16,9 +16,9 @@ final class SettingsSectionTests: XCTestCase {
         XCTAssertEqual(SettingsLayout.groups.map(\.sections), [
             [.appearance, .terminal],
             [.keybar, .macros, .keyboard],
-            [.defaults],
+            [.defaults, .sshKeys, .knownHosts],
             [.privacy],
-            [.tips, .diagnostics],
+            [.tips, .diagnostics, .about],
         ])
     }
 
@@ -32,9 +32,9 @@ final class SettingsSectionTests: XCTestCase {
         XCTAssertEqual(SettingsLayout.groups.flatMap(\.sections).map(\.title), [
             "Appearance", "Terminal",
             "Keybar", "Macros", "Keyboard",
-            "Connection Defaults",
+            "Connection Defaults", "SSH Keys", "Known Hosts",
             "Suggestions & Privacy",
-            "Tips & Gestures", "Diagnostics",
+            "Tips & Gestures", "Diagnostics", "About",
         ])
     }
 

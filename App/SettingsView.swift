@@ -108,9 +108,12 @@ struct SettingsView: View {
         case .macros:      MacroLibraryView(store: keybarSettings)
         case .keyboard:    KeyboardSettingsView(store: keybarSettings)
         case .defaults:    DefaultsEditorView()
+        case .sshKeys:     SSHKeysView()
+        case .knownHosts:  KnownHostsView()
         case .privacy:     PrivacySettingsView()
         case .tips:        TipsView(showsDoneButton: false)
         case .diagnostics: DiagnosticsSettingsView()
+        case .about:       AboutView()
         }
     }
 }

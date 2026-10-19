@@ -5,7 +5,8 @@
 /// Keybar and Macros edit the same global store before connecting and in a session,
 /// so changes made from the host list apply to the next session.
 public enum SettingsSection: String, CaseIterable, Sendable {
-    case appearance, terminal, keybar, macros, keyboard, defaults, privacy, tips, diagnostics
+    case appearance, terminal, keybar, macros, keyboard, defaults, sshKeys, knownHosts, privacy
+    case tips, diagnostics, about
 
     /// The row title (also the pushed screen's title).
     public var title: String {
@@ -16,9 +17,12 @@ public enum SettingsSection: String, CaseIterable, Sendable {
         case .macros:      return "Macros"
         case .keyboard:    return "Keyboard"
         case .defaults:    return "Connection Defaults"
+        case .sshKeys:     return "SSH Keys"
+        case .knownHosts:  return "Known Hosts"
         case .privacy:     return "Suggestions & Privacy"
         case .tips:        return "Tips & Gestures"
         case .diagnostics: return "Diagnostics"
+        case .about:       return "About"
         }
     }
 
@@ -31,9 +35,12 @@ public enum SettingsSection: String, CaseIterable, Sendable {
         case .macros:      return "command"
         case .keyboard:    return "keyboard.badge.ellipsis"
         case .defaults:    return "slider.horizontal.3"
+        case .sshKeys:     return "key"
+        case .knownHosts:  return "checkmark.shield"
         case .privacy:     return "hand.raised"
         case .tips:        return "questionmark.circle"
         case .diagnostics: return "ladybug"
+        case .about:       return "info.circle"
         }
     }
 }
@@ -54,8 +61,8 @@ public enum SettingsLayout {
     public static let groups: [SettingsGroup] = [
         SettingsGroup(header: nil, sections: [.appearance, .terminal]),
         SettingsGroup(header: "Input", sections: [.keybar, .macros, .keyboard]),
-        SettingsGroup(header: "Connections", sections: [.defaults]),
+        SettingsGroup(header: "Connections", sections: [.defaults, .sshKeys, .knownHosts]),
         SettingsGroup(header: "Privacy", sections: [.privacy]),
-        SettingsGroup(header: "Help", sections: [.tips, .diagnostics]),
+        SettingsGroup(header: "Help", sections: [.tips, .diagnostics, .about]),
     ]
 }
