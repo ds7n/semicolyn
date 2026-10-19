@@ -1153,25 +1153,36 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// the outcome is returned as-is (matches the cert-auth no-fallback rule).
     private func authenticate(conn: Connection, user: String, host: Host,
                               defaults: Defaults, password: String) async throws -> AuthOutcome {
-        // Resolve the identity through Defaults inheritance, not just the host's explicit value.
-        if let identityID = resolveIdentities(host: host, defaults: defaults).first {
-            // A genuine Keychain read failure must surface (no `try?`); only a truly
-            // absent private key falls back to password (e.g. SE-flavor identity whose
-            // key isn't stored on this device).
-            if let key = try AppStores.shared.identities.privateKeyOpenSSH(for: identityID) {
-                // No silent fallback: a present-but-rejected key returns its outcome.
+        // Resolve identities through Defaults inheritance, not just the host's explicit
+        // value. Each key on this device is tried in order, then the password
+        // (`authenticateInOrder`). A genuine Keychain read failure surfaces (no `try?`);
+        // only a truly absent private key is skipped (e.g. an SE-flavor identity whose
+        // key isn't stored on this device).
+        let identities = resolveIdentities(host: host, defaults: defaults)
+        let sequence = try await authenticateInOrder(
+            identities: identities,
+            password: password,
+            loadKey: { try AppStores.shared.identities.privateKeyOpenSSH(for: $0) },
+            tryKey: { identityID, key in
                 DebugLog.shared.log(.connect, "authenticate: publickey (identity=\(identityID))")
                 let outcome = try await conn.authenticatePublickey(user: user, privateKeyOpenssh: key)
                 DebugLog.shared.log(.connect, "authenticate: publickey → \(String(describing: outcome))")
-                return outcome
-            }
-            DebugLog.shared.log(.connect, "authenticate: identity \(identityID) has no stored key → password fallback")
-        } else {
-            DebugLog.shared.log(.connect, "authenticate: no identity resolved → password")
-        }
-        let outcome = try await conn.authenticatePassword(user: user, password: password)
-        DebugLog.shared.log(.connect, "authenticate: password → \(String(describing: outcome))")
-        return outcome
+                return AuthAttemptResult(outcome)
+            },
+            tryPassword: { pw in
+                let outcome = try await conn.authenticatePassword(user: user, password: pw)
+                DebugLog.shared.log(.connect, "authenticate: password → \(String(describing: outcome))")
+                return AuthAttemptResult(outcome)
+            })
+        DebugLog.shared.log(.connect, decisionLine(
+            "authenticate",
+            inputs: [("identities", "\(identities.count)"),
+                     ("hasPassword", "\(!password.isEmpty)")],
+            outputs: [("attempts", "\(sequence.attempts.count)"),
+                      ("skippedNoKey", "\(sequence.skippedWithoutKey.count)"),
+                      ("result", "\(sequence.result)")],
+            reason: nil))
+        return AuthOutcome(sequence.result)
     }
 
     // MARK: - Host record
@@ -2604,5 +2615,29 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         KeepaliveConfig(
             intervalSecs: UInt32(max(0, resolveServerAliveInterval(host: host, defaults: defaults))),
             countMax: UInt32(max(0, resolveServerAliveCountMax(host: host, defaults: defaults))))
+    }
+}
+
+// MARK: - Auth outcome bridging
+
+private extension AuthAttemptResult {
+    /// Map the Rust core's outcome onto the Kit's ordering-logic result.
+    init(_ outcome: AuthOutcome) {
+        switch outcome {
+        case .success: self = .success
+        case .partialSuccess: self = .partialSuccess
+        case .failure: self = .failure
+        }
+    }
+}
+
+private extension AuthOutcome {
+    /// Map the Kit's sequence result back onto the Rust core's outcome.
+    init(_ result: AuthAttemptResult) {
+        switch result {
+        case .success: self = .success
+        case .partialSuccess: self = .partialSuccess
+        case .failure: self = .failure
+        }
     }
 }

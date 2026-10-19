@@ -405,9 +405,10 @@ struct SessionView: View {
         switch credentialResolution(hasUsableKey: hostHasUsableKey(defaults: defaults),
                                      hasStoredPassword: storedPassword != nil) {
         case .connectWithKey:
-            // `authenticate` uses the resolved identity's key and ignores the
-            // password argument, so an empty password is correct here.
-            vm.connect(savedHost: host, password: "")
+            // `authenticate` tries each resolved key in order, then this password
+            // (a stored one, if any). With no stored password it is empty and the
+            // password step is skipped once a key has been tried.
+            vm.connect(savedHost: host, password: storedPassword ?? "")
         case .connectWithStoredPassword:
             password = storedPassword ?? ""
             vm.connect(savedHost: host, password: password)
@@ -425,19 +426,18 @@ struct SessionView: View {
         return stored.isEmpty ? nil : stored
     }
 
-    /// True if the host resolves to an identity whose private key is available on
-    /// this device, the same check `ConnectionViewModel.authenticate` gates on.
+    /// True if any identity the host resolves to has its private key on this
+    /// device, the same check `ConnectionViewModel.authenticate` gates on.
     /// A Keychain read error is treated as "no usable key" here (the connect path
     /// re-reads and surfaces a genuine failure), so a transient error only means we
     /// fall back to the password prompt rather than silently blocking.
     private func hostHasUsableKey(defaults: Defaults) -> Bool {
-        guard let identityID = resolveIdentities(host: host, defaults: defaults).first else {
-            return false
-        }
         // privateKeyOpenSSH returns String? (nil = absent); `try?` collapses a read
         // error to nil too. Either nil → no usable key on this device.
-        let key = try? AppStores.shared.identities.privateKeyOpenSSH(for: identityID)
-        return (key ?? nil) != nil
+        resolveIdentities(host: host, defaults: defaults).contains { identityID in
+            let key = try? AppStores.shared.identities.privateKeyOpenSSH(for: identityID)
+            return (key ?? nil) != nil
+        }
     }
 
     // MARK: - Password prompt
