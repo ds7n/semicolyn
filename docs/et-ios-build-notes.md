@@ -11,11 +11,8 @@ fresh session can act without re-deriving the painful bits.
 
 **Source docs** (the load-bearing knowledge this consolidates):
 - `extern/eternaltermlib/docs/porting-ios.md` — the iOS porting findings, verified on Linux.
-- The execution plan: `docs/superpowers/plans/2026-07-12-et-ios-xcframework-build.md`.
 - The template to mirror: `scripts/build-mosh-xcframework.sh` (host protoc + per-slice cross +
   explode-and-combine + create-xcframework).
-- Parent design: `docs/superpowers/specs/2026-07-10-et-transport-design.md` (branch
-  `docs/et-transport-spec`).
 
 ## Scope
 

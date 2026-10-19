@@ -3,7 +3,7 @@
 
 # Architecture & spec map
 
-The high-level overview and the index into the detailed specs/plans. For status & pending work see [TODO.md](../TODO.md); for the full decision log see [docs/brainstorming-decisions.md](brainstorming-decisions.md); for build/test gotchas see [CLAUDE.md](../CLAUDE.md).
+The high-level overview of the system. For the full decision log see [docs/brainstorming-decisions.md](brainstorming-decisions.md).
 
 ## What it is
 
@@ -23,7 +23,7 @@ semicolyn is an **iOS / iPadOS SSH + mosh terminal client built for touch**: ter
 └───────────────────────────────────────────────────────┘
 ```
 
-The design keeps the **Apple-only UI/SDK layer thin** so the maximum surface stays Linux-testable. Decision logic lives in `Sources/SemicolynKit/` (pure, XCTest on the Linux fast loop); the Rust SSH core is exposed through a UniFFI XCFramework; only SwiftUI/SwiftTerm/Keychain/CloudKit wiring is Apple-gated. Crypto goes through swift-crypto on Linux and system CryptoKit on Apple behind `#if canImport(CryptoKit)`. (The two-tier rule and its build/test consequences: [CLAUDE.md](../CLAUDE.md).)
+The design keeps the **Apple-only UI/SDK layer thin** so the maximum surface stays Linux-testable. Decision logic lives in `Sources/SemicolynKit/` (pure, XCTest on the Linux fast loop); the Rust SSH core is exposed through a UniFFI XCFramework; only SwiftUI/SwiftTerm/Keychain/CloudKit wiring is Apple-gated. Crypto goes through swift-crypto on Linux and system CryptoKit on Apple behind `#if canImport(CryptoKit)`.
 
 ## Repository layout
 
@@ -34,16 +34,14 @@ The design keeps the **Apple-only UI/SDK layer thin** so the maximum surface sta
 | `Sources/SemicolynKit/` | Platform-agnostic Swift: `Model/`, `Storage/`, `Crypto/`, `Tmux/`, `Predictor/`, `Theme/`, `Terminal/`, `IO/` |
 | `Sources/SeedKit/`, `Sources/semicolyn-dictbuild/`, `Sources/semicolyn-predeval/` | Build-time predictor tooling: dictionary builders (English, commands) and the replay evaluation harness |
 | `Tests/` | `SemicolynKitTests`, `SeedKitTests`, `BridgeTests` (macOS) |
-| `docs/superpowers/specs/` | Per-subsystem locked design specs (one design each) |
-| `docs/superpowers/plans/` | The roadmap + per-phase implementation plans |
 | `docs/brainstorming-decisions.md` | Every locked decision, by topic, with the deferred list |
 | `mockups/specs/`, `mockups/drafts/` | Locked visual record · pre-decision explorations |
 | `scripts/` | `build-xcframework.sh`, `build-mosh-xcframework.sh`, `build-english-dict.sh`, `build-command-dict.sh`, `dict/` |
 | `corpora/eval/` | Predictor evaluation text only (commands and prose replay); never shipped or used to build a dictionary |
 
-## Spec map
+## Subsystems
 
-Every v1 subsystem has a locked spec under [`docs/superpowers/specs/`](superpowers/specs/). Primary specs by area (the granular sub-spec families are noted where they exist):
+Every v1 subsystem has a locked internal design spec (not published in this repository). The designs by area:
 
 **Connection & SSH** — `ssh-algorithms` (4-tier allowlist, PQC `mlkem768x25519` in Tier 1) · `host-key-trust` (TOFU + mismatch) · `ssh-cert-auth` · `chain-auth` (ProxyJump) · `pty-shell-channel` · `mosh-transport` (vendored `blinksh/mosh` → `Mosh.xcframework`, russh bootstrap → `MoshSession` bridge → SwiftTerm; M1–M4 shipped, on TestFlight; device feel-pass pending).
 
@@ -61,4 +59,4 @@ Every v1 subsystem has a locked spec under [`docs/superpowers/specs/`](superpowe
 
 ## Plans & roadmap
 
-Phases build bottom-up so each rests only on verified earlier work: **0** Foundations → **1** SSH core → **2** Storage & sync → **3** Terminal + tmux → **4** Keybar, input & predictor → **5** Host & identity UI → **6** Connection-management UI → **7** Settings, security & ship polish. Per-phase implementation plans (with exit criteria) are in [`docs/superpowers/plans/`](superpowers/plans/); the master is [`2026-06-17-semicolyn-implementation-roadmap.md`](superpowers/plans/2026-06-17-semicolyn-implementation-roadmap.md). Current state: [TODO.md](../TODO.md).
+Phases build bottom-up so each rests only on verified earlier work: **0** Foundations → **1** SSH core → **2** Storage & sync → **3** Terminal + tmux → **4** Keybar, input & predictor → **5** Host & identity UI → **6** Connection-management UI → **7** Settings, security & ship polish.

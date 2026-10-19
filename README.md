@@ -19,9 +19,7 @@ and publickey auth) builds for the iOS Simulator and is now **on TestFlight** �
 the macOS CI runner archives, signs, and uploads a device-installable build. The
 protocol + logic tiers are built and Linux-tested; the app shell is built and
 validated by macOS CI.
-→ **Status & what's next:** [TODO.md](TODO.md) ·
-**Architecture & specs:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
-**Working in the repo:** [CLAUDE.md](CLAUDE.md)
+→ **Architecture:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## What makes it different
 
@@ -64,19 +62,16 @@ docker compose run --rm dev cargo test -p semicolyn-ssh-core
 ```
 
 The Apple-gated tier (XCFramework + iOS app) needs macOS + Xcode and is also run
-in CI on macOS runners — see [CLAUDE.md](CLAUDE.md) for the commands and gotchas,
-and [docs/mvp-app-testing.md](docs/mvp-app-testing.md) to build and run the app.
+in CI on macOS runners; see [docs/mvp-app-testing.md](docs/mvp-app-testing.md) to build and run the app.
 
 ## Contributing
 
 Early-stage solo project with a locked, spec-driven design. To get oriented:
 read this README, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
-[docs/brainstorming-decisions.md](docs/brainstorming-decisions.md), then the
-relevant spec before any code. The platform-agnostic tier (`crates/`,
+[docs/brainstorming-decisions.md](docs/brainstorming-decisions.md) before any code. The platform-agnostic tier (`crates/`,
 `Sources/SemicolynKit/`) is fully buildable and testable on Linux via the
-quickstart above — start there. Build/test gotchas and conventions are in
-[CLAUDE.md](CLAUDE.md). Please open an issue before a large PR so it can be
-checked against the locked specs.
+quickstart above — start there. Please open an issue before a large PR so it can be
+checked against the locked design.
 
 ## License
 
