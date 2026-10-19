@@ -87,8 +87,9 @@ struct HostListView: View {
                 vm.reload()
                 runLaunchResumeIfNeeded()
             }
-            // Settings sheet, Task 4.
-            .sheet(isPresented: $showingSettings) {
+            // Settings sheet, Task 4. Reload on dismiss: deleting an SSH key there
+            // rewrites the hosts that used it.
+            .sheet(isPresented: $showingSettings, onDismiss: { vm.reload() }) {
                 SettingsView(keybarSettings: AppStores.shared.keybarSettings)
             }
             // Connect to user@host…: find-or-create the host, then connect.

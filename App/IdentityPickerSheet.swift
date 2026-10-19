@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
+import UIKit
 import LocalAuthentication
 import SemicolynKit
 
@@ -8,16 +9,30 @@ import SemicolynKit
 /// (the model calls a key an `Identity`).
 ///
 /// **Saved** lists existing keys, **Create** mints an Ed25519 key and **Import**
-/// ingests an OpenSSH private key blob.
+/// ingests an OpenSSH private key blob. After "Generate & Save" the sheet shows the
+/// new public key with "Copy" (M-70) before closing. Settings > SSH Keys opens it
+/// without the Saved tab.
 struct IdentityPickerSheet: View {
-    /// Called when the user selects an existing identity. The sheet dismisses itself.
+    /// False hides the Saved tab (adding a key from Settings > SSH Keys).
+    let showsSavedTab: Bool
+    /// Called with the picked, generated or imported identity. A generated key is
+    /// reported as soon as it is saved, so closing the public-key view any way keeps it.
     let onPick: (Identity) -> Void
+
+    init(showsSavedTab: Bool = true, onPick: @escaping (Identity) -> Void) {
+        self.showsSavedTab = showsSavedTab
+        self.onPick = onPick
+        _selectedTab = State(initialValue: showsSavedTab ? 0 : 1)
+    }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) private var theme
 
     /// Selected tab index: 0 = Saved, 1 = Create, 2 = Import.
     @State private var selectedTab = 0
+    /// The key just generated; non-nil shows its public key instead of the tabs.
+    @State private var created: Identity?
+    @State private var copied = false
 
     // All identities loaded once on appear.
     @State private var identities: [Identity] = []
@@ -32,44 +47,81 @@ struct IdentityPickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Segmented tab picker
-                Picker("", selection: $selectedTab) {
-                    Text("Saved").tag(0)
-                    Text("Create").tag(1)
-                    Text("Import").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-                .onChange(of: selectedTab) { _, _ in errorText = nil }
-
-                // Tab content
-                switch selectedTab {
-                case 0:
-                    pickExistingTab
-                case 1:
-                    createNewTab
-                default:
-                    importExistingTab
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Add SSH Key")
-                        .font(.headline)
-                        .foregroundStyle(Color(theme.text.primary))
-                }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") { InputClickFeedback.play(); dismiss() }
-                        .foregroundStyle(Color(theme.accent.primary))
-                }
+            if let created {
+                createdView(created)
+            } else {
+                tabs
             }
         }
         .onAppear {
             identities = (try? AppStores.shared.hosts.allIdentities()) ?? []
+        }
+    }
+
+    private var tabs: some View {
+        VStack(spacing: 0) {
+            // Segmented tab picker
+            Picker("", selection: $selectedTab) {
+                if showsSavedTab { Text("Saved").tag(0) }
+                Text("Create").tag(1)
+                Text("Import").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            .onChange(of: selectedTab) { _, _ in errorText = nil }
+
+            // Tab content
+            switch selectedTab {
+            case 0:
+                pickExistingTab
+            case 1:
+                createNewTab
+            default:
+                importExistingTab
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Add SSH Key")
+                    .font(.headline)
+                    .foregroundStyle(Color(theme.text.primary))
+            }
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Cancel") { InputClickFeedback.play(); dismiss() }
+                    .foregroundStyle(Color(theme.accent.primary))
+            }
+        }
+    }
+
+    // MARK: - Created (public key + Copy)
+
+    private func createdView(_ identity: Identity) -> some View {
+        Form {
+            Section {
+                Text(publicKeyShareText(identity) ?? "This key's public key couldn't be read.")
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                Button(copied ? "Copied" : "Copy") {
+                    InputClickFeedback.play()
+                    guard let text = publicKeyShareText(identity) else { return }
+                    UIPasteboard.general.string = text
+                    copied = true
+                }
+            } header: {
+                Text("Public Key")
+            } footer: {
+                Text("Add this line to ~/.ssh/authorized_keys on the server. The private key stays in your Keychain.")
+            }
+        }
+        .navigationTitle(identity.displayName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { InputClickFeedback.play(); dismiss() }
+            }
         }
     }
 
@@ -165,7 +217,8 @@ struct IdentityPickerSheet: View {
             let id = try AppStores.shared.identities.createGenerated(
                 displayName: newName.trimmingCharacters(in: .whitespaces),
                 biometricPolicy: biometricPolicy, now: Date())
-            onPick(id); dismiss()
+            onPick(id)
+            created = id
         } catch { errorText = friendly(error) }
     }
 

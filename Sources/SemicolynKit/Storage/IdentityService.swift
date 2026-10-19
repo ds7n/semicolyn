@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
-/// Key material produced by an `IdentityMinter`. Pure value type — the private
+/// Key material produced by an `IdentityMinter`. Pure value type, the private
 /// key is plumbed straight into the `SecretStore` and never logged or copied
 /// elsewhere. Mirrors the Rust core's `KeyMaterial` UniFFI record.
 public struct KeyMaterial: Equatable, Sendable {
@@ -37,13 +37,21 @@ public enum IdentityServiceError: Error, Equatable {
     case minting(String)
 }
 
+/// Errors surfaced when renaming or deleting a saved identity.
+public enum IdentityEditError: Error, Equatable {
+    /// The new display name is empty after trimming whitespace.
+    case emptyName
+    /// No identity record has the given id.
+    case notFound
+}
+
 /// Mints/imports an identity and persists it: private key → `SecretStore`,
 /// metadata → `HostStore`. The only place the two stores are written together,
 /// so the "private key in Keychain, metadata in records" invariant holds in one
 /// spot. Writes the secret first, then metadata; on a minter failure nothing is
 /// written (the throw happens before any store call). If the metadata save fails
 /// after the secret is written, the secret is rolled back so the two stores never
-/// diverge — a private key will never remain in the secret store without a
+/// diverge, a private key will never remain in the secret store without a
 /// corresponding identity record.
 public struct IdentityService {
     private let store: HostStore
@@ -82,6 +90,35 @@ public struct IdentityService {
     public func privateKeyOpenSSH(for identityID: UUID) throws -> String? {
         guard let data = try secrets.getSecret(.privateKey(identityID: identityID)) else { return nil }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Rename the identity to `newName` (trimmed). Only the display name changes:
+    /// the key, its fingerprint and every host reference stay as they were.
+    ///
+    /// - Throws: `IdentityEditError.emptyName` for a blank name,
+    ///   `IdentityEditError.notFound` when no identity has `identityID`.
+    @discardableResult
+    public func rename(identityID: UUID, to newName: String) throws -> Identity {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw IdentityEditError.emptyName }
+        guard var identity = try store.identity(id: identityID) else { throw IdentityEditError.notFound }
+        identity.displayName = name
+        try store.saveIdentity(identity)
+        return identity
+    }
+
+    /// Delete the identity everywhere: first every host and Defaults reference
+    /// (`HostStore.deleteIdentityRemovingReferences`), then the record, then its
+    /// private key and passphrase secrets. Returns the usage that was cleared.
+    ///
+    /// - Throws: `IdentityEditError.notFound` when no identity has `identityID`.
+    @discardableResult
+    public func deleteIdentity(id identityID: UUID) throws -> IdentityUsage {
+        guard try store.identity(id: identityID) != nil else { throw IdentityEditError.notFound }
+        let usage = try store.deleteIdentityRemovingReferences(id: identityID)
+        try secrets.deleteSecret(.privateKey(identityID: identityID))
+        try secrets.deleteSecret(.passphrase(identityID: identityID))
+        return usage
     }
 
     /// Shared persistence: secret first, then metadata. Both keyed by a fresh UUID.
