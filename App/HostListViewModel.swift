@@ -11,6 +11,8 @@ final class HostListViewModel: ObservableObject {
     /// Non-nil when `deleteHost` is refused because another host uses the
     /// target as a jump host. Cleared by the view after the alert is dismissed.
     @Published var deleteError: String?
+    /// The label of the host whose delete failed, for the alert title.
+    @Published var deleteErrorHostLabel = ""
 
     /// Reloads `hosts` from `HostStore`. Silences errors, a missing or
     /// unreadable store is treated as an empty library rather than a crash.
@@ -31,8 +33,10 @@ final class HostListViewModel: ObservableObject {
             hosts.removeAll { $0.id == host.id }
         } catch StoreError.jumpHostInUse(let referrers) {
             let labels = referrers.map(\.label).joined(separator: ", ")
-            deleteError = "Cannot delete '\(host.label)'. Used as jumphost by: \(labels). Remove these references first."
+            deleteErrorHostLabel = host.label
+            deleteError = "Used as jumphost by: \(labels). Remove these references first."
         } catch {
+            deleteErrorHostLabel = host.label
             deleteError = error.localizedDescription
         }
     }

@@ -36,6 +36,8 @@ struct HostListView: View {
     /// Guards the once-per-launch resume sweep so re-entering `onAppear` (e.g. after a
     /// sheet dismiss) never re-triggers it.
     @State private var didRunResume = false
+    /// A host swiped for Delete, awaiting confirmation.
+    @State private var pendingDelete: Host?
 
     var body: some View {
         NavigationStack {
@@ -64,6 +66,7 @@ struct HostListView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
+                    .accessibilityLabel("Add Host")
                 }
             }
             .onAppear {
@@ -93,9 +96,26 @@ struct HostListView: View {
                     HostEditorView(editing: host)
                 }
             }
+            // Swipe Delete asks first, with the same message as the editor's Delete.
+            .confirmationDialog(
+                "Delete “\(pendingDelete?.label ?? "")”?",
+                isPresented: Binding(get: { pendingDelete != nil },
+                                     set: { if !$0 { pendingDelete = nil } }),
+                titleVisibility: .visible,
+                presenting: pendingDelete
+            ) { host in
+                Button("Delete", role: .destructive) {
+                    InputClickFeedback.play()
+                    vm.delete(host)
+                    pendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: { _ in
+                Text(hostDeleteMessage)
+            }
             // Delete-refusal alert.
             .alert(
-                "Cannot Delete Host",
+                "Can't Delete “\(vm.deleteErrorHostLabel)”",
                 isPresented: Binding(
                     get: { vm.deleteError != nil },
                     set: { if !$0 { vm.deleteError = nil } }
@@ -147,7 +167,7 @@ struct HostListView: View {
             }
             .buttonStyle(.plain)
 
-            Text("You'll need a hostname, username, and either a password or key.")
+            Text("You'll need the server's address, your username, and a password or SSH key. You can create a key in the next step.")
                 .font(.subheadline)
                 .foregroundStyle(Color(theme.text.secondary))
                 .multilineTextAlignment(.center)
@@ -169,13 +189,15 @@ struct HostListView: View {
                 }
                 .buttonStyle(.plain)
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    // Delete action
-                    Button(role: .destructive) {
+                    // Delete action: confirmed first. Not `role: .destructive`, which
+                    // animates the row away before the user has confirmed.
+                    Button {
                         InputClickFeedback.play()
-                        vm.delete(host)
+                        pendingDelete = host
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .tint(.red)
 
                     // Edit action
                     Button {
