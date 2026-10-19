@@ -84,9 +84,14 @@ public struct HostStore {
 
     // MARK: Defaults singleton
 
-    /// The Defaults record, or an empty `Defaults()` when none has been saved.
+    /// The Defaults record, or an empty `Defaults()` when none has been saved. A
+    /// pre-D-5 record (no transport, Mosh enabled) is migrated once and written back
+    /// (`migratingLegacyMoshDefaults`).
     public func defaults() throws -> Defaults {
-        try records.get(.defaults, id: Self.defaultsID, as: Defaults.self) ?? Defaults()
+        let stored = try records.get(.defaults, id: Self.defaultsID, as: Defaults.self) ?? Defaults()
+        guard let migrated = migratingLegacyMoshDefaults(stored) else { return stored }
+        try saveDefaults(migrated)
+        return migrated
     }
 
     public func saveDefaults(_ d: Defaults) throws {

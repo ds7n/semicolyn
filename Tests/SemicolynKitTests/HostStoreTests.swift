@@ -87,4 +87,38 @@ final class HostStoreTests: XCTestCase {
         try s.saveHost(user)
         XCTAssertEqual(try s.hostsUsing(identityID: kid), [HostRef(id: user.id, label: "prod")])
     }
+
+    // MARK: - Legacy Defaults Mosh migration (review fix, D-5 ruling)
+
+    func testLegacyDefaultsWithMoshEnabledMigratesToExplicitMoshOnce() throws {
+        let backend = InMemoryBlobStore()
+        let key = SymmetricKey(size: .bits256)
+        let s = HostStore(records: EncryptedRecordStore(backend: backend, key: key))
+        // A record as an old build stored it: no transport, Defaults Mosh enabled.
+        try s.saveDefaults(Defaults(mosh: .explicit(MoshConfig(enabled: true, serverPath: "/opt/mosh-server"))))
+
+        let loaded = try s.defaults()
+        XCTAssertEqual(loaded.transport, .explicit(.mosh))
+        XCTAssertEqual(loaded.mosh, .explicit(MoshConfig(enabled: false, serverPath: "/opt/mosh-server")))
+        // Unset hosts keep connecting over Mosh.
+        XCTAssertEqual(resolveTransport(host: host("h"), defaults: loaded), .mosh)
+        // Written back: a fresh store over the same backend reads the migrated record.
+        let reopened = HostStore(records: EncryptedRecordStore(backend: backend, key: key))
+        XCTAssertEqual(try reopened.defaults(), loaded)
+    }
+
+    func testNewDefaultsWithMoshConfigAndNoTransportStaySSH() throws {
+        let s = makeStore()
+        let current = Defaults(mosh: .explicit(MoshConfig(enabled: false, serverPath: "/x")))
+        try s.saveDefaults(current)
+        XCTAssertEqual(try s.defaults(), current)
+        XCTAssertEqual(resolveTransport(host: host("h"), defaults: try s.defaults()), .ssh)
+    }
+
+    func testMigrationLeavesAnExplicitTransportAlone() {
+        let ssh = Defaults(mosh: .explicit(MoshConfig(enabled: true)), transport: .explicit(.ssh))
+        XCTAssertNil(migratingLegacyMoshDefaults(ssh))
+        XCTAssertNil(migratingLegacyMoshDefaults(Defaults()))
+        XCTAssertNil(migratingLegacyMoshDefaults(Defaults(mosh: .explicit(nil))))
+    }
 }

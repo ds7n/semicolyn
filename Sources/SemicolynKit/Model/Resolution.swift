@@ -224,3 +224,19 @@ public func resolveTransport(host: Host, defaults: Defaults) -> Transport {
     if case .explicit(let cfg?) = host.mosh, cfg.enabled { return .mosh }
     return .ssh
 }
+
+/// One-time load migration for Connection Defaults written before D-5: a Defaults
+/// record with no transport and an enabled Mosh config used to make every unset host
+/// connect over Mosh. Make that intent explicit (transport = Mosh) and clear the
+/// legacy `enabled` flag, so those users keep Mosh while editing the Mosh group
+/// never switches transport again. Returns nil when the record needs no change
+/// (already migrated, a transport is set, or Mosh is absent or disabled).
+public func migratingLegacyMoshDefaults(_ defaults: Defaults) -> Defaults? {
+    guard defaults.transport.value == nil,
+          case .explicit(var cfg?) = defaults.mosh, cfg.enabled else { return nil }
+    var migrated = defaults
+    cfg.enabled = false
+    migrated.mosh = .explicit(cfg)
+    migrated.transport = .explicit(.mosh)
+    return migrated
+}
