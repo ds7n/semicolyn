@@ -7,9 +7,10 @@ public enum SettingsContext: Equatable, Sendable {
     case inSession    // long-press Esc, active session
 }
 
-/// The sections of the unified Settings screen.
+/// The sections of the unified Settings screen. (The former Experimental screen is
+/// gone: its scrolling picker moved to Terminal and Diagnostics has its own row.)
 public enum SettingsSection: String, CaseIterable, Sendable {
-    case appearance, terminal, keybar, launcher, defaults, privacy, diagnostics, experimental
+    case appearance, terminal, keybar, launcher, defaults, privacy, tips, diagnostics
 }
 
 /// Decides which Settings sections are interactive in a given context. Keybar and

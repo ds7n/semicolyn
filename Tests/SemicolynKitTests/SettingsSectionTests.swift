@@ -5,8 +5,12 @@ import XCTest
 @testable import SemicolynKit
 
 final class SettingsSectionTests: XCTestCase {
-    func testExperimentalCaseExists() {
-        XCTAssertTrue(SettingsSection.allCases.contains(.experimental))
-        XCTAssertEqual(SettingsSection.experimental.rawValue, "experimental")
+    func testTipsAndDiagnosticsCasesExist() {
+        XCTAssertEqual(SettingsSection.tips.rawValue, "tips")
+        XCTAssertEqual(SettingsSection.diagnostics.rawValue, "diagnostics")
+    }
+
+    func testExperimentalIsGone() {
+        XCTAssertNil(SettingsSection(rawValue: "experimental"))
     }
 }

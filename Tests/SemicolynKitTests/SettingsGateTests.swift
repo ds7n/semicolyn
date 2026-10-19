@@ -11,7 +11,7 @@ final class SettingsGateTests: XCTestCase {
                           "\(s) should be enabled in-session")
         }
     }
-    // Pre-connect: keybar + launcher disabled; the other five enabled.
+    // Pre-connect: keybar + launcher disabled; the other six enabled.
     func testKeybarDisabledPreConnect() {
         XCTAssertFalse(SettingsGate.isEnabled(.keybar, in: .preConnect))
     }
@@ -33,8 +33,8 @@ final class SettingsGateTests: XCTestCase {
     func testDiagnosticsEnabledPreConnect() {
         XCTAssertTrue(SettingsGate.isEnabled(.diagnostics, in: .preConnect))
     }
-    func testExperimentalEnabledPreConnect() {
-        XCTAssertTrue(SettingsGate.isEnabled(.experimental, in: .preConnect))
+    func testTipsEnabledPreConnect() {
+        XCTAssertTrue(SettingsGate.isEnabled(.tips, in: .preConnect))
     }
     // Section vocabulary is stable (guards accidental add/remove).
     func testSectionCount() {
