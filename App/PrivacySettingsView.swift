@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
 
-/// Privacy controls. v1 surfaces the predictor panic-purge — the honest, complete
-/// "forget everything it learned" reset. Wipes user-derived learned state only; the
+/// Privacy controls. v1 surfaces the predictor panic-purge ("Clear Learned
+/// Suggestions…"): the honest, complete "forget everything it learned" reset. Wipes user-derived learned state only; the
 /// bundled seed suggestions (shipped app content, no secret) remain.
 ///
 /// Wiring note: this view calls `AppStores.shared.purgePredictorLearned()`, which
 /// resets the live session's in-memory engine (via the `activePredictorSession`
 /// registration) BEFORE deleting the on-disk store. So a purge is complete whether
-/// Settings is reached from the host list (no session) or mid-session — there is no
+/// Settings is reached from the host list (no session) or mid-session; there is no
 /// stale-write-back window.
 struct PrivacySettingsView: View {
     @State private var confirming = false
@@ -19,16 +19,16 @@ struct PrivacySettingsView: View {
         List {
             Section {
                 Button(role: .destructive) { InputClickFeedback.play(); confirming = true } label: {
-                    Label("Forget everything the predictor learned", systemImage: "trash")
+                    Label("Clear Learned Suggestions…", systemImage: "trash")
                 }
             } footer: {
-                Text("Removes everything the keyboard predictor learned from what you typed. The built-in suggestions remain.")
+                Text("Removes words learned from your typing. Built-in suggestions stay.")
             }
         }
         .navigationTitle("Privacy")
-        .confirmationDialog("Forget the predictor's learned words?",
+        .confirmationDialog("Clear learned suggestions?",
                             isPresented: $confirming, titleVisibility: .visible) {
-            Button("Forget Everything", role: .destructive) {
+            Button("Clear", role: .destructive) {
                 InputClickFeedback.play()
                 try? AppStores.shared.purgePredictorLearned()
                 purged = true
@@ -37,7 +37,7 @@ struct PrivacySettingsView: View {
         } message: {
             Text("This can't be undone. Built-in suggestions are kept.")
         }
-        .alert("Predictor memory cleared", isPresented: $purged) {
+        .alert("Learned suggestions cleared", isPresented: $purged) {
             Button("OK", role: .cancel) { InputClickFeedback.play() }
         }
     }

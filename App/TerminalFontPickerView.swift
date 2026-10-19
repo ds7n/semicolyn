@@ -4,7 +4,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 import SemicolynKit
 
-/// Font-face picker: system + bundled Nerd Fonts, plus user-imported faces.
+/// Font-face picker: system + bundled Nerd Fonts, plus user-imported faces (listed
+/// from the imported-fonts folder every time, so they survive reopening the screen).
 /// Each row previews sample letters and a couple of Nerd Font icons in that face.
 struct TerminalFontPickerView: View {
     // Direct singleton read, not `@EnvironmentObject` (which crashes if uninjected). This
@@ -12,7 +13,11 @@ struct TerminalFontPickerView: View {
     // that does not propagate the app-root injection. See TerminalSettingsView.
     @ObservedObject private var store = AppStores.shared.terminalSettings
     @State private var importing = false
-    @State private var importedFaces: [TerminalFont] = []
+    /// The imported font files, refreshed from `TerminalFontProvider` on appear and
+    /// after every import or delete.
+    @State private var importedFiles: [TerminalFontProvider.ImportedFontFile] = []
+    /// Deleting the face in use asks first (the terminal falls back to the default).
+    @State private var pendingActiveDelete: TerminalFontProvider.ImportedFontFile?
 
     private static let sample = "AaBb 0O ==> !=  \u{e0b0} \u{f07b} \u{f09b}"
 
@@ -20,15 +25,19 @@ struct TerminalFontPickerView: View {
 
     var body: some View {
         List {
-            Section("Bundled") {
+            Section {
                 row(systemFace)
                 ForEach(FontCatalog.bundled, id: \.postScriptName) { bf in
                     row(bf.face)
                 }
+            } header: {
+                Text("Bundled")
+            } footer: {
+                Text("Nerd Fonts include extra icons that some command-line tools use.")
             }
-            Section("Imported") {
-                ForEach(importedFaces, id: \.self) { face in
-                    row(face)
+            Section {
+                ForEach(importedFiles, id: \.self) { file in
+                    row(file.face)
                 }
                 .onDelete(perform: deleteImported)
                 Button {
@@ -37,9 +46,26 @@ struct TerminalFontPickerView: View {
                 } label: {
                     Label("Import Font…", systemImage: "square.and.arrow.down")
                 }
+            } header: {
+                Text("Imported")
+            } footer: {
+                Text("Fonts you import (.ttf, .otf) appear here.")
             }
         }
         .navigationTitle("Typeface")
+        .onAppear { importedFiles = TerminalFontProvider.shared.importedFiles }
+        .confirmationDialog(
+            "Delete “\(pendingActiveDelete?.face.displayName ?? "")”?",
+            isPresented: Binding(get: { pendingActiveDelete != nil },
+                                 set: { if !$0 { pendingActiveDelete = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingActiveDelete
+        ) { file in
+            Button("Delete", role: .destructive) { remove(file); pendingActiveDelete = nil }
+            Button("Cancel", role: .cancel) { pendingActiveDelete = nil }
+        } message: { _ in
+            Text("It's the typeface in use. The terminal switches to \(FontCatalog.default.face.displayName).")
+        }
         .fileImporter(
             isPresented: $importing,
             allowedContentTypes: [UTType(filenameExtension: "ttf"), UTType(filenameExtension: "otf")]
@@ -78,11 +104,11 @@ struct TerminalFontPickerView: View {
     private func handleImport(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let src = urls.first else { return }
         guard let dest = copyIntoAppSupport(src) else { return }
-        if let ps = TerminalFontProvider.shared.registerImported(fileURL: dest) {
-            let face = TerminalFont(kind: .imported(ps),
-                                    displayName: dest.deletingPathExtension().lastPathComponent)
-            importedFaces.append(face)
-            store.settings.fontFace = face
+        if TerminalFontProvider.shared.registerImported(fileURL: dest) != nil {
+            importedFiles = TerminalFontProvider.shared.importedFiles
+            if let file = importedFiles.first(where: { $0.url == dest }) {
+                store.settings.fontFace = file.face
+            }
         }
     }
 
@@ -101,13 +127,22 @@ struct TerminalFontPickerView: View {
         }
     }
 
+    /// Swipe-delete: removes the file and unregisters it. The face in use asks first.
     private func deleteImported(_ offsets: IndexSet) {
-        for i in offsets {
-            let face = importedFaces[i]
-            if store.settings.fontFace == face {
-                store.settings.fontFace = FontCatalog.default.face
+        for file in offsets.map({ importedFiles[$0] }) {
+            if store.settings.fontFace == file.face {
+                pendingActiveDelete = file
+            } else {
+                remove(file)
             }
         }
-        importedFaces.remove(atOffsets: offsets)
+    }
+
+    private func remove(_ file: TerminalFontProvider.ImportedFontFile) {
+        if store.settings.fontFace == file.face {
+            store.settings.fontFace = FontCatalog.default.face
+        }
+        TerminalFontProvider.shared.removeImported(file)
+        importedFiles = TerminalFontProvider.shared.importedFiles
     }
 }
