@@ -4,9 +4,10 @@ import SwiftUI
 import SemicolynKit
 
 /// Per-key override editor for a fixed key's swipe-up/down secondaries. Each
-/// direction is None / Literal / Special-key(+modifiers). Writes the whole
-/// SwipeSecondaries pair to `store.settings.fixedKeySecondaries[id]`; "Clear
-/// override" removes the entry (reverts to the built-in default).
+/// direction is None / Text / Key(+modifiers). Writes the whole SwipeSecondaries
+/// pair to `store.settings.fixedKeySecondaries[id]`; "Restore Default Swipes"
+/// removes the entry (reverts to the built-in default; cheap to redo, so no
+/// confirmation).
 struct FixedKeySecondaryEditorView: View {
     @ObservedObject var store: KeybarSettingsStore
     let id: FixedKeyID
@@ -21,7 +22,7 @@ struct FixedKeySecondaryEditorView: View {
             Section("Swipe up")  { directionEditor(\.up) }
             Section("Swipe down"){ directionEditor(\.down) }
             Section {
-                Button("Clear override (use defaults)", role: .destructive) {
+                Button("Restore Default Swipes") {
                     store.settings.fixedKeySecondaries[id] = nil
                 }
             }
@@ -43,15 +44,15 @@ struct FixedKeySecondaryEditorView: View {
     @ViewBuilder
     private func directionEditor(_ dir: WritableKeyPath<SwipeSecondaries, SecondaryValue?>) -> some View {
         let current = effective[keyPath: dir]
-        // Mode picker: None / Literal / Key
+        // Mode picker: None / Text / Key
         Picker("Action", selection: Binding(
             get: { mode(of: current) },
             set: { setMode($0, dir: dir) })) {
-                Text("None").tag(0); Text("Literal").tag(1); Text("Special key").tag(2)
+                Text("None").tag(0); Text("Text").tag(1); Text("Key").tag(2)
         }.pickerStyle(.segmented)
 
         if case .literal(let s)? = binding(dir).wrappedValue {
-            TextField("Character(s)", text: Binding(
+            TextField("Text to type", text: Binding(
                 get: { s },
                 set: { writeOverride(dir: dir, .literal($0)) }))
                 .autocorrectionDisabled()
@@ -86,7 +87,7 @@ struct FixedKeySecondaryEditorView: View {
     @ViewBuilder
     private func keyPicker(input: KeyInput, mods: KeyModifiers,
                            dir: WritableKeyPath<SwipeSecondaries, SecondaryValue?>) -> some View {
-        // Minimal key set for v1: Tab, Esc, Enter, Backspace, F1–F12, arrows.
+        // Minimal key set for v1: Tab, Esc, Enter, Backspace, F1 to F12, arrows.
         Picker("Key", selection: Binding(
             get: { keyTag(input) },
             set: { writeOverride(dir: dir, .key(keyFromTag($0), mods)) })) {
@@ -94,8 +95,8 @@ struct FixedKeySecondaryEditorView: View {
                 Text("↑").tag(4); Text("↓").tag(5); Text("←").tag(6); Text("→").tag(7)
                 ForEach(1...12, id: \.self) { Text("F\($0)").tag(100 + $0) }
         }
-        Toggle("Control", isOn: modBinding(\.control, input: input, mods: mods, dir: dir))
-        Toggle("Option",  isOn: modBinding(\.option,  input: input, mods: mods, dir: dir))
+        Toggle("Ctrl", isOn: modBinding(\.control, input: input, mods: mods, dir: dir))
+        Toggle("Alt (Option)", isOn: modBinding(\.option, input: input, mods: mods, dir: dir))
         Toggle("Shift",   isOn: modBinding(\.shift,   input: input, mods: mods, dir: dir))
     }
     private func modBinding(_ kp: WritableKeyPath<KeyModifiers, Bool>, input: KeyInput, mods: KeyModifiers,
