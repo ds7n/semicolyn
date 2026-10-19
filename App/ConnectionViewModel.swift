@@ -107,7 +107,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Predictor-strip suggestion state, split into its own observable slice so a
     /// suggestion recompute invalidates only the predictor-strip views (Plan B §B1).
     let predictorVM = PredictorViewModel()
-    /// Nil when the predictor is disabled for this session (incognito).
+    /// Nil before a session starts. In private mode it is a non-learning engine
+    /// (`learns: false`) that still suggests from the built-in dictionaries.
     private var predictor: PredictorActor?
     private var tracker = InputTokenTracker()
     /// Coalesces remote output for the screen-word harvest: capped at 8 KiB (newest
@@ -2066,7 +2067,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     // MARK: - Predictor
 
     /// Persist the session's learned predictor vocabulary to disk. Idempotent and
-    /// safe to call repeatedly; a no-op when the predictor is disabled (incognito)
+    /// safe to call repeatedly; a no-op in private mode (no learned store attached)
     /// or no learned store is attached. Called from `teardown()` and on
     /// app-background (`scenePhase`) so learning survives a backgrounded or killed
     /// app, previously only a clean teardown flushed. The snapshot+save now runs on
@@ -2146,8 +2147,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `PredictorPurgeable`: reset the running engine to empty (seed preserved).
     /// Called by `AppStores.purgePredictorLearned()` when THIS session is the active
     /// one, so a panic-purge triggered from Settings, even mid-session, clears the
-    /// in-memory learned state before the on-disk store is deleted. No-op when the
-    /// predictor is off (incognito).
+    /// in-memory learned state before the on-disk store is deleted. Not registered
+    /// in private mode (nothing learned to reset).
     func purgeLearnedEngine() {
         DebugLog.shared.log(.predictor, "predictor:purge")
         Task { [predictor] in await predictor?.purgeLearned() }
@@ -2166,11 +2167,22 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         try? AppStores.shared.purgePredictorLearned()
     }
 
-    /// Build the session predictor unless incognito is on for this host.
+    /// Build the session predictor: a learning engine, or a non-learning one when
+    /// private mode ("Don't learn from my typing") is on for this host.
     private func startPredictor(host: Host, defaults: Defaults) {
         guard !resolvePredictorIncognito(host: host, defaults: defaults) else {
-            predictor = nil
-            // Incognito: no engine to reset, so don't claim the active-purge slot.
+            // Private mode ("Don't learn from my typing"): suggestions still come from
+            // the built-in dictionaries, but the engine starts with nothing learned,
+            // records and harvests nothing (`learns: false`), and has no learned store
+            // to flush, so the on-disk vocabulary is never read or written.
+            learnedStore = nil
+            predictor = PredictorActor(engine: PredictorEngine(
+                learned: .empty,
+                english: AppStores.shared.englishDictionary(),
+                commands: AppStores.shared.commandTree(),
+                filter: AppStores.shared.predictorTokenFilter(),
+                learns: false))
+            // Nothing learned to reset, so don't claim the active-purge slot.
             if AppStores.shared.activePredictorSession === self {
                 AppStores.shared.activePredictorSession = nil
             }
@@ -2191,8 +2203,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// tmux, Mosh, ET): each chunk feeds the password-prompt gate and the engine's
     /// screen-word harvest (escape, secret-flag and partial-token context carry
     /// across chunks inside the engine). Harvest chunks coalesce in `harvestBuffer`
-    /// with at most one in flight. Harvest is a no-op when the predictor is off
-    /// (incognito). `teardown` clears the slot.
+    /// with at most one in flight. Harvest is a no-op in private mode (the engine
+    /// does not learn). `teardown` clears the slot.
     private func installOutputTap() {
         output.onHarvestBytes = { [weak self] bytes in
             guard let self else { return }
