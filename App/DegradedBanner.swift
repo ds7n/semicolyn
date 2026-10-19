@@ -14,7 +14,7 @@ struct DegradedBanner: View {
         case .optedOut:        return "tmux is off for this host: using a plain shell."
         case .tmuxNotFound:    return "tmux not found: using a plain shell."
         case .tooOld(let v):   return "tmux \(v.major).\(v.minor) is too old (need 3.0+): using a plain shell."
-        case .couldNotStart:   return "Couldn't start tmux (check the session name): using a plain shell."
+        case .couldNotStart:   return "Couldn't start tmux. Check the session name in this host's settings. Using a plain shell."
         }
     }
 

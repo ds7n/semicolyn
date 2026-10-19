@@ -50,8 +50,6 @@ struct SessionView: View {
     @State private var resolving = true
     /// Set when the user confirms an ssh:// link tap; drives a nested session cover.
     @State private var quickConnectHost: IdentifiableHost?
-    /// Drives the "Disconnect from <host>?" confirmation dialog.
-    @State private var confirmingDisconnect = false
     /// Master logging switch and the panel destination (Settings → Diagnostics; both off
     /// by default). The 🐞 panel needs BOTH: logging on (so there's anything to show) and
     /// the panel destination chosen.
@@ -201,28 +199,16 @@ struct SessionView: View {
             }
         }
         .animation(.easeInOut, value: vm.resumeRawPrompt)
-        // Connected-state Disconnect affordance: a small top-trailing control (the
-        // connected view has no nav bar). Confirms before tearing down so a session
-        // isn't lost by an accidental tap. Shown only while a live shell is up.
+        // The way into the session menu when the keybar is NOT on screen (keyboard down
+        // or failed, or the keybar hidden with a hardware keyboard): tap opens the
+        // in-session Settings sheet (Session section: Reconnect / Disconnect), long-press
+        // raises the keyboard. With the keybar showing, long-press Esc (or ⌘,) instead.
         .overlay(alignment: .topTrailing) {
-            if case .shell = vm.state {
-                Button {
-                    InputClickFeedback.play()
-                    confirmingDisconnect = true
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(Color(theme.text.secondary))
-                        .padding(8)
-                        .accessibilityLabel("Disconnect")
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 4).padding(.trailing, 6)
-            }
+            SessionMenuButton(vm: vm, hardwareKeyboard: hardwareKeyboard)
         }
+        // ⇧⌘W asks here (the Session section's Disconnect confirms inside Settings).
         .confirmationDialog("Disconnect from \(host.label)?",
-                            isPresented: $confirmingDisconnect, titleVisibility: .visible) {
+                            isPresented: $vm.confirmingDisconnect, titleVisibility: .visible) {
             Button("Disconnect", role: .destructive) { InputClickFeedback.play(); vm.disconnect() }
             Button("Cancel", role: .cancel) {}
         }
@@ -266,7 +252,7 @@ struct SessionView: View {
             // instead of leaving us to guess). Ungated: records even when logging is off.
             if case .shell = newState { DebugLog.shared.logConfig(reason: "connect") }
         }
-        // Host-key prompt sheet, mirrors ConnectView exactly.
+        // Host-key prompt sheet.
         // `onDismiss` fails closed: if the sheet is dismissed without an explicit
         // button tap, treat it as rejection so the continuation is never leaked.
         .sheet(item: $vm.pendingPrompt, onDismiss: { vm.resolvePrompt(false) }) { prompt in
@@ -329,7 +315,8 @@ struct SessionView: View {
     @ViewBuilder private func sessionSheet(_ sheet: SessionSheet) -> some View {
         switch sheet {
         case .settings:
-            SettingsView(context: .inSession, keybarSettings: AppStores.shared.keybarSettings)
+            SettingsView(context: .inSession, keybarSettings: AppStores.shared.keybarSettings,
+                         session: vm.sessionControls)
         case .launcher:
             NavigationStack { MacroLibraryView(store: AppStores.shared.keybarSettings) }
         case .tips:
@@ -459,7 +446,7 @@ struct SessionView: View {
                     SecureField("Password", text: $password)
                     // This prompt only appears when the host has no usable key. Key
                     // auth is used automatically for hosts with an assigned identity.
-                    Text("No SSH key assigned to this host, enter a password, or assign an identity in the host editor to use key auth.")
+                    Text("Enter your password. To sign in with an SSH key instead, edit this host and add a key.")
                         .font(.caption)
                         .foregroundStyle(Color(theme.text.secondary))
                 }
@@ -568,6 +555,49 @@ struct SessionView: View {
                     Button("Close") { InputClickFeedback.play(); dismiss() }
                 }
             }
+        }
+    }
+}
+
+/// The small "≡" corner button over a live session. Shown only while the keybar is not
+/// on screen (`sessionMenuButtonVisible`); observes the keybar settings itself so a
+/// settings change re-renders only this button, not the whole session view.
+private struct SessionMenuButton: View {
+    @ObservedObject var vm: ConnectionViewModel
+    @ObservedObject var hardwareKeyboard: HardwareKeyboardMonitor
+    @ObservedObject private var keybarSettings = AppStores.shared.keybarSettings
+    @Environment(\.theme) private var theme
+
+    private var visible: Bool {
+        sessionMenuButtonVisible(
+            inShell: vm.state == .shell,
+            keybarAttached: vm.keybarAttached,
+            hardwareKeyboardConnected: hardwareKeyboard.isConnected,
+            hideKeybarWithHardwareKeyboard: keybarSettings.settings.hideKeybarWithHardwareKeyboard)
+    }
+
+    var body: some View {
+        if visible {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color(theme.text.secondary))
+                .frame(width: 32, height: 32)
+                .background(Color(theme.surface.panel).opacity(0.85), in: Circle())
+                .contentShape(Circle())
+                .padding(.top, 4).padding(.trailing, 6)
+                .onTapGesture {
+                    InputClickFeedback.play()
+                    vm.presentedSheet = .settings
+                }
+                .onLongPressGesture {
+                    InputClickFeedback.play()
+                    vm.requestKeyboardFocus()
+                }
+                .accessibilityElement()
+                .accessibilityLabel("Session menu")
+                .accessibilityHint("Opens Settings with Reconnect and Disconnect.")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction(named: "Show keyboard") { vm.requestKeyboardFocus() }
         }
     }
 }

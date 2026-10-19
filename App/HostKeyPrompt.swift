@@ -68,9 +68,9 @@ struct FirstTrustModal: View {
                         .onTapGesture { expanded.toggle() }
                         .animation(.default, value: expanded)
 
-                    // Body copy — verbatim from spec
+                    // Body copy (menu review M-102)
                     Text(
-                        "Verify this matches what your administrator gave you, or the fingerprint shown by the server when you set it up."
+                        "First connection to this server. If you set it up, check that this fingerprint matches the one on the server."
                     )
                     .font(.subheadline)
                     .foregroundStyle(Color(theme.text.secondary))
@@ -86,7 +86,7 @@ struct FirstTrustModal: View {
                     InputClickFeedback.play()
                     onDecision(true)
                 } label: {
-                    Text("Trust & Connect")
+                    Text("Trust and Connect")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -205,7 +205,7 @@ struct MismatchModal: View {
                     InputClickFeedback.play()
                     showReplaceConfirm = true
                 } label: {
-                    Text("Replace key & connect")
+                    Text("Replace Key and Connect")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -214,7 +214,7 @@ struct MismatchModal: View {
                     isPresented: $showReplaceConfirm,
                     titleVisibility: .visible
                 ) {
-                    Button("Replace and connect", role: .destructive) {
+                    Button("Replace Key and Connect", role: .destructive) {
                         InputClickFeedback.play()
                         onDecision(true)
                     }

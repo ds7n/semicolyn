@@ -287,6 +287,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// cleans up silently (no `.failed`, no banner). Reset at connect-start (NOT in
     /// `teardown()`, which runs before the async `onEnd` and would clear it too early).
     private var etUserDisconnecting = false
+    /// Bumped by every `teardown()`. An ET `onEnd` captures the value current when its
+    /// session was created and ignores itself once it no longer matches, so a late
+    /// onEnd from a session a Reconnect already replaced can't fail the new one.
+    private var etGeneration = 0
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -516,6 +520,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         case .clearScreen:         sendTerminalInput([0x0c])              // Ctrl-L
         case .paste:               pasteFromClipboard()
         case .reconnect:           reconnect()
+        case .disconnect:          confirmingDisconnect = true
         case .newConnection:       presentedSheet = .hostPicker
         case .openLauncher:        presentedSheet = .launcher
         case .settings:            presentedSheet = .settings
@@ -530,14 +535,53 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sendTerminalInput(Array(text.utf8))
     }
 
-    /// Re-run the last saved-host connect (`⇧⌘R`). No-op if nothing connected yet.
+    /// Re-run the last saved-host connect (`⇧⌘R`, the Session menu, the session-ended
+    /// banner). No-op if nothing connected yet. A live or half-open session is torn
+    /// down first: `connect` ignores calls while `.shell`/`.connecting`, which made
+    /// Reconnect a silent no-op from inside a session. `state` passes through `.idle`
+    /// only synchronously (`connect` flips it to `.connecting` in the same turn), so
+    /// SessionView's dismiss-on-idle never sees it, the same hand-off the Mosh
+    /// reattach watchdogs use.
     func reconnect() {
         guard let host = lastSavedHost else {
             DebugLog.shared.log(.connect, "reconnect: ABORT no lastSavedHost")
             return
         }
-        DebugLog.shared.log(.connect, "reconnect: triggered for \(host.hostName)")
+        let wasLive = state == .shell || state == .connecting
+        DebugLog.shared.log(.connect, "reconnect: triggered for \(host.hostName) wasLive=\(wasLive)")
+        if wasLive {
+            etUserDisconnecting = true   // the old ET session's async onEnd stays silent
+            teardown()
+            state = .idle
+        }
         connect(savedHost: host, password: lastPassword ?? "")
+    }
+
+    /// Asks SessionView to show the "Disconnect from <host>?" confirmation (`⇧⌘W`).
+    @Published var confirmingDisconnect = false
+
+    /// The Session section of the in-session Settings sheet ("<host> · <transport>",
+    /// Reconnect, Disconnect), or nil when no live shell is up.
+    var sessionControls: SessionSettingsControls? {
+        guard state == .shell, let host = lastSavedHost else { return nil }
+        let transport = activeSessionTransport(moshActive: isMoshActive, etActive: isETActive)
+        return SessionSettingsControls(
+            title: sessionMenuTitle(hostLabel: host.label, transport: transport),
+            hostLabel: host.label,
+            onReconnect: { [weak self] in self?.reconnect() },
+            onDisconnect: { [weak self] in self?.disconnect() })
+    }
+
+    /// Whether the keybar's input accessory is in a window (the keyboard, or the
+    /// hardware-keyboard bar, is showing). Drives the "≡" corner button
+    /// (`sessionMenuButtonVisible`). Reported by `KeybarInputAccessory`.
+    @Published private(set) var keybarAttached = false
+
+    /// `KeybarInputAccessory.didMoveToWindow` hook.
+    func noteKeybarAttached(_ attached: Bool) {
+        guard attached != keybarAttached else { return }
+        keybarAttached = attached
+        DebugLog.shared.log(.keybar, "keybar:attached \(attached)")
     }
 
     /// Ask the active terminal to re-show the keyboard + keybar. Safe to call when
@@ -584,6 +628,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         etFirstFrameSeen = false
         etSession?.close()
         etSession = nil
+        etGeneration &+= 1
         plainTmux = nil
         plainTmuxSessionNamePendingInstall = nil
         moshPlainTmuxLaunchSent = false
@@ -750,6 +795,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // Adopt this record's id so the connected-edge capture REFRESHES the same record
         // (and a later teardown clears the right one).
         sessionID = record.sessionID
+        // Reconnect (Session menu, ⇧⌘R) and the Session section need the host; a cold
+        // reattach never runs `connect(savedHost:)`, which is where it is otherwise set.
+        lastSavedHost = host
         state = .connecting
         DebugLog.shared.log(.connect,
             "resume:coldReattach transport=\(record.transport.rawValue) endpoint=\(record.host):\(record.port)")
@@ -1800,8 +1848,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onState = { raw in
             DebugLog.shared.log(.transport, "et: state=\(mapETState(Int32(raw)))")
         }
+        let generation = etGeneration
         sess.onEnd = { [weak self] reason in
             guard let self else { return }
+            // Stale: a teardown (Reconnect, a newer connect) already replaced this
+            // session. Checked before touching the watchdog, which now belongs to the
+            // new session. A user disconnect keeps its own silent branch below.
+            if generation != self.etGeneration, !self.etUserDisconnecting {
+                DebugLog.shared.log(.transport, "et: onEnd from a replaced session → ignored")
+                return
+            }
             self.etWatchdog?.cancel(); self.etWatchdog = nil
             // User-initiated disconnect (the "x" button): `disconnect()` already tore the
             // session down and drove state to .idle. This async onEnd must NOT run the

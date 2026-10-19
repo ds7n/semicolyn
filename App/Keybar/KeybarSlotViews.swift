@@ -310,6 +310,8 @@ struct PadView: View {
     @State private var lastTranslation: CGSize = .zero  // latest dx/dy, updated every onChanged
     @State private var repeatTimer: Timer?
     @State private var showWindowMenu = false
+    /// Second step of "Close Pane": closing stops whatever runs in the pane (D-10).
+    @State private var confirmingClosePane = false
 
     var body: some View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
@@ -341,9 +343,18 @@ struct PadView: View {
             Button("Split Right") { vm.plainTmux?.onWindowAction(.splitHorizontal) }
             Button("Split Down") { vm.plainTmux?.onWindowAction(.splitVertical) }
             Button("New Window") { vm.plainTmux?.onWindowAction(.newWindow) }
-            Button("Zoom Toggle") { vm.plainTmux?.onWindowAction(.zoom) }
+            // tmux zoom is a toggle and the app does not track the zoom state, so the
+            // label names both directions.
+            Button("Zoom / Unzoom Pane") { vm.plainTmux?.onWindowAction(.zoom) }
+            Button("Close Pane", role: .destructive) { confirmingClosePane = true }
+            Button("Cancel", role: .cancel) { }
+        }
+        .confirmationDialog("Close this pane?", isPresented: $confirmingClosePane,
+                            titleVisibility: .visible) {
             Button("Close Pane", role: .destructive) { vm.plainTmux?.onWindowAction(.closePane) }
             Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Anything running in it will stop.")
         }
     }
 

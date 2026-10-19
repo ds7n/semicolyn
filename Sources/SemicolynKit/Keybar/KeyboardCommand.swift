@@ -19,6 +19,8 @@ public enum KeyboardCommand: Equatable, Hashable, Sendable {
     case paste
     case newConnection
     case reconnect
+    /// End the session (asks for confirmation first, like the Session menu's Disconnect).
+    case disconnect
     case openLauncher
     case settings
     case tips
@@ -69,15 +71,16 @@ public enum KeyboardCommandCatalog {
             chord(KeyboardChord(input: "]", command: true, shift: true), .nextWindow, "Next Window"),
             cmd("[", .prevPane, "Previous Pane"),
             cmd("]", .nextPane, "Next Pane"),
-            cmd("d", .splitVertical, "Split Vertically"),
-            cmd("|", .splitVertical, "Split Vertically"),
-            chord(KeyboardChord(input: "d", command: true, shift: true), .splitHorizontal, "Split Horizontally"),
-            cmd("-", .splitHorizontal, "Split Horizontally"),
+            cmd("d", .splitVertical, "Split Right"),
+            cmd("|", .splitVertical, "Split Right"),
+            chord(KeyboardChord(input: "d", command: true, shift: true), .splitHorizontal, "Split Down"),
+            cmd("-", .splitHorizontal, "Split Down"),
             cmd("k", .clearScreen, "Clear Screen"),
             cmd("c", .copy, "Copy"),
             cmd("v", .paste, "Paste"),
             chord(KeyboardChord(input: "n", command: true, shift: true), .newConnection, "New Connection"),
             chord(KeyboardChord(input: "r", command: true, shift: true), .reconnect, "Reconnect"),
+            chord(KeyboardChord(input: "w", command: true, shift: true), .disconnect, "Disconnect"),
             chord(KeyboardChord(input: "p", command: true, shift: true), .openLauncher, "Macro Launcher"),
             cmd(",", .settings, "Settings"),
             cmd("?", .tips, "Tips & Gestures"),
