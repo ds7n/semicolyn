@@ -16,12 +16,6 @@ public enum MacroTemplateError: Error, Equatable, Sendable {
     case unknownModifier(String)
     /// A key token that names no known key (e.g. `"{Frobnicate}"`, `"{F13}"`).
     case unknownKey(String)
-    /// A `${` parameter placeholder with no closing `}` (e.g. `"${host"`).
-    case unterminatedParameter
-    /// An empty `${}` parameter placeholder.
-    case emptyParameter
-    /// A `${…}` whose name isn't `[A-Za-z0-9_]+` (e.g. `"${a b}"`, `"${a-b}"`).
-    case invalidParameterName(String)
 }
 
 /// Parses a macro *template* string into a `[MacroEvent]` body. Literal text
@@ -32,6 +26,9 @@ public enum MacroTemplateError: Error, Equatable, Sendable {
 ///   - Chords: `{Ctrl+R}`, `{Ctrl+Shift+K}`, `{Alt+X}` — one or more modifiers
 ///     (Ctrl/Control, Alt/Option/Opt, Shift) joined to a final key by `+`.
 ///   - Literal braces: `{{` → `{`, `}}` → `}`.
+///   - Shell-style `${...}` is plain text: `${` starts a literal run through the
+///     next `}` (or to the end of the template when there is none), so
+///     `echo ${HOME}` types exactly that and never fails to parse.
 ///
 /// Names are case-insensitive. (keybar-customization spec "Template mode".)
 public enum MacroTemplate {
@@ -41,7 +38,11 @@ public enum MacroTemplate {
         var i = 0
         while i < chars.count {
             let c = chars[i]
-            if c == "{" {
+            if c == "$", i + 1 < chars.count, chars[i + 1] == "{" {   // literal "${...}"
+                let end = chars[(i + 2)...].firstIndex(of: "}").map { $0 + 1 } ?? chars.count
+                events.append(contentsOf: chars[i..<end].map { MacroEvent(key: .char($0)) })
+                i = end
+            } else if c == "{" {
                 if i + 1 < chars.count, chars[i + 1] == "{" {   // escaped "{{"
                     events.append(MacroEvent(key: .char("{")))
                     i += 2
@@ -113,70 +114,5 @@ public enum MacroTemplate {
         let lower = token.lowercased()
         guard lower.hasPrefix("f") else { return nil }
         return Int(lower.dropFirst())
-    }
-}
-
-extension MacroTemplate {
-    /// Parses a *parameterized* macro template into a `[MacroBodyElement]` body: the
-    /// same grammar as `parse`, plus `${name}` / `${name:default}` placeholders
-    /// resolved to text at fire-time. A `$` not followed by `{` stays literal.
-    /// (keybar-customization spec "Optional placeholders".)
-    public static func parseBody(_ template: String) throws -> [MacroBodyElement] {
-        var out: [MacroBodyElement] = []
-        let chars = Array(template)
-        var i = 0
-        while i < chars.count {
-            let c = chars[i]
-            if c == "$", i + 1 < chars.count, chars[i + 1] == "{" {
-                guard let close = chars[(i + 2)...].firstIndex(of: "}") else {
-                    throw MacroTemplateError.unterminatedParameter
-                }
-                out.append(.placeholder(try parseParameter(String(chars[(i + 2)..<close]))))
-                i = close + 1
-            } else if c == "{" {
-                if i + 1 < chars.count, chars[i + 1] == "{" {        // escaped "{{"
-                    out.append(.event(MacroEvent(key: .char("{"))))
-                    i += 2
-                    continue
-                }
-                guard let close = chars[(i + 1)...].firstIndex(of: "}") else {
-                    throw MacroTemplateError.unterminatedPlaceholder
-                }
-                out.append(.event(try parsePlaceholder(String(chars[(i + 1)..<close]))))
-                i = close + 1
-            } else if c == "}" {
-                if i + 1 < chars.count, chars[i + 1] == "}" {        // escaped "}}"
-                    out.append(.event(MacroEvent(key: .char("}"))))
-                    i += 2
-                    continue
-                }
-                throw MacroTemplateError.unexpectedCloseBrace
-            } else {
-                out.append(.event(MacroEvent(key: .char(c))))
-                i += 1
-            }
-        }
-        return out
-    }
-
-    /// Parses the text inside one `${…}` into a `MacroPlaceholder`. The name (before
-    /// the first `:`) must be `[A-Za-z0-9_]+`; anything after the first `:` is the
-    /// default verbatim (may be empty or itself contain `:`).
-    private static func parseParameter(_ inner: String) throws -> MacroPlaceholder {
-        guard !inner.isEmpty else { throw MacroTemplateError.emptyParameter }
-        let name: String
-        let defaultValue: String?
-        if let colon = inner.firstIndex(of: ":") {
-            name = String(inner[..<colon])
-            defaultValue = String(inner[inner.index(after: colon)...])
-        } else {
-            name = inner
-            defaultValue = nil
-        }
-        let valid = !name.isEmpty && name.allSatisfy { ch in
-            ch == "_" || (ch.isASCII && (ch.isLetter || ch.isNumber))
-        }
-        guard valid else { throw MacroTemplateError.invalidParameterName(name) }
-        return MacroPlaceholder(name: name, defaultValue: defaultValue)
     }
 }

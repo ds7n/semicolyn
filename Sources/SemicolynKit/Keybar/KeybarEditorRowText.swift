@@ -66,3 +66,9 @@ private func _gesturePrefix(_ gesture: CustomSlotGesture) -> String {
     case .longPress: return "Hold: "
     }
 }
+
+/// The confirmation message for deleting a macro that keybar keys use, e.g.
+/// "It's used by 2 keybar keys." (singular for one key).
+public func macroDeleteUsageMessage(keyCount: Int) -> String {
+    keyCount == 1 ? "It's used by 1 keybar key." : "It's used by \(keyCount) keybar keys."
+}

@@ -34,6 +34,17 @@ public struct KeybarSettings: Equatable, Sendable, Codable {
         KeybarSettings(library: library)
     }
 
+    /// How many keybar keys use the macro `id`: a macro key pinned on the bar, plus
+    /// every gesture key that binds it on any gesture (counted once per key).
+    /// Settings > Macros confirms a delete only when this is above zero.
+    public func keyCount(using id: MacroID) -> Int {
+        let pinned = layout.allSlots.filter { $0 == .pinnedMacro(id) }.count
+        let gestureKeys = library.customSlots.filter { slot in
+            CustomSlotGesture.allCases.contains { slot.binding(for: $0)?.macro == id }
+        }.count
+        return pinned + gestureKeys
+    }
+
     private enum CodingKeys: String, CodingKey {
         case layout, library, hideKeybarWithHardwareKeyboard, fixedKeySecondaries
     }

@@ -49,3 +49,37 @@ final class KeybarResetTests: XCTestCase {
         XCTAssertEqual(KeybarSettings.default.resettingKeepingLibrary(), KeybarSettings.default)
     }
 }
+
+/// M-4: Settings > Macros confirms deleting a macro only when keybar keys use it.
+final class MacroUsageTests: XCTestCase {
+    private let a = MacroID("a"), b = MacroID("b"), c = MacroID("c")
+
+    private func settings() -> KeybarSettings {
+        let macros = [a, b, c].map { Macro(id: $0, name: $0.raw, body: [MacroEvent(key: .char("x"))]) }
+        // Gesture key 1 binds `a` on two gestures (counts once); gesture key 2 binds `a` and `b`.
+        let g1 = CustomSlot(id: CustomSlotID("g1"), tap: GestureBinding(macro: a), longPress: GestureBinding(macro: a))
+        let g2 = CustomSlot(id: CustomSlotID("g2"), swipeUp: GestureBinding(macro: b), swipeDown: GestureBinding(macro: a))
+        return KeybarSettings(
+            layout: KeybarLayout(left: [.escPill, .modifier], middle: [.pinnedMacro(a), .custom(CustomSlotID("g1"))],
+                                 right: [.pad]),
+            library: KeybarLibrary(macros: macros, customSlots: [g1, g2]))
+    }
+
+    func testCountsPinnedKeyAndEachGestureKeyOnce() {
+        XCTAssertEqual(settings().keyCount(using: a), 3)   // pinned + g1 + g2
+    }
+
+    func testGestureKeyOnlyUse() {
+        XCTAssertEqual(settings().keyCount(using: b), 1)
+    }
+
+    func testUnusedMacroCountsZero() {
+        XCTAssertEqual(settings().keyCount(using: c), 0)
+        XCTAssertEqual(settings().keyCount(using: MacroID("missing")), 0)
+    }
+
+    func testUsageMessagePluralization() {
+        XCTAssertEqual(macroDeleteUsageMessage(keyCount: 1), "It's used by 1 keybar key.")
+        XCTAssertEqual(macroDeleteUsageMessage(keyCount: 2), "It's used by 2 keybar keys.")
+    }
+}
