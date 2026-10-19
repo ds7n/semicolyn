@@ -8,6 +8,12 @@ public struct Fingerprint: Equatable, Sendable {
         self.full = raw
     }
 
+    /// The full fingerprint with its `SHA256:` prefix, adding the prefix when the
+    /// stored value is a bare base64 hash. Empty stays empty.
+    public var sha256Display: String {
+        full.isEmpty || full.hasPrefix("SHA256:") ? full : "SHA256:\(full)"
+    }
+
     public var truncated: String {
         let prefix = "SHA256:"
         guard full.hasPrefix(prefix) else {
