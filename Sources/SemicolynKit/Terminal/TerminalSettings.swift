@@ -3,7 +3,18 @@
 import Foundation
 
 /// Caret rendering style, independent of blink (mirrors DECSCUSR families).
-public enum CursorStyle: Equatable, Sendable, Codable { case block, underline, bar }
+public enum CursorStyle: Equatable, Sendable, Codable, CaseIterable {
+    case block, underline, bar
+
+    /// The Appearance > Cursor > Style picker label.
+    public var displayName: String {
+        switch self {
+        case .block:     return "Block"
+        case .underline: return "Underline"
+        case .bar:       return "Bar"
+        }
+    }
+}
 
 /// A selectable terminal typeface. `.system` = SF Mono (no icons); `.bundled`
 /// = a Nerd Font shipped in the app bundle; `.imported` = a user-registered
@@ -72,7 +83,7 @@ public enum FontCatalog {
 }
 
 /// Terminal rendering preferences. Pure value type; defaults baked in per the
-/// Plan C spec. A future Settings screen binds to this; Plan C ships defaults.
+/// Plan C spec, edited in Settings > Appearance (font, cursor) and Terminal (scrollback).
 public struct TerminalSettings: Equatable, Sendable, Codable {
     public var fontSize: Double
     public var cursorStyle: CursorStyle
@@ -83,8 +94,37 @@ public struct TerminalSettings: Equatable, Sendable, Codable {
 
     /// Allowed font-point range (touch-legible floor, sane ceiling).
     public static let fontRange: ClosedRange<Double> = 7...24
-    /// Raw-PTY scrollback presets; `Int.max` represents "unlimited".
-    public static let scrollbackPresets: [Int] = [1000, 2000, 5000, 10000, Int.max]
+    /// Scrollback presets offered in Settings > Terminal. There is no "Unlimited":
+    /// SwiftTerm sizes its line buffer as `scrollback + rows`, so a huge value
+    /// (`Int.max`) overflows and traps, and `nil` means NO scrollback there.
+    public static let scrollbackPresets: [Int] = [1000, 2000, 5000, 10000]
+    /// The largest scrollback ever handed to the terminal (see `effectiveScrollback`).
+    public static let maxScrollback = 100_000
+
+    /// The scrollback actually applied: the stored value clamped to
+    /// `0...maxScrollback`, so an out-of-range stored value (e.g. a legacy
+    /// `Int.max` "unlimited") can never overflow the terminal's buffer sizing.
+    public var effectiveScrollback: Int {
+        min(max(scrollbackLines, 0), Self.maxScrollback)
+    }
+
+    /// The Scrollback picker's choices: the presets plus the stored value when it is
+    /// not one of them (so the picker never shows a blank selection), ascending.
+    public static func scrollbackChoices(current: Int) -> [Int] {
+        scrollbackPresets.contains(current) ? scrollbackPresets
+            : (scrollbackPresets + [current]).sorted()
+    }
+
+    /// The Scrollback picker label: "5,000 lines" (comma-grouped, locale-independent).
+    public static func scrollbackLabel(_ lines: Int) -> String {
+        let digits = String(lines.magnitude)
+        var grouped = ""
+        for (i, ch) in digits.enumerated() {
+            if i > 0 && (digits.count - i) % 3 == 0 { grouped.append(",") }
+            grouped.append(ch)
+        }
+        return "\(lines < 0 ? "-" : "")\(grouped) \(lines == 1 ? "line" : "lines")"
+    }
 
     public init(fontSize: Double = 13,
                 cursorStyle: CursorStyle = .block,

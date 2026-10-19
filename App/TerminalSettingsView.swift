@@ -3,7 +3,8 @@
 import SwiftUI
 import SemicolynKit
 
-/// Terminal settings: font size, font face, and how swiping scrolls full-screen apps.
+/// Settings → Terminal: behaviour. Scrollback, and how swiping scrolls full-screen
+/// apps. (Font and cursor are in Appearance.)
 struct TerminalSettingsView: View {
     // Read the shared store DIRECTLY rather than via `@EnvironmentObject`. An
     // `@EnvironmentObject` that was never injected is a `fatalError` by design, and
@@ -15,25 +16,18 @@ struct TerminalSettingsView: View {
 
     var body: some View {
         List {
-            Section("Font Size") {
-                Slider(value: $store.settings.fontSize,
-                       in: TerminalSettings.fontRange, step: 1) {
-                    Text("Font Size")
-                }
-                Text("\(Int(store.settings.fontSize)) pt")
-                    .foregroundStyle(.secondary)
-            }
-            Section("Font") {
-                NavigationLink {
-                    TerminalFontPickerView()
-                } label: {
-                    HStack {
-                        Text("Typeface")
-                        Spacer()
-                        Text(store.settings.fontFace.displayName)
-                            .foregroundStyle(.secondary)
+            Section {
+                Picker("Scrollback", selection: Binding(
+                    get: { store.settings.effectiveScrollback },
+                    set: { store.settings.scrollbackLines = $0 }
+                )) {
+                    ForEach(TerminalSettings.scrollbackChoices(current: store.settings.effectiveScrollback),
+                            id: \.self) { lines in
+                        Text(TerminalSettings.scrollbackLabel(lines)).tag(lines)
                     }
                 }
+            } footer: {
+                Text("Applies to plain shells. tmux keeps its own history.")
             }
             Section {
                 // The section header is the single label; the inline picker's own title is

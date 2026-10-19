@@ -97,7 +97,9 @@ struct TerminalScreen: UIViewRepresentable {
         // Apply terminal rendering preferences from settings.
         let s = context.coordinator.settings
         terminal.font = TerminalFontProvider.shared.font(for: s.fontFace, size: CGFloat(s.fontSize))
-        terminal.getTerminal().options.scrollback = s.scrollbackLines
+        // `changeScrollback`, not `options.scrollback =`: the buffer already exists, and
+        // only this resizes it. Clamped (`effectiveScrollback`) so it can't overflow.
+        terminal.getTerminal().changeScrollback(s.effectiveScrollback)
         // Apply the theme's terminal palette (bg/fg/cursor/selection + 16 ANSI).
         applyPalette(theme.terminalPalette(), to: terminal)
         applyCursor(to: terminal, style: s.cursorStyle, blink: s.cursorBlink)
@@ -224,6 +226,17 @@ struct TerminalScreen: UIViewRepresentable {
             coord.lastAppliedFontSize = settings.fontSize
             coord.baseSize = settings.fontSize
         }
+        // Cursor and scrollback changed in Settings apply live, once per change (a
+        // program's own DECSCUSR is not re-overridden on every SwiftUI pass).
+        if settings.cursorStyle != coord.lastAppliedCursorStyle || settings.cursorBlink != coord.lastAppliedCursorBlink {
+            applyCursor(to: terminal, style: settings.cursorStyle, blink: settings.cursorBlink)
+            coord.lastAppliedCursorStyle = settings.cursorStyle
+            coord.lastAppliedCursorBlink = settings.cursorBlink
+        }
+        if settings.effectiveScrollback != coord.lastAppliedScrollback {
+            terminal.getTerminal().changeScrollback(settings.effectiveScrollback)
+            coord.lastAppliedScrollback = settings.effectiveScrollback
+        }
         // Update mouse-active dot visibility and selection gesture state.
         context.coordinator.updateMouseDot(from: terminal)
     }
@@ -272,6 +285,10 @@ struct TerminalScreen: UIViewRepresentable {
         /// without clobbering an in-progress pinch on every SwiftUI pass.
         var lastAppliedFace: TerminalFont
         var lastAppliedFontSize: Double
+        /// Cursor and scrollback last applied from Settings (see `updateUIView`).
+        var lastAppliedCursorStyle: SemicolynKit.CursorStyle
+        var lastAppliedCursorBlink: Bool
+        var lastAppliedScrollback: Int
         /// True once we've claimed keyboard focus the first time (on the first
         /// `updateUIView` after the view is in a window, so `becomeFirstResponder` can
         /// succeed). We don't re-claim on later passes (a user who dismisses the
@@ -301,6 +318,9 @@ struct TerminalScreen: UIViewRepresentable {
             self.baseSize = settings.fontSize
             self.lastAppliedFace = settings.fontFace
             self.lastAppliedFontSize = settings.fontSize
+            self.lastAppliedCursorStyle = settings.cursorStyle
+            self.lastAppliedCursorBlink = settings.cursorBlink
+            self.lastAppliedScrollback = settings.effectiveScrollback
             self.halo = BellHaloView(frame: .zero)
             self.osc52Allowed = osc52Allowed
             self.onTitle = onTitle
