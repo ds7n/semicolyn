@@ -190,12 +190,15 @@ public func hasCycle(savingHostId: UUID, chain: [JumpHop],
 /// replaces the old "Mosh silently wins" inference. Precedence:
 /// 1. explicit host.transport
 /// 2. explicit defaults.transport
-/// 3. LEGACY MIGRATION: a host/defaults with mosh enabled but no transport set
-///    resolves to .mosh (so existing Mosh hosts keep working with no stored field)
+/// 3. LEGACY MIGRATION: a HOST whose own mosh config is enabled but has no
+///    transport set resolves to .mosh (so existing Mosh hosts keep working with
+///    no stored field). Only the host's own leaf counts: the Defaults Mosh group
+///    holds settings "used by hosts set to Mosh", so filling it (or a stored
+///    Defaults `mosh.enabled`) must never switch hosts to Mosh.
 /// 4. .ssh (the universally-available default)
 public func resolveTransport(host: Host, defaults: Defaults) -> Transport {
     if let t = host.transport.value { return t }
     if let t = defaults.transport.value { return t }
-    if resolveMoshEnabled(host: host, defaults: defaults) { return .mosh }
+    if case .explicit(let cfg?) = host.mosh, cfg.enabled { return .mosh }
     return .ssh
 }
