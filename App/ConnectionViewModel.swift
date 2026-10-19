@@ -291,6 +291,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// session was created and ignores itself once it no longer matches, so a late
     /// onEnd from a session a Reconnect already replaced can't fail the new one.
     private var etGeneration = 0
+    /// Advanced by every `teardown()`. Each SSH shell's sink
+    /// (`GenerationGatedShellOutput`) and each Mosh session's callbacks capture it, so
+    /// a session a Reconnect replaced can't feed or fail the new one.
+    private var sessionGeneration = SessionGeneration()
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -629,6 +633,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         etSession?.close()
         etSession = nil
         etGeneration &+= 1
+        sessionGeneration.advance()   // stale SSH sink / Mosh callbacks now drop out
         plainTmux = nil
         plainTmuxSessionNamePendingInstall = nil
         moshPlainTmuxLaunchSent = false
@@ -867,8 +872,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // App target already compiles: the Obj-C block property is inferred main-actor
         // here, so no `MainActor.assumeIsolated` wrapper is needed (that guard is for
         // nonisolated SwiftTerm/@objc callbacks, not these blocks).
+        // Callbacks from a session a Reconnect already replaced are dropped.
+        let moshGeneration = sessionGeneration.value
         sess.onOutput = { [weak self] data in
-            guard let self else { return }
+            guard let self, self.sessionGeneration.isCurrent(moshGeneration) else { return }
             self.output.onOutput(data: data)
             // Connecting overlay: runs after the probe accumulation below (on every exit
             // path) so the sentinel check sees this chunk.
@@ -929,7 +936,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             }
         }
         sess.onFirstFrame = { [weak self] in
-            guard let self else { return }
+            guard let self, self.sessionGeneration.isCurrent(moshGeneration) else { return }
             // Reattach succeeded: frames flowing. Refresh the record (new lastConnectedAt)
             // and drop the in-memory failure copy.
             DebugLog.shared.log(.connect, "resume:reattachMosh onFirstFrame → live")
@@ -1023,7 +1030,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                                endpoint: (host: record.host, port: record.port), secret: key)
         }
         sess.onEnd = { [weak self] reason in
-            guard let self else { return }
+            guard let self, self.sessionGeneration.isCurrent(moshGeneration) else {
+                DebugLog.shared.log(.connect, "resume:reattachMosh onEnd from a replaced session → ignored")
+                return
+            }
             // Mutual exclusion with the liveness watchdog (mirrors the fresh path's
             // moshResolved guard): if the watchdog already resolved this reattach (dead
             // server -> fresh connect), a late onEnd must NOT clobber the new connection
@@ -1309,12 +1319,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         return text.isEmpty ? nil : text
     }
 
+    /// The sink for one SSH shell: forwards to `output` only while this session's
+    /// generation is current (see `GenerationGatedShellOutput`).
+    private func gatedShellOutput() -> GenerationGatedShellOutput {
+        GenerationGatedShellOutput(target: output, generation: sessionGeneration.value,
+                                   isCurrent: { [weak self] g in self?.sessionGeneration.isCurrent(g) ?? false })
+    }
+
     /// Open a raw PTY shell: the original pre-tmux path. Sets `connection`,
     /// `session`, and `state = .shell`.
     private func openRawShell(conn: Connection) async throws {
         DebugLog.shared.log(.lifecycle, "openRawShell: opening PTY shell")
         let sess = try await conn.openShell(
-            term: "xterm-256color", cols: 80, rows: 24, output: output)
+            term: "xterm-256color", cols: 80, rows: 24, output: gatedShellOutput())
         connection = conn
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
@@ -1461,8 +1478,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // leave the terminal permanently blank. `onOutput` appends to the
             // `PendingOutputBuffer`, which replays on sink-install, and feeds the
             // predictor output tap (`installOutputTap` above).
+            // Callbacks from a session a Reconnect already replaced are dropped.
+            let moshGeneration = sessionGeneration.value
             sess.onOutput = { [weak self] data in
-                guard let self else { return }
+                guard let self, self.sessionGeneration.isCurrent(moshGeneration) else { return }
                 self.output.onOutput(data: data)
                 // Connecting overlay: runs after the probe accumulation below (on every
                 // exit path) so the sentinel check sees this chunk.
@@ -1505,13 +1524,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self.evaluatePlainTmuxProbe()
             }
             sess.onFirstFrame = { [weak self] in
+                guard let self, self.sessionGeneration.isCurrent(moshGeneration) else { return }
                 // Frames are flowing: the UDP path is up. `moshFirstFrameSeen` is no
                 // longer the exit discriminator (that's reason+elapsed now), but it
                 // still records that a frame arrived; cancelling the watchdog here is
                 // the important effect, the loop signalled life, so don't SSH-fall-back.
                 DebugLog.shared.log(.connect, "mosh: onFirstFrame, UDP handshake up, frames flowing")
-                self?.moshFirstFrameSeen = true
-                self?.moshWatchdog?.cancel(); self?.moshWatchdog = nil
+                self.moshFirstFrameSeen = true
+                self.moshWatchdog?.cancel(); self.moshWatchdog = nil
                 DebugLog.shared.log(.connect, "mosh: watchdog cancelled (onFirstFrame)")
                 // Start the plain-tmux launch (attach-or-create) now that frames are
                 // flowing. DIRECT launch: mosh-server is already running it as the session
@@ -1523,7 +1543,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // fire SYNCHRONOUSLY during `sess.start()` below (see the `onOutput`
                 // comment above), before `moshSession = sess` runs, so `self.moshSession`
                 // may still be nil at this instant.
-                if useTmux, let self, !self.moshPlainTmuxLaunchSent,
+                if useTmux, !self.moshPlainTmuxLaunchSent,
                    isValidTmuxSessionName(self.tmuxSessionNameForConnection) {
                     self.moshPlainTmuxLaunchSent = true
                     self.startMoshPlainTmuxLaunch(sess: sess, typeInBandLaunch: !self.moshDirectLaunch)
@@ -1534,9 +1554,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // is true for a plain-tmux Mosh session, and the tmux session name RIDES
                 // the record so a cold reattach lands back in the tmux session rather
                 // than a raw shell (device bug 2026-09-04: Mosh resume captured tmux=false).
-                self?.captureResume(host: host, transport: .mosh,
-                                    endpoint: (host: host.hostName, port: port),
-                                    secret: Data(key.utf8))
+                self.captureResume(host: host, transport: .mosh,
+                                   endpoint: (host: host.hostName, port: port),
+                                   secret: Data(key.utf8))
             }
             // Stamp the start time BEFORE the onEnd closure literal so the closure can
             // capture it (Swift resolves captures at declaration order, not runtime).
@@ -1544,7 +1564,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // true session-start instant. Monotonic clock (systemUptime).
             let moshStartedAt = ProcessInfo.processInfo.systemUptime
             sess.onEnd = { [weak self] reason in
-                guard let self else { return }
+                guard let self, self.sessionGeneration.isCurrent(moshGeneration) else {
+                    DebugLog.shared.log(.connect, "mosh: onEnd from a replaced session → ignored")
+                    return
+                }
                 self.moshWatchdog?.cancel(); self.moshWatchdog = nil
                 // The watchdog may have already resolved this session (attached SSH)
                 // via an onEnd dispatch that was enqueued before the watchdog niled it.
@@ -1953,7 +1976,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let startCmd = PlainTmuxController.launchCommand(sessionName: tmuxSessionNameForConnection)
         DebugLog.shared.log(.tmux, "attachPlainTmux: openExec startCmd=\(startCmd.prefix(60))")
         let sess = try await conn.openExec(command: startCmd, term: "xterm-256color",
-                                           cols: 80, rows: 24, output: output)
+                                           cols: 80, rows: 24, output: gatedShellOutput())
         connection = conn
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
