@@ -81,12 +81,13 @@ final class HostEditorViewModel: ObservableObject {
         let others = (try? AppStores.shared.hosts.allHosts())?.filter { $0.id != host.id } ?? []
         let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
         let pwRefResolves = passwordRefResolves()
-        issues = validateHostForm(
-            host,
-            others: others,
-            defaults: defaults,
-            passwordRefResolves: pwRefResolves
-        )
+        // Hidden groups (`UnwiredOptions`) are not validated: a stored value the
+        // user can't see must never block Save.
+        issues = visibleIssues(
+            validateHostForm(host, others: others, defaults: defaults,
+                             passwordRefResolves: pwRefResolves),
+            jumpChainShown: UnwiredOptions.jumpChain,
+            portForwardingShown: UnwiredOptions.portForwarding)
     }
 
     // MARK: - Save
