@@ -3,7 +3,7 @@
 import Foundation
 
 /// `known_hosts` storage, keyed by host UUID, over a `SecretStore` (entries live
-/// in iCloud Keychain — synced and E2EE — per the host-config-model storage
+/// in iCloud Keychain, synced and E2EE, per the host-config-model storage
 /// backbone). Multiple entries per host are supported so a rotation window can
 /// hold the old and new key as both valid. Entries serialize as JSON `[HostKey]`
 /// under `SecretRef.hostKeys(hostID:)`.
@@ -36,6 +36,11 @@ public struct HostKeyStore {
         } else {
             try persist(remaining, forHost: hostID)
         }
+    }
+
+    /// Remove every entry for `hostID` (the host itself was deleted). Idempotent.
+    public func removeAll(forHost hostID: UUID) throws {
+        try secrets.deleteSecret(.hostKeys(hostID: hostID))
     }
 
     private func persist(_ entries: [HostKey], forHost hostID: UUID) throws {

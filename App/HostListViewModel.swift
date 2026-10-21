@@ -42,7 +42,9 @@ final class HostListViewModel: ObservableObject {
     /// refusal message from the spec; any other error is also surfaced.
     func delete(_ host: Host) {
         do {
-            try AppStores.shared.hosts.deleteHost(id: host.id)
+            // Also drops the host's trusted host keys and saved password (Keychain).
+            try deleteHostAndSecrets(id: host.id, hosts: AppStores.shared.hosts,
+                                     secrets: AppStores.shared.secrets)
             // Cleanup (spec): a deleted host has no resume target, so drop any resume
             // record for it now (not just on the next-launch reconcile sweep).
             AppStores.shared.resume.clear(hostID: host.id)
