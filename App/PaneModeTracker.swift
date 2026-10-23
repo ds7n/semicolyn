@@ -36,7 +36,7 @@ final class PaneModeTracker {
         mode = next
         // recompute is always called on the main thread (SwiftUI/SwiftTerm view
         // callbacks). Both the @MainActor logger and the @MainActor `onChange`
-        // (which touches mouseDot UI state) run under one hop.
+        // run under one hop.
         MainActor.assumeIsolated {
             DebugLog.shared.log(.gesture, "mode[raw] -> \(next) (altSrc=raw)")
             onChange(next)
