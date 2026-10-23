@@ -126,6 +126,24 @@ final class GestureEngineDragTests: XCTestCase {
         XCTAssertEqual(d.up(65, 70, at: 1.2), [.endSelectionDrag(gp(65, 70), showMenu: true)])
     }
 
+    /// Device report 2026-10-23: on a short (double-tapped) word the two handles' touch
+    /// areas overlap; grabbing the END handle must move only the end, never the start.
+    func testGrabbingEndOfShortWordKeepsStartFixed() {
+        var d = GestureDriver(gestureContext(selection: GestureSelection(start: gc(2, 101), end: gc(4, 101))))
+        d.down(48, 30, at: 1.0)                       // on the end handle, inside the start's slop too
+        XCTAssertEqual(d.move(68, 30, at: 1.1),
+                       [.setSelection(start: gc(2, 101), end: gc(6, 101), loupe: gp(68, 30))])
+    }
+
+    /// The grabbed end keeps its offset from the finger: touching beside the handle and
+    /// moving 14pt (1.4 cells) advances the end one cell, not to the cell under the finger.
+    func testHandleDragKeepsGrabOffset() {
+        var d = GestureDriver(gestureContext(selection: sel))
+        d.down(95, 38, at: 1.0)                       // right of the end cell (x80..90), in slop
+        XCTAssertEqual(d.move(109, 38, at: 1.1),
+                       [.setSelection(start: gc(2, 101), end: gc(9, 101), loupe: gp(109, 38))])
+    }
+
     /// Device bug build 175: a horizontal handle drag must never switch windows.
     func testHorizontalHandleDragNeverSwitches() {
         var d = GestureDriver(gestureContext(selection: sel))

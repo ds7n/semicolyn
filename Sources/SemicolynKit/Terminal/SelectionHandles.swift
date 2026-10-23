@@ -38,13 +38,31 @@ public struct SelectionHandleRect: Equatable, Sendable {
 }
 
 /// Pick which selection handle `point` is on, given each end's on-screen cell rect padded by
-/// `slop` (touch tolerance). `start` wins if the padded rects overlap the point. Returns nil
-/// when the point is on neither (the caller then treats the drag as content, not a handle drag).
+/// `slop` (touch tolerance). When both padded rects contain the point (a short selection),
+/// the handle whose drawn bar is nearer wins: SwiftTerm draws the start bar on the start
+/// cell's LEFT edge and the end bar on the end cell's RIGHT edge. An exact tie keeps the
+/// start. Returns nil when the point is on neither (the caller then treats the drag as
+/// content, not a handle drag).
 public func hitTestHandle(point: SelectionHandlePoint, startRect: SelectionHandleRect,
                           endRect: SelectionHandleRect, slop: Double) -> SelectionEnd? {
-    if startRect.containsPadded(point, slop: slop) { return .start }
-    if endRect.containsPadded(point, slop: slop) { return .end }
-    return nil
+    let onStart = startRect.containsPadded(point, slop: slop)
+    let onEnd = endRect.containsPadded(point, slop: slop)
+    switch (onStart, onEnd) {
+    case (false, false): return nil
+    case (true, false): return .start
+    case (false, true): return .end
+    case (true, true):
+        let toStart = distanceToBar(point, x: startRect.x, rect: startRect)
+        let toEnd = distanceToBar(point, x: endRect.x + endRect.width, rect: endRect)
+        return toEnd < toStart ? .end : .start
+    }
+}
+
+/// Distance from `point` to a handle bar: the vertical segment at `x` spanning `rect`'s rows.
+private func distanceToBar(_ point: SelectionHandlePoint, x: Double, rect: SelectionHandleRect) -> Double {
+    let dx = point.x - x
+    let dy = point.y < rect.y ? rect.y - point.y : max(0, point.y - (rect.y + rect.height))
+    return (dx * dx + dy * dy).squareRoot()
 }
 
 /// Normalize two grid positions so `start` precedes `end` in reading (row-major) order.
