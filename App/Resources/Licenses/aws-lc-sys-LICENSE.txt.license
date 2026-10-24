@@ -1,0 +1,9 @@
+SPDX-FileCopyrightText: Amazon.com, Inc. or its affiliates
+SPDX-FileCopyrightText: Google Inc.
+SPDX-FileCopyrightText: The OpenSSL Project
+SPDX-FileCopyrightText: Eric Young
+SPDX-License-Identifier: ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)
+
+aws-lc-sys 0.41.0 LICENSE (crate source).
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.

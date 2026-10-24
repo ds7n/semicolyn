@@ -1,0 +1,6 @@
+SPDX-FileCopyrightText: 2021-2026 The RustCrypto Project Developers
+SPDX-License-Identifier: MIT
+
+ssh-key 0.7.0-rc.10 LICENSE-MIT (crate source).
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.

@@ -1,0 +1,6 @@
+SPDX-FileCopyrightText: 2014-present the tldr-pages team and contributors
+SPDX-License-Identifier: CC-BY-4.0 AND MIT
+
+tldr-pages LICENSE.md at 3b17800dbd75c5e19287e2f955c5886c446d2ec3.
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.

@@ -1,0 +1,6 @@
+SPDX-FileCopyrightText: Amazon.com, Inc. or its affiliates
+SPDX-License-Identifier: ISC AND (Apache-2.0 OR ISC)
+
+aws-lc-rs 1.17.0 LICENSE (crate source).
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.

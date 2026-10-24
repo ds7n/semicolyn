@@ -1,0 +1,7 @@
+SPDX-FileCopyrightText: 2013 Tomas Kislan
+SPDX-FileCopyrightText: 2013 Adam Rudd
+SPDX-License-Identifier: MIT
+
+base64 LICENSE (Eternal Terminal external/).
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.
