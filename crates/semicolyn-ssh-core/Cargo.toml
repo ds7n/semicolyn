@@ -10,7 +10,7 @@ name = "semicolyn_ssh_core"
 crate-type = ["staticlib", "lib"]
 
 [dependencies]
-uniffi = { version = "0.31", features = ["cli", "tokio"] }
+uniffi = { version = "0.31", features = ["tokio"] }
 russh = "0.61"
 ssh-key = { version = "=0.7.0-rc.10", default-features = false, features = ["alloc", "ed25519", "ecdsa", "rsa", "p256", "p384", "encryption", "rand_core"] }
 rand_core = "0.10"
@@ -19,6 +19,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync",
 async-trait = "0.1"
 thiserror = "2"
 
+[features]
+# The host-only `uniffi-bindgen` binary (Swift binding generator). Kept out of the
+# default build so its CLI dependencies are never linked into the iOS library.
+bindgen = ["uniffi/cli"]
+
 [dev-dependencies]
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
@@ -26,3 +31,4 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 [[bin]]
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
