@@ -18,8 +18,9 @@ private struct ResumeTarget: Identifiable {
 }
 
 /// Root host-library screen. Shows an empty-state CTA when no hosts exist;
-/// otherwise a list where each row can be tapped to connect or swiped for
-/// Edit / Delete actions.
+/// otherwise a searchable list where each row can be tapped to connect, swiped for
+/// Edit / Delete, or long-pressed for Connect / Edit / Duplicate / Delete. The
+/// toolbar also offers "Connect to user@host…" (`QuickConnectEntrySheet`).
 struct HostListView: View {
     @StateObject private var vm = HostListViewModel()
     @Environment(\.theme) private var theme
@@ -36,6 +37,14 @@ struct HostListView: View {
     /// Guards the once-per-launch resume sweep so re-entering `onAppear` (e.g. after a
     /// sheet dismiss) never re-triggers it.
     @State private var didRunResume = false
+    /// A host swiped for Delete, awaiting confirmation.
+    @State private var pendingDelete: Host?
+    /// The Hosts search text (`filterHosts`).
+    @State private var search = ""
+    /// Whether the "Connect to user@host…" sheet is up.
+    @State private var showingQuickConnect = false
+    /// The host chosen in that sheet, connected once the sheet has gone away.
+    @State private var quickConnectHost: Host?
 
     var body: some View {
         NavigationStack {
@@ -57,23 +66,48 @@ struct HostListView: View {
                     }
                     .accessibilityLabel("Settings")
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Button {
+                        InputClickFeedback.play()
+                        showingQuickConnect = true
+                    } label: {
+                        Image(systemName: "bolt.horizontal")
+                    }
+                    .accessibilityLabel("Connect to user@host…")
                     Button {
                         InputClickFeedback.play()
                         editorMode = .creating
                     } label: {
                         Image(systemName: "plus")
                     }
+                    .accessibilityLabel("Add Host")
                 }
             }
             .onAppear {
                 vm.reload()
                 runLaunchResumeIfNeeded()
             }
-            // Settings sheet, Task 4.
-            .sheet(isPresented: $showingSettings) {
-                SettingsView(context: .preConnect,
-                             keybarSettings: AppStores.shared.keybarSettings)
+            // Settings sheet, Task 4. Reload on dismiss: deleting an SSH key there
+            // rewrites the hosts that used it.
+            .sheet(isPresented: $showingSettings, onDismiss: { vm.reload() }) {
+                SettingsView(keybarSettings: AppStores.shared.keybarSettings)
+            }
+            // Connect to user@host…: find-or-create the host, then connect.
+            // The session cover opens once the sheet is gone (two presentations at once
+            // would drop the second).
+            .sheet(isPresented: $showingQuickConnect, onDismiss: {
+                vm.reload()
+                if let host = quickConnectHost {
+                    quickConnectHost = nil
+                    connectingHost = IdentifiableHost(host)
+                }
+            }) {
+                QuickConnectEntrySheet(
+                    onConnect: { target in
+                        quickConnectHost = try? ConnectionViewModel.savedOrNewHost(for: target)
+                        showingQuickConnect = false
+                    },
+                    onCancel: { showingQuickConnect = false })
             }
             // Session cover, Task 8: tap a saved host to connect.
             .fullScreenCover(item: $connectingHost) { wrapper in
@@ -93,9 +127,26 @@ struct HostListView: View {
                     HostEditorView(editing: host)
                 }
             }
+            // Swipe Delete asks first, with the same message as the editor's Delete.
+            .confirmationDialog(
+                "Delete “\(pendingDelete?.label ?? "")”?",
+                isPresented: Binding(get: { pendingDelete != nil },
+                                     set: { if !$0 { pendingDelete = nil } }),
+                titleVisibility: .visible,
+                presenting: pendingDelete
+            ) { host in
+                Button("Delete", role: .destructive) {
+                    InputClickFeedback.play()
+                    vm.delete(host)
+                    pendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: { _ in
+                Text(hostDeleteMessage)
+            }
             // Delete-refusal alert.
             .alert(
-                "Cannot Delete Host",
+                "Can't Delete “\(vm.deleteErrorHostLabel)”",
                 isPresented: Binding(
                     get: { vm.deleteError != nil },
                     set: { if !$0 { vm.deleteError = nil } }
@@ -104,6 +155,17 @@ struct HostListView: View {
                 Button("OK", role: .cancel) { InputClickFeedback.play(); vm.deleteError = nil }
             } message: {
                 Text(vm.deleteError ?? "")
+            }
+            .alert(
+                "Couldn't Duplicate Host",
+                isPresented: Binding(
+                    get: { vm.duplicateError != nil },
+                    set: { if !$0 { vm.duplicateError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { InputClickFeedback.play(); vm.duplicateError = nil }
+            } message: {
+                Text(vm.duplicateError ?? "")
             }
         }
     }
@@ -147,7 +209,7 @@ struct HostListView: View {
             }
             .buttonStyle(.plain)
 
-            Text("You'll need a hostname, username, and either a password or key.")
+            Text("You'll need the server's address, your username, and a password or SSH key. You can create a key in the next step.")
                 .font(.subheadline)
                 .foregroundStyle(Color(theme.text.secondary))
                 .multilineTextAlignment(.center)
@@ -160,7 +222,7 @@ struct HostListView: View {
 
     private var hostList: some View {
         List {
-            ForEach(vm.hosts, id: \.id) { host in
+            ForEach(filterHosts(vm.hosts, query: search), id: \.id) { host in
                 Button {
                     InputClickFeedback.play()
                     connectingHost = IdentifiableHost(host)
@@ -168,14 +230,39 @@ struct HostListView: View {
                     HostRow(host: host)
                 }
                 .buttonStyle(.plain)
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    // Delete action
+                .contextMenu {
+                    Button {
+                        connectingHost = IdentifiableHost(host)
+                    } label: {
+                        Label("Connect", systemImage: "play")
+                    }
+                    Button {
+                        editorMode = .editing(host)
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    Button {
+                        if let copy = vm.duplicate(host) { editorMode = .editing(copy) }
+                    } label: {
+                        Label("Duplicate", systemImage: "plus.square.on.square")
+                    }
+                    // Confirmed first, same dialog as the swipe.
                     Button(role: .destructive) {
-                        InputClickFeedback.play()
-                        vm.delete(host)
+                        pendingDelete = host
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    // Delete action: confirmed first. Not `role: .destructive`, which
+                    // animates the row away before the user has confirmed.
+                    Button {
+                        InputClickFeedback.play()
+                        pendingDelete = host
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .tint(.red)
 
                     // Edit action
                     Button {
@@ -186,6 +273,12 @@ struct HostListView: View {
                     }
                     .tint(Color(theme.accent.primary))
                 }
+            }
+        }
+        .searchable(text: $search, prompt: "Search hosts")
+        .overlay {
+            if filterHosts(vm.hosts, query: search).isEmpty {
+                ContentUnavailableView.search(text: search)
             }
         }
     }

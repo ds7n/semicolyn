@@ -8,10 +8,10 @@
 /// Only active while plain tmux is attached: with no tmux (raw shell, tmux opted out or
 /// missing) every shortcut maps to nil, so it does nothing, as before.
 ///
-/// The split names follow the catalog's iTerm2-style titles, which are the opposite of
-/// tmux's flags: "Split Vertically" (`⌘D`, `⌘|`) draws a vertical divider, so the new
-/// pane sits to the right (`split-window -h`, `TmuxAction.splitHorizontal`); "Split
-/// Horizontally" (`⇧⌘D`, `⌘-`) puts it below (`split-window -v`).
+/// The split command names follow iTerm2, which are the opposite of tmux's flags:
+/// `splitVertical` ("Split Right", `⌘D`, `⌘|`) draws a vertical divider, so the new
+/// pane sits to the right (`split-window -h`, `TmuxAction.splitHorizontal`);
+/// `splitHorizontal` ("Split Down", `⇧⌘D`, `⌘-`) puts it below (`split-window -v`).
 ///
 /// `closeWindow`, `switchWindow(n)` and `prevPane` have no bound tmux action yet, so they
 /// map to nil even with tmux attached. Non-tmux commands (paste, settings, ...) are
@@ -27,7 +27,7 @@ public func keyboardTmuxAction(for command: KeyboardCommand,
     case .splitVertical:   return .splitHorizontal
     case .splitHorizontal: return .splitVertical
     case .closeWindow, .switchWindow, .prevPane,
-         .clearScreen, .copy, .paste, .newConnection, .reconnect,
+         .clearScreen, .copy, .paste, .newConnection, .reconnect, .disconnect,
          .openLauncher, .settings, .tips:
         return nil
     }

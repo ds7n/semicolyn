@@ -28,13 +28,20 @@ public struct PredictorEngine: Sendable {
     private let commands: CommandTree?
     /// Single-ranker weights.
     public var weights: RankingWeights
+    /// `false` for a private ("Don't learn from my typing") session: ``record`` and
+    /// ``harvest(_:)`` are no-ops, so nothing typed or shown is learned, while
+    /// ``suggestions(line:lineOptedOut:limit:)`` still ranks the shipped dictionaries
+    /// (and whatever `learned` the engine was built with).
+    public let learns: Bool
 
     /// An engine for the single ranker (``suggestions(line:lineOptedOut:limit:)``),
     /// reading the shipped English dictionary and command tree. Either may be `nil`
-    /// (that source then adds nothing).
+    /// (that source then adds nothing). `learns: false` makes a private engine
+    /// (see ``learns``).
     public init(learned: LearnedState, english: WordDictionary?, commands: CommandTree?,
                 filter: TokenFilter = .init(), weights: RankingWeights = .init(),
-                window: RollingWindow = .days30) {
+                window: RollingWindow = .days30, learns: Bool = true) {
+        self.learns = learns
         self.learned = learned
         self.output = OutputHarvest(capacity: 512)
         self.filter = filter
@@ -73,6 +80,7 @@ public struct PredictorEngine: Sendable {
     public mutating func record(_ token: String, count: UInt32 = 1, after previous: String? = nil,
                                 echoConfirmed: Bool = true, optedOut: Bool = false,
                                 accepted: Bool = false) {
+        guard learns else { return }
         // Normalize: learn the lookup word (surrounding punctuation trimmed; paths and
         // flags whole). Both the raw token and the word must pass the filter, so
         // trimming can never let an excluded form through.
@@ -165,6 +173,7 @@ public struct PredictorEngine: Sendable {
     /// resets, and the chunk's leading fragment (up to its first whitespace, which
     /// may be the tail of a cut word or escape sequence) is not harvested.
     public mutating func harvest(_ chunk: HarvestChunk) {
+        guard learns else { return }
         if chunk.droppedBefore { resetHarvestContext() }
         var clean = harvestFilter.filter(chunk.bytes)
         if chunk.droppedBefore {

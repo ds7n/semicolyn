@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-/// The connection transport for a host: chosen explicitly by the user (no Auto).
-/// SSH is the universally-available default; Mosh roams but has no panes; ET has
-/// panes and roaming but needs etserver on the host.
+/// The connection transport for a host ("Connection type" in the editors): chosen
+/// explicitly by the user (no Auto). SSH is the universally-available default; Mosh
+/// and ET stay connected across network changes but need their server installed.
+/// Gesture-driven tmux works on all three.
 public enum Transport: String, Codable, Sendable, CaseIterable, Equatable {
     case ssh, mosh, et
 
@@ -20,11 +21,11 @@ public enum Transport: String, Codable, Sendable, CaseIterable, Equatable {
     public var summary: String {
         switch self {
         case .ssh:
-            return "Works everywhere, native tmux panes, does not survive roaming."
+            return "Works with any server. Drops when your network changes."
         case .mosh:
-            return "Survives roaming, no native panes, needs mosh-server + a UDP port range."
+            return "Stays connected when your network changes or the phone sleeps. Needs mosh-server and open UDP ports."
         case .et:
-            return "Panes and roaming, needs etserver on the host + TCP 2022, failure is shown (no silent switch)."
+            return "Stays connected when your network changes. Needs etserver on the server (TCP 2022)."
         }
     }
 }

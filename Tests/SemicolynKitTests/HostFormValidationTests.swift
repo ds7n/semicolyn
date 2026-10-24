@@ -112,4 +112,44 @@ final class HostFormValidationTests: XCTestCase {
         let issues = validateHostForm(h, others: [], defaults: Defaults(), passwordRefResolves: true)
         XCTAssertFalse(issues.contains { $0.kind == .invalidTmuxSessionName })
     }
+
+    // MARK: - Hidden groups never block Save (review fix)
+
+    private func issue(_ kind: ValidationIssue.Kind, _ severity: ValidationSeverity = .hardBlock) -> ValidationIssue {
+        ValidationIssue(kind: kind, severity: severity)
+    }
+
+    func testHiddenJumpChainIssuesAreDroppedAndSaveIsAllowed() {
+        let id = UUID()
+        let host = h("self", id, jump: [.ref(hostId: id)])
+        let all = validateHostForm(host, others: [], defaults: Defaults(), passwordRefResolves: true)
+        XCTAssertFalse(canSave(all))
+        let shown = visibleIssues(all, jumpChainShown: false, portForwardingShown: false)
+        XCTAssertEqual(shown, [])
+        XCTAssertTrue(canSave(shown))
+    }
+
+    func testShownJumpChainIssuesAreKept() {
+        let id = UUID()
+        let host = h("self", id, jump: [.ref(hostId: id)])
+        let all = validateHostForm(host, others: [], defaults: Defaults(), passwordRefResolves: true)
+        XCTAssertEqual(visibleIssues(all, jumpChainShown: true, portForwardingShown: false), all)
+    }
+
+    func testForwardIssuesFollowThePortForwardingFlagOnly() {
+        let issues = [issue(.localForwardMissingField(index: 0)),
+                      issue(.remoteForwardMissingField(index: 1)),
+                      issue(.dynamicForwardMissingField(index: 2)),
+                      issue(.inlineJumpHostMissingHostName(index: 0))]
+        XCTAssertEqual(visibleIssues(issues, jumpChainShown: true, portForwardingShown: false),
+                       [issue(.inlineJumpHostMissingHostName(index: 0))])
+        XCTAssertEqual(visibleIssues(issues, jumpChainShown: false, portForwardingShown: true),
+                       Array(issues.prefix(3)))
+    }
+
+    func testVisibleFieldIssuesAreNeverDropped() {
+        let issues = [issue(.missingLabel), issue(.missingHostName), issue(.stalePasswordRef),
+                      issue(.invalidTmuxSessionName), issue(.noUserSet, .softBlock)]
+        XCTAssertEqual(visibleIssues(issues, jumpChainShown: false, portForwardingShown: false), issues)
+    }
 }

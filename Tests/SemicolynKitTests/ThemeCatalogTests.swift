@@ -90,4 +90,25 @@ final class ThemeCatalogTests: XCTestCase {
         let decoded = try JSONDecoder().decode(ThemeID.self, from: data)
         XCTAssertEqual(decoded, original)
     }
+
+    // MARK: - D-7 live preview
+
+    func testPreviewShowsSupporterThemeWithoutPro() {
+        let d = displayedDescriptor(selectedID: ThemeID("neonMidnight"), previewID: ThemeID("glacier"), isPro: false)
+        XCTAssertEqual(d.id, ThemeID("glacier"))
+    }
+
+    func testNoPreviewIsTheProGatedSelection() {
+        // A stored Supporter selection without Pro still renders the free default.
+        XCTAssertEqual(displayedDescriptor(selectedID: ThemeID("glacier"), previewID: nil, isPro: false).id,
+                       ThemeID("neonMidnight"))
+        XCTAssertEqual(displayedDescriptor(selectedID: ThemeID("glacier"), previewID: nil, isPro: true).id,
+                       ThemeID("glacier"))
+    }
+
+    func testUnknownPreviewFallsBackToSelection() {
+        XCTAssertEqual(displayedDescriptor(selectedID: ThemeID("neonMidnight"), previewID: ThemeID("nope"),
+                                           isPro: false).id,
+                       ThemeID("neonMidnight"))
+    }
 }

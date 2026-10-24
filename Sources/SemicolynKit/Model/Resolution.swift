@@ -74,6 +74,28 @@ public func credentialResolution(hasUsableKey: Bool, hasStoredPassword: Bool) ->
     return .promptForPassword
 }
 
+/// What a Reconnect signs in with. A session that started from a cold reattach
+/// never ran `credentialResolution` (no password was typed or read), so Reconnect
+/// re-derives the credential instead of sending an empty password.
+public enum ReconnectCredential: Equatable, Sendable {
+    /// Reconnect with this password (keys, if any, are still tried first).
+    case password(String)
+    /// Reconnect with the host's keys only (no password to offer).
+    case keysOnly
+    /// Nothing to sign in with: ask for the password before tearing anything down.
+    case askForPassword
+}
+
+/// Decide the Reconnect credential: the password this session connected with, else
+/// the host's stored password, else its keys; with none of them, ask. Empty strings
+/// count as absent.
+public func reconnectCredential(lastPassword: String?, storedPassword: String?,
+                                hasUsableKey: Bool) -> ReconnectCredential {
+    if let p = lastPassword, !p.isEmpty { return .password(p) }
+    if let p = storedPassword, !p.isEmpty { return .password(p) }
+    return hasUsableKey ? .keysOnly : .askForPassword
+}
+
 // MARK: Tier 1 list fields (fallback: empty)
 
 public func resolveIdentities(host: Host, defaults: Defaults) -> [IdentityRef] {
@@ -190,12 +212,31 @@ public func hasCycle(savingHostId: UUID, chain: [JumpHop],
 /// replaces the old "Mosh silently wins" inference. Precedence:
 /// 1. explicit host.transport
 /// 2. explicit defaults.transport
-/// 3. LEGACY MIGRATION: a host/defaults with mosh enabled but no transport set
-///    resolves to .mosh (so existing Mosh hosts keep working with no stored field)
+/// 3. LEGACY MIGRATION: a HOST whose own mosh config is enabled but has no
+///    transport set resolves to .mosh (so existing Mosh hosts keep working with
+///    no stored field). Only the host's own leaf counts: the Defaults Mosh group
+///    holds settings "used by hosts set to Mosh", so filling it (or a stored
+///    Defaults `mosh.enabled`) must never switch hosts to Mosh.
 /// 4. .ssh (the universally-available default)
 public func resolveTransport(host: Host, defaults: Defaults) -> Transport {
     if let t = host.transport.value { return t }
     if let t = defaults.transport.value { return t }
-    if resolveMoshEnabled(host: host, defaults: defaults) { return .mosh }
+    if case .explicit(let cfg?) = host.mosh, cfg.enabled { return .mosh }
     return .ssh
+}
+
+/// One-time load migration for Connection Defaults written before D-5: a Defaults
+/// record with no transport and an enabled Mosh config used to make every unset host
+/// connect over Mosh. Make that intent explicit (transport = Mosh) and clear the
+/// legacy `enabled` flag, so those users keep Mosh while editing the Mosh group
+/// never switches transport again. Returns nil when the record needs no change
+/// (already migrated, a transport is set, or Mosh is absent or disabled).
+public func migratingLegacyMoshDefaults(_ defaults: Defaults) -> Defaults? {
+    guard defaults.transport.value == nil,
+          case .explicit(var cfg?) = defaults.mosh, cfg.enabled else { return nil }
+    var migrated = defaults
+    cfg.enabled = false
+    migrated.mosh = .explicit(cfg)
+    migrated.transport = .explicit(.mosh)
+    return migrated
 }

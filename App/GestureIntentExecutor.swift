@@ -220,6 +220,9 @@ extension GestureIntentExecutor: @preconcurrency UIEditMenuInteractionDelegate {
                 guard let self, let text = UIPasteboard.general.string, !text.isEmpty else { return }
                 // Always bracket: apps without bracketed paste ignore the ESC[200~/ESC[201~ markers.
                 self.hooks.sendBytes(SemicolynKit.bracketedPasteBytes(text, bracketed: true))
+                // The double-tap that opened this menu also selected a word; drop it.
+                self.terminal?.selectNone()
+                self.selection = nil
             })
         }
         return UIMenu(children: items.isEmpty ? suggestedActions : items)

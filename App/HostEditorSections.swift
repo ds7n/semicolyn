@@ -16,10 +16,20 @@ extension HostEditorView {
         resolveTransport(host: vm.host, defaults: vm.defaults)
     }
 
-    /// Connection section: Tier-2 SSH options, all `Inherited<T>`, collapsed by default.
+    /// What "Default" would resolve to for this host (its transport left unset),
+    /// shown as "Default (X)". Usually the Defaults value or SSH; an old Mosh host
+    /// with an enabled Mosh config of its own still resolves to Mosh.
+    var inheritedTransport: Transport {
+        var unset = vm.host
+        unset.transport = .inherit
+        return resolveTransport(host: unset, defaults: vm.defaults)
+    }
+
+    /// Connection section: connection type, SSH keep-alive, and (hidden until wired,
+    /// `UnwiredOptions`) the Tier-2 SSH options. All `Inherited<T>`, collapsed by default.
     var connectionSection: some View {
         DisclosureGroup(isExpanded: $connectionExpanded) {
-            // transport, Inherited<Transport>: four-state Picker (Default / SSH / Mosh / ET)
+            // transport, Inherited<Transport>: four-state Picker (Default (X) / SSH / Mosh / ET)
             Picker(selection: Binding(
                 get: {
                     switch vm.host.transport {
@@ -32,26 +42,25 @@ extension HostEditorView {
                     vm.revalidate()
                 }
             )) {
-                Text("Default").tag("default")
+                Text(defaultChoiceLabel(inheritedTransport.displayName)).tag("default")
                 ForEach(Transport.allCases, id: \.rawValue) { t in
                     Text(t.displayName).tag(t.rawValue)
                 }
             } label: {
-                Text("Transport")
+                Text("Connection type")
                     .foregroundStyle(Color(theme.text.primary))
             }
 
-            if case .explicit(let t?) = vm.host.transport {
-                Text(t.summary)
-                    .font(.footnote)
-                    .foregroundStyle(Color(theme.text.secondary))
-            }
+            // Summary of the type in effect, "Default (X)" included.
+            Text(selectedTransport.summary + " Leave on SSH if unsure.")
+                .font(.footnote)
+                .foregroundStyle(Color(theme.text.secondary))
 
-            // serverAliveInterval, Inherited<Int>
-            // Disabled when the selected transport is Mosh (mosh has its own keepalive).
+            // serverAliveInterval, Inherited<Int>. Used by the SSH connection, and by
+            // Mosh / ET while they set up over SSH.
             LabeledContent {
                 TextField(
-                    serverAliveIntervalPlaceholder,
+                    defaultPlaceholder(String(fallbacks.keepAliveInterval)),
                     text: Binding(
                         get: { inheritedIntToText(vm.host.serverAliveInterval) },
                         set: { vm.host.serverAliveInterval = textToInheritedInt($0, minimum: 0) }
@@ -60,22 +69,14 @@ extension HostEditorView {
                 .keyboardType(.numberPad)
                 .onChange(of: vm.host.serverAliveInterval) { _, _ in vm.revalidate() }
             } label: {
-                Text("Keep-alive interval (s)")
+                Text("SSH keep-alive every (seconds)")
                     .foregroundStyle(Color(theme.text.primary))
-            }
-            .disabled(selectedTransport == .mosh)
-
-            if selectedTransport == .mosh {
-                Text("Mosh has its own keepalive.")
-                    .font(.caption)
-                    .foregroundStyle(Color(theme.text.secondary))
             }
 
             // serverAliveCountMax, Inherited<Int>
-            // Disabled when the selected transport is Mosh (mosh has its own keepalive).
             LabeledContent {
                 TextField(
-                    serverAliveCountMaxPlaceholder,
+                    defaultPlaceholder(String(fallbacks.keepAliveRetries)),
                     text: Binding(
                         get: { inheritedIntToText(vm.host.serverAliveCountMax) },
                         set: { vm.host.serverAliveCountMax = textToInheritedInt($0, minimum: 0) }
@@ -84,104 +85,66 @@ extension HostEditorView {
                 .keyboardType(.numberPad)
                 .onChange(of: vm.host.serverAliveCountMax) { _, _ in vm.revalidate() }
             } label: {
-                Text("Keep-alive retries")
-                    .foregroundStyle(Color(theme.text.primary))
-            }
-            .disabled(selectedTransport == .mosh)
-
-            if selectedTransport == .mosh {
-                Text("Mosh has its own keepalive.")
-                    .font(.caption)
-                    .foregroundStyle(Color(theme.text.secondary))
-            }
-
-            // compression, Inherited<Bool>: three-state Picker (Default / On / Off)
-            Picker(selection: Binding(
-                get: { inheritedBoolToSelection(vm.host.compression) },
-                set: { vm.host.compression = selectionToInheritedBool($0); vm.revalidate() }
-            )) {
-                Text("Default").tag(Bool?.none)
-                Text("On").tag(Bool?.some(true))
-                Text("Off").tag(Bool?.some(false))
-            } label: {
-                Text("Compression")
+                Text("Missed replies before disconnect")
                     .foregroundStyle(Color(theme.text.primary))
             }
 
-            // forwardAgent, Inherited<Bool>: three-state Picker (Default / On / Off)
-            Picker(selection: Binding(
-                get: { inheritedBoolToSelection(vm.host.forwardAgent) },
-                set: { vm.host.forwardAgent = selectionToInheritedBool($0); vm.revalidate() }
-            )) {
-                Text("Default").tag(Bool?.none)
-                Text("On").tag(Bool?.some(true))
-                Text("Off").tag(Bool?.some(false))
-            } label: {
-                Text("Agent forwarding")
-                    .foregroundStyle(Color(theme.text.primary))
-            }
+            Text(selectedTransport == .ssh
+                 ? "Sends a small signal so idle connections don't drop."
+                 : "Only used while setting up the connection.")
+                .font(.caption)
+                .foregroundStyle(Color(theme.text.secondary))
 
-            // strictHostKeyChecking, Inherited<StrictHostKeyChecking>: Picker
-            Picker(selection: Binding(
-                get: { inheritedSHKCToSelection(vm.host.strictHostKeyChecking) },
-                set: { vm.host.strictHostKeyChecking = selectionToInheritedSHKC($0); vm.revalidate() }
-            )) {
-                Text("Default (inherit)").tag(StrictHostKeyChecking?.none)
-                Text("yes").tag(StrictHostKeyChecking?.some(.yes))
-                Text("accept-new").tag(StrictHostKeyChecking?.some(.acceptNew))
-                Text("ask").tag(StrictHostKeyChecking?.some(.ask))
-                Text("no").tag(StrictHostKeyChecking?.some(.no))
-            } label: {
-                Text("Host key checking")
-                    .foregroundStyle(Color(theme.text.primary))
-            }
-
-            // preferredAuthentications, Inherited<[AuthMethod]>: toggles per method
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Preferred auth")
-                    .foregroundStyle(Color(theme.text.primary))
-
-                // .inherit → show "Default (inherit)" hint; toggles promote to explicit
-                // .explicit([]) or .explicit([...]) → individual method toggles control it
-                if case .inherit = vm.host.preferredAuthentications {
-                    Text("Default (inherit)")
-                        .font(.caption)
-                        .foregroundStyle(Color(theme.text.secondary))
-                }
-
-                ForEach([AuthMethod.publicKey, .password, .keyboardInteractive], id: \.self) { method in
-                    let methodLabel: String = {
-                        switch method {
-                        case .publicKey: return "Public key"
-                        case .password: return "Password"
-                        case .keyboardInteractive: return "Keyboard-interactive"
-                        }
-                    }()
-                    let isActive: Bool = vm.host.preferredAuthentications.value?.contains(method) ?? false
-
-                    Toggle(isOn: Binding(
-                        get: { isActive },
-                        set: { newValue in
-                            // Promote to explicit on first toggle, then toggle the method
-                            var current: Set<AuthMethod> = inheritedAuthMethodsToSelection(
-                                vm.host.preferredAuthentications
-                            ) ?? Set()
-                            if newValue {
-                                current.insert(method)
-                            } else {
-                                current.remove(method)
-                            }
-                            vm.host.preferredAuthentications = selectionToInheritedAuthMethods(current)
-                            vm.revalidate()
-                        }
-                    )) {
-                        Text(methodLabel)
-                            .font(.subheadline)
-                            .foregroundStyle(Color(theme.text.primary))
-                    }
+            if UnwiredOptions.compression {
+                // compression, Inherited<Bool>: three-state Picker (Default / On / Off)
+                Picker(selection: Binding(
+                    get: { inheritedBoolToSelection(vm.host.compression) },
+                    set: { vm.host.compression = selectionToInheritedBool($0); vm.revalidate() }
+                )) {
+                    Text(defaultChoiceLabel("Off")).tag(Bool?.none)
+                    Text("On").tag(Bool?.some(true))
+                    Text("Off").tag(Bool?.some(false))
+                } label: {
+                    Text("Compression")
+                        .foregroundStyle(Color(theme.text.primary))
                 }
             }
-            .padding(.vertical, 2)
+
+            if UnwiredOptions.agentForwarding {
+                // forwardAgent, Inherited<Bool>: three-state Picker (Default / On / Off)
+                Picker(selection: Binding(
+                    get: { inheritedBoolToSelection(vm.host.forwardAgent) },
+                    set: { vm.host.forwardAgent = selectionToInheritedBool($0); vm.revalidate() }
+                )) {
+                    Text(defaultChoiceLabel("Off")).tag(Bool?.none)
+                    Text("On").tag(Bool?.some(true))
+                    Text("Off").tag(Bool?.some(false))
+                } label: {
+                    Text("Agent forwarding")
+                        .foregroundStyle(Color(theme.text.primary))
+                }
+            }
+
+            if UnwiredOptions.hostKeyChecking {
+                // strictHostKeyChecking, Inherited<StrictHostKeyChecking>: Picker
+                Picker(selection: Binding(
+                    get: { inheritedSHKCToSelection(vm.host.strictHostKeyChecking) },
+                    set: { vm.host.strictHostKeyChecking = selectionToInheritedSHKC($0); vm.revalidate() }
+                )) {
+                    Text(defaultChoiceLabel("accept-new")).tag(StrictHostKeyChecking?.none)
+                    Text("yes").tag(StrictHostKeyChecking?.some(.yes))
+                    Text("accept-new").tag(StrictHostKeyChecking?.some(.acceptNew))
+                    Text("ask").tag(StrictHostKeyChecking?.some(.ask))
+                    Text("no").tag(StrictHostKeyChecking?.some(.no))
+                } label: {
+                    Text("Host key checking")
+                        .foregroundStyle(Color(theme.text.primary))
+                }
+            }
+
+            if UnwiredOptions.preferredAuth {
+                preferredAuthRows
+            }
 
         } label: {
             Text("Connection")
@@ -190,16 +153,46 @@ extension HostEditorView {
         }
     }
 
-    // MARK: Placeholder hints
+    /// preferredAuthentications, Inherited<[AuthMethod]>: toggles per method. Hidden
+    /// until wired (`UnwiredOptions.preferredAuth`).
+    private var preferredAuthRows: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Preferred auth")
+                .foregroundStyle(Color(theme.text.primary))
 
-    private var serverAliveIntervalPlaceholder: String {
-        if let v = defaults.serverAliveInterval.value { return "Defaults · \(v)" }
-        return "e.g. 30"
-    }
+            ForEach([AuthMethod.publicKey, .password, .keyboardInteractive], id: \.self) { method in
+                let methodLabel: String = {
+                    switch method {
+                    case .publicKey: return "Public key"
+                    case .password: return "Password"
+                    case .keyboardInteractive: return "Keyboard-interactive"
+                    }
+                }()
+                let isActive: Bool = vm.host.preferredAuthentications.value?.contains(method) ?? false
 
-    private var serverAliveCountMaxPlaceholder: String {
-        if let v = defaults.serverAliveCountMax.value { return "Defaults · \(v)" }
-        return "e.g. 3"
+                Toggle(isOn: Binding(
+                    get: { isActive },
+                    set: { newValue in
+                        // Promote to explicit on first toggle, then toggle the method
+                        var current: Set<AuthMethod> = inheritedAuthMethodsToSelection(
+                            vm.host.preferredAuthentications
+                        ) ?? Set()
+                        if newValue {
+                            current.insert(method)
+                        } else {
+                            current.remove(method)
+                        }
+                        vm.host.preferredAuthentications = selectionToInheritedAuthMethods(current)
+                        vm.revalidate()
+                    }
+                )) {
+                    Text(methodLabel)
+                        .font(.subheadline)
+                        .foregroundStyle(Color(theme.text.primary))
+                }
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -398,7 +391,7 @@ extension HostEditorView {
 
 extension HostEditorView {
 
-    /// Mosh section: server path, UDP port range, prediction mode.
+    /// Mosh section: server path, UDP ports, local echo.
     /// Only composed (in `HostEditorView.body`) when the selected transport is Mosh;
     /// selecting Transport=Mosh in the Connection section's picker is the enable signal,
     /// so there is no separate master toggle here.
@@ -413,7 +406,7 @@ extension HostEditorView {
                     text: Binding(
                         get: { vm.host.mosh.value?.serverPath ?? "" },
                         set: { newPath in
-                            var cfg = vm.host.mosh.value ?? MoshConfig(enabled: true)
+                            var cfg = vm.host.mosh.value ?? MoshConfig(enabled: false)
                             cfg.serverPath = newPath.isEmpty ? nil : newPath
                             vm.host.mosh = .explicit(cfg)
                             vm.revalidate()
@@ -426,12 +419,15 @@ extension HostEditorView {
                 Text("Server path")
                     .foregroundStyle(Color(theme.text.primary))
             }
+            Text("Only needed if mosh-server isn't found automatically.")
+                .font(.caption)
+                .foregroundStyle(Color(theme.text.secondary))
 
             // UDP port range, lo / hi pair
             LabeledContent {
                 HStack(spacing: 8) {
                     TextField(
-                        "lo",
+                        "From",
                         text: Binding(
                             get: {
                                 if let range = vm.host.mosh.value?.udpPortRange, range.count >= 2 {
@@ -440,7 +436,7 @@ extension HostEditorView {
                                 return ""
                             },
                             set: { newLo in
-                                var cfg = vm.host.mosh.value ?? MoshConfig(enabled: true)
+                                var cfg = vm.host.mosh.value ?? MoshConfig(enabled: false)
                                 let lo = Int(newLo) ?? 0
                                 let existingRange = cfg.udpPortRange
                                 let hi = (existingRange != nil && existingRange!.count >= 2) ? existingRange![1] : 0
@@ -453,11 +449,11 @@ extension HostEditorView {
                     .keyboardType(.numberPad)
                     .frame(maxWidth: .infinity)
 
-                    Text("-")
+                    Text("to")
                         .foregroundStyle(Color(theme.text.secondary))
 
                     TextField(
-                        "hi",
+                        "To",
                         text: Binding(
                             get: {
                                 if let range = vm.host.mosh.value?.udpPortRange, range.count >= 2 {
@@ -466,7 +462,7 @@ extension HostEditorView {
                                 return ""
                             },
                             set: { newHi in
-                                var cfg = vm.host.mosh.value ?? MoshConfig(enabled: true)
+                                var cfg = vm.host.mosh.value ?? MoshConfig(enabled: false)
                                 let existingRange = cfg.udpPortRange
                                 let lo = (existingRange != nil && existingRange!.count >= 2) ? existingRange![0] : 0
                                 let hi = Int(newHi) ?? 0
@@ -480,29 +476,35 @@ extension HostEditorView {
                     .frame(maxWidth: .infinity)
                 }
             } label: {
-                Text("UDP port range")
+                Text("UDP ports")
                     .foregroundStyle(Color(theme.text.primary))
             }
+            Text("Leave blank unless your firewall needs a fixed range, for example 60000 to 61000.")
+                .font(.caption)
+                .foregroundStyle(Color(theme.text.secondary))
 
-            // Prediction mode, Picker over 4 cases (nil = inherit/default)
+            // Local echo (mosh prediction mode). "Default" already sends adaptive, so
+            // unset and .adaptive share the "Adaptive (default)" row.
             Picker(selection: Binding(
-                get: { vm.host.mosh.value?.predictionMode },
+                get: { moshLocalEchoSelection(vm.host.mosh.value?.predictionMode) },
                 set: { newMode in
-                    var cfg = vm.host.mosh.value ?? MoshConfig(enabled: true)
+                    var cfg = vm.host.mosh.value ?? MoshConfig(enabled: false)
                     cfg.predictionMode = newMode
                     vm.host.mosh = .explicit(cfg)
                     vm.revalidate()
                 }
             )) {
-                Text("Default").tag(MoshPredictionMode?.none)
-                Text("Adaptive").tag(MoshPredictionMode?.some(.adaptive))
+                Text("Adaptive (default)").tag(MoshPredictionMode?.none)
                 Text("Always").tag(MoshPredictionMode?.some(.always))
                 Text("Never").tag(MoshPredictionMode?.some(.never))
                 Text("Experimental").tag(MoshPredictionMode?.some(.experimental))
             } label: {
-                Text("Prediction mode")
+                Text("Local echo")
                     .foregroundStyle(Color(theme.text.primary))
             }
+            Text("Shows your typing before the server confirms it. Adaptive does this only on slow connections.")
+                .font(.caption)
+                .foregroundStyle(Color(theme.text.secondary))
 
         } label: {
             Text("Mosh")
@@ -575,37 +577,14 @@ extension HostEditorView {
     }
 }
 
-// MARK: - Semicolyn behavior section
+// MARK: - tmux and Privacy sections
 
 extension HostEditorView {
 
-    /// Semicolyn behavior section: predictor incognito and use-tmux toggles.
-    /// Collapsed by default; auto-expands on edit when `semicolyn` is explicitly configured.
-    var semicolynSection: some View {
-        DisclosureGroup(isExpanded: $semicolynExpanded) {
-
-            // Predictor incognito, default false per resolution
-            Toggle(isOn: Binding(
-                get: { vm.host.semicolyn.value?.predictor?.incognito ?? false },
-                set: { newIncognito in
-                    var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
-                    var predictor = cfg.predictor ?? PredictorConfig()
-                    predictor.incognito = newIncognito
-                    cfg.predictor = predictor
-                    vm.host.semicolyn = .explicit(cfg)
-                    vm.revalidate()
-                }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Predictor incognito")
-                        .foregroundStyle(Color(theme.text.primary))
-                    Text("Don't learn from this session's output.")
-                        .font(.caption)
-                        .foregroundStyle(Color(theme.text.secondary))
-                }
-            }
-            .onChange(of: vm.host.semicolyn) { _, _ in vm.revalidate() }
-
+    /// tmux section: Use tmux and the session name. Collapsed by default; expands on
+    /// edit when the host sets either.
+    var tmuxSection: some View {
+        DisclosureGroup(isExpanded: $tmuxExpanded) {
             // Use tmux, default true per resolution. Shown for all transports:
             // native gestures (swipe, long-press, tap) drive plain tmux over
             // SSH/Mosh/ET alike.
@@ -623,7 +602,7 @@ extension HostEditorView {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Use tmux")
                         .foregroundStyle(Color(theme.text.primary))
-                    Text("Drive tmux with native gestures (swipe, long-press, tap).")
+                    Text(useTmuxCaption)
                         .font(.caption)
                         .foregroundStyle(Color(theme.text.secondary))
                 }
@@ -634,7 +613,7 @@ extension HostEditorView {
             let useTmuxOn = (vm.host.semicolyn.value?.tmux?.useTmux ?? true)
             LabeledContent {
                 TextField(
-                    "inherit · semicolyn",
+                    defaultPlaceholder(fallbacks.tmuxSessionName),
                     text: Binding(
                         get: { vm.host.semicolyn.value?.tmux?.sessionName ?? "" },
                         set: { newName in
@@ -650,38 +629,78 @@ extension HostEditorView {
                 .autocorrectionDisabled()
                 .onChange(of: vm.host.semicolyn) { _, _ in vm.revalidate() }
             } label: {
-                Text("tmux session name")
+                Text("Session name")
                     .foregroundStyle(Color(theme.text.primary))
             }
             .disabled(!useTmuxOn)
+            Text(tmuxSessionNameCaption)
+                .font(.caption)
+                .foregroundStyle(Color(theme.text.secondary))
 
             if vm.issues.contains(where: { $0.kind == .invalidTmuxSessionName }) {
                 Text("Only letters, digits, - and _ (no spaces, dots, or colons).")
                     .font(.caption)
                     .foregroundStyle(Color(theme.state.broken))
             }
+        } label: {
+            Text("tmux")
+                .font(.headline)
+                .foregroundStyle(Color(theme.text.primary))
+        }
+    }
 
-            // OSC 52 clipboard, default true per resolution
-            Toggle(isOn: Binding(
-                get: { vm.host.semicolyn.value?.osc52?.allow ?? true },
-                set: { newAllow in
-                    var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
-                    var osc52 = cfg.osc52 ?? Osc52Config()
-                    osc52.allow = newAllow
-                    cfg.osc52 = osc52
-                    vm.host.semicolyn = .explicit(cfg)
-                    vm.revalidate()
+    /// Privacy section: private mode and OSC 52, both inheritable ("Default (X)" is
+    /// the Connection Defaults value, else the built-in). Collapsed by default;
+    /// expands on edit when the host sets either.
+    var privacySection: some View {
+        DisclosureGroup(isExpanded: $privacyExpanded) {
+            // Private mode ("incognito" in the model), built-in default off
+            VStack(alignment: .leading, spacing: 2) {
+                Picker(selection: Binding(
+                    get: { vm.host.semicolyn.value?.predictor?.incognito },
+                    set: { newIncognito in
+                        var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
+                        cfg.predictor = newIncognito.map { PredictorConfig(incognito: $0) }
+                        vm.host.semicolyn = .explicit(cfg)
+                        vm.revalidate()
+                    }
+                )) {
+                    Text(defaultChoiceLabel(onOffLabel(fallbacks.privateMode))).tag(Bool?.none)
+                    Text("On").tag(Bool?.some(true))
+                    Text("Off").tag(Bool?.some(false))
+                } label: {
+                    Text(privateModeLabel)
+                        .foregroundStyle(Color(theme.text.primary))
                 }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Allow OSC 52 clipboard").foregroundStyle(Color(theme.text.primary))
-                    Text("Let remote programs copy to your clipboard (default on).")
-                        .font(.caption).foregroundStyle(Color(theme.text.secondary))
-                }
+                Text("Word suggestions still appear, but nothing you type or see on this host is learned.")
+                    .font(.caption)
+                    .foregroundStyle(Color(theme.text.secondary))
             }
 
+            // OSC 52 clipboard, built-in default on
+            VStack(alignment: .leading, spacing: 2) {
+                Picker(selection: Binding(
+                    get: { vm.host.semicolyn.value?.osc52?.allow },
+                    set: { newAllow in
+                        var cfg = vm.host.semicolyn.value ?? SemicolynConfig()
+                        cfg.osc52 = newAllow.map { Osc52Config(allow: $0) }
+                        vm.host.semicolyn = .explicit(cfg)
+                        vm.revalidate()
+                    }
+                )) {
+                    Text(defaultChoiceLabel(onOffLabel(fallbacks.osc52Allow))).tag(Bool?.none)
+                    Text("On").tag(Bool?.some(true))
+                    Text("Off").tag(Bool?.some(false))
+                } label: {
+                    Text(osc52Label)
+                        .foregroundStyle(Color(theme.text.primary))
+                }
+                Text(osc52Caption)
+                    .font(.caption)
+                    .foregroundStyle(Color(theme.text.secondary))
+            }
         } label: {
-            Text("Semicolyn behavior")
+            Text("Privacy")
                 .font(.headline)
                 .foregroundStyle(Color(theme.text.primary))
         }
@@ -702,7 +721,7 @@ extension HostEditorView {
             } label: {
                 HStack {
                     Spacer()
-                    Text("Delete host")
+                    Text("Delete Host")
                         .foregroundStyle(Color(theme.state.broken))
                     Spacer()
                 }

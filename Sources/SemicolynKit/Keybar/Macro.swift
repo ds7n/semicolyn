@@ -24,44 +24,80 @@ public struct MacroEvent: Equatable, Sendable, Codable {
 
 /// A recorded or templated sequence of input events with a display name. The
 /// library's authoritative unit; keybar slots and custom-slot bindings reference
-/// a macro by `id`. (keybar-customization spec "Macro metadata"; v1 omits the
-/// optional placeholders / context filter — deferred to a v2 follow-up.)
+/// a macro by `id`. (keybar-customization spec "Macro metadata".)
+///
+/// Macros have no parameters: `${...}` is plain text. Older builds could store a
+/// `parameterizedBody` (literal events interleaved with `${name}` /
+/// `${name:default}` placeholders) next to a placeholder-free `body`. Decoding
+/// such a record folds the placeholders back into `body` as the literal text the
+/// user typed, so the macro sends exactly that text; encoding writes only `body`.
 public struct Macro: Equatable, Sendable, Codable, Identifiable {
     public let id: MacroID
     public var name: String
-    /// The plain (placeholder-free) keystrokes. Authoritative for plain macros and the
-    /// static skeleton for parameterized ones; what existing display/encode paths read.
+    /// The keystrokes this macro sends, in order.
     public var body: [MacroEvent]
-    /// Optional `${…}`-parameterized template, resolved at fire-time via
-    /// `resolveMacroBody`. `nil` for plain recorded/parsed macros. Persisted as an
-    /// optional key, so older macro records (no key) decode as plain. (4d-2)
-    public var parameterizedBody: [MacroBodyElement]?
 
     public init(id: MacroID, name: String, body: [MacroEvent]) {
         self.id = id
         self.name = name
         self.body = body
-        self.parameterizedBody = nil
     }
 
-    /// A parameterized macro: `parameterizedBody` is authoritative at fire-time; `body`
-    /// is derived as its static (placeholder-free) keystrokes for display/back-compat.
-    public init(id: MacroID, name: String, parameterizedBody: [MacroBodyElement]) {
-        self.id = id
-        self.name = name
-        self.body = parameterizedBody.compactMap { element in
-            if case .event(let e) = element { return e }
-            return nil
+    private enum CodingKeys: String, CodingKey { case id, name, body, parameterizedBody }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(MacroID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        if let legacy = try c.decodeIfPresent([LegacyMacroBodyElement].self, forKey: .parameterizedBody) {
+            // The legacy template is authoritative: its `body` dropped the placeholders.
+            body = legacy.flatMap(\.literalEvents)
+        } else {
+            body = try c.decode([MacroEvent].self, forKey: .body)
         }
-        self.parameterizedBody = parameterizedBody
     }
 
-    /// Whether this macro carries `${…}` placeholders to resolve at fire-time.
-    public var isParameterized: Bool { parameterizedBody != nil }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(body, forKey: .body)
+    }
+}
 
-    /// The body to hand to `resolveMacroBody` at fire-time: the parameterized template
-    /// if present, else the plain events wrapped as elements (which resolve trivially).
-    public var resolvableBody: [MacroBodyElement] {
-        parameterizedBody ?? body.map(MacroBodyElement.event)
+/// Decode-only reader for one element of a legacy `parameterizedBody`: a literal
+/// event, or a `${name}` / `${name:default}` placeholder that is now plain text.
+private enum LegacyMacroBodyElement: Decodable {
+    case event(MacroEvent)
+    case placeholder(name: String, defaultValue: String?)
+
+    private enum CodingKeys: String, CodingKey { case kind, event, placeholder }
+    private enum PlaceholderKeys: String, CodingKey { case name, defaultValue }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        switch try c.decode(String.self, forKey: .kind) {
+        case "event":
+            self = .event(try c.decode(MacroEvent.self, forKey: .event))
+        case "placeholder":
+            let p = try c.nestedContainer(keyedBy: PlaceholderKeys.self, forKey: .placeholder)
+            self = .placeholder(name: try p.decode(String.self, forKey: .name),
+                                defaultValue: try p.decodeIfPresent(String.self, forKey: .defaultValue))
+        case let k:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind, in: c, debugDescription: "unknown macro body element kind '\(k)'")
+        }
+    }
+
+    /// The events this element sends now: the event itself, or the placeholder's
+    /// source text (`${name}` or `${name:default}`) as one character each.
+    var literalEvents: [MacroEvent] {
+        switch self {
+        case .event(let e):
+            return [e]
+        case .placeholder(let name, let defaultValue):
+            let text = "${" + name + (defaultValue.map { ":" + $0 } ?? "") + "}"
+            return text.map { MacroEvent(key: .char($0)) }
+        }
     }
 }

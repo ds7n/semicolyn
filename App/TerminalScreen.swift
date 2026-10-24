@@ -81,11 +81,6 @@ struct TerminalScreen: UIViewRepresentable {
                 }
             }
         }
-        // Mode now only drives the mouse dot and the gesture context; recognizers are
-        // never toggled. (Replaces the init-time dot-only closure.)
-        context.coordinator.modeTracker.onChange = { [weak coordinator = context.coordinator] mode in
-            coordinator?.mouseDot.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
-        }
         // Prime once at mount so a terminal that starts on the alt-screen (reattach
         // into a running vim/Claude) is correct from frame one.
         context.coordinator.modeTracker.recompute(terminal: terminal.getTerminal())
@@ -97,7 +92,9 @@ struct TerminalScreen: UIViewRepresentable {
         // Apply terminal rendering preferences from settings.
         let s = context.coordinator.settings
         terminal.font = TerminalFontProvider.shared.font(for: s.fontFace, size: CGFloat(s.fontSize))
-        terminal.getTerminal().options.scrollback = s.scrollbackLines
+        // `changeScrollback`, not `options.scrollback =`: the buffer already exists, and
+        // only this resizes it. Clamped (`effectiveScrollback`) so it can't overflow.
+        terminal.getTerminal().changeScrollback(s.effectiveScrollback)
         // Apply the theme's terminal palette (bg/fg/cursor/selection + 16 ANSI).
         applyPalette(theme.terminalPalette(), to: terminal)
         applyCursor(to: terminal, style: s.cursorStyle, blink: s.cursorBlink)
@@ -107,9 +104,6 @@ struct TerminalScreen: UIViewRepresentable {
         halo.frame = terminal.bounds
         halo.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         terminal.addSubview(halo)
-
-        // Install mouse-active indicator dot (top-left corner, fixed 4pt).
-        terminal.addSubview(context.coordinator.mouseDot)
 
         // Attach pinch-to-zoom gesture. Scale is applied live on .changed and
         // committed to coordinator.baseSize on .ended; not persisted to the host.
@@ -224,8 +218,17 @@ struct TerminalScreen: UIViewRepresentable {
             coord.lastAppliedFontSize = settings.fontSize
             coord.baseSize = settings.fontSize
         }
-        // Update mouse-active dot visibility and selection gesture state.
-        context.coordinator.updateMouseDot(from: terminal)
+        // Cursor and scrollback changed in Settings apply live, once per change (a
+        // program's own DECSCUSR is not re-overridden on every SwiftUI pass).
+        if settings.cursorStyle != coord.lastAppliedCursorStyle || settings.cursorBlink != coord.lastAppliedCursorBlink {
+            applyCursor(to: terminal, style: settings.cursorStyle, blink: settings.cursorBlink)
+            coord.lastAppliedCursorStyle = settings.cursorStyle
+            coord.lastAppliedCursorBlink = settings.cursorBlink
+        }
+        if settings.effectiveScrollback != coord.lastAppliedScrollback {
+            terminal.getTerminal().changeScrollback(settings.effectiveScrollback)
+            coord.lastAppliedScrollback = settings.effectiveScrollback
+        }
     }
 
     /// Tear down the gesture engine's display-link timer (it retains the recognizer) and
@@ -258,9 +261,6 @@ struct TerminalScreen: UIViewRepresentable {
         /// Debounces rapid resize events (rotation / keyboard show-hide) into a
         /// single remote window-change once the grid is stable for ~100ms.
         private var resizeDebounce: ResizeDebounce = ResizeDebounce()
-        /// Mouse-active indicator dot (4pt, accent primary @ 40% opacity).
-        /// Installed as a subview of the TerminalView in makeUIView.
-        let mouseDot: UIView
         /// Long-press gesture recognizer used for text selection. Suspended while
         /// the terminal's mouse mode is active so mouse events reach the app.
         var selectionLongPress: UILongPressGestureRecognizer?
@@ -272,6 +272,10 @@ struct TerminalScreen: UIViewRepresentable {
         /// without clobbering an in-progress pinch on every SwiftUI pass.
         var lastAppliedFace: TerminalFont
         var lastAppliedFontSize: Double
+        /// Cursor and scrollback last applied from Settings (see `updateUIView`).
+        var lastAppliedCursorStyle: SemicolynKit.CursorStyle
+        var lastAppliedCursorBlink: Bool
+        var lastAppliedScrollback: Int
         /// True once we've claimed keyboard focus the first time (on the first
         /// `updateUIView` after the view is in a window, so `becomeFirstResponder` can
         /// succeed). We don't re-claim on later passes (a user who dismisses the
@@ -285,8 +289,7 @@ struct TerminalScreen: UIViewRepresentable {
         var executor: GestureIntentExecutor?
         var touchRecognizer: TerminalTouchRecognizer?
         /// Tracks this pane's `InteractionMode`, recomputed from `PaneTerminalView`'s
-        /// `bufferActivated`/`mouseModeChanged` overrides (event-driven, replaces the
-        /// old render-time poll in `updateMouseDot`).
+        /// `bufferActivated`/`mouseModeChanged` overrides (event-driven).
         let modeTracker = PaneModeTracker()
         /// The connection view model, weakly referenced so the coordinator doesn't
         /// extend its lifetime. Used only to source the password-line flag for the
@@ -301,23 +304,14 @@ struct TerminalScreen: UIViewRepresentable {
             self.baseSize = settings.fontSize
             self.lastAppliedFace = settings.fontFace
             self.lastAppliedFontSize = settings.fontSize
+            self.lastAppliedCursorStyle = settings.cursorStyle
+            self.lastAppliedCursorBlink = settings.cursorBlink
+            self.lastAppliedScrollback = settings.effectiveScrollback
             self.halo = BellHaloView(frame: .zero)
             self.osc52Allowed = osc52Allowed
             self.onTitle = onTitle
-            let dot = UIView(frame: CGRect(x: 8, y: 8, width: 4, height: 4))
-            dot.layer.cornerRadius = 2
-            dot.backgroundColor = UIColor(Color(theme.accent.primary.alpha(0.40)))
-            dot.isUserInteractionEnabled = false
-            dot.isHidden = true
-            self.mouseDot = dot
             super.init()
             halo.configure(color: UIColor(Color(theme.bell.edge)))
-            // Refresh the dot immediately on a mode transition, rather than waiting
-            // for the next SwiftUI `updateUIView` pass. `makeUIView` replaces this
-            // closure with an equivalent dot-only one.
-            modeTracker.onChange = { [weak self] mode in
-                self?.mouseDot.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
-            }
         }
 
         /// Handles pinch-to-zoom on the TerminalView.
@@ -517,18 +511,6 @@ struct TerminalScreen: UIViewRepresentable {
                     }
                 }
             }
-        }
-
-        /// Update the mouse-dot *visual* from the event-driven `modeTracker` (no
-        /// longer polls terminal state here, `PaneTerminalView`'s
-        /// `bufferActivated`/`mouseModeChanged` overrides keep `modeTracker` current).
-        /// `isScrollEnabled` / `allowMouseReporting` are fixed `false` at mount (the
-        /// gesture engine owns scrolling and clicks); nothing here touches them.
-        ///
-        /// Called from `updateUIView` on each SwiftUI pass.
-        func updateMouseDot(from terminalView: TerminalView) {
-            let mode = modeTracker.mode
-            mouseDot.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
         }
 
         // Visual bell: pulse halo + optional haptic (throttled by BellStateMachine).

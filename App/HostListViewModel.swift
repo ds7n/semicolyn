@@ -11,11 +11,29 @@ final class HostListViewModel: ObservableObject {
     /// Non-nil when `deleteHost` is refused because another host uses the
     /// target as a jump host. Cleared by the view after the alert is dismissed.
     @Published var deleteError: String?
+    /// The label of the host whose delete failed, for the alert title.
+    @Published var deleteErrorHostLabel = ""
+    /// Non-nil when saving a duplicate failed. Cleared after the alert.
+    @Published var duplicateError: String?
 
     /// Reloads `hosts` from `HostStore`. Silences errors, a missing or
     /// unreadable store is treated as an empty library rather than a crash.
     func reload() {
         hosts = (try? AppStores.shared.hosts.allHosts()) ?? []
+    }
+
+    /// Saves a copy of `host` (`duplicateHost`: "<label> copy", no password) and
+    /// returns it, or nil when the save failed (`duplicateError`).
+    func duplicate(_ host: Host) -> Host? {
+        let copy = duplicateHost(host, id: UUID(), existingLabels: hosts.map(\.label))
+        do {
+            try AppStores.shared.hosts.saveHost(copy)
+            reload()
+            return copy
+        } catch {
+            duplicateError = error.localizedDescription
+            return nil
+        }
     }
 
     /// Attempts to delete `host`. On success, removes it from the in-memory
@@ -24,15 +42,19 @@ final class HostListViewModel: ObservableObject {
     /// refusal message from the spec; any other error is also surfaced.
     func delete(_ host: Host) {
         do {
-            try AppStores.shared.hosts.deleteHost(id: host.id)
+            // Also drops the host's trusted host keys and saved password (Keychain).
+            try deleteHostAndSecrets(id: host.id, hosts: AppStores.shared.hosts,
+                                     secrets: AppStores.shared.secrets)
             // Cleanup (spec): a deleted host has no resume target, so drop any resume
             // record for it now (not just on the next-launch reconcile sweep).
             AppStores.shared.resume.clear(hostID: host.id)
             hosts.removeAll { $0.id == host.id }
         } catch StoreError.jumpHostInUse(let referrers) {
             let labels = referrers.map(\.label).joined(separator: ", ")
-            deleteError = "Cannot delete '\(host.label)'. Used as jumphost by: \(labels). Remove these references first."
+            deleteErrorHostLabel = host.label
+            deleteError = "Used as jumphost by: \(labels). Remove these references first."
         } catch {
+            deleteErrorHostLabel = host.label
             deleteError = error.localizedDescription
         }
     }

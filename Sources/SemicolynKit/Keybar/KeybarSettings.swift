@@ -26,6 +26,25 @@ public struct KeybarSettings: Equatable, Sendable, Codable {
     /// The default: stock layout, empty library, keybar shown.
     public static let `default` = KeybarSettings()
 
+    /// Settings > Keybar > "Reset Keybar…": the layout, swipe overrides and the
+    /// hardware-keyboard toggle return to their defaults, while the library (every
+    /// macro and gesture key) is kept. Keys that were on the bar leave it, but the
+    /// macros and gesture keys they referenced can be added back from "Add".
+    public func resettingKeepingLibrary() -> KeybarSettings {
+        KeybarSettings(library: library)
+    }
+
+    /// How many keybar keys use the macro `id`: a macro key pinned on the bar, plus
+    /// every gesture key that binds it on any gesture (counted once per key).
+    /// Settings > Macros confirms a delete only when this is above zero.
+    public func keyCount(using id: MacroID) -> Int {
+        let pinned = layout.allSlots.filter { $0 == .pinnedMacro(id) }.count
+        let gestureKeys = library.customSlots.filter { slot in
+            CustomSlotGesture.allCases.contains { slot.binding(for: $0)?.macro == id }
+        }.count
+        return pinned + gestureKeys
+    }
+
     private enum CodingKeys: String, CodingKey {
         case layout, library, hideKeybarWithHardwareKeyboard, fixedKeySecondaries
     }

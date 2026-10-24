@@ -139,3 +139,46 @@ final class TerminalShellOutput: ShellOutput {
         DispatchQueue.main.async { [weak self] in self?.onExit?(exit) }
     }
 }
+
+/// The `ShellOutput` handed to the Rust core for ONE SSH shell. Forwards to the
+/// view model's long-lived `TerminalShellOutput` only while the session generation it
+/// captured at open is still current (`SessionGeneration`). After a Reconnect the old
+/// shell's pump keeps running until its channel closes; its trailing bytes and its
+/// late `on_closed` are dropped here instead of reaching the new session (whose
+/// `onExit` would otherwise fail it and clear its resume record).
+final class GenerationGatedShellOutput: ShellOutput {
+    private let target: TerminalShellOutput
+    private let generation: UInt64
+    /// Main-actor check of the captured generation against the view model's current one.
+    private let isCurrent: @MainActor (UInt64) -> Bool
+
+    init(target: TerminalShellOutput, generation: UInt64,
+         isCurrent: @escaping @MainActor (UInt64) -> Bool) {
+        self.target = target
+        self.generation = generation
+        self.isCurrent = isCurrent
+    }
+
+    func onOutput(data: Data) {
+        DispatchQueue.main.async { [self] in
+            // On main (DispatchQueue.main); assumeIsolated reaches the @MainActor check.
+            let live = MainActor.assumeIsolated { isCurrent(generation) }
+            guard live else { return }
+            // Re-hops to main inside, after this hop: FIFO keeps the byte order.
+            target.onOutput(data: data)
+        }
+    }
+
+    func onClosed(exit: ShellExit) {
+        DispatchQueue.main.async { [self] in
+            let live = MainActor.assumeIsolated { isCurrent(generation) }
+            guard live else {
+                MainActor.assumeIsolated {
+                    DebugLog.shared.log(.connect, "shell: on_closed from a replaced session → ignored")
+                }
+                return
+            }
+            target.onExit?(exit)
+        }
+    }
+}

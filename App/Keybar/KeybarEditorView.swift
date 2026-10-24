@@ -19,49 +19,48 @@ private enum KeybarEditorSheet: Identifiable {
     }
 }
 
-/// Settings → Keybar: every slot in order across the Left (fixed), Middle
-/// (scrolls) and Right (fixed) regions. Reorder via drag handles, delete via
-/// swipe (Esc/Pad excluded), move between regions via each row's menu. Reset
-/// restores the default layout.
+/// Settings → Keybar: every slot in order across the Left, Middle (swipe to
+/// scroll) and Right regions. Reorder via drag handles, delete via swipe (Esc,
+/// Pad and the Modifier excluded), move between regions via each row's menu.
+/// "Reset Keybar…" (confirmed) restores the layout, swipes and the
+/// hardware-keyboard toggle (edited in Settings > Keyboard); macros and gesture keys
+/// are kept.
 ///
 /// Note: SwiftUI cross-section drag is unreliable, so moving between regions
 /// uses an explicit per-row "Move to" menu instead of dragging across sections.
 struct KeybarEditorView: View {
     @ObservedObject var store: KeybarSettingsStore
-    /// One-time warning before removing the Modifier (don't nag on repeat).
-    @AppStorage("semicolyn.keybar.modifierRemoveWarned") private var modifierRemoveWarned = false
-    @State private var confirmingModifierRemove = false
+    @State private var confirmingReset = false
     @State private var editorSheet: KeybarEditorSheet?
 
     private var layout: KeybarLayout { store.settings.layout }
 
     var body: some View {
         List {
-            Section {
-                Toggle("Hide when hardware keyboard connected", isOn: hideWithHardwareKeyboardBinding)
-            } footer: {
-                Text("Hides the keybar while a hardware keyboard is attached. The predictor strip stays.")
-            }
-
             ForEach(KeybarRegion.allCases, id: \.self) { region in
                 regionSection(region)
             }
 
             Section { addMenu } footer: {
-                Text("A macro key runs one macro when tapped. A gesture key can run a different macro for tap, swipe up, swipe down and long-press.")
+                Text("A macro sends saved text or keys with one tap. A macro key runs one macro. A gesture key runs a different macro for tap, swipe up, swipe down and long-press.")
+            }
+
+            Section {
+                Button("Reset Keybar…", role: .destructive) { confirmingReset = true }
             }
         }
         .environment(\.editMode, .constant(.active))   // always show reorder handles
         .navigationTitle("Keybar")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Reset") { store.resetToDefaults() }
-            }
+        .confirmationDialog("Reset keybar?", isPresented: $confirmingReset, titleVisibility: .visible) {
+            Button("Reset", role: .destructive) { store.resetKeepingLibrary() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your layout and swipe changes return to the defaults. Your macros are kept.")
         }
         .sheet(item: $editorSheet) { which in
             NavigationStack {
                 switch which {
-                case .launcher:        MacroLibraryView(store: store)
+                case .launcher:        MacroLibraryView(store: store, showsDoneButton: true)
                 case .createMacro:
                     // From the Add menu a new macro lands on the bar as a macro key.
                     MacroCreationView(store: store) { store.appendToMiddle(.pinnedMacro($0.id)) }
@@ -70,15 +69,6 @@ struct KeybarEditorView: View {
                 case .editFixed(let k): FixedKeySecondaryEditorView(store: store, id: k)
                 }
             }
-        }
-        .alert("Remove Modifier?", isPresented: $confirmingModifierRemove) {
-            Button("Remove", role: .destructive) {
-                modifierRemoveWarned = true
-                apply(layout.removing(.modifier))
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("You'll lose Ctrl/Alt/Shift access. You can re-add it from “Add” below.")
         }
     }
 
@@ -98,9 +88,18 @@ struct KeybarEditorView: View {
 
     private func regionTitle(_ region: KeybarRegion) -> String {
         switch region {
-        case .left:   return "Left (fixed)"
-        case .middle: return "Middle (scrolls)"
-        case .right:  return "Right (fixed)"
+        case .left:   return "Left (always visible)"
+        case .middle: return "Middle (swipe to scroll)"
+        case .right:  return "Right (always visible)"
+        }
+    }
+
+    /// The short region name used in the per-row "Move to" menu.
+    private func regionName(_ region: KeybarRegion) -> String {
+        switch region {
+        case .left:   return "Left"
+        case .middle: return "Middle"
+        case .right:  return "Right"
         }
     }
 
@@ -128,11 +127,11 @@ struct KeybarEditorView: View {
                     Image(systemName: "pencil").font(.footnote)
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("Edit swipe secondaries")
+                .accessibilityLabel("Edit swipe up and down actions")
             }
             Menu {
                 ForEach(KeybarLayout.allowedRegions(for: slot).filter { $0 != region }, id: \.self) { target in
-                    Button("Move to \(regionTitle(target))") {
+                    Button("Move to \(regionName(target))") {
                         apply(layout.moving(slot, to: target))
                     }
                 }
@@ -152,9 +151,9 @@ struct KeybarEditorView: View {
                 }
             }
             Divider()
-            Button("Add macro key…") { editorSheet = .launcher }
-            Button("Add gesture key…") { editorSheet = .createSlot }
-            Button("Record new macro key…") { editorSheet = .createMacro }
+            Button("Add Macro Key…") { editorSheet = .launcher }
+            Button("New Macro Key…") { editorSheet = .createMacro }
+            Button("Add Gesture Key…") { editorSheet = .createSlot }
         } label: {
             Label("Add", systemImage: "plus")
         }
@@ -169,22 +168,13 @@ struct KeybarEditorView: View {
 
     // MARK: - Actions
 
-    private var hideWithHardwareKeyboardBinding: Binding<Bool> {
-        Binding(get: { store.settings.hideKeybarWithHardwareKeyboard },
-                set: { store.settings.hideKeybarWithHardwareKeyboard = $0 })
-    }
-
-    /// Handles a swipe-to-delete on a region. Single-row deletes only; routes the
-    /// Modifier through a one-time confirm.
+    /// Handles a swipe-to-delete on a region. Single-row deletes only; slots that
+    /// cannot be removed (Esc, Pad, Modifier) are skipped.
     private func delete(_ offsets: IndexSet, from region: [KeybarSlot]) {
         for index in offsets {
             let slot = region[index]
             guard KeybarLayout.isRemovable(slot) else { continue }
-            if slot == .modifier && !modifierRemoveWarned {
-                confirmingModifierRemove = true
-            } else {
-                apply(layout.removing(slot))
-            }
+            apply(layout.removing(slot))
         }
     }
 

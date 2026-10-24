@@ -110,7 +110,7 @@ struct PredictorStripView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Color(theme.predictor.suggestionText))
                         .padding(.horizontal, 8)
-                        .accessibilityLabel("Forget last line")
+                        .accessibilityLabel("Forget what I just typed")
                 }
                 .buttonStyle(.plain)
             }

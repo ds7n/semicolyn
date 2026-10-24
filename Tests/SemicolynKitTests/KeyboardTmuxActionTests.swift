@@ -69,7 +69,7 @@ final class KeyboardTmuxActionTests: XCTestCase {
 
     func testNonTmuxCommandsMapToNil() {
         for command: KeyboardCommand in [.clearScreen, .copy, .paste, .newConnection,
-                                         .reconnect, .openLauncher, .settings, .tips] {
+                                         .reconnect, .disconnect, .openLauncher, .settings, .tips] {
             XCTAssertNil(keyboardTmuxAction(for: command, plainTmuxAttached: true), "\(command)")
         }
     }

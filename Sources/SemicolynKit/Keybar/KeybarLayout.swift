@@ -112,9 +112,11 @@ public struct KeybarLayout: Equatable, Sendable {
 
     // MARK: - Sticky rules
 
-    /// Whether a slot may be deleted. Only Esc pill and Pad are non-removable.
+    /// Whether a slot may be deleted. Esc pill, Pad and the Modifier are
+    /// non-removable (the Modifier is the only touch path to Ctrl/Alt/Shift); all
+    /// three can still move between the regions they are allowed in.
     public static func isRemovable(_ slot: KeybarSlot) -> Bool {
-        slot != .escPill && slot != .pad
+        slot != .escPill && slot != .pad && slot != .modifier
     }
 
     /// Whether a slot must stay in a fixed region (never scroll off-screen).

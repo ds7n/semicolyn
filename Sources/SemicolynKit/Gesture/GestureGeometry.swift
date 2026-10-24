@@ -23,6 +23,12 @@ public enum GestureGeometry {
                             width: c.cellWidth, height: c.cellHeight)
     }
 
+    /// A cell's centre in viewport coordinates.
+    public static func cellCenter(_ cell: GestureCell, in c: GestureContext) -> GesturePoint {
+        let r = handleRect(for: cell, in: c)
+        return GesturePoint(x: r.x + r.width / 2, y: r.y + r.height / 2)
+    }
+
     /// Which selection handle (if any) is under `p`, with fingertip slop.
     public static func handle(at p: GesturePoint, in c: GestureContext) -> SelectionEnd? {
         guard let s = c.selection else { return nil }
