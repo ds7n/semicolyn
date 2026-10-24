@@ -3,31 +3,6 @@
 import SwiftUI
 import SemicolynKit
 
-/// A context-promoted slot: bronze fill, primary char on tap, optional swipe
-/// secondaries (context-detection spec "Promoted slot visual").
-struct PromotionSlotView: View {
-    let slot: PromotionSlot
-    let vm: ConnectionViewModel
-    @Environment(\.theme) private var theme
-    var body: some View {
-        VStack(spacing: 0) {
-            if let up = slot.up { Text(up).font(.system(size: 9)).foregroundStyle(Color(theme.text.secondary)) }
-            Text(slot.tap).font(.system(.body, design: .monospaced)).foregroundStyle(Color(theme.text.primary))
-            if let down = slot.down { Text(down).font(.system(size: 9)).foregroundStyle(Color(theme.text.secondary)) }
-        }
-        .frame(minWidth: 24, minHeight: 31).padding(.horizontal, 4)   // same size as SlotChrome so a promotion never changes the bar height
-        .background(Color(theme.keybar.slotBgPromoted))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .onInputClickTap { if let c = slot.tap.first { vm.keybar.tapSymbol(c) } }
-        .keySwipe("promotion") { dir in
-            switch dir {
-            case .up:   if let u = slot.up?.first { vm.keybar.tapSymbol(u) }
-            case .down: if let d = slot.down?.first { vm.keybar.tapSymbol(d) }
-            }
-        }
-    }
-}
-
 /// A function-key slot (F1-F12) shown while Fn mode is engaged.
 struct FkeySlotView: View {
     let n: Int
@@ -47,11 +22,10 @@ struct FkeySlotView: View {
 }
 
 /// The Fn toggle slot. Background reflects Fn mode (armed/locked). A single tap
-/// recognizer cycles off→armed→locked→off (`vm.fnTap()`); the former `count:2`
+/// recognizer cycles off->armed->locked->off (`vm.fnTap()`); the former `count:2`
 /// double-tap-to-lock was removed because the sibling recognizer forced SwiftUI
 /// to wait out the double-tap window before firing the tap, which felt laggy.
-/// Manual lock is now the second tap of the cycle; auto-engage still locks
-/// directly (context-detection spec).
+/// Lock is now the second tap of the cycle.
 struct FnSlotView: View {
     let mode: FnMode
     let vm: ConnectionViewModel

@@ -66,9 +66,9 @@ struct TerminalScreen: UIViewRepresentable {
         // (window-space `rawTerminalChildHeight`, PR #122), so the child must NOT self-inset.
         terminal.terminalDelegate = context.coordinator
         // Event-driven InteractionMode: recompute on every alt-screen / mouse-mode
-        // transition (single-pane mount → nil key), then refresh the dot immediately.
+        // transition, then refresh the dot immediately.
         terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] event, term in
-            coordinator?.modeTracker.recompute(terminal: term, altSource: .rawLive)
+            coordinator?.modeTracker.recompute(terminal: term)
             // Connecting overlay: tmux turning mouse reporting on is the "attached" signal
             // (the VM uses it while the overlay is up, and to stop the Mosh direct launch's
             // marker scan). Delivered on the main thread
@@ -83,12 +83,12 @@ struct TerminalScreen: UIViewRepresentable {
         }
         // Mode now only drives the mouse dot and the gesture context; recognizers are
         // never toggled. (Replaces the init-time dot-only closure.)
-        context.coordinator.modeTracker.onChange = { [weak coordinator = context.coordinator] _, mode in
+        context.coordinator.modeTracker.onChange = { [weak coordinator = context.coordinator] mode in
             coordinator?.mouseDot.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
         }
         // Prime once at mount so a terminal that starts on the alt-screen (reattach
         // into a running vim/Claude) is correct from frame one.
-        context.coordinator.modeTracker.recompute(terminal: terminal.getTerminal(), altSource: .rawLive)
+        context.coordinator.modeTracker.recompute(terminal: terminal.getTerminal())
         // Our keybar IS the terminal's input accessory view now (a real UIInputView
         // audio-feedback context, so `playInputClick()` fires). This replaces both
         // SwiftTerm's built-in bar and the old `.safeAreaInset` keybar mount.
@@ -143,8 +143,7 @@ struct TerminalScreen: UIViewRepresentable {
             plainTmux: { [weak coordinator] in coordinator?.vm?.plainTmux },
             mode: { [weak coordinator] in coordinator?.modeTracker.mode ?? .localScroll },
             altScrollDecision: { [weak coordinator] in coordinator?.currentAltScrollDecision()
-                ?? altScrollDecision(mode: AppStores.shared.terminalSettings.settings.altScrollMode,
-                                     paneCommand: nil, windowTitle: nil, registry: .bundledDefault) },
+                ?? altScrollDecision(mode: AppStores.shared.terminalSettings.settings.altScrollMode) },
             sendBytes: { [weak coordinator] bytes in coordinator?.send(bytes) },
             placeCursor: { [weak coordinator, weak terminal] col, row in
                 guard let terminal else { return }
@@ -202,9 +201,8 @@ struct TerminalScreen: UIViewRepresentable {
         // Re-present the keyboard when the VM requests focus (the keybar's Settings sheet
         // closing). Presenting that sheet from the keybar (an inputAccessoryView) hides the
         // keyboard WITHOUT resigning first responder, so a plain become is a no-op; the
-        // decision forces a reload in that case (same fix as the removed -CC pane container,
-        // PR #128, which the raw/plain-tmux screen never got: device build 172). Act only on a NEW
-        // token so repeated SwiftUI passes never thrash.
+        // decision forces a reload in that case (PR #128's fix, applied here after device
+        // build 172). Act only on a NEW token so repeated SwiftUI passes never thrash.
         if keyboardFocusRequestToken != context.coordinator.lastFocusRequestToken {
             context.coordinator.lastFocusRequestToken = keyboardFocusRequestToken
             let action = keyboardRestoreAction(isFirstResponder: terminal.isFirstResponder,
@@ -317,7 +315,7 @@ struct TerminalScreen: UIViewRepresentable {
             // Refresh the dot immediately on a mode transition, rather than waiting
             // for the next SwiftUI `updateUIView` pass. `makeUIView` replaces this
             // closure with an equivalent dot-only one.
-            modeTracker.onChange = { [weak self] _, mode in
+            modeTracker.onChange = { [weak self] mode in
                 self?.mouseDot.isHidden = !(mode == .appOwnsInput || mode == .mouseReporting)
             }
         }
@@ -432,12 +430,10 @@ struct TerminalScreen: UIViewRepresentable {
             onSend(bytes)
         }
 
-        /// The alt-screen scroll decision for this terminal (raw / plain-tmux single pane: no
-        /// tmux pane command; the window title feeds the registry).
+        /// The alt-screen scroll decision for this terminal (from the user's scroll mode).
         @MainActor
         func currentAltScrollDecision() -> AltScrollDecision {
-            altScrollDecision(mode: AppStores.shared.terminalSettings.settings.altScrollMode,
-                              paneCommand: nil, windowTitle: vm?.terminalTitle, registry: .bundledDefault)
+            altScrollDecision(mode: AppStores.shared.terminalSettings.settings.altScrollMode)
         }
 
         /// Snapshot everything the gesture engine needs at touch-down.

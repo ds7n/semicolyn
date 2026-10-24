@@ -11,19 +11,16 @@ fresh session can act without re-deriving the painful bits.
 
 **Source docs** (the load-bearing knowledge this consolidates):
 - `extern/eternaltermlib/docs/porting-ios.md` — the iOS porting findings, verified on Linux.
-- The execution plan: `docs/superpowers/plans/2026-07-12-et-ios-xcframework-build.md`.
 - The template to mirror: `scripts/build-mosh-xcframework.sh` (host protoc + per-slice cross +
   explode-and-combine + create-xcframework).
-- Parent design: `docs/superpowers/specs/2026-07-10-et-transport-design.md` (branch
-  `docs/et-transport-spec`).
 
 ## Scope
 
 The iOS **compile + package** step ONLY: make `eternaltermlib` build for iOS in semicolyn's
 macOS CI and emit `ETerminal.xcframework` (device arm64 + simulator arm64/x86_64), linked as a
 `#if os(macOS)` binaryTarget in `Package.swift` like `Mosh.xcframework`. Nothing consumes it
-yet — the Swift `libetios` wrapper, SSH bootstrap, `TmuxRuntime` drop-in, and Transport picker
-are downstream (separate plans).
+yet: the Swift `libetios` wrapper, SSH bootstrap, tmux integration, and Transport picker
+are downstream (separate plans). (ET now runs gesture-driven plain tmux like SSH and Mosh.)
 
 ## The 5 locked decisions (do NOT re-litigate)
 

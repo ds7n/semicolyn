@@ -82,6 +82,36 @@ final class KeybarInputRouterTests: XCTestCase {
         XCTAssertEqual(spy.sent, [Array("\u{1b}OD".utf8)])
     }
 
+    func testAllFourArrowsNormalCursorModeSendCSI() {
+        let (r, spy) = make(app: false)
+        r.arrow(.up); r.arrow(.down); r.arrow(.right); r.arrow(.left)
+        XCTAssertEqual(spy.sent, [Array("\u{1b}[A".utf8), Array("\u{1b}[B".utf8),
+                                  Array("\u{1b}[C".utf8), Array("\u{1b}[D".utf8)])
+    }
+
+    func testAllFourArrowsApplicationCursorModeSendSS3() {
+        let (r, spy) = make(app: true)
+        r.arrow(.up); r.arrow(.down); r.arrow(.right); r.arrow(.left)
+        XCTAssertEqual(spy.sent, [Array("\u{1b}OA".utf8), Array("\u{1b}OB".utf8),
+                                  Array("\u{1b}OC".utf8), Array("\u{1b}OD".utf8)])
+    }
+
+    /// The App points `applicationCursorKeys` at the live terminal's DECCKM flag, so the
+    /// router must re-read it on EVERY key: an app (vim, less) turning the mode on or off
+    /// mid-session changes the very next arrow.
+    func testArrowReadsCursorModeLiveOnEveryKey() {
+        let spy = Spy()
+        var app = false
+        let r = KeybarInputRouter(applicationCursorKeys: { app }, send: spy.send)
+        r.arrow(.up)
+        app = true                       // e.g. vim sent ESC [ ? 1 h
+        r.arrow(.up)
+        app = false                      // vim exited: ESC [ ? 1 l
+        r.arrow(.up)
+        XCTAssertEqual(spy.sent, [Array("\u{1b}[A".utf8), Array("\u{1b}OA".utf8),
+                                  Array("\u{1b}[A".utf8)])
+    }
+
     func testModifierGestureDoesNotSendUntilAKeyFires() {
         let (r, spy) = make()
         r.tapCtrl()

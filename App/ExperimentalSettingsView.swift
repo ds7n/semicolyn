@@ -24,7 +24,7 @@ struct ExperimentalSettingsView: View {
                 // leaves just the four real, selectable mode rows under a plain header.
                 Picker("Alt-screen scroll", selection: $store.settings.altScrollMode) {
                     Text("Line scroll (mouse wheel)").tag(AltScrollMode.wheel)
-                    Text("Fallback (Page/arrow keys)").tag(AltScrollMode.pageKeysArrows)
+                    Text("Fallback (arrow keys)").tag(AltScrollMode.pageKeysArrows)
                 }
                 .pickerStyle(.inline)
                 .labelsHidden()
@@ -37,7 +37,7 @@ struct ExperimentalSettingsView: View {
                 Text("""
                 Line scroll: sends mouse-wheel events so full-screen apps (Claude, vim, less) \
                 scroll one line at a time, like Blink. If an app does not respond to it, switch \
-                to Fallback. Fallback: arrow keys for less/vim, PgUp/PgDn for AI CLIs (older method).
+                to Fallback. Fallback: arrow keys (older method).
                 """)
             }
 

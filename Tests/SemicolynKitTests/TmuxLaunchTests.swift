@@ -14,11 +14,11 @@ final class TmuxLaunchTests: XCTestCase {
         XCTAssertNil(parseTmuxVersion(""))
     }
 
-    func testSupportsControlModeBoundary() {
-        XCTAssertFalse(tmuxSupportsControlMode(TmuxVersion(major: 2, minor: 9)))  // max-1 below floor
-        XCTAssertTrue(tmuxSupportsControlMode(TmuxVersion(major: 3, minor: 0)))   // exact floor
-        XCTAssertTrue(tmuxSupportsControlMode(TmuxVersion(major: 3, minor: 1)))
-        XCTAssertFalse(tmuxSupportsControlMode(TmuxVersion(major: 1, minor: 9)))
+    func testMeetsMinimumVersionBoundary() {
+        XCTAssertFalse(tmuxMeetsMinimumVersion(TmuxVersion(major: 2, minor: 9)))  // max-1 below floor
+        XCTAssertTrue(tmuxMeetsMinimumVersion(TmuxVersion(major: 3, minor: 0)))   // exact floor
+        XCTAssertTrue(tmuxMeetsMinimumVersion(TmuxVersion(major: 3, minor: 1)))
+        XCTAssertFalse(tmuxMeetsMinimumVersion(TmuxVersion(major: 1, minor: 9)))
     }
 
     func testLaunchDecisionPartitions() {
@@ -28,18 +28,5 @@ final class TmuxLaunchTests: XCTestCase {
         XCTAssertEqual(tmuxLaunchDecision(useTmux: true, versionProbe: "tmux 2.9"),
                        .degrade(.tooOld(TmuxVersion(major: 2, minor: 9))))
         XCTAssertEqual(tmuxLaunchDecision(useTmux: true, versionProbe: "tmux 3.0"), .attach)
-    }
-
-    func testSessionNameIsStableHexSlug() {
-        let name = tmuxSessionName(seed: "device-abc")
-        XCTAssertTrue(name.hasPrefix("semicolyn-"))
-        let hex = name.dropFirst("semicolyn-".count)
-        XCTAssertEqual(hex.count, 8)
-        XCTAssertTrue(hex.allSatisfy { "0123456789abcdef".contains($0) })
-        // Pin the exact digest so an algorithm swap (SHA-1/MD5) would fail:
-        // SHA-256("device-abc") first 8 hex chars.
-        XCTAssertEqual(name, "semicolyn-068c3bfd")
-        XCTAssertEqual(tmuxSessionName(seed: "device-abc"), name)             // deterministic
-        XCTAssertNotEqual(tmuxSessionName(seed: "device-xyz"), name)          // seed-sensitive
     }
 }

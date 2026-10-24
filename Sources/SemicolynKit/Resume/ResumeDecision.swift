@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
-/// What the App should do to resume on launch. Pure + Linux-tested (mirrors
-/// `ETControlModeDecision`); the App tier only executes the returned action.
+/// What the App should do to resume on launch. Pure + Linux-tested; the App tier
+/// only executes the returned action.
 public enum ResumeAction: Equatable, Sendable {
     /// Warm: the live ConnectionViewModel + transport are still in memory; re-show it.
     case reforeground
