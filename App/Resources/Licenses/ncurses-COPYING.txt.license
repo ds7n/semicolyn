@@ -1,0 +1,7 @@
+SPDX-FileCopyrightText: 2018-2024 Thomas E. Dickey
+SPDX-FileCopyrightText: 1998-2018 Free Software Foundation, Inc.
+SPDX-License-Identifier: X11-distribute-modifications-variant
+
+ncurses 6.5 COPYING.
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.

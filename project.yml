@@ -46,9 +46,12 @@ targets:
         # the fonts' licensing in-repo but must not ship inside the .app. Same for the
         # predictor dictionaries' REUSE sidecars and provenance records under
         # Resources/predictor: english_v2.bin, commands_v2.bin and SEED_ATTRIBUTION.md
-        # still bundle so the CC-BY/MIT credit is user-visible at runtime.
+        # still bundle so the CC-BY/MIT credit is user-visible at runtime. The licence
+        # texts under Resources/Licenses (shown by About > Acknowledgements) bundle too;
+        # only their REUSE sidecars are excluded.
         excludes:
           - "Resources/Fonts/*.license"
+          - "Resources/Licenses/*.license"
           - "Resources/predictor/*.license"
           - "Resources/predictor/*.provenance.txt"
           - "Resources/predictor/blocklist_extra.txt"

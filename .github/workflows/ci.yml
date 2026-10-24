@@ -115,8 +115,10 @@ jobs:
     runs-on: macos-14   # Apple Silicon + Xcode
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      # Only the submodules the build compiles; a recursive checkout pulls ET's unused
+      # sentry-native/crashpad tree from chromium.googlesource.com, which flakes with 503s.
+      - name: Check out build submodules
+        run: bash scripts/ci-submodules.sh
 
       - name: Select latest-stable Xcode (the default is too old for Swift tools 6.0)
         uses: maxim-lobanov/setup-xcode@v1
