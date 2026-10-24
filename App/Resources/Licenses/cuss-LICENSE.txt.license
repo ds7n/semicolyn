@@ -1,0 +1,6 @@
+SPDX-FileCopyrightText: 2016 Titus Wormer
+SPDX-License-Identifier: MIT
+
+words/cuss license (main).
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.

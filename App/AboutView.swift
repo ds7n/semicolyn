@@ -4,8 +4,8 @@ import SwiftUI
 import SemicolynKit
 
 /// Settings → Help → About (M-75): version and build, Acknowledgements (Kit
-/// `About.acknowledgements`, which mirrors the repo's licence files) and the
-/// Source Code link (GPL-3.0).
+/// `About.acknowledgements`, which mirrors the repo's licence files), semicolyn's own
+/// licence text and the Source Code link (GPL-3.0).
 struct AboutView: View {
     private var versionLabel: String {
         let info = Bundle.main.infoDictionary
@@ -20,6 +20,7 @@ struct AboutView: View {
             }
             Section {
                 NavigationLink("Acknowledgements") { AcknowledgementsView() }
+                NavigationLink("License") { SemicolynLicenseView() }
                 if let url = URL(string: About.sourceCodeURL) {
                     Link(destination: url) {
                         LabeledContent("Source Code", value: About.license)
@@ -58,10 +59,11 @@ private struct AcknowledgementsView: View {
     }
 }
 
-/// One project: what it's used for, licence, copyright, changes made and link. SCOWL
-/// also shows its full bundled copyright notice.
+/// One project: what it's used for, licence, copyright, changes made and link, then the
+/// full text of every bundled licence file it names (`Acknowledgement.licenseFiles`).
 private struct AcknowledgementDetailView: View {
     let item: Acknowledgement
+    @State private var licenses: [BundledLicense] = []
 
     var body: some View {
         List {
@@ -70,6 +72,7 @@ private struct AcknowledgementDetailView: View {
                 LabeledContent("License", value: item.licenseName)
                 Text(item.copyright)
                     .font(.callout)
+                    .textSelection(.enabled)
                 if let changes = item.changes {
                     Text("Changes: \(changes)")
                         .font(.callout)
@@ -79,19 +82,72 @@ private struct AcknowledgementDetailView: View {
                         .font(.callout)
                 }
             }
-            if item.name == "SCOWL", let notice = bundledText("SCOWL_COPYRIGHT", "txt") {
-                Section("Copyright Notice") {
-                    Text(notice)
-                        .font(.caption.monospaced())
-                        .textSelection(.enabled)
-                }
-            }
+            LicenseTextSections(licenses: licenses)
         }
         .navigationTitle(item.name)
+        .task { licenses = BundledLicense.load(item.licenseFiles) }
     }
+}
 
-    private func bundledText(_ name: String, _ ext: String) -> String? {
-        guard let url = Bundle.main.url(forResource: name, withExtension: ext) else { return nil }
-        return try? String(contentsOf: url, encoding: .utf8)
+/// semicolyn's own licence: the GNU GPL v3 and the App Store permission.
+private struct SemicolynLicenseView: View {
+    @State private var licenses: [BundledLicense] = []
+
+    var body: some View {
+        List {
+            LicenseTextSections(licenses: licenses)
+        }
+        .navigationTitle("License")
+        .task { licenses = BundledLicense.load(About.licenseFiles) }
+    }
+}
+
+/// One bundled licence file, split at blank lines so a long document (the Rust crate
+/// list runs to thousands of lines) renders lazily, one List row per paragraph.
+private struct BundledLicense: Identifiable {
+    let file: String
+    /// nil when the file is missing from the bundle.
+    let paragraphs: [String]?
+    var id: String { file }
+
+    /// Reads each named file from the app bundle (resources are copied flat).
+    static func load(_ files: [String]) -> [BundledLicense] {
+        files.map { file in
+            guard let url = Bundle.main.url(forResource: file, withExtension: nil),
+                  let text = try? String(contentsOf: url, encoding: .utf8) else {
+                return BundledLicense(file: file, paragraphs: nil)
+            }
+            let paragraphs = text.components(separatedBy: "\n\n")
+                .map { $0.trimmingCharacters(in: .newlines) }
+                .filter { !$0.isEmpty }
+            return BundledLicense(file: file, paragraphs: paragraphs)
+        }
+    }
+}
+
+/// A section per licence file showing its full text, monospaced and selectable.
+private struct LicenseTextSections: View {
+    let licenses: [BundledLicense]
+
+    var body: some View {
+        ForEach(licenses) { license in
+            Section {
+                if let paragraphs = license.paragraphs {
+                    ForEach(paragraphs.indices, id: \.self) { index in
+                        Text(paragraphs[index])
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .listRowSeparator(.hidden)
+                    }
+                } else {
+                    Text("This license text is missing from the app.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text(license.file)
+                    .textCase(nil)
+            }
+        }
     }
 }

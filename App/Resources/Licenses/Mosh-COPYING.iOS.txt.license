@@ -1,0 +1,6 @@
+SPDX-FileCopyrightText: 2012 Keith Winstein and the Mosh authors
+SPDX-License-Identifier: GPL-3.0-or-later
+
+Verbatim copy of extern/mosh/COPYING.iOS.
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.

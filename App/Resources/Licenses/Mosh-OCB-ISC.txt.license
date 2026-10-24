@@ -1,0 +1,7 @@
+SPDX-FileCopyrightText: 2012 Ted Krovetz
+SPDX-FileCopyrightText: 2022 Google LLC
+SPDX-License-Identifier: ISC
+
+Licence header of extern/mosh/src/crypto/ocb_internal.cc (lines 1-26).
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.

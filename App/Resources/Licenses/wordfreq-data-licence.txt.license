@@ -1,0 +1,7 @@
+SPDX-FileCopyrightText: 2022 Robyn Speer
+SPDX-License-Identifier: Apache-2.0
+
+The "License" section of the wordfreq 3.1.1 README (PyPI sdist), which
+carries the data sources' attribution terms.
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.

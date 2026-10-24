@@ -1,0 +1,6 @@
+SPDX-FileCopyrightText: Mozilla Foundation
+SPDX-License-Identifier: MPL-2.0
+
+MPL 2.0 text from spdx/license-list-data.
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.

@@ -1,0 +1,6 @@
+SPDX-FileCopyrightText: 2013-2026 Frank Denis
+SPDX-License-Identifier: ISC
+
+libsodium 1.0.22-RELEASE LICENSE.
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.
