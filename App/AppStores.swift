@@ -243,23 +243,4 @@ final class AppStores {
         DebugLog.shared.log(.seed, "predictor:blocklist loaded words=\(words.count)")
         return TokenFilter(patterns: TokenFilter.defaultPatterns + [.blocklist(words)])
     }
-
-    // MARK: - Device seed
-
-    /// Returns a stable per-install random seed, persisted in `UserDefaults`.
-    ///
-    /// No longer feeds the tmux session name, that is now the user-configurable
-    /// `resolveTmuxSessionName` (builtin default `"semicolyn"`). Retained for a
-    /// future 2b-ii CloudKit-account-bound derivation that may reuse this seed.
-    ///
-    /// - Returns: A UUID string that is stable for the lifetime of the app install.
-    func deviceSeed() throws -> String {
-        let key = "semicolyn.deviceSeed"
-        if let existing = UserDefaults.standard.string(forKey: key) {
-            return existing
-        }
-        let fresh = UUID().uuidString
-        UserDefaults.standard.set(fresh, forKey: key)
-        return fresh
-    }
 }

@@ -157,7 +157,7 @@ public func resolveUseTmux(host: Host, defaults: Defaults) -> Bool {
     resolveLeaf(host.semicolyn, defaults.semicolyn, { $0.tmux?.useTmux }, fallback: true)
 }
 
-/// Resolve the tmux -CC session name: host leaf → Defaults leaf → builtin.
+/// Resolve the tmux session name: host leaf → Defaults leaf → builtin.
 /// Normalization runs inside the leaf accessor, so an empty/whitespace-only leaf
 /// is seen as absent and falls through to the next level (ultimately "semicolyn").
 public func resolveTmuxSessionName(host: Host, defaults: Defaults) -> String {

@@ -159,8 +159,7 @@ final class GestureIntentExecutor: NSObject {
         for run in arrowEvents(cols: 0, rows: -lines) {   // finger down -> up runs (older)
             let bytes: [UInt8]
             switch keys {
-            case .wheel: bytes = encodeWheelRun(run, col: col, row: row)
-            case .pageKeys: bytes = encodePageKeyRun(run)
+            case .wheel:  bytes = encodeWheelRun(run, col: col, row: row)
             case .arrows: bytes = encodeArrowRun(run, applicationCursorKeys: term.applicationCursor)
             }
             if !bytes.isEmpty { hooks.sendBytes(bytes) }

@@ -14,8 +14,8 @@ public struct ResumableSession: Codable, Sendable, Equatable {
     /// The reattach endpoint (Mosh server port, ET server host/port).
     public let host: String
     public let port: Int
-    /// The tmux -CC session name if the session was control-mode, so a reconnect
-    /// runs `new-session -A -s <name>` and reattaches the same panes; nil otherwise.
+    /// The tmux session name if the session ran plain tmux, so a reconnect relaunches
+    /// tmux on the same session and reattaches its windows and panes; nil otherwise.
     public let tmuxSessionName: String?
     /// Timestamp for most-recent ordering. NOT used for expiry (records clear on
     /// failure, not on a timer).

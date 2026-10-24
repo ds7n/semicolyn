@@ -2,11 +2,6 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
-#if canImport(CryptoKit)
-import CryptoKit
-#else
-import Crypto
-#endif
 
 /// A parsed `major.minor` tmux version (patch letters like `3.3a` are ignored).
 public struct TmuxVersion: Equatable, Comparable, Sendable {
@@ -32,17 +27,18 @@ public func parseTmuxVersion(_ probeOutput: String) -> TmuxVersion? {
     return nil
 }
 
-/// Control mode needs tmux ≥ 3.0 (roadmap constraint).
-public func tmuxSupportsControlMode(_ v: TmuxVersion) -> Bool {
+/// The minimum tmux Semicolyn launches on SSH: 3.0 (the floor carried over from the
+/// control-mode era; the gesture layer's bindings are exercised against 3.x).
+public func tmuxMeetsMinimumVersion(_ v: TmuxVersion) -> Bool {
     v >= TmuxVersion(major: 3, minor: 0)
 }
 
-/// Why Semicolyn fell back to a raw-PTY shell instead of attaching control mode.
+/// Why Semicolyn fell back to a raw shell instead of launching tmux.
 public enum DegradeReason: Equatable, Sendable {
     case optedOut                 // host's semicolyn.tmux.useTmux == false
     case tmuxNotFound             // probe empty / unparseable
     case tooOld(TmuxVersion)      // tmux < 3.0
-    case couldNotStart            // the -CC start command couldn't be built (e.g. an
+    case couldNotStart            // the tmux launch command couldn't be built (e.g. an
                                   // invalid resolved session name), so tmux never launched
 }
 
@@ -52,32 +48,10 @@ public enum TmuxLaunchDecision: Equatable, Sendable {
     case degrade(DegradeReason)
 }
 
-/// Decide whether to attach control mode given the host's opt-in flag and the
+/// Decide whether to launch tmux given the host's opt-in flag and the
 /// captured `tmux -V` output (nil when the probe produced nothing).
 public func tmuxLaunchDecision(useTmux: Bool, versionProbe: String?) -> TmuxLaunchDecision {
     guard useTmux else { return .degrade(.optedOut) }
     guard let probe = versionProbe, let v = parseTmuxVersion(probe) else { return .degrade(.tmuxNotFound) }
-    return tmuxSupportsControlMode(v) ? .attach : .degrade(.tooOld(v))
-}
-
-/// Supplies the shared tmux session name. The real implementation derives it from
-/// the iCloud-account-bound CloudKit key (2b-ii, enrollment-gated); Plan A uses a
-/// local stub seed.
-public protocol SessionNameProvider {
-    func sessionName() -> String
-}
-
-/// `semicolyn-<first 8 lowercase hex of SHA-256(seed)>`.
-public func tmuxSessionName(seed: String) -> String {
-    let digest = SHA256.hash(data: Data(seed.utf8))
-    let hex = digest.map { String(format: "%02x", $0) }.joined()
-    return "semicolyn-" + hex.prefix(8)
-}
-
-/// Stub provider: a deterministic name from a local seed. Swap for a
-/// CloudKit-key-derived provider in 2b-ii.
-public struct StubSessionNameProvider: SessionNameProvider {
-    public let seed: String
-    public init(seed: String) { self.seed = seed }
-    public func sessionName() -> String { tmuxSessionName(seed: seed) }
+    return tmuxMeetsMinimumVersion(v) ? .attach : .degrade(.tooOld(v))
 }

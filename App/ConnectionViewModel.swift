@@ -463,12 +463,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         observePredictorInput(bytes)
     }
 
-    /// DECCKM (application-cursor-keys) state of the active pane's terminal.
-    /// Only the removed -CC path registered pane views; plain tmux and raw shell
-    /// have none, so this is false (unchanged behavior). Pointing it at the
-    /// mounted terminal is a separate follow-up.
+    /// Live DECCKM (application-cursor-keys) state of the mounted terminal, on every
+    /// transport (raw SSH, plain tmux, Mosh, ET): the emulator tracks `ESC [ ? 1 h/l`
+    /// from the remote, so keybar arrows send `ESC O A` in vim/less and `ESC [ A` at a
+    /// shell. Read per keystroke (the router calls this for every key). False before
+    /// the terminal mounts.
     private func activePaneApplicationCursor() -> Bool {
-        false
+        mountedTerminalView?.getTerminal().applicationCursor ?? false
     }
 
     /// The `TerminalView` the user is currently typing into (L1 echo oracle, the
@@ -496,14 +497,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     // MARK: - Hardware-keyboard commands (Phase 4e)
 
     /// Dispatches a resolved hardware-keyboard command to its action. Window/pane
-    /// commands are currently no-ops; presentation commands publish a
+    /// commands drive plain tmux through the gesture bindings (`keyboardTmuxAction`)
+    /// and do nothing without tmux; presentation commands publish a
     /// `presentedSheet` intent for `SessionView`.
     func perform(_ command: KeyboardCommand) {
         DebugLog.shared.log(.input, "input:command \(command)")
         switch command {
         case .newWindow, .closeWindow, .switchWindow, .prevWindow, .nextWindow,
              .prevPane, .nextPane, .splitVertical, .splitHorizontal:
-            break   // window/pane commands: removed with -CC (plain-tmux rewire is a follow-up)
+            let action = keyboardTmuxAction(for: command, plainTmuxAttached: plainTmux != nil)
+            DebugLog.shared.log(.tmux, decisionLine(
+                "input:shortcut",
+                inputs: [("command", "\(command)"), ("plainTmux", "\(plainTmux != nil)")],
+                outputs: [("action", action.map { "\($0)" } ?? "none")],
+                reason: nil))
+            if let action { plainTmux?.onKeyboardShortcut(action) }
         case .clearScreen:         sendTerminalInput([0x0c])              // Ctrl-L
         case .paste:               pasteFromClipboard()
         case .reconnect:           reconnect()

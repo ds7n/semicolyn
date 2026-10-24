@@ -9,12 +9,11 @@ enum LogCategory: String, CaseIterable, Sendable {
     case lifecycle   // connect/attach/disconnect, app fg/bg, transport switch
     case connect     // auth, hostkey, mosh fallback, reconnect
     case tmux        // tmux version probe / launch / gesture commands / sizing
-    case render      // pane/window render, log-on-change only
     case gesture     // tap/pan/long-press/pinch handlers + classify decisions
     case input       // keystroke structural events (length/backspace/modifier), NOT content
     case predictor   // suggestion lifecycle + secret-exclusion gates
     case keybar      // accessory sizing, macro resolution, live-edit apply
-    case seed        // tmux history seeding
+    case seed        // predictor vocabulary seeding + terminal scroll setup
     case geometry    // container bounds/cell/grid/pane-frame + view identity across connects
     case transport   // raw transport handshake structure (masked credential)
 
@@ -31,19 +30,18 @@ enum LogCategory: String, CaseIterable, Sendable {
         case .lifecycle: return "Connect, attach, disconnect, app foreground/background, transport switch."
         case .connect:   return "Auth, host-key trust, Mosh fallback, reconnect."
         case .tmux:      return "tmux version probe, launch, gesture commands, and terminal sizing."
-        case .render:    return "Pane/window render events (logged only on change). Verbose."
         case .gesture:   return "Tap, pan, long-press, pinch handlers and swipe-vs-scroll classification."
         case .input:     return "Keystroke structure (length, backspace, modifiers), never key content. Verbose."
         case .predictor: return "Suggestion lifecycle and secret-exclusion gates. Verbose."
         case .keybar:    return "Accessory sizing, macro resolution, live-edit apply. Verbose."
-        case .seed:      return "tmux scrollback history seeding."
+        case .seed:      return "Predictor vocabulary seeding and terminal scroll setup."
         case .geometry:  return "Container bounds, cell metrics, grid, pane frames, and view identity across connects."
         case .transport: return "Raw transport handshake structure (Eternal Terminal IDPASSKEY, Mosh connect). Credential values are masked. Verbose, off by default."
         }
     }
 
     /// Categories ON by default: low-volume, high-diagnostic-value. The high-volume /
-    /// niche ones (gesture/render/input/predictor/keybar) default OFF (opt-in when needed).
+    /// niche ones (gesture/input/predictor/keybar) default OFF (opt-in when needed).
     /// `geometry` is ON by default while the switched-window layout gap is under active
     /// investigation (it logs on-change, so it stays low-volume).
     static let defaultEnabled: Set<LogCategory> = [.lifecycle, .connect, .tmux, .seed, .geometry]
