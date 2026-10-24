@@ -107,7 +107,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Predictor-strip suggestion state, split into its own observable slice so a
     /// suggestion recompute invalidates only the predictor-strip views (Plan B §B1).
     let predictorVM = PredictorViewModel()
-    /// Nil when the predictor is disabled for this session (incognito).
+    /// Nil before a session starts. In private mode it is a non-learning engine
+    /// (`learns: false`) that still suggests from the built-in dictionaries.
     private var predictor: PredictorActor?
     private var tracker = InputTokenTracker()
     /// Coalesces remote output for the screen-word harvest: capped at 8 KiB (newest
@@ -286,6 +287,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// cleans up silently (no `.failed`, no banner). Reset at connect-start (NOT in
     /// `teardown()`, which runs before the async `onEnd` and would clear it too early).
     private var etUserDisconnecting = false
+    /// Bumped by every `teardown()`. An ET `onEnd` captures the value current when its
+    /// session was created and ignores itself once it no longer matches, so a late
+    /// onEnd from a session a Reconnect already replaced can't fail the new one.
+    private var etGeneration = 0
+    /// Advanced by every `teardown()`. Each SSH shell's sink
+    /// (`GenerationGatedShellOutput`) and each Mosh session's callbacks capture it, so
+    /// a session a Reconnect replaced can't feed or fail the new one.
+    private var sessionGeneration = SessionGeneration()
     /// Set when we bootstrapped Mosh but fell back to SSH before handoff. Consumed
     /// by `SessionView` to show a one-line banner (parallels `degraded`/`crashBanner`).
     @Published var moshFallback: String?
@@ -515,6 +524,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         case .clearScreen:         sendTerminalInput([0x0c])              // Ctrl-L
         case .paste:               pasteFromClipboard()
         case .reconnect:           reconnect()
+        case .disconnect:          confirmingDisconnect = true
         case .newConnection:       presentedSheet = .hostPicker
         case .openLauncher:        presentedSheet = .launcher
         case .settings:            presentedSheet = .settings
@@ -529,14 +539,115 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sendTerminalInput(Array(text.utf8))
     }
 
-    /// Re-run the last saved-host connect (`⇧⌘R`). No-op if nothing connected yet.
+    /// Re-run the last saved-host connect (`⇧⌘R`, the Session menu, the session-ended
+    /// banner). No-op if nothing connected yet. The credential is re-derived
+    /// (`reconnectCredential`): a session that began as a cold reattach never had a
+    /// password typed or read, so an empty one must not be sent. With nothing to sign
+    /// in with, the live session is kept and SessionView asks for the password
+    /// (`reconnectNeedsPassword`).
     func reconnect() {
         guard let host = lastSavedHost else {
             DebugLog.shared.log(.connect, "reconnect: ABORT no lastSavedHost")
             return
         }
-        DebugLog.shared.log(.connect, "reconnect: triggered for \(host.hostName)")
-        connect(savedHost: host, password: lastPassword ?? "")
+        let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+        let credential = reconnectCredential(lastPassword: lastPassword,
+                                             storedPassword: Self.storedPassword(for: host),
+                                             hasUsableKey: Self.hasUsableKey(host: host, defaults: defaults))
+        switch credential {
+        case .password(let password): performReconnect(host: host, password: password)
+        case .keysOnly:               performReconnect(host: host, password: "")
+        case .askForPassword:
+            DebugLog.shared.log(.connect, "reconnect: no key or password for \(host.hostName) → ask, session kept")
+            reconnectNeedsPassword = true
+        }
+    }
+
+    /// Reconnect with the password typed into SessionView's prompt.
+    func reconnect(withPassword password: String) {
+        reconnectNeedsPassword = false
+        guard let host = lastSavedHost, !password.isEmpty else { return }
+        performReconnect(host: host, password: password)
+    }
+
+    /// Set when Reconnect has nothing to sign in with; SessionView shows a password
+    /// prompt and calls `reconnect(withPassword:)`.
+    @Published var reconnectNeedsPassword = false
+
+    /// A live or half-open session is torn down first: `connect` ignores calls while
+    /// `.shell`/`.connecting`, which made Reconnect a silent no-op from inside a
+    /// session. `state` passes through `.idle` only synchronously (`connect` flips it
+    /// to `.connecting` in the same turn), so SessionView's dismiss-on-idle never sees
+    /// it, the same hand-off the Mosh reattach watchdogs use.
+    private func performReconnect(host: Host, password: String) {
+        let wasLive = state == .shell || state == .connecting
+        DebugLog.shared.log(.connect, "reconnect: triggered for \(host.hostName) wasLive=\(wasLive)")
+        if wasLive {
+            etUserDisconnecting = true   // the old ET session's async onEnd stays silent
+            teardown()
+            state = .idle
+        }
+        connect(savedHost: host, password: password)
+    }
+
+    /// The password for a fresh connect that no prompt ran for (resume banners, the
+    /// dead-server watchdogs): this session's password, else the stored one, else ""
+    /// (keys only, or the server rejects it as before).
+    private func freshConnectPassword(for host: Host) -> String {
+        if case .password(let p) = reconnectCredential(lastPassword: lastPassword,
+                                                       storedPassword: Self.storedPassword(for: host),
+                                                       hasUsableKey: false) {
+            return p
+        }
+        return ""
+    }
+
+    /// The host's non-empty stored password, or nil (absent, unreadable, or empty).
+    static func storedPassword(for host: Host) -> String? {
+        guard let passwordID = host.passwordRef.value,
+              let data = try? AppStores.shared.secrets.getSecret(.password(id: passwordID))
+        else { return nil }
+        let stored = String(decoding: data, as: UTF8.self)
+        return stored.isEmpty ? nil : stored
+    }
+
+    /// True if any identity the host resolves to has its private key on this device.
+    /// A Keychain read error counts as "no usable key" here (the connect path re-reads
+    /// and logs a genuine failure).
+    static func hasUsableKey(host: Host, defaults: Defaults) -> Bool {
+        // privateKeyOpenSSH returns String? (nil = absent); `try?` collapses a read
+        // error to nil too. Either nil → no usable key on this device.
+        resolveIdentities(host: host, defaults: defaults).contains { identityID in
+            let key = try? AppStores.shared.identities.privateKeyOpenSSH(for: identityID)
+            return (key ?? nil) != nil
+        }
+    }
+
+    /// Asks SessionView to show the "Disconnect from <host>?" confirmation (`⇧⌘W`).
+    @Published var confirmingDisconnect = false
+
+    /// The Session section of the in-session Settings sheet ("<host> · <transport>",
+    /// Reconnect, Disconnect), or nil when no live shell is up.
+    var sessionControls: SessionSettingsControls? {
+        guard state == .shell, let host = lastSavedHost else { return nil }
+        let transport = activeSessionTransport(moshActive: isMoshActive, etActive: isETActive)
+        return SessionSettingsControls(
+            title: sessionMenuTitle(hostLabel: host.label, transport: transport),
+            hostLabel: host.label,
+            onReconnect: { [weak self] in self?.reconnect() },
+            onDisconnect: { [weak self] in self?.disconnect() })
+    }
+
+    /// Whether the keybar's input accessory is in a window (the keyboard, or the
+    /// hardware-keyboard bar, is showing). Drives the "≡" corner button
+    /// (`sessionMenuButtonVisible`). Reported by `KeybarInputAccessory`.
+    @Published private(set) var keybarAttached = false
+
+    /// `KeybarInputAccessory.didMoveToWindow` hook.
+    func noteKeybarAttached(_ attached: Bool) {
+        guard attached != keybarAttached else { return }
+        keybarAttached = attached
+        DebugLog.shared.log(.keybar, "keybar:attached \(attached)")
     }
 
     /// Ask the active terminal to re-show the keyboard + keybar. Safe to call when
@@ -583,6 +694,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         etFirstFrameSeen = false
         etSession?.close()
         etSession = nil
+        etGeneration &+= 1
+        sessionGeneration.advance()   // stale SSH sink / Mosh callbacks now drop out
         plainTmux = nil
         plainTmuxSessionNamePendingInstall = nil
         moshPlainTmuxLaunchSent = false
@@ -749,6 +862,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // Adopt this record's id so the connected-edge capture REFRESHES the same record
         // (and a later teardown clears the right one).
         sessionID = record.sessionID
+        // Reconnect (Session menu, ⇧⌘R) and the Session section need the host; a cold
+        // reattach never runs `connect(savedHost:)`, which is where it is otherwise set.
+        lastSavedHost = host
         state = .connecting
         DebugLog.shared.log(.connect,
             "resume:coldReattach transport=\(record.transport.rawValue) endpoint=\(record.host):\(record.port)")
@@ -818,8 +934,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // App target already compiles: the Obj-C block property is inferred main-actor
         // here, so no `MainActor.assumeIsolated` wrapper is needed (that guard is for
         // nonisolated SwiftTerm/@objc callbacks, not these blocks).
+        // Callbacks from a session a Reconnect already replaced are dropped.
+        let moshGeneration = sessionGeneration.value
         sess.onOutput = { [weak self] data in
-            guard let self else { return }
+            guard let self, self.sessionGeneration.isCurrent(moshGeneration) else { return }
             self.output.onOutput(data: data)
             // Connecting overlay: runs after the probe accumulation below (on every exit
             // path) so the sentinel check sees this chunk.
@@ -880,7 +998,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             }
         }
         sess.onFirstFrame = { [weak self] in
-            guard let self else { return }
+            guard let self, self.sessionGeneration.isCurrent(moshGeneration) else { return }
             // Reattach succeeded: frames flowing. Refresh the record (new lastConnectedAt)
             // and drop the in-memory failure copy.
             DebugLog.shared.log(.connect, "resume:reattachMosh onFirstFrame → live")
@@ -974,7 +1092,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                                endpoint: (host: record.host, port: record.port), secret: key)
         }
         sess.onEnd = { [weak self] reason in
-            guard let self else { return }
+            guard let self, self.sessionGeneration.isCurrent(moshGeneration) else {
+                DebugLog.shared.log(.connect, "resume:reattachMosh onEnd from a replaced session → ignored")
+                return
+            }
             // Mutual exclusion with the liveness watchdog (mirrors the fresh path's
             // moshResolved guard): if the watchdog already resolved this reattach (dead
             // server -> fresh connect), a late onEnd must NOT clobber the new connection
@@ -1023,9 +1144,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // `connect` immediately tears down + flips to `.connecting`.
             self.state = .idle
             // Full fresh connect (SSH auth -> new mosh bootstrap) using stored
-            // creds, the same entry the host list uses; password "" defers to the
-            // saved key/credential resolution.
-            self.connect(savedHost: host, password: "")
+            // creds, the same entry the host list uses (the stored password when
+            // there is one, else keys only).
+            self.connect(savedHost: host, password: self.freshConnectPassword(for: host))
         }
     }
 
@@ -1073,7 +1194,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // the fresh-relaunch watchdog; connect() then tears down + flips to
             // `.connecting`, which also resets the state-resume flags via teardown().
             self.state = .idle
-            self.connect(savedHost: host, password: "")
+            self.connect(savedHost: host, password: self.freshConnectPassword(for: host))
         }
     }
 
@@ -1111,7 +1232,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         DebugLog.shared.log(.connect, "resume:startFresh host=\(mem.host.label)")
         resumeFailure = nil
         resumeInMemory = nil
-        connect(savedHost: mem.host, password: lastPassword ?? "")
+        connect(savedHost: mem.host, password: freshConnectPassword(for: mem.host))
     }
 
     /// Banner Back to hosts: drop the in-memory copy and dismiss to the host list.
@@ -1128,7 +1249,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         DebugLog.shared.log(.connect, "resume:rawReconnect host=\(host.label)")
         resumeRawPrompt = nil
         resumeRawRecord = nil
-        connect(savedHost: host, password: lastPassword ?? "")
+        connect(savedHost: host, password: freshConnectPassword(for: host))
     }
 
     /// Raw-SSH prompt Not now: clear the resumed record and dismiss to the host list.
@@ -1153,25 +1274,40 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// the outcome is returned as-is (matches the cert-auth no-fallback rule).
     private func authenticate(conn: Connection, user: String, host: Host,
                               defaults: Defaults, password: String) async throws -> AuthOutcome {
-        // Resolve the identity through Defaults inheritance, not just the host's explicit value.
-        if let identityID = resolveIdentities(host: host, defaults: defaults).first {
-            // A genuine Keychain read failure must surface (no `try?`); only a truly
-            // absent private key falls back to password (e.g. SE-flavor identity whose
-            // key isn't stored on this device).
-            if let key = try AppStores.shared.identities.privateKeyOpenSSH(for: identityID) {
-                // No silent fallback: a present-but-rejected key returns its outcome.
+        // Resolve identities through Defaults inheritance, not just the host's explicit
+        // value. Each key on this device is tried in order, then the password
+        // (`authenticateInOrder`). A key that can't be read or used (Keychain error,
+        // corrupt key) is logged and skipped, like an absent key, so it never blocks
+        // the next key or the password.
+        let identities = resolveIdentities(host: host, defaults: defaults)
+        let sequence = try await authenticateInOrder(
+            identities: identities,
+            password: password,
+            loadKey: { try AppStores.shared.identities.privateKeyOpenSSH(for: $0) },
+            tryKey: { identityID, key in
                 DebugLog.shared.log(.connect, "authenticate: publickey (identity=\(identityID))")
                 let outcome = try await conn.authenticatePublickey(user: user, privateKeyOpenssh: key)
                 DebugLog.shared.log(.connect, "authenticate: publickey → \(String(describing: outcome))")
-                return outcome
-            }
-            DebugLog.shared.log(.connect, "authenticate: identity \(identityID) has no stored key → password fallback")
-        } else {
-            DebugLog.shared.log(.connect, "authenticate: no identity resolved → password")
-        }
-        let outcome = try await conn.authenticatePassword(user: user, password: password)
-        DebugLog.shared.log(.connect, "authenticate: password → \(String(describing: outcome))")
-        return outcome
+                return AuthAttemptResult(outcome)
+            },
+            tryPassword: { pw in
+                let outcome = try await conn.authenticatePassword(user: user, password: pw)
+                DebugLog.shared.log(.connect, "authenticate: password → \(String(describing: outcome))")
+                return AuthAttemptResult(outcome)
+            },
+            onKeyError: { identityID, error in
+                DebugLog.shared.log(.connect, "authenticate: key \(identityID) skipped, error \(String(describing: error))")
+            })
+        DebugLog.shared.log(.connect, decisionLine(
+            "authenticate",
+            inputs: [("identities", "\(identities.count)"),
+                     ("hasPassword", "\(!password.isEmpty)")],
+            outputs: [("attempts", "\(sequence.attempts.count)"),
+                      ("skippedNoKey", "\(sequence.skippedWithoutKey.count)"),
+                      ("keyErrors", "\(sequence.keyErrors.count)"),
+                      ("result", "\(sequence.result)")],
+            reason: nil))
+        return AuthOutcome(sequence.result)
     }
 
     // MARK: - Host record
@@ -1198,13 +1334,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Find an existing saved host matching an ssh:// target, or create + persist one.
     /// A target without a user inherits the default user (`.inherit`).
     func hostForSSHTarget(_ target: SSHConnectTarget) throws -> Host {
-        let port = target.port ?? 22
-        let existing = try AppStores.shared.hosts.allHosts()
-            .first { $0.hostName == target.host && ($0.port.value ?? 22) == port && $0.user.value == target.user }
-        if let existing { return existing }
-        let host = Host(id: UUID(), label: target.host, hostName: target.host,
-                        user: target.user.map { Inherited.explicit($0) } ?? .inherit,
-                        port: .explicit(port))
+        try Self.savedOrNewHost(for: target)
+    }
+
+    /// Find-or-create for a quick-connect target (`savedHost(for:in:)` /
+    /// `newHost(for:id:)`); a new host is saved. Shared with the Hosts list's
+    /// "Connect to user@host…".
+    static func savedOrNewHost(for target: SSHConnectTarget) throws -> Host {
+        if let existing = savedHost(for: target, in: try AppStores.shared.hosts.allHosts()) {
+            return existing
+        }
+        let host = newHost(for: target, id: UUID())
         try AppStores.shared.hosts.saveHost(host)
         return host
     }
@@ -1245,12 +1385,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         return text.isEmpty ? nil : text
     }
 
+    /// The sink for one SSH shell: forwards to `output` only while this session's
+    /// generation is current (see `GenerationGatedShellOutput`).
+    private func gatedShellOutput() -> GenerationGatedShellOutput {
+        GenerationGatedShellOutput(target: output, generation: sessionGeneration.value,
+                                   isCurrent: { [weak self] g in self?.sessionGeneration.isCurrent(g) ?? false })
+    }
+
     /// Open a raw PTY shell: the original pre-tmux path. Sets `connection`,
     /// `session`, and `state = .shell`.
     private func openRawShell(conn: Connection) async throws {
         DebugLog.shared.log(.lifecycle, "openRawShell: opening PTY shell")
         let sess = try await conn.openShell(
-            term: "xterm-256color", cols: 80, rows: 24, output: output)
+            term: "xterm-256color", cols: 80, rows: 24, output: gatedShellOutput())
         connection = conn
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
@@ -1397,8 +1544,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // leave the terminal permanently blank. `onOutput` appends to the
             // `PendingOutputBuffer`, which replays on sink-install, and feeds the
             // predictor output tap (`installOutputTap` above).
+            // Callbacks from a session a Reconnect already replaced are dropped.
+            let moshGeneration = sessionGeneration.value
             sess.onOutput = { [weak self] data in
-                guard let self else { return }
+                guard let self, self.sessionGeneration.isCurrent(moshGeneration) else { return }
                 self.output.onOutput(data: data)
                 // Connecting overlay: runs after the probe accumulation below (on every
                 // exit path) so the sentinel check sees this chunk.
@@ -1441,13 +1590,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 self.evaluatePlainTmuxProbe()
             }
             sess.onFirstFrame = { [weak self] in
+                guard let self, self.sessionGeneration.isCurrent(moshGeneration) else { return }
                 // Frames are flowing: the UDP path is up. `moshFirstFrameSeen` is no
                 // longer the exit discriminator (that's reason+elapsed now), but it
                 // still records that a frame arrived; cancelling the watchdog here is
                 // the important effect, the loop signalled life, so don't SSH-fall-back.
                 DebugLog.shared.log(.connect, "mosh: onFirstFrame, UDP handshake up, frames flowing")
-                self?.moshFirstFrameSeen = true
-                self?.moshWatchdog?.cancel(); self?.moshWatchdog = nil
+                self.moshFirstFrameSeen = true
+                self.moshWatchdog?.cancel(); self.moshWatchdog = nil
                 DebugLog.shared.log(.connect, "mosh: watchdog cancelled (onFirstFrame)")
                 // Start the plain-tmux launch (attach-or-create) now that frames are
                 // flowing. DIRECT launch: mosh-server is already running it as the session
@@ -1459,7 +1609,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // fire SYNCHRONOUSLY during `sess.start()` below (see the `onOutput`
                 // comment above), before `moshSession = sess` runs, so `self.moshSession`
                 // may still be nil at this instant.
-                if useTmux, let self, !self.moshPlainTmuxLaunchSent,
+                if useTmux, !self.moshPlainTmuxLaunchSent,
                    isValidTmuxSessionName(self.tmuxSessionNameForConnection) {
                     self.moshPlainTmuxLaunchSent = true
                     self.startMoshPlainTmuxLaunch(sess: sess, typeInBandLaunch: !self.moshDirectLaunch)
@@ -1470,9 +1620,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // is true for a plain-tmux Mosh session, and the tmux session name RIDES
                 // the record so a cold reattach lands back in the tmux session rather
                 // than a raw shell (device bug 2026-09-04: Mosh resume captured tmux=false).
-                self?.captureResume(host: host, transport: .mosh,
-                                    endpoint: (host: host.hostName, port: port),
-                                    secret: Data(key.utf8))
+                self.captureResume(host: host, transport: .mosh,
+                                   endpoint: (host: host.hostName, port: port),
+                                   secret: Data(key.utf8))
             }
             // Stamp the start time BEFORE the onEnd closure literal so the closure can
             // capture it (Swift resolves captures at declaration order, not runtime).
@@ -1480,7 +1630,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // true session-start instant. Monotonic clock (systemUptime).
             let moshStartedAt = ProcessInfo.processInfo.systemUptime
             sess.onEnd = { [weak self] reason in
-                guard let self else { return }
+                guard let self, self.sessionGeneration.isCurrent(moshGeneration) else {
+                    DebugLog.shared.log(.connect, "mosh: onEnd from a replaced session → ignored")
+                    return
+                }
                 self.moshWatchdog?.cancel(); self.moshWatchdog = nil
                 // The watchdog may have already resolved this session (attached SSH)
                 // via an onEnd dispatch that was enqueued before the watchdog niled it.
@@ -1788,8 +1941,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         sess.onState = { raw in
             DebugLog.shared.log(.transport, "et: state=\(mapETState(Int32(raw)))")
         }
+        let generation = etGeneration
         sess.onEnd = { [weak self] reason in
             guard let self else { return }
+            // Stale: a teardown (Reconnect, a newer connect) already replaced this
+            // session. Checked before touching the watchdog, which now belongs to the
+            // new session. A user disconnect keeps its own silent branch below.
+            if generation != self.etGeneration, !self.etUserDisconnecting {
+                DebugLog.shared.log(.transport, "et: onEnd from a replaced session → ignored")
+                return
+            }
             self.etWatchdog?.cancel(); self.etWatchdog = nil
             // User-initiated disconnect (the "x" button): `disconnect()` already tore the
             // session down and drove state to .idle. This async onEnd must NOT run the
@@ -1881,7 +2042,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let startCmd = PlainTmuxController.launchCommand(sessionName: tmuxSessionNameForConnection)
         DebugLog.shared.log(.tmux, "attachPlainTmux: openExec startCmd=\(startCmd.prefix(60))")
         let sess = try await conn.openExec(command: startCmd, term: "xterm-256color",
-                                           cols: 80, rows: 24, output: output)
+                                           cols: 80, rows: 24, output: gatedShellOutput())
         connection = conn
         session = sess
         rawWriter = SerialByteWriter(sink: ShellSessionSink(session: sess))
@@ -2055,7 +2216,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     // MARK: - Predictor
 
     /// Persist the session's learned predictor vocabulary to disk. Idempotent and
-    /// safe to call repeatedly; a no-op when the predictor is disabled (incognito)
+    /// safe to call repeatedly; a no-op in private mode (no learned store attached)
     /// or no learned store is attached. Called from `teardown()` and on
     /// app-background (`scenePhase`) so learning survives a backgrounded or killed
     /// app, previously only a clean teardown flushed. The snapshot+save now runs on
@@ -2135,8 +2296,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// `PredictorPurgeable`: reset the running engine to empty (seed preserved).
     /// Called by `AppStores.purgePredictorLearned()` when THIS session is the active
     /// one, so a panic-purge triggered from Settings, even mid-session, clears the
-    /// in-memory learned state before the on-disk store is deleted. No-op when the
-    /// predictor is off (incognito).
+    /// in-memory learned state before the on-disk store is deleted. Not registered
+    /// in private mode (nothing learned to reset).
     func purgeLearnedEngine() {
         DebugLog.shared.log(.predictor, "predictor:purge")
         Task { [predictor] in await predictor?.purgeLearned() }
@@ -2155,11 +2316,22 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         try? AppStores.shared.purgePredictorLearned()
     }
 
-    /// Build the session predictor unless incognito is on for this host.
+    /// Build the session predictor: a learning engine, or a non-learning one when
+    /// private mode ("Don't learn from my typing") is on for this host.
     private func startPredictor(host: Host, defaults: Defaults) {
         guard !resolvePredictorIncognito(host: host, defaults: defaults) else {
-            predictor = nil
-            // Incognito: no engine to reset, so don't claim the active-purge slot.
+            // Private mode ("Don't learn from my typing"): suggestions still come from
+            // the built-in dictionaries, but the engine starts with nothing learned,
+            // records and harvests nothing (`learns: false`), and has no learned store
+            // to flush, so the on-disk vocabulary is never read or written.
+            learnedStore = nil
+            predictor = PredictorActor(engine: PredictorEngine(
+                learned: .empty,
+                english: AppStores.shared.englishDictionary(),
+                commands: AppStores.shared.commandTree(),
+                filter: AppStores.shared.predictorTokenFilter(),
+                learns: false))
+            // Nothing learned to reset, so don't claim the active-purge slot.
             if AppStores.shared.activePredictorSession === self {
                 AppStores.shared.activePredictorSession = nil
             }
@@ -2180,8 +2352,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// tmux, Mosh, ET): each chunk feeds the password-prompt gate and the engine's
     /// screen-word harvest (escape, secret-flag and partial-token context carry
     /// across chunks inside the engine). Harvest chunks coalesce in `harvestBuffer`
-    /// with at most one in flight. Harvest is a no-op when the predictor is off
-    /// (incognito). `teardown` clears the slot.
+    /// with at most one in flight. Harvest is a no-op in private mode (the engine
+    /// does not learn). `teardown` clears the slot.
     private func installOutputTap() {
         output.onHarvestBytes = { [weak self] bytes in
             guard let self else { return }
@@ -2604,5 +2776,29 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         KeepaliveConfig(
             intervalSecs: UInt32(max(0, resolveServerAliveInterval(host: host, defaults: defaults))),
             countMax: UInt32(max(0, resolveServerAliveCountMax(host: host, defaults: defaults))))
+    }
+}
+
+// MARK: - Auth outcome bridging
+
+private extension AuthAttemptResult {
+    /// Map the Rust core's outcome onto the Kit's ordering-logic result.
+    init(_ outcome: AuthOutcome) {
+        switch outcome {
+        case .success: self = .success
+        case .partialSuccess: self = .partialSuccess
+        case .failure: self = .failure
+        }
+    }
+}
+
+private extension AuthOutcome {
+    /// Map the Kit's sequence result back onto the Rust core's outcome.
+    init(_ result: AuthAttemptResult) {
+        switch result {
+        case .success: self = .success
+        case .partialSuccess: self = .partialSuccess
+        case .failure: self = .failure
+        }
     }
 }

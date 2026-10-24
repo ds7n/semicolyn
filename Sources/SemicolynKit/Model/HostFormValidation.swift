@@ -135,3 +135,20 @@ public func validateHostForm(
 public func canSave(_ issues: [ValidationIssue]) -> Bool {
     !issues.contains { $0.severity == .hardBlock }
 }
+
+/// The issues the host editor acts on: drops the jump-chain and port-forward issues
+/// while those groups are hidden (`UnwiredOptions`), so a stored value the user
+/// can't see never blocks Save. Every other issue is kept, in order.
+public func visibleIssues(_ issues: [ValidationIssue], jumpChainShown: Bool,
+                          portForwardingShown: Bool) -> [ValidationIssue] {
+    issues.filter { issue in
+        switch issue.kind {
+        case .jumpChainCycle, .inlineJumpHostMissingHostName:
+            return jumpChainShown
+        case .localForwardMissingField, .remoteForwardMissingField, .dynamicForwardMissingField:
+            return portForwardingShown
+        default:
+            return true
+        }
+    }
+}

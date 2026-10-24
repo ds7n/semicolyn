@@ -23,20 +23,21 @@ func macroEventLabel(_ event: MacroEvent) -> String {
     return mods + base
 }
 
-/// Macro authoring: name + a Template or Record body. Template mode parses
-/// `{Ctrl+R}docker{Enter}` syntax live; Record mode builds a chip sequence from a
-/// text field + special-key buttons (the v1 record surface — live-keybar capture
-/// during a session is a follow-up). On Save the macro is persisted to the
-/// library and handed to `onSaved`. (keybar-customization spec "Macro creation".)
+/// Macro authoring: name + a "Type it" (template) or "Build it" (step by step)
+/// body. "Type it" parses `{Ctrl+R}docker{Enter}` syntax live (`${...}` is plain
+/// text); "Build it" builds a chip sequence from a text field + special-key
+/// buttons (live-keybar capture during a session is a follow-up). On Save the
+/// macro is persisted to the library and handed to `onSaved`.
+/// (keybar-customization spec "Macro creation".)
 struct MacroCreationView: View {
     @ObservedObject var store: KeybarSettingsStore
     @Environment(\.dismiss) private var dismiss
-    /// Receives the saved (already-persisted) macro — e.g. to pre-assign it to a
+    /// Receives the saved (already-persisted) macro, e.g. to pre-assign it to a
     /// slot binding the caller is editing.
     var onSaved: (Macro) -> Void = { _ in }
 
     enum Mode: String, CaseIterable, Identifiable {
-        case template = "Template", record = "Record"
+        case template = "Type it", record = "Build it"
         var id: String { rawValue }
     }
 
@@ -69,16 +70,20 @@ struct MacroCreationView: View {
             Section("Name") {
                 TextField("e.g. Deploy", text: $name)
             }
-            Section("Mode") {
+            Section {
                 Picker("Mode", selection: $mode) {
                     ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
+            } header: {
+                Text("Mode")
+            } footer: {
+                Text("Type it: write text with {Keys} in braces. Build it: add text and keys step by step.")
             }
             if mode == .template { templateSection } else { recordSection }
             previewSection
         }
-        .navigationTitle("New macro")
+        .navigationTitle("New Macro")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
@@ -100,7 +105,7 @@ struct MacroCreationView: View {
             if let err = templateErrorText {
                 Text(err).foregroundStyle(.red)
             } else {
-                Text("Literal text plus {Enter}, {Tab}, {Esc}, {F1}–{F12}, and chords like {Ctrl+R}.")
+                Text("Text is typed as is. Add keys in braces: {Enter}, {Tab}, {Esc}, {F1} to {F12}, or combos like {Ctrl+R}.")
             }
         }
     }
@@ -185,15 +190,12 @@ struct MacroCreationView: View {
 
     private func describe(_ error: Error) -> String {
         switch error as? MacroTemplateError {
-        case .unterminatedPlaceholder: return "Unclosed “{” — every placeholder needs a “}”."
-        case .emptyPlaceholder:        return "Empty “{}” placeholder."
-        case .unexpectedCloseBrace:    return "Stray “}” — use “}}” for a literal brace."
+        case .unterminatedPlaceholder: return "Unclosed “{”: every key in braces needs a “}”."
+        case .emptyPlaceholder:        return "Empty “{}”."
+        case .unexpectedCloseBrace:    return "Stray “}”: use “}}” for a literal brace."
         case .danglingModifier:        return "A modifier needs a key, e.g. {Ctrl+R}."
         case .unknownModifier(let m):  return "Unknown modifier “\(m)”."
         case .unknownKey(let k):       return "Unknown key “\(k)”."
-        case .unterminatedParameter:   return "Unclosed “${” — every parameter needs a “}”."
-        case .emptyParameter:          return "Empty “${}” parameter."
-        case .invalidParameterName(let n): return "Invalid parameter name “\(n)” — use letters, digits, or “_”."
         case nil:                      return "Invalid template."
         }
     }

@@ -48,7 +48,7 @@ final class KeybarEditorRowTextTests: XCTestCase {
         let lib = KeybarLibrary.empty
         XCTAssertEqual(keybarEditorTitle(for: .escPill, library: lib), "Esc pill")
         XCTAssertEqual(keybarEditorTitle(for: .pad, library: lib), "Pad (arrows + pane)")
-        XCTAssertEqual(keybarEditorTitle(for: .modifier, library: lib), "Modifier (Ctrl/Alt/Shift)")
+        XCTAssertEqual(keybarEditorTitle(for: .modifier, library: lib), "Ctrl / Alt / Shift")
         XCTAssertEqual(keybarEditorTitle(for: .tab, library: lib), "Tab")
         XCTAssertEqual(keybarEditorTitle(for: .fn, library: lib), "Fn (function keys)")
         XCTAssertEqual(keybarEditorTitle(for: .symbol("/"), library: lib), "Symbol “/”")
@@ -124,8 +124,14 @@ final class KeybarEditorRowTextTests: XCTestCase {
     // MARK: - Detail: built-ins without secondaries
 
     func testBuiltInsWithoutSecondariesHaveNoDetail() {
-        for slot in [KeybarSlot.escPill, .pad, .modifier, .fn] {
+        for slot in [KeybarSlot.escPill, .pad, .fn] {
             XCTAssertNil(keybarEditorDetail(for: slot, settings: settings()), "\(slot)")
         }
+    }
+
+    // M-86: the Modifier row explains its three gestures.
+    func testModifierDetailExplainsGestures() {
+        XCTAssertEqual(keybarEditorDetail(for: .modifier, settings: settings()),
+                       "Tap: Ctrl. Swipe up: Alt. Swipe down: Shift.")
     }
 }

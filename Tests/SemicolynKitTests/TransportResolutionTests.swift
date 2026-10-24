@@ -45,4 +45,46 @@ final class TransportResolutionTests: XCTestCase {
         }
         XCTAssertEqual(resolveTransport(host: h, defaults: Defaults()), .ssh)
     }
+
+    // D-5: the Defaults Mosh group only holds settings for hosts set to Mosh.
+    // A filled (even `enabled: true`, as older builds stored it) Defaults Mosh
+    // config with Defaults transport unset must leave unset hosts on SSH.
+    func testDefaultsMoshConfigDoesNotSwitchUnsetHostsToMosh() {
+        var d = Defaults()
+        d.mosh = .explicit(MoshConfig(enabled: true, serverPath: "/opt/bin/mosh-server",
+                                      udpPortRange: [60000, 60010], predictionMode: .always))
+        XCTAssertEqual(resolveTransport(host: host(), defaults: d), .ssh)
+    }
+
+    // D-5: the same Defaults Mosh config with `enabled: false` (what the editor
+    // now writes) also leaves unset hosts on SSH.
+    func testDefaultsMoshConfigDisabledKeepsSSH() {
+        var d = Defaults()
+        d.mosh = .explicit(MoshConfig(enabled: false, serverPath: "/opt/bin/mosh-server"))
+        XCTAssertEqual(resolveTransport(host: host(), defaults: d), .ssh)
+    }
+
+    // D-5: Defaults Mosh config does not override an explicit Defaults transport.
+    func testDefaultsMoshConfigWithDefaultsTransportETStaysET() {
+        var d = Defaults()
+        d.transport = .explicit(.et)
+        d.mosh = .explicit(MoshConfig(enabled: true))
+        XCTAssertEqual(resolveTransport(host: host(), defaults: d), .et)
+    }
+
+    // A host's own mosh config with enabled=false is not a legacy Mosh host.
+    func testHostMoshConfigDisabledStaysSSH() {
+        XCTAssertEqual(resolveTransport(host: host { $0.mosh = .explicit(MoshConfig(enabled: false)) },
+                                        defaults: Defaults()), .ssh)
+    }
+
+    // Old stored data still decodes: a legacy host JSON with mosh.enabled=true and
+    // no transport field still resolves to Mosh after a round-trip.
+    func testLegacyMoshHostRoundTripStillMosh() throws {
+        let legacy = host { $0.mosh = .explicit(MoshConfig(enabled: true, serverPath: "/usr/bin/mosh-server")) }
+        let data = try JSONEncoder().encode(legacy)
+        let decoded = try JSONDecoder().decode(SemicolynKit.Host.self, from: data)
+        XCTAssertEqual(decoded.mosh.value?.serverPath, "/usr/bin/mosh-server")
+        XCTAssertEqual(resolveTransport(host: decoded, defaults: Defaults()), .mosh)
+    }
 }

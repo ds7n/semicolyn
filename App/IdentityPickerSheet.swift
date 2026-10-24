@@ -1,21 +1,38 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
+import UIKit
+import LocalAuthentication
 import SemicolynKit
 
-/// Half-sheet inline identity picker opened from the Auth section's "+" button.
+/// Half-sheet SSH key picker opened from the Auth section's "Add SSH Key" button
+/// (the model calls a key an `Identity`).
 ///
-/// Plan 2 ships the **Pick existing** tab. **Create new** mints an ed25519 key
-/// and **Import existing** ingests an OpenSSH private key blob.
+/// **Saved** lists existing keys, **Create** mints an Ed25519 key and **Import**
+/// ingests an OpenSSH private key blob. After "Generate & Save" the sheet shows the
+/// new public key with "Copy" (M-70) before closing. Settings > SSH Keys opens it
+/// without the Saved tab.
 struct IdentityPickerSheet: View {
-    /// Called when the user selects an existing identity. The sheet dismisses itself.
+    /// False hides the Saved tab (adding a key from Settings > SSH Keys).
+    let showsSavedTab: Bool
+    /// Called with the picked, generated or imported identity. A generated key is
+    /// reported as soon as it is saved, so closing the public-key view any way keeps it.
     let onPick: (Identity) -> Void
+
+    init(showsSavedTab: Bool = true, onPick: @escaping (Identity) -> Void) {
+        self.showsSavedTab = showsSavedTab
+        self.onPick = onPick
+        _selectedTab = State(initialValue: showsSavedTab ? 0 : 1)
+    }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) private var theme
 
-    /// Selected tab index: 0 = Pick existing, 1 = Create new, 2 = Import existing.
+    /// Selected tab index: 0 = Saved, 1 = Create, 2 = Import.
     @State private var selectedTab = 0
+    /// The key just generated; non-nil shows its public key instead of the tabs.
+    @State private var created: Identity?
+    @State private var copied = false
 
     // All identities loaded once on appear.
     @State private var identities: [Identity] = []
@@ -30,44 +47,81 @@ struct IdentityPickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Segmented tab picker
-                Picker("", selection: $selectedTab) {
-                    Text("Pick existing").tag(0)
-                    Text("Create new").tag(1)
-                    Text("Import existing").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-                .onChange(of: selectedTab) { _, _ in errorText = nil }
-
-                // Tab content
-                switch selectedTab {
-                case 0:
-                    pickExistingTab
-                case 1:
-                    createNewTab
-                default:
-                    importExistingTab
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Add Identity")
-                        .font(.headline)
-                        .foregroundStyle(Color(theme.text.primary))
-                }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") { InputClickFeedback.play(); dismiss() }
-                        .foregroundStyle(Color(theme.accent.primary))
-                }
+            if let created {
+                createdView(created)
+            } else {
+                tabs
             }
         }
         .onAppear {
             identities = (try? AppStores.shared.hosts.allIdentities()) ?? []
+        }
+    }
+
+    private var tabs: some View {
+        VStack(spacing: 0) {
+            // Segmented tab picker
+            Picker("", selection: $selectedTab) {
+                if showsSavedTab { Text("Saved").tag(0) }
+                Text("Create").tag(1)
+                Text("Import").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            .onChange(of: selectedTab) { _, _ in errorText = nil }
+
+            // Tab content
+            switch selectedTab {
+            case 0:
+                pickExistingTab
+            case 1:
+                createNewTab
+            default:
+                importExistingTab
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Add SSH Key")
+                    .font(.headline)
+                    .foregroundStyle(Color(theme.text.primary))
+            }
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Cancel") { InputClickFeedback.play(); dismiss() }
+                    .foregroundStyle(Color(theme.accent.primary))
+            }
+        }
+    }
+
+    // MARK: - Created (public key + Copy)
+
+    private func createdView(_ identity: Identity) -> some View {
+        Form {
+            Section {
+                Text(publicKeyShareText(identity) ?? "This key's public key couldn't be read.")
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                Button(copied ? "Copied" : "Copy") {
+                    InputClickFeedback.play()
+                    guard let text = publicKeyShareText(identity) else { return }
+                    UIPasteboard.general.string = text
+                    copied = true
+                }
+            } header: {
+                Text("Public Key")
+            } footer: {
+                Text("Add this line to ~/.ssh/authorized_keys on the server. The private key stays in your Keychain.")
+            }
+        }
+        .navigationTitle(identity.displayName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { InputClickFeedback.play(); dismiss() }
+            }
         }
     }
 
@@ -90,10 +144,12 @@ struct IdentityPickerSheet: View {
     }
 
     private var emptyState: some View {
-        VStack {
+        VStack(spacing: 12) {
             Spacer()
-            Text("No identities yet")
+            Text("No saved keys yet.")
                 .foregroundStyle(Color(theme.text.secondary))
+            Button("Create a Key") { InputClickFeedback.play(); selectedTab = 1 }
+                .buttonStyle(.bordered)
             Spacer()
         }
     }
@@ -102,9 +158,13 @@ struct IdentityPickerSheet: View {
 
     private var createNewTab: some View {
         Form {
-            Section("New ed25519 key") {
+            Section {
                 TextField("Display name", text: $newName)
                 biometricPolicyPicker
+            } header: {
+                Text("New SSH Key")
+            } footer: {
+                Text("Ed25519")
             }
             Section {
                 Button("Generate & Save") { InputClickFeedback.play(); generate() }
@@ -112,7 +172,6 @@ struct IdentityPickerSheet: View {
             } footer: {
                 if let errorText { Text(errorText).foregroundStyle(.red) }
             }
-            secureEnclaveExplainer
         }
     }
 
@@ -138,19 +197,18 @@ struct IdentityPickerSheet: View {
     }
 
     private var biometricPolicyPicker: some View {
-        Picker("Biometric", selection: $biometricPolicy) {
+        Picker("Require \(biometryName)", selection: $biometricPolicy) {
             Text("Never").tag(BiometricPolicy.never)
-            Text("Per-unlock").tag(BiometricPolicy.afterUnlock)
-            Text("Per-use").tag(BiometricPolicy.anyUse)
+            Text("Once per Unlock").tag(BiometricPolicy.afterUnlock)
+            Text("Every Use").tag(BiometricPolicy.anyUse)
         }
     }
 
-    /// SE deferral explainer (Phase 2b-i: iCloud Keychain only).
-    private var secureEnclaveExplainer: some View {
-        Section {
-            Label("Secure Enclave keys arrive in a later update.", systemImage: "bolt.slash")
-                .font(.caption).foregroundStyle(Color(theme.text.secondary))
-        }
+    /// "Touch ID" on Touch ID devices, otherwise "Face ID".
+    private var biometryName: String {
+        let context = LAContext()
+        _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        return context.biometryType == .touchID ? "Touch ID" : "Face ID"
     }
 
     private func generate() {
@@ -159,7 +217,8 @@ struct IdentityPickerSheet: View {
             let id = try AppStores.shared.identities.createGenerated(
                 displayName: newName.trimmingCharacters(in: .whitespaces),
                 biometricPolicy: biometricPolicy, now: Date())
-            onPick(id); dismiss()
+            onPick(id)
+            created = id
         } catch { errorText = friendly(error) }
     }
 
@@ -178,7 +237,7 @@ struct IdentityPickerSheet: View {
     private func friendly(_ error: Error) -> String {
         switch error as? IdentityServiceError {
         case .minting(let m): return "Couldn't read that key: \(m)"
-        case nil: return "Couldn't save the identity: \(error.localizedDescription)"
+        case nil: return "Couldn't save the key: \(error.localizedDescription)"
         }
     }
 }

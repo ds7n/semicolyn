@@ -22,7 +22,10 @@ public struct GestureEngine: Sendable {
         case pressed(start: GesturePoint, startTime: Double, handle: SelectionEnd?,
                      longPressEligible: Bool, stoppedFling: Bool, context: GestureContext)
         case longPressed
-        case draggingHandle(anchor: GestureCell, last: GesturePoint, context: GestureContext)
+        /// `grabOffset`: grabbed cell's centre minus the touch-down point, added to every move
+        /// so the grabbed end tracks the finger's travel rather than the cell under it.
+        case draggingHandle(anchor: GestureCell, grabOffset: GesturePoint, last: GesturePoint,
+                            context: GestureContext)
         case swiping(start: GesturePoint, samples: [Sample], context: GestureContext)
         case scrolling(start: GesturePoint, emitted: Int, samples: [Sample], context: GestureContext)
         case flinging(velocity: Double, startTime: Double, lastTick: Double, emitted: Int,
@@ -113,7 +116,7 @@ public struct GestureEngine: Sendable {
     private mutating func touchDown(_ e: TouchEvent, _ ctx: GestureContext) -> [GestureIntent] {
         if e.touchCount >= 2 {
             var out: [GestureIntent] = []
-            if case let .draggingHandle(_, last, _) = state {
+            if case let .draggingHandle(_, _, last, _) = state {
                 out.append(.endSelectionDrag(last, showMenu: false))
             }
             if case .twoFinger = state { return out }   // a third finger: keep the two-finger touch
@@ -138,9 +141,11 @@ public struct GestureEngine: Sendable {
             let distance = e.point.distance(to: start)
             if let handle, let selection = ctx.selection, distance >= GestureThresholds.deadZone {
                 let anchor = handle == .start ? selection.end : selection.start
-                state = .draggingHandle(anchor: anchor, last: e.point, context: ctx)
+                let grabbed = GestureGeometry.cellCenter(handle == .start ? selection.start : selection.end, in: ctx)
+                let offset = GesturePoint(x: grabbed.x - start.x, y: grabbed.y - start.y)
+                state = .draggingHandle(anchor: anchor, grabOffset: offset, last: e.point, context: ctx)
                 lastReason = "handle"
-                return [Self.selectionIntent(anchor: anchor, point: e.point, context: ctx)]
+                return [Self.selectionIntent(anchor: anchor, point: e.point, offset: offset, context: ctx)]
             }
             switch DragAxisLock.resolve(dx: e.point.x - start.x, dy: e.point.y - start.y,
                                         isMultiWindowTmux: ctx.screen == .plainTmux && ctx.multiWindow) {
@@ -163,10 +168,10 @@ public struct GestureEngine: Sendable {
                 return scroll(to: e, start: start, emitted: 0,
                               samples: [Sample(time: startTime, point: start)], context: ctx)
             }
-        case let .draggingHandle(anchor, _, ctx):
-            state = .draggingHandle(anchor: anchor, last: e.point, context: ctx)
+        case let .draggingHandle(anchor, offset, _, ctx):
+            state = .draggingHandle(anchor: anchor, grabOffset: offset, last: e.point, context: ctx)
             lastReason = "handle"
-            return [Self.selectionIntent(anchor: anchor, point: e.point, context: ctx)]
+            return [Self.selectionIntent(anchor: anchor, point: e.point, offset: offset, context: ctx)]
         case let .swiping(start, samples, ctx):
             lastReason = "swipe"
             state = .swiping(start: start,
@@ -249,7 +254,7 @@ public struct GestureEngine: Sendable {
 
     private mutating func touchCancel(_ e: TouchEvent) -> [GestureIntent] {
         switch state {
-        case let .draggingHandle(_, last, _):
+        case let .draggingHandle(_, _, last, _):
             state = .idle
             lastReason = "cancel"
             return [.endSelectionDrag(last, showMenu: false)]
@@ -300,9 +305,9 @@ public struct GestureEngine: Sendable {
 
     // MARK: selection
 
-    private static func selectionIntent(anchor: GestureCell, point: GesturePoint,
+    private static func selectionIntent(anchor: GestureCell, point: GesturePoint, offset: GesturePoint,
                                         context ctx: GestureContext) -> GestureIntent {
-        let moving = GestureGeometry.cell(at: point, in: ctx)
+        let moving = GestureGeometry.cell(at: GesturePoint(x: point.x + offset.x, y: point.y + offset.y), in: ctx)
         let o = orderedSelection(a: (anchor.col, anchor.row), b: (moving.col, moving.row))
         return .setSelection(start: GestureCell(col: o.start.col, row: o.start.row),
                              end: GestureCell(col: o.end.col, row: o.end.row), loupe: point)

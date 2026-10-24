@@ -61,6 +61,22 @@ public func resolveDescriptor(
     return descriptor
 }
 
+/// The descriptor to render, honoring a live preview. While the theme picker
+/// previews a Supporter theme (`previewID`, never persisted) that theme renders even
+/// without Pro, so the user can see it; with no preview (or an unknown preview id)
+/// this is exactly `resolveDescriptor`, so the stored selection stays Pro-gated.
+public func displayedDescriptor(
+    selectedID: ThemeID,
+    previewID: ThemeID?,
+    isPro: Bool,
+    catalog: [ThemeDescriptor] = Theme.catalog
+) -> ThemeDescriptor {
+    if let previewID, let preview = catalog.first(where: { $0.id == previewID }) {
+        return preview
+    }
+    return resolveDescriptor(selectedID: selectedID, isPro: isPro, catalog: catalog)
+}
+
 /// Convenience: the resolved `Theme` to apply (see `resolveDescriptor`).
 public func resolveTheme(
     selectedID: ThemeID,

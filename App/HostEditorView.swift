@@ -25,10 +25,6 @@ struct HostEditorView: View {
     /// Tracks whether the user has changed anything since the form opened.
     private let originalHost: Host
 
-    // Fix 2, subtitle tracking state
-    /// True after the first successful save in this editing session.
-    @State private var savedOnce = false
-
     // Fix 4, touched tracking (gate required-field banners)
     /// True once the user has interacted with the Label field.
     @State private var labelTouched = false
@@ -48,8 +44,10 @@ struct HostEditorView: View {
     @State var moshExpanded = false
     /// Whether the Tailscale section is expanded.
     @State var tailscaleExpanded = false
-    /// Whether the Semicolyn behavior section is expanded.
-    @State var semicolynExpanded = false
+    /// Whether the tmux section is expanded.
+    @State var tmuxExpanded = false
+    /// Whether the Privacy section is expanded.
+    @State var privacyExpanded = false
 
     // Task 6, identity picker state
     /// Whether the inline identity picker half-sheet is presented.
@@ -84,15 +82,12 @@ struct HostEditorView: View {
     }
 
     private var title: String {
-        vm.isNew ? "New host" : vm.host.label.isEmpty ? "Edit host" : vm.host.label
+        vm.isNew ? "New Host" : vm.host.label.isEmpty ? "Edit Host" : vm.host.label
     }
 
-    // Fix 2, subtitle derived from savedOnce + hasChanges
-    private var subtitle: String {
-        if !savedOnce { return "unsaved" }
-        if hasChanges { return "unsaved changes" }
-        return "up to date"
-    }
+    /// What unset fields fall back to: the Connection Defaults value, else the built-in.
+    /// `internal`: read by the section extensions in a separate file.
+    var fallbacks: InheritedFallbacks { InheritedFallbacks(defaults: vm.defaults) }
 
     // MARK: - Body
 
@@ -102,19 +97,19 @@ struct HostEditorView: View {
                 basicsSection
                 authSection
                 connectionSection
-                jumpChainSection
-                portForwardingSection
+                tmuxSection
+                privacySection
                 if selectedTransport == .mosh {
                     moshSection
                 }
-                tailscaleSection
-                semicolynSection
+                // Stored but not applied yet: hidden until wired (`UnwiredOptions`).
+                if UnwiredOptions.jumpChain { jumpChainSection }
+                if UnwiredOptions.portForwarding { portForwardingSection }
+                if UnwiredOptions.tailscale { tailscaleSection }
                 if !vm.isNew {
                     deleteSection
                 }
             }
-            // Fix 2, principal toolbar item replaces .navigationTitle for
-            // reliable iOS subtitle rendering (NavigationStack on iOS 16+).
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .onAppear {
@@ -143,23 +138,23 @@ struct HostEditorView: View {
             isPresented: $showingDiscardConfirm,
             titleVisibility: .visible
         ) {
-            Button("Discard changes", role: .destructive) { InputClickFeedback.play(); dismiss() }
-            Button("Keep editing", role: .cancel) {}
+            Button("Discard Changes", role: .destructive) { InputClickFeedback.play(); dismiss() }
+            Button("Keep Editing", role: .cancel) {}
         }
         // Task 5, delete confirmation sheet
         .confirmationDialog(
-            "Delete '\(vm.host.label)'?",
+            "Delete “\(vm.host.label)”?",
             isPresented: $showingDeleteConfirm,
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) { InputClickFeedback.play(); performDelete() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the host config from your library. The action cannot be undone.")
+            Text(hostDeleteMessage)
         }
         // Task 5, delete refusal alert (host is referenced as jumphost)
         .alert(
-            "Cannot delete '\(vm.host.label)'.",
+            "Can't Delete “\(vm.host.label)”",
             isPresented: Binding(
                 get: { deleteRefusalReferrers != nil },
                 set: { if !$0 { deleteRefusalReferrers = nil } }
@@ -216,16 +211,11 @@ struct HostEditorView: View {
                 }
             }
         }
-        // Fix 2, principal VStack title + subtitle (iOS-reliable approach)
+        // No "unsaved / up to date" subtitle: Save already reflects change state.
         ToolbarItem(placement: .principal) {
-            VStack(spacing: 2) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(Color(theme.text.primary))
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(Color(theme.text.secondary))
-            }
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(Color(theme.text.primary))
         }
         ToolbarItem(placement: .navigationBarTrailing) {
             Button("Save") {
@@ -248,7 +238,7 @@ struct HostEditorView: View {
         Section("Basics") {
             // Label (required)
             LabeledContent {
-                TextField("e.g. prod-web", text: $vm.host.label)
+                TextField("e.g. Home server", text: $vm.host.label)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .onChange(of: vm.host.label) { _, _ in
@@ -257,7 +247,7 @@ struct HostEditorView: View {
                     }
             } label: {
                 HStack(spacing: 2) {
-                    Text("Label")
+                    Text("Name")
                     Text("•")
                         .foregroundStyle(
                             vm.host.label.isEmpty
@@ -270,7 +260,7 @@ struct HostEditorView: View {
 
             // Hostname (required)
             LabeledContent {
-                TextField("e.g. 192.168.1.1", text: $vm.host.hostName)
+                TextField("e.g. example.com or 192.168.1.10", text: $vm.host.hostName)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
@@ -280,7 +270,7 @@ struct HostEditorView: View {
                     }
             } label: {
                 HStack(spacing: 2) {
-                    Text("Hostname")
+                    Text("Address")
                     Text("•")
                         .foregroundStyle(
                             vm.host.hostName.isEmpty
@@ -327,7 +317,7 @@ struct HostEditorView: View {
             // Inline validation banners for Basics fields
             // Fix 4, gate required-field banners on touched state
             if labelTouched && hasIssue(.missingLabel) {
-                IssueBanner(message: "Label is required to save.", severity: .hardBlock)
+                IssueBanner(message: "Name is required to save.", severity: .hardBlock)
             }
             if let dupIssue = duplicateLabelIssue,
                case .duplicateLabel(let existing) = dupIssue.kind {
@@ -339,12 +329,12 @@ struct HostEditorView: View {
             }
             // Fix 4, gate required-field banners on touched state
             if hostNameTouched && hasIssue(.missingHostName) {
-                IssueBanner(message: "Hostname is required to save.", severity: .hardBlock)
+                IssueBanner(message: "Address is required to save.", severity: .hardBlock)
             }
             // Fix 2, gate no-user banner: suppress on a fresh untouched new-host form
             if hasNoUserIssue && ((!vm.isNew) || labelTouched || hostNameTouched) {
                 IssueBanner(
-                    message: "No user set here or in Defaults. Connecting will require setting a user.",
+                    message: "No user set here or in Connection Defaults. Connecting will require setting a user.",
                     severity: .softBlock
                 )
             }
@@ -354,17 +344,26 @@ struct HostEditorView: View {
     // MARK: - Auth section
 
     private var authSection: some View {
-        Section("Auth") {
+        Section {
             // Identities pill row
             if let identityRefs = vm.host.identities.value, !identityRefs.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(identityRefs, id: \.self) { ref in
-                            IdentityPill(identityRef: ref)
+                            IdentityPill(identityRef: ref) {
+                                vm.host.identities = removingIdentity(ref, from: vm.host.identities)
+                                vm.revalidate()
+                            }
                         }
                     }
                     .padding(.vertical, 4)
                 }
+            }
+
+            // No key of its own: the Connection Defaults key (if any) is used.
+            if vm.host.identities == .inherit,
+               let defaultKey = fallbacks.identities.first {
+                LabeledContent("SSH Key", value: defaultChoiceLabel(identityName(defaultKey)))
             }
 
             // Identity add button
@@ -374,8 +373,8 @@ struct HostEditorView: View {
             } label: {
                 Label(
                     vm.host.identities.value?.isEmpty ?? true
-                        ? "Add identity"
-                        : "Add another identity",
+                        ? "Add SSH Key"
+                        : "Add Another SSH Key",
                     systemImage: "plus.circle"
                 )
                 .foregroundStyle(Color(theme.accent.primary))
@@ -383,7 +382,7 @@ struct HostEditorView: View {
 
             // Use password toggle
             Toggle(isOn: $vm.usePassword) {
-                Text("Use password instead")
+                Text("Save a password")
                     .foregroundStyle(Color(theme.text.primary))
             }
             .onChange(of: vm.usePassword) { _, newValue in
@@ -414,7 +413,19 @@ struct HostEditorView: View {
                 }
             }
 
+        } header: {
+            Text("Auth")
+        } footer: {
+            // Matches `authenticateInOrder`: keys in order, then the saved password.
+            Text("SSH keys are tried in order. The saved password is used if this host has no key on this device or the server rejects them.")
         }
+    }
+
+    /// A saved key's display name, or a short id when it is not on this device.
+    private func identityName(_ ref: IdentityRef) -> String {
+        let all = (try? AppStores.shared.hosts.allIdentities()) ?? []
+        return all.first(where: { $0.id == ref })?.displayName
+            ?? String(ref.uuidString.prefix(8).lowercased())
     }
 
     // MARK: - Validation helpers
@@ -437,20 +448,9 @@ struct HostEditorView: View {
 
     // MARK: - Placeholder hints
 
-    private var userPlaceholder: String {
-        if let defaultUser = defaults.user.value {
-            return "Defaults · \(defaultUser)"
-        }
-        return "e.g. ubuntu"
-    }
+    private var userPlaceholder: String { fallbacks.userPlaceholder }
 
-    private var portPlaceholder: String {
-        // Fix 3, only claim Defaults value when one is actually set
-        if let defaultPort = defaults.port.value {
-            return "Defaults · \(defaultPort)"
-        }
-        return "e.g. 22"
-    }
+    private var portPlaceholder: String { defaultPlaceholder(String(fallbacks.port)) }
 
     // MARK: - Expansion logic
 
@@ -483,8 +483,10 @@ struct HostEditorView: View {
             // Tailscale: expand if tailscale is explicitly configured
             tailscaleExpanded = vm.host.tailscale != .inherit
 
-            // Semicolyn: expand if semicolyn is explicitly configured
-            semicolynExpanded = vm.host.semicolyn != .inherit
+            // tmux / Privacy: expand if the host sets any of their leaves
+            let cfg = vm.host.semicolyn.value
+            tmuxExpanded = cfg?.tmux?.useTmux != nil || cfg?.tmux?.sessionName != nil
+            privacyExpanded = cfg?.predictor?.incognito != nil || cfg?.osc52?.allow != nil
         }
         // Auto-expand on hard issues (also triggered live via onChange → revalidate)
         syncSectionAutoExpand()
@@ -539,12 +541,9 @@ struct HostEditorView: View {
             // the .alert modifier above will present it before dismissing.
             // If no warning, dismiss immediately.
             if outcome.duplicateLabels.isEmpty {
-                savedOnce = true  // Fix 2, mark as saved before dismissing
                 dismiss()
-            } else {
-                savedOnce = true  // Fix 2, save succeeded even with dup warning
-                // vm.saveWarning is now set; the alert will dismiss after OK.
             }
+            // Otherwise vm.saveWarning is now set; the alert will dismiss after OK.
         } catch EditorSaveError.hardBlocksPresent {
             // Issues are already reflected in vm.issues; the view renders them.
             // The Save button is disabled when hard blocks exist, so this branch
@@ -558,11 +557,13 @@ struct HostEditorView: View {
 
 // MARK: - Identity pill
 
-/// A small rounded pill showing the identity's display name. Resolves the
-/// `IdentityRef` (UUID) against `allIdentities()` at render time; falls back
-/// to a truncated UUID if the identity is not found.
+/// A small rounded pill showing the identity's display name, with an xmark (and a
+/// "Remove from Host" context menu) that removes the key from this host. Resolves
+/// the `IdentityRef` (UUID) against `allIdentities()` at render time; falls back to
+/// a truncated UUID if the identity is not found.
 private struct IdentityPill: View {
     let identityRef: IdentityRef
+    let onRemove: () -> Void
     @Environment(\.theme) private var theme
 
     private var label: String {
@@ -574,13 +575,31 @@ private struct IdentityPill: View {
     }
 
     var body: some View {
-        Text(label)
-            .font(.caption)
-            .foregroundStyle(Color(theme.text.primary))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Color(theme.surface.panelHigh))
-            .clipShape(Capsule())
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(Color(theme.text.primary))
+            Button {
+                InputClickFeedback.play()
+                onRemove()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color(theme.text.secondary))
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Remove \(label) from host")
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .padding(.vertical, 4)
+        .background(Color(theme.surface.panelHigh))
+        .clipShape(Capsule())
+        .contextMenu {
+            Button(role: .destructive) { onRemove() } label: {
+                Label("Remove from Host", systemImage: "minus.circle")
+            }
+        }
     }
 }
 
@@ -608,3 +627,6 @@ struct IssueBanner: View {
         .padding(.vertical, 2)
     }
 }
+
+/// The host delete confirmation message, shared by the editor and the Hosts list swipe.
+let hostDeleteMessage = "This host will be removed from your library. This can't be undone."

@@ -3,89 +3,69 @@
 import SwiftUI
 import SemicolynKit
 
-/// Standalone Defaults editor, the singleton `Defaults` record.
+/// Settings > Connection Defaults: the singleton `Defaults` record, i.e. the values
+/// every host uses for a field it leaves blank.
 ///
-/// Same section shell as `HostEditorView` but without `label`/`hostName`/Delete.
-/// All sections are collapsed by default. Each row shows:
-/// - `inherit · <fallback>` (in secondary color) when the field is `.inherit`
-/// - The explicit value when the field is `.explicit`
+/// Live apply, like every other Settings screen: each change is written straight to
+/// the store (`DefaultsEditorViewModel`), with no Save or Cancel and no nested
+/// NavigationStack, so Back returns to Settings. Plain headed sections.
 ///
-/// Swipe-left on any `.explicit` row resets it to `.inherit` ("Clear override").
-/// Save is always enabled, no required fields.
+/// An unset row reads "Default (X)" (pickers) or "Default: X" (text fields), X being
+/// the built-in value. Swipe-left on a set row resets it ("Clear override").
 ///
-/// NOTE: This is a completely standalone view, NOT an extension of `HostEditorView`.
-/// It reuses the pure mapper functions from `InheritedBinding.swift` (only).
+/// Options that are stored but not applied yet (`UnwiredOptions`) are hidden. Jump
+/// chain and port forwarding have no global default and are not listed here.
+///
+/// NOTE: This is a standalone view, NOT an extension of `HostEditorView`. It reuses
+/// the pure mapper functions from `InheritedBinding.swift` (only).
 struct DefaultsEditorView: View {
     @StateObject private var vm = DefaultsEditorViewModel()
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) private var theme
 
-    // Section expansion state, all collapsed by default (spec: §Defaults editor)
-    @State private var basicsExpanded = false
-    @State private var connectionExpanded = false
-    @State private var jumpChainExpanded = false
-    @State private var portForwardingExpanded = false
-    @State private var moshExpanded = false
-    @State private var tailscaleExpanded = false
-    @State private var semicolynExpanded = false
-
-    /// Whether to show the save-error alert (unexpected store failure).
-    @State private var saveError: String? = nil
+    private var builtIn: InheritedFallbacks { vm.fallbacks }
 
     var body: some View {
-        NavigationStack {
-            List {
-                basicsSection
-                connectionSection
-                jumpChainSection
-                portForwardingSection
-                if vm.defaults.transport.value == .mosh {
-                    moshSection
-                }
+        List {
+            basicsSection
+            signInSection
+            connectionSection
+            keepAliveSection
+            moshSection
+            if UnwiredOptions.tailscale {
                 tailscaleSection
-                semicolynSection
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { toolbarContent }
-            .alert("Save failed", isPresented: Binding(
-                get: { saveError != nil },
-                set: { if !$0 { saveError = nil } }
-            )) {
-                Button("OK", role: .cancel) { InputClickFeedback.play(); saveError = nil }
-            } message: {
-                Text(saveError ?? "")
-            }
+            tmuxSection
+            privacySection
+        }
+        .navigationTitle("Connection Defaults")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Couldn't save", isPresented: Binding(
+            get: { vm.saveError != nil },
+            set: { if !$0 { vm.saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) { InputClickFeedback.play(); vm.saveError = nil }
+        } message: {
+            Text(vm.saveError ?? "")
         }
     }
 
-    // MARK: - Toolbar
+    // MARK: - Shared row helpers
 
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .navigationBarLeading) {
-            Button("Cancel") { InputClickFeedback.play(); dismiss() }
-        }
-        ToolbarItem(placement: .principal) {
-            Text("Defaults")
-                .font(.headline)
-                .foregroundStyle(Color(theme.text.primary))
-        }
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button("Save") { InputClickFeedback.play(); performSave() }
-                .fontWeight(.semibold)
-                .foregroundStyle(Color(theme.accent.primary))
-        }
+    /// A text value with a caption line under it (the caption explains the row).
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(Color(theme.text.secondary))
     }
 
-    // MARK: - Basics section (user, port)
+    // MARK: - Basics (user, port)
 
     private var basicsSection: some View {
-        DisclosureGroup(isExpanded: $basicsExpanded) {
-
-            // user, Inherited<String>; no built-in fallback → "(unset)"
+        Section {
+            // user, Inherited<String>; no built-in fallback
             LabeledContent {
                 TextField(
-                    "inherit · (unset)",
+                    builtIn.userPlaceholder,
                     text: Binding(
                         get: { inheritedStringToText(vm.defaults.user) },
                         set: { vm.defaults.user = textToInheritedString($0) }
@@ -93,11 +73,7 @@ struct DefaultsEditorView: View {
                 )
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
-                .foregroundStyle(
-                    vm.defaults.user == .inherit
-                        ? Color(theme.text.secondary)
-                        : Color(theme.text.primary)
-                )
+                .multilineTextAlignment(.trailing)
             } label: {
                 Text("User")
                     .foregroundStyle(Color(theme.text.primary))
@@ -112,18 +88,14 @@ struct DefaultsEditorView: View {
             // port, Inherited<Int>; built-in fallback: 22
             LabeledContent {
                 TextField(
-                    "inherit · 22",
+                    defaultPlaceholder(String(builtIn.port)),
                     text: Binding(
                         get: { inheritedIntToText(vm.defaults.port) },
                         set: { vm.defaults.port = textToInheritedInt($0) }
                     )
                 )
                 .keyboardType(.numberPad)
-                .foregroundStyle(
-                    vm.defaults.port == .inherit
-                        ? Color(theme.text.secondary)
-                        : Color(theme.text.primary)
-                )
+                .multilineTextAlignment(.trailing)
             } label: {
                 Text("Port")
                     .foregroundStyle(Color(theme.text.primary))
@@ -134,39 +106,76 @@ struct DefaultsEditorView: View {
                         .tint(Color(theme.accent.primary))
                 }
             }
-
-        } label: {
+        } header: {
             Text("Basics")
-                .font(.headline)
-                .foregroundStyle(Color(theme.text.primary))
+        } footer: {
+            Text("Hosts use these values unless they set their own.")
         }
     }
 
-    // MARK: - Connection section
+    // MARK: - Connection (connection type)
+
+    /// The connection type in effect for a host that leaves it blank.
+    private var effectiveTransport: Transport {
+        vm.defaults.transport.value ?? builtIn.transport
+    }
 
     private var connectionSection: some View {
-        DisclosureGroup(isExpanded: $connectionExpanded) {
+        Section {
+            Picker(selection: Binding(
+                get: {
+                    switch vm.defaults.transport {
+                    case .inherit: return "default"
+                    case .explicit(let t): return t?.rawValue ?? "default"
+                    }
+                },
+                set: { (sel: String) in
+                    vm.defaults.transport = (sel == "default") ? .inherit : .explicit(Transport(rawValue: sel))
+                }
+            )) {
+                Text(defaultChoiceLabel(builtIn.transport.displayName)).tag("default")
+                ForEach(Transport.allCases, id: \.rawValue) { t in
+                    Text(t.displayName).tag(t.rawValue)
+                }
+            } label: {
+                Text("Connection type")
+                    .foregroundStyle(Color(theme.text.primary))
+            }
+            .swipeActions {
+                if case .explicit = vm.defaults.transport {
+                    Button("Clear override") { vm.defaults.transport = .inherit }
+                        .tint(Color(theme.accent.primary))
+                }
+            }
 
-            // transport, Inherited<Transport>: four-state Picker; built-in fallback: SSH
-            transportRow
+            if UnwiredOptions.compression { compressionRow }
+            if UnwiredOptions.agentForwarding { forwardAgentRow }
+            if UnwiredOptions.hostKeyChecking { shkRow }
+            if UnwiredOptions.preferredAuth { preferredAuthSection }
+        } header: {
+            Text("Connection")
+        } footer: {
+            Text(effectiveTransport.summary + " Leave on SSH if unsure.")
+        }
+    }
 
+    // MARK: - SSH keep-alive
+
+    private var keepAliveSection: some View {
+        Section {
             // serverAliveInterval, Inherited<Int>; built-in fallback: 30
             LabeledContent {
                 TextField(
-                    "inherit · 30",
+                    defaultPlaceholder(String(builtIn.keepAliveInterval)),
                     text: Binding(
                         get: { inheritedIntToText(vm.defaults.serverAliveInterval) },
                         set: { vm.defaults.serverAliveInterval = textToInheritedInt($0, minimum: 0) }
                     )
                 )
                 .keyboardType(.numberPad)
-                .foregroundStyle(
-                    vm.defaults.serverAliveInterval == .inherit
-                        ? Color(theme.text.secondary)
-                        : Color(theme.text.primary)
-                )
+                .multilineTextAlignment(.trailing)
             } label: {
-                Text("Keep-alive interval (s)")
+                Text("Every (seconds)")
                     .foregroundStyle(Color(theme.text.primary))
             }
             .swipeActions {
@@ -179,20 +188,16 @@ struct DefaultsEditorView: View {
             // serverAliveCountMax, Inherited<Int>; built-in fallback: 3
             LabeledContent {
                 TextField(
-                    "inherit · 3",
+                    defaultPlaceholder(String(builtIn.keepAliveRetries)),
                     text: Binding(
                         get: { inheritedIntToText(vm.defaults.serverAliveCountMax) },
                         set: { vm.defaults.serverAliveCountMax = textToInheritedInt($0, minimum: 0) }
                     )
                 )
                 .keyboardType(.numberPad)
-                .foregroundStyle(
-                    vm.defaults.serverAliveCountMax == .inherit
-                        ? Color(theme.text.secondary)
-                        : Color(theme.text.primary)
-                )
+                .multilineTextAlignment(.trailing)
             } label: {
-                Text("Keep-alive retries")
+                Text("Missed replies before disconnect")
                     .foregroundStyle(Color(theme.text.primary))
             }
             .swipeActions {
@@ -201,64 +206,21 @@ struct DefaultsEditorView: View {
                         .tint(Color(theme.accent.primary))
                 }
             }
-
-            // compression, Inherited<Bool>: three-state Picker; built-in fallback: false
-            // "inherit · false" label shown in-row; swipe row is the Picker row itself.
-            compressionRow
-
-            // forwardAgent, Inherited<Bool>: three-state Picker; built-in fallback: false
-            forwardAgentRow
-
-            // strictHostKeyChecking, Inherited<StrictHostKeyChecking>: Picker
-            // built-in fallback: accept-new
-            shkRow
-
-            // preferredAuthentications, Inherited<[AuthMethod]>: per-method toggles
-            preferredAuthSection
-
-        } label: {
-            Text("Connection")
-                .font(.headline)
-                .foregroundStyle(Color(theme.text.primary))
+        } header: {
+            Text("SSH keep-alive")
+        } footer: {
+            Text("Sends a small signal so idle connections don't drop. For Mosh and Eternal Terminal it is only used while setting up the connection.")
         }
     }
 
-    // Transport row as a named var so swipeActions can be applied cleanly.
-    private var transportRow: some View {
-        Picker(selection: Binding(
-            get: {
-                switch vm.defaults.transport {
-                case .inherit: return "default"
-                case .explicit(let t): return t?.rawValue ?? "default"
-                }
-            },
-            set: { (sel: String) in
-                vm.defaults.transport = (sel == "default") ? .inherit : .explicit(Transport(rawValue: sel))
-            }
-        )) {
-            Text("inherit · SSH").tag("default")
-            ForEach(Transport.allCases, id: \.rawValue) { t in
-                Text(t.displayName).tag(t.rawValue)
-            }
-        } label: {
-            Text("Transport")
-                .foregroundStyle(Color(theme.text.primary))
-        }
-        .swipeActions {
-            if case .explicit = vm.defaults.transport {
-                Button("Clear override") { vm.defaults.transport = .inherit }
-                    .tint(Color(theme.accent.primary))
-            }
-        }
-    }
+    // MARK: - Hidden until wired (UnwiredOptions)
 
-    // Compression row as a named var so swipeActions can be applied cleanly.
     private var compressionRow: some View {
         Picker(selection: Binding(
             get: { inheritedBoolToSelection(vm.defaults.compression) },
             set: { vm.defaults.compression = selectionToInheritedBool($0) }
         )) {
-            Text("inherit · false").tag(Bool?.none)
+            Text(defaultChoiceLabel("Off")).tag(Bool?.none)
             Text("On").tag(Bool?.some(true))
             Text("Off").tag(Bool?.some(false))
         } label: {
@@ -278,7 +240,7 @@ struct DefaultsEditorView: View {
             get: { inheritedBoolToSelection(vm.defaults.forwardAgent) },
             set: { vm.defaults.forwardAgent = selectionToInheritedBool($0) }
         )) {
-            Text("inherit · false").tag(Bool?.none)
+            Text(defaultChoiceLabel("Off")).tag(Bool?.none)
             Text("On").tag(Bool?.some(true))
             Text("Off").tag(Bool?.some(false))
         } label: {
@@ -298,7 +260,7 @@ struct DefaultsEditorView: View {
             get: { inheritedSHKCToSelection(vm.defaults.strictHostKeyChecking) },
             set: { vm.defaults.strictHostKeyChecking = selectionToInheritedSHKC($0) }
         )) {
-            Text("inherit · accept-new").tag(StrictHostKeyChecking?.none)
+            Text(defaultChoiceLabel("accept-new")).tag(StrictHostKeyChecking?.none)
             Text("yes").tag(StrictHostKeyChecking?.some(.yes))
             Text("accept-new").tag(StrictHostKeyChecking?.some(.acceptNew))
             Text("ask").tag(StrictHostKeyChecking?.some(.ask))
@@ -315,9 +277,8 @@ struct DefaultsEditorView: View {
         }
     }
 
-    /// Per-method toggles for `preferredAuthentications`.
-    /// When `.inherit`, shows a muted "inherit · publickey, keyboard-interactive, password" hint.
-    /// Toggling any method promotes the field to `.explicit`.
+    /// Per-method toggles for `preferredAuthentications`. Toggling any method promotes
+    /// the field to `.explicit`.
     private var preferredAuthSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -329,12 +290,6 @@ struct DefaultsEditorView: View {
                         .font(.caption)
                         .foregroundStyle(Color(theme.accent.primary))
                 }
-            }
-
-            if case .inherit = vm.defaults.preferredAuthentications {
-                Text("inherit · publickey, keyboard-interactive, password")
-                    .font(.caption)
-                    .foregroundStyle(Color(theme.text.secondary))
             }
 
             ForEach([AuthMethod.publicKey, .keyboardInteractive, .password], id: \.self) { method in
@@ -366,163 +321,8 @@ struct DefaultsEditorView: View {
         .padding(.vertical, 2)
     }
 
-    // MARK: - Jump chain section (deferred list editing)
-
-    /// Jump chain section for Defaults.
-    ///
-    /// NOTE: List-typed field editing (proxyJump) is deferred for Defaults.
-    /// Editing a default jump chain is a rare power-user case with no clear UX
-    /// precedent in this app (the hop editor needs a host context for "Pick host"
-    /// mode). A placeholder row is shown instead; per-host editing remains
-    /// available via HostEditorView. See Task 7 report for rationale.
-    private var jumpChainSection: some View {
-        DisclosureGroup(isExpanded: $jumpChainExpanded) {
-            Text("Set per-host, no global default")
-                .font(.subheadline)
-                .foregroundStyle(Color(theme.text.secondary))
-                .italic()
-        } label: {
-            Text("Jump chain")
-                .font(.headline)
-                .foregroundStyle(Color(theme.text.primary))
-        }
-    }
-
-    // MARK: - Port forwarding section (deferred list editing)
-
-    /// Port forwarding section for Defaults.
-    ///
-    /// NOTE: List-typed field editing (localForwards, remoteForwards,
-    /// dynamicForwards) is deferred for Defaults. Setting forwarding defaults
-    /// globally is an advanced case; per-host editing remains available.
-    /// See Task 7 report for rationale.
-    private var portForwardingSection: some View {
-        DisclosureGroup(isExpanded: $portForwardingExpanded) {
-            Text("Set per-host, no global default")
-                .font(.subheadline)
-                .foregroundStyle(Color(theme.text.secondary))
-                .italic()
-        } label: {
-            Text("Port forwarding")
-                .font(.headline)
-                .foregroundStyle(Color(theme.text.primary))
-        }
-    }
-
-    // MARK: - Mosh section
-
-    private var moshSection: some View {
-        DisclosureGroup(isExpanded: $moshExpanded) {
-
-            LabeledContent {
-                TextField(
-                    "e.g. /usr/local/bin/mosh-server",
-                    text: Binding(
-                        get: { vm.defaults.mosh.value?.serverPath ?? "" },
-                        set: { newPath in
-                            var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: true)
-                            cfg.serverPath = newPath.isEmpty ? nil : newPath
-                            vm.defaults.mosh = .explicit(cfg)
-                        }
-                    )
-                )
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-            } label: {
-                Text("Server path")
-                    .foregroundStyle(Color(theme.text.primary))
-            }
-
-            LabeledContent {
-                HStack(spacing: 8) {
-                    TextField(
-                        "lo",
-                        text: Binding(
-                            get: {
-                                if let range = vm.defaults.mosh.value?.udpPortRange,
-                                   range.count >= 2 { return String(range[0]) }
-                                return ""
-                            },
-                            set: { newLo in
-                                var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: true)
-                                let lo = Int(newLo) ?? 0
-                                let hi = (cfg.udpPortRange?.count ?? 0) >= 2
-                                    ? cfg.udpPortRange![1] : 0
-                                cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
-                                vm.defaults.mosh = .explicit(cfg)
-                            }
-                        )
-                    )
-                    .keyboardType(.numberPad)
-                    .frame(maxWidth: .infinity)
-
-                    Text("-")
-                        .foregroundStyle(Color(theme.text.secondary))
-
-                    TextField(
-                        "hi",
-                        text: Binding(
-                            get: {
-                                if let range = vm.defaults.mosh.value?.udpPortRange,
-                                   range.count >= 2 { return String(range[1]) }
-                                return ""
-                            },
-                            set: { newHi in
-                                var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: true)
-                                let lo = (cfg.udpPortRange?.count ?? 0) >= 2
-                                    ? cfg.udpPortRange![0] : 0
-                                let hi = Int(newHi) ?? 0
-                                cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
-                                vm.defaults.mosh = .explicit(cfg)
-                            }
-                        )
-                    )
-                    .keyboardType(.numberPad)
-                    .frame(maxWidth: .infinity)
-                }
-            } label: {
-                Text("UDP port range")
-                    .foregroundStyle(Color(theme.text.primary))
-            }
-
-            Picker(selection: Binding(
-                get: { vm.defaults.mosh.value?.predictionMode },
-                set: { newMode in
-                    var cfg = vm.defaults.mosh.value ?? MoshConfig(enabled: true)
-                    cfg.predictionMode = newMode
-                    vm.defaults.mosh = .explicit(cfg)
-                }
-            )) {
-                Text("Default").tag(MoshPredictionMode?.none)
-                Text("Adaptive").tag(MoshPredictionMode?.some(.adaptive))
-                Text("Always").tag(MoshPredictionMode?.some(.always))
-                Text("Never").tag(MoshPredictionMode?.some(.never))
-                Text("Experimental").tag(MoshPredictionMode?.some(.experimental))
-            } label: {
-                Text("Prediction mode")
-                    .foregroundStyle(Color(theme.text.primary))
-            }
-
-            // When mosh is inherit (not explicitly configured), show hint
-            if case .inherit = vm.defaults.mosh {
-                Text("inherit · disabled")
-                    .font(.caption)
-                    .foregroundStyle(Color(theme.text.secondary))
-            }
-
-        } label: {
-            Text("Mosh")
-                .font(.headline)
-                .foregroundStyle(Color(theme.text.primary))
-        }
-    }
-
-    // MARK: - Tailscale section
-
     private var tailscaleSection: some View {
-        DisclosureGroup(isExpanded: $tailscaleExpanded) {
-
-            // tailscale.required toggle
+        Section("Tailscale") {
             Toggle(isOn: Binding(
                 get: { vm.defaults.tailscale.value?.required ?? false },
                 set: { newRequired in
@@ -531,7 +331,7 @@ struct DefaultsEditorView: View {
                     vm.defaults.tailscale = .explicit(cfg)
                 }
             )) {
-                Text("Tailscale required by default")
+                Text("Require Tailscale")
                     .foregroundStyle(Color(theme.text.primary))
             }
             .swipeActions {
@@ -541,7 +341,6 @@ struct DefaultsEditorView: View {
                 }
             }
 
-            // Tailnet, only visible when required is on
             if vm.defaults.tailscale.value?.required == true {
                 LabeledContent {
                     TextField(
@@ -562,53 +361,130 @@ struct DefaultsEditorView: View {
                         .foregroundStyle(Color(theme.text.primary))
                 }
             }
-
-            if case .inherit = vm.defaults.tailscale {
-                Text("inherit · not required")
-                    .font(.caption)
-                    .foregroundStyle(Color(theme.text.secondary))
-            }
-
-        } label: {
-            Text("Tailscale")
-                .font(.headline)
-                .foregroundStyle(Color(theme.text.primary))
         }
     }
 
-    // MARK: - Semicolyn behavior section
+    // MARK: - Mosh
 
-    private var semicolynSection: some View {
-        DisclosureGroup(isExpanded: $semicolynExpanded) {
+    /// The Defaults Mosh config to edit. A new one is created with `enabled: false`:
+    /// these settings are only "used by hosts set to Mosh" and must never imply the
+    /// Mosh transport (`resolveTransport` ignores a Defaults `enabled` flag anyway).
+    private var moshConfig: MoshConfig {
+        vm.defaults.mosh.value ?? MoshConfig(enabled: false)
+    }
 
-            // Predictor incognito, built-in fallback: false
-            Toggle(isOn: Binding(
-                get: { vm.defaults.semicolyn.value?.predictor?.incognito ?? false },
-                set: { newIncognito in
-                    var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
-                    var predictor = cfg.predictor ?? PredictorConfig()
-                    predictor.incognito = newIncognito
-                    cfg.predictor = predictor
-                    vm.defaults.semicolyn = .explicit(cfg)
-                }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Predictor incognito")
+    private var moshSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                LabeledContent {
+                    TextField(
+                        "e.g. /usr/local/bin/mosh-server",
+                        text: Binding(
+                            get: { vm.defaults.mosh.value?.serverPath ?? "" },
+                            set: { newPath in
+                                var cfg = moshConfig
+                                cfg.serverPath = newPath.isEmpty ? nil : newPath
+                                vm.defaults.mosh = .explicit(cfg)
+                            }
+                        )
+                    )
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .multilineTextAlignment(.trailing)
+                } label: {
+                    Text("Server path")
                         .foregroundStyle(Color(theme.text.primary))
-                    Text("Don't learn from sessions by default.")
-                        .font(.caption)
-                        .foregroundStyle(Color(theme.text.secondary))
                 }
-            }
-            .swipeActions {
-                if case .explicit = vm.defaults.semicolyn {
-                    Button("Clear override") { vm.defaults.semicolyn = .inherit }
-                        .tint(Color(theme.accent.primary))
-                }
+                caption("Only needed if mosh-server isn't found automatically.")
             }
 
-            // Use tmux, built-in fallback: true. Shown for all transports:
-            // native gestures (swipe, long-press, tap) drive plain tmux over
+            VStack(alignment: .leading, spacing: 4) {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        TextField(
+                            "From",
+                            text: Binding(
+                                get: {
+                                    if let range = vm.defaults.mosh.value?.udpPortRange,
+                                       range.count >= 2 { return String(range[0]) }
+                                    return ""
+                                },
+                                set: { newLo in
+                                    var cfg = moshConfig
+                                    let lo = Int(newLo) ?? 0
+                                    let hi = (cfg.udpPortRange?.count ?? 0) >= 2
+                                        ? cfg.udpPortRange![1] : 0
+                                    cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
+                                    vm.defaults.mosh = .explicit(cfg)
+                                }
+                            )
+                        )
+                        .keyboardType(.numberPad)
+                        .frame(maxWidth: .infinity)
+
+                        Text("to")
+                            .foregroundStyle(Color(theme.text.secondary))
+
+                        TextField(
+                            "To",
+                            text: Binding(
+                                get: {
+                                    if let range = vm.defaults.mosh.value?.udpPortRange,
+                                       range.count >= 2 { return String(range[1]) }
+                                    return ""
+                                },
+                                set: { newHi in
+                                    var cfg = moshConfig
+                                    let lo = (cfg.udpPortRange?.count ?? 0) >= 2
+                                        ? cfg.udpPortRange![0] : 0
+                                    let hi = Int(newHi) ?? 0
+                                    cfg.udpPortRange = (lo > 0 || hi > 0) ? [lo, hi] : nil
+                                    vm.defaults.mosh = .explicit(cfg)
+                                }
+                            )
+                        )
+                        .keyboardType(.numberPad)
+                        .frame(maxWidth: .infinity)
+                    }
+                } label: {
+                    Text("UDP ports")
+                        .foregroundStyle(Color(theme.text.primary))
+                }
+                caption("Leave blank unless your firewall needs a fixed range, for example 60000 to 61000.")
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                // "Default" already sends adaptive, so the two are one choice.
+                Picker(selection: Binding(
+                    get: { moshLocalEchoSelection(vm.defaults.mosh.value?.predictionMode) },
+                    set: { newMode in
+                        var cfg = moshConfig
+                        cfg.predictionMode = newMode
+                        vm.defaults.mosh = .explicit(cfg)
+                    }
+                )) {
+                    Text("Adaptive (default)").tag(MoshPredictionMode?.none)
+                    Text("Always").tag(MoshPredictionMode?.some(.always))
+                    Text("Never").tag(MoshPredictionMode?.some(.never))
+                    Text("Experimental").tag(MoshPredictionMode?.some(.experimental))
+                } label: {
+                    Text("Local echo")
+                        .foregroundStyle(Color(theme.text.primary))
+                }
+                caption("Shows your typing before the server confirms it. Adaptive does this only on slow connections.")
+            }
+        } header: {
+            Text("Mosh")
+        } footer: {
+            Text("Used by hosts set to Mosh.")
+        }
+    }
+
+    // MARK: - tmux
+
+    private var tmuxSection: some View {
+        Section {
+            // Use tmux, built-in fallback: true. Gestures drive plain tmux over
             // SSH/Mosh/ET alike.
             Toggle(isOn: Binding(
                 get: { vm.defaults.semicolyn.value?.tmux?.useTmux ?? true },
@@ -623,38 +499,33 @@ struct DefaultsEditorView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Use tmux")
                         .foregroundStyle(Color(theme.text.primary))
-                    Text("Drive tmux with native gestures (swipe, long-press, tap).")
-                        .font(.caption)
-                        .foregroundStyle(Color(theme.text.secondary))
-                }
-            }
-            .swipeActions {
-                if case .explicit = vm.defaults.semicolyn {
-                    Button("Clear override") { vm.defaults.semicolyn = .inherit }
-                        .tint(Color(theme.accent.primary))
+                    caption(useTmuxCaption)
                 }
             }
 
-            // Tmux session name, built-in fallback: inherit (semicolyn)
-            LabeledContent {
-                TextField(
-                    "inherit · semicolyn",
-                    text: Binding(
-                        get: { vm.defaults.semicolyn.value?.tmux?.sessionName ?? "" },
-                        set: { newName in
-                            var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
-                            var tmux = cfg.tmux ?? TmuxConfig()
-                            tmux.sessionName = newName.isEmpty ? nil : newName
-                            cfg.tmux = tmux
-                            vm.defaults.semicolyn = .explicit(cfg)
-                        }
+            VStack(alignment: .leading, spacing: 4) {
+                LabeledContent {
+                    TextField(
+                        defaultPlaceholder(builtIn.tmuxSessionName),
+                        text: Binding(
+                            get: { vm.defaults.semicolyn.value?.tmux?.sessionName ?? "" },
+                            set: { newName in
+                                var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
+                                var tmux = cfg.tmux ?? TmuxConfig()
+                                tmux.sessionName = newName.isEmpty ? nil : newName
+                                cfg.tmux = tmux
+                                vm.defaults.semicolyn = .explicit(cfg)
+                            }
+                        )
                     )
-                )
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            } label: {
-                Text("tmux session name")
-                    .foregroundStyle(Color(theme.text.primary))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .multilineTextAlignment(.trailing)
+                } label: {
+                    Text("Session name")
+                        .foregroundStyle(Color(theme.text.primary))
+                }
+                caption(tmuxSessionNameCaption)
             }
             .swipeActions {
                 if vm.defaults.semicolyn.value?.tmux?.sessionName != nil {
@@ -668,28 +539,76 @@ struct DefaultsEditorView: View {
                     .tint(Color(theme.accent.primary))
                 }
             }
-
-            if case .inherit = vm.defaults.semicolyn {
-                Text("inherit · predictor on, tmux on")
-                    .font(.caption)
-                    .foregroundStyle(Color(theme.text.secondary))
-            }
-
-        } label: {
-            Text("Semicolyn behavior")
-                .font(.headline)
-                .foregroundStyle(Color(theme.text.primary))
+        } header: {
+            Text("tmux")
         }
     }
 
-    // MARK: - Save action
+    // MARK: - Privacy
 
-    private func performSave() {
-        do {
-            try vm.save()
-            dismiss()
-        } catch {
-            saveError = error.localizedDescription
+    /// "Let server copy to clipboard" (OSC 52). The all-hosts "Don't learn from my
+    /// typing" default lives in Settings > Suggestions & Privacy.
+    private var privacySection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                Picker(selection: Binding(
+                    get: { vm.defaults.semicolyn.value?.osc52?.allow },
+                    set: { newAllow in
+                        var cfg = vm.defaults.semicolyn.value ?? SemicolynConfig()
+                        cfg.osc52 = newAllow.map { Osc52Config(allow: $0) }
+                        vm.defaults.semicolyn = .explicit(cfg)
+                    }
+                )) {
+                    Text(defaultChoiceLabel(onOffLabel(builtIn.osc52Allow))).tag(Bool?.none)
+                    Text("On").tag(Bool?.some(true))
+                    Text("Off").tag(Bool?.some(false))
+                } label: {
+                    Text(osc52Label)
+                        .foregroundStyle(Color(theme.text.primary))
+                }
+                caption(osc52Caption)
+            }
+        } header: {
+            Text("Privacy")
+        }
+    }
+
+    // MARK: - Sign-in
+
+    /// The SSH key a host with no key of its own uses (`Defaults.identities`).
+    private var signInSection: some View {
+        Section {
+            Picker(selection: Binding(
+                get: { defaultKeySelection(vm.defaults.identities) },
+                set: { vm.defaults.identities = defaultKeyIdentities($0) }
+            )) {
+                Text("None").tag(IdentityRef?.none)
+                ForEach(vm.identities, id: \.id) { identity in
+                    Text(identity.displayName).tag(IdentityRef?.some(identity.id))
+                }
+            } label: {
+                Text("Default SSH key")
+                    .foregroundStyle(Color(theme.text.primary))
+            }
+        } header: {
+            Text("Sign-in")
+        } footer: {
+            Text("Used by hosts that have no SSH key of their own.")
         }
     }
 }
+
+// MARK: - Shared wording (host editor and Connection Defaults)
+
+/// "Use tmux" caption, shared by both editors.
+let useTmuxCaption = "Opens (or creates) a tmux session when you connect, so your work survives disconnects. Swipe to switch windows; long-press the arrow pad for panes. Needs tmux on the server."
+
+/// tmux session name caption, shared by both editors.
+let tmuxSessionNameCaption = "Hosts with the same name share one session. Leave blank to use “semicolyn”."
+
+/// The private-mode toggle label, shared by the host editor and Suggestions & Privacy.
+let privateModeLabel = "Don't learn from my typing"
+
+/// The OSC 52 row label and caption, shared by both editors.
+let osc52Label = "Let server copy to clipboard"
+let osc52Caption = "Programs on the server can write to your clipboard (OSC 52)."

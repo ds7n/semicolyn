@@ -39,9 +39,10 @@ private struct RootView: View {
     var body: some View {
         HostListView()
             .environment(\.theme,
-                         resolveTheme(selectedID: appearance.selectedThemeID,
-                                      isPro: pro.isPro))
-            // NOTE: the Terminal/Experimental settings screens and font picker read
+                         displayedDescriptor(selectedID: appearance.selectedThemeID,
+                                             previewID: appearance.previewThemeID,
+                                             isPro: pro.isPro).theme)
+            // NOTE: the Terminal settings screen and font picker read
             // `AppStores.shared.terminalSettings` DIRECTLY (via `@ObservedObject`), not
             // through an injected `@EnvironmentObject`. A missing env-object is a
             // `fatalError`, and Settings is presented as a sheet/cover from sites that do

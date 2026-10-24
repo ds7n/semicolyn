@@ -13,6 +13,18 @@ public struct HostRef: Equatable, Sendable {
     }
 }
 
+/// Where an identity is used, for the SSH Keys delete confirmation.
+public struct IdentityUsage: Equatable, Sendable {
+    /// Hosts that list the key, directly or on an inline jump hop.
+    public let hosts: [HostRef]
+    /// True when the key is (one of) the Connection Defaults key(s).
+    public let isDefaultKey: Bool
+    public init(hosts: [HostRef], isDefaultKey: Bool) {
+        self.hosts = hosts
+        self.isDefaultKey = isDefaultKey
+    }
+}
+
 /// Errors raised by the host repository's save/delete invariants.
 public enum StoreError: Error, Equatable {
     /// Saving the host would create a loop in its `proxyJump` chain.
@@ -84,9 +96,14 @@ public struct HostStore {
 
     // MARK: Defaults singleton
 
-    /// The Defaults record, or an empty `Defaults()` when none has been saved.
+    /// The Defaults record, or an empty `Defaults()` when none has been saved. A
+    /// pre-D-5 record (no transport, Mosh enabled) is migrated once and written back
+    /// (`migratingLegacyMoshDefaults`).
     public func defaults() throws -> Defaults {
-        try records.get(.defaults, id: Self.defaultsID, as: Defaults.self) ?? Defaults()
+        let stored = try records.get(.defaults, id: Self.defaultsID, as: Defaults.self) ?? Defaults()
+        guard let migrated = migratingLegacyMoshDefaults(stored) else { return stored }
+        try saveDefaults(migrated)
+        return migrated
     }
 
     public func saveDefaults(_ d: Defaults) throws {
@@ -125,7 +142,49 @@ public struct HostStore {
         try records.delete(.identity, id: id)
     }
 
+    /// Where `identityID` is used: the hosts that list it (directly or on an inline
+    /// jump hop, as `hostsUsing`) and whether it is the Connection Defaults key.
+    public func identityUsage(identityID: UUID) throws -> IdentityUsage {
+        IdentityUsage(hosts: try hostsUsing(identityID: identityID),
+                      isDefaultKey: try defaults().identities.value?.contains(identityID) ?? false)
+    }
+
+    /// Delete the identity record after removing every reference to it, so no host
+    /// (and not the Connection Defaults) is left pointing at a missing key. A host
+    /// whose last key this was falls back to the Defaults key (`removingIdentity`);
+    /// an inline jump hop left with no keys gets `nil`. References are removed before
+    /// the record, so a failure part way leaves an unused key, never a dangling
+    /// reference. Returns the usage that was cleared. The private key secret is not
+    /// touched here: `IdentityService.deleteIdentity` owns that.
+    @discardableResult
+    public func deleteIdentityRemovingReferences(id: UUID) throws -> IdentityUsage {
+        let usage = try identityUsage(identityID: id)
+        for ref in usage.hosts {
+            guard var host = try host(id: ref.id) else { continue }
+            host.identities = removingIdentity(id, from: host.identities)
+            if case .explicit(let hops?) = host.proxyJump {
+                host.proxyJump = .explicit(hops.map { hop($0, removingIdentity: id) })
+            }
+            try records.put(host, type: .host, id: host.id)
+        }
+        if usage.isDefaultKey {
+            var d = try defaults()
+            d.identities = removingIdentity(id, from: d.identities)
+            try saveDefaults(d)
+        }
+        try records.delete(.identity, id: id)
+        return usage
+    }
+
     // MARK: Helpers
+
+    /// `hop` without `identityID` in its key list; an emptied list becomes `nil`.
+    private func hop(_ hop: JumpHop, removingIdentity identityID: UUID) -> JumpHop {
+        guard case let .inline(hostName, port, user, identities?) = hop,
+              identities.contains(identityID) else { return hop }
+        let rest = identities.filter { $0 != identityID }
+        return .inline(hostName: hostName, port: port, user: user, identities: rest.isEmpty ? nil : rest)
+    }
 
     private func isRef(_ hop: JumpHop, to id: UUID) -> Bool {
         if case let .ref(hostId) = hop { return hostId == id }

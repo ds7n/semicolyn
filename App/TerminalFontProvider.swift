@@ -15,6 +15,21 @@ import SemicolynKit
     private(set) var registeredImportedNames: Set<String> = []
     private var didRegisterBundled = false
 
+    /// One imported font file on disk and the face it registers.
+    struct ImportedFontFile: Hashable {
+        let url: URL
+        let postScriptName: String
+        /// The face the picker lists and stores (named after the file).
+        var face: TerminalFont {
+            TerminalFont(kind: .imported(postScriptName),
+                         displayName: url.deletingPathExtension().lastPathComponent)
+        }
+    }
+
+    /// Every registered imported font file, in registration order (launch re-register
+    /// plus picker imports). The Typeface picker lists these.
+    private(set) var importedFiles: [ImportedFontFile] = []
+
     /// Directory where user-imported font files are copied so they survive relaunch.
     /// The picker copies into here; `registerImportedFonts()` re-registers them at launch.
     /// Pure path computation — reading it does NOT create the directory (use
@@ -55,15 +70,34 @@ import SemicolynKit
         }
     }
 
-    /// Register a user-imported font file. Returns its PostScript name on success.
+    /// Register a user-imported font file. Returns its PostScript name on success. A
+    /// file that is already registered (re-importing the same file) counts as success.
     func registerImported(fileURL: URL) -> String? {
-        guard CTFontManagerRegisterFontsForURL(fileURL as CFURL, .process, nil) else { return nil }
         guard let data = try? Data(contentsOf: fileURL),
               let provider = CGDataProvider(data: data as CFData),
               let cg = CGFont(provider),
               let ps = cg.postScriptName as String? else { return nil }
+        var error: Unmanaged<CFError>?
+        if !CTFontManagerRegisterFontsForURL(fileURL as CFURL, .process, &error) {
+            let code = error.map { CFErrorGetCode($0.takeRetainedValue()) }
+            guard code == CTFontManagerError.alreadyRegistered.rawValue else { return nil }
+        }
         registeredImportedNames.insert(ps)
+        let file = ImportedFontFile(url: fileURL, postScriptName: ps)
+        importedFiles.removeAll { $0.url == fileURL }
+        importedFiles.append(file)
         return ps
+    }
+
+    /// Delete an imported font: unregister it, remove the file from the imported-fonts
+    /// folder, and drop it from `importedFiles`.
+    func removeImported(_ file: ImportedFontFile) {
+        CTFontManagerUnregisterFontsForURL(file.url as CFURL, .process, nil)
+        try? FileManager.default.removeItem(at: file.url)
+        importedFiles.removeAll { $0.url == file.url }
+        if !importedFiles.contains(where: { $0.postScriptName == file.postScriptName }) {
+            registeredImportedNames.remove(file.postScriptName)
+        }
     }
 
     /// Resolve a face to a concrete UIFont. Never returns a tofu font.

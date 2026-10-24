@@ -27,11 +27,17 @@ final class TransportCodableTests: XCTestCase {
         XCTAssertEqual(Transport.et.displayName, "Eternal Terminal")
     }
 
-    // Summaries are non-empty and mention the defining tradeoff (observable content check).
-    func testSummariesMentionKeyTradeoff() {
-        XCTAssertTrue(Transport.ssh.summary.contains("roaming"))
-        XCTAssertTrue(Transport.mosh.summary.contains("panes"))
-        XCTAssertTrue(Transport.et.summary.contains("etserver"))
+    // M-20: exact summaries. Gesture tmux runs on every transport, so none of them
+    // may claim (or deny) "panes" any more.
+    func testSummariesExactText() {
+        XCTAssertEqual(Transport.ssh.summary, "Works with any server. Drops when your network changes.")
+        XCTAssertEqual(Transport.mosh.summary,
+                       "Stays connected when your network changes or the phone sleeps. Needs mosh-server and open UDP ports.")
+        XCTAssertEqual(Transport.et.summary,
+                       "Stays connected when your network changes. Needs etserver on the server (TCP 2022).")
+        for t in Transport.allCases {
+            XCTAssertFalse(t.summary.contains("panes"), "\(t) summary still mentions panes")
+        }
     }
 
     // A Host encoded BEFORE the transport field existed (no "transport" key) must

@@ -15,6 +15,11 @@ import SemicolynKit
         didSet { persist() }
     }
 
+    /// A theme shown live while the picker previews it (a Supporter theme without
+    /// Pro). Never persisted; the picker clears it when it goes away, so the app
+    /// reverts to `selectedThemeID`. See `displayedDescriptor`.
+    @Published var previewThemeID: ThemeID?
+
     init() {
         if let raw = UserDefaults.standard.string(forKey: Self.defaultsKey) {
             self.selectedThemeID = ThemeID(raw)
@@ -23,7 +28,7 @@ import SemicolynKit
         }
     }
 
-    /// Restores the free default (Neon Midnight). Intentional forward seam for a future Settings "Reset" affordance (mirrors `KeybarSettingsStore.resetToDefaults`).
+    /// Restores the free default (Neon Midnight). Intentional forward seam for a future Settings "Reset" affordance (mirrors `KeybarSettingsStore.resetKeepingLibrary`).
     func resetToDefault() {
         selectedThemeID = Theme.defaultDescriptor.id
     }

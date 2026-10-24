@@ -45,6 +45,42 @@ final class SelectionHandlesTests: XCTestCase {
                                                 startRect: s, endRect: e, slop: 8))
     }
 
+    // Overlapping slop (a short word): the handle whose drawn edge is nearer wins. The
+    // start handle sits on the start cell's LEFT edge (x=20), the end on the end cell's
+    // RIGHT edge (x=50); the split is the midpoint x=35.
+    func testOverlapPicksNearerHandle() {
+        let s = SelectionHandleRect(x: 20, y: 0, width: 10, height: 20)
+        let e = SelectionHandleRect(x: 40, y: 0, width: 10, height: 20)
+        func hit(_ x: Double) -> SelectionEnd? {
+            SemicolynKit.hitTestHandle(point: SelectionHandlePoint(x: x, y: 10), startRect: s, endRect: e, slop: 22)
+        }
+        XCTAssertEqual(hit(48), .end)
+        XCTAssertEqual(hit(22), .start)
+        XCTAssertEqual(hit(34), .start)
+        XCTAssertEqual(hit(36), .end)
+        XCTAssertEqual(hit(35), .start)               // exact tie keeps the start
+    }
+
+    // BVA: a one-cell selection (both ends on the same cell) splits at the cell's middle.
+    func testSingleCellSelectionSplitsAtMiddle() {
+        let r = SelectionHandleRect(x: 20, y: 0, width: 10, height: 20)
+        XCTAssertEqual(SemicolynKit.hitTestHandle(point: SelectionHandlePoint(x: 21, y: 10),
+                                                  startRect: r, endRect: r, slop: 22), .start)
+        XCTAssertEqual(SemicolynKit.hitTestHandle(point: SelectionHandlePoint(x: 29, y: 10),
+                                                  startRect: r, endRect: r, slop: 22), .end)
+    }
+
+    // Multi-row: a touch on the end row's handle wins even though the start row's slop
+    // reaches it vertically.
+    func testOverlapAcrossRowsUsesVerticalDistance() {
+        let s = SelectionHandleRect(x: 20, y: 0, width: 10, height: 20)
+        let e = SelectionHandleRect(x: 10, y: 20, width: 10, height: 20)
+        XCTAssertEqual(SemicolynKit.hitTestHandle(point: SelectionHandlePoint(x: 20, y: 38),
+                                                  startRect: s, endRect: e, slop: 22), .end)
+        XCTAssertEqual(SemicolynKit.hitTestHandle(point: SelectionHandlePoint(x: 20, y: 2),
+                                                  startRect: s, endRect: e, slop: 22), .start)
+    }
+
     // Ordering: a drag that moves the start below/after the end normalizes (row-major).
     func testOrderingFlipsWhenReversed() {
         let r = SemicolynKit.orderedSelection(a: (col: 5, row: 10), b: (col: 2, row: 3))

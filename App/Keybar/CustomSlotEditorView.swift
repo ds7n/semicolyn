@@ -18,6 +18,7 @@ struct CustomSlotEditorView: View {
     @State private var label: String
     @State private var bindings: [CustomSlotGesture: GestureBinding]
     @State private var pickingGesture: CustomSlotGesture?
+    @State private var confirmingDelete = false
 
     init(store: KeybarSettingsStore, slot: CustomSlot?) {
         _store = ObservedObject(wrappedValue: store)
@@ -40,7 +41,7 @@ struct CustomSlotEditorView: View {
     var body: some View {
         Form {
             Section {
-                TextField("Label / glyph (optional)", text: $label)
+                TextField("Key label (optional)", text: $label)
             } footer: {
                 Text("Shown on the key. If blank, the key uses the tap macro's name.")
             }
@@ -51,16 +52,22 @@ struct CustomSlotEditorView: View {
                 }
             }
 
-            if let id = editingID {
+            if editingID != nil {
                 Section {
-                    Button("Delete gesture key", role: .destructive) {
-                        store.deleteCustomSlot(id)
-                        dismiss()
-                    }
+                    Button("Delete Gesture Key", role: .destructive) { confirmingDelete = true }
                 }
             }
         }
-        .navigationTitle(editingID == nil ? "New gesture key" : "Edit gesture key")
+        .navigationTitle(editingID == nil ? "New Gesture Key" : "Edit Gesture Key")
+        .confirmationDialog("Delete this gesture key?", isPresented: $confirmingDelete,
+                            titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                guard let id = editingID else { return }
+                store.deleteCustomSlot(id)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {

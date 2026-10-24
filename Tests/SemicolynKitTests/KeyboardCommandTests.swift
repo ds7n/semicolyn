@@ -31,6 +31,32 @@ final class KeyboardCommandTests: XCTestCase {
         XCTAssertEqual(resolve(command: "?"), .tips)
     }
 
+    func testDisconnectIsShiftCommandW() {
+        XCTAssertEqual(resolve(command: "w", shift: true), .disconnect)
+        // ⌘W (no shift) is still Close Window: the two do not collide.
+        XCTAssertEqual(resolve(command: "w"), .closeWindow)
+    }
+
+    func testDisconnectHudTitle() {
+        let titles = KeyboardCommandCatalog.all.filter { $0.command == .disconnect }.map(\.title)
+        XCTAssertEqual(titles, ["Disconnect"])
+    }
+
+    func testSplitTitlesMatchThePaneDialog() {
+        // M-99: shortcut names match the Pad long-press dialog ("Split Right" / "Split Down").
+        let right = KeyboardCommandCatalog.all.filter { $0.command == .splitVertical }.map(\.title)
+        let down = KeyboardCommandCatalog.all.filter { $0.command == .splitHorizontal }.map(\.title)
+        XCTAssertEqual(right, ["Split Right", "Split Right"])
+        XCTAssertEqual(down, ["Split Down", "Split Down"])
+    }
+
+    func testNoZoomShortcutsAndMinusStaysSplitDown() {
+        // D-12: pinch only; ⌘= and ⌘0 are unbound, ⌘- keeps the split alias.
+        XCTAssertNil(resolve(command: "="))
+        XCTAssertNil(resolve(command: "0"))
+        XCTAssertEqual(resolve(command: "-"), .splitHorizontal)
+    }
+
     func testLauncherIsShiftCommandP() {
         XCTAssertEqual(resolve(command: "p", shift: true), .openLauncher)
     }
@@ -105,7 +131,7 @@ final class KeyboardCommandTests: XCTestCase {
         let expected: Set<KeyboardCommand> = [
             .newWindow, .closeWindow, .switchWindow(1), .prevWindow, .nextWindow,
             .prevPane, .nextPane, .splitVertical, .splitHorizontal,
-            .clearScreen, .copy, .paste, .newConnection, .reconnect,
+            .clearScreen, .copy, .paste, .newConnection, .reconnect, .disconnect,
             .openLauncher, .settings, .tips,
         ]
         for action in expected {
@@ -117,5 +143,14 @@ final class KeyboardCommandTests: XCTestCase {
         for n in 1...9 {
             XCTAssertEqual(resolve(command: String(n)), .switchWindow(n))
         }
+    }
+
+    // Tips and Settings > Keyboard list chords as glyphs in Apple's order (⌃⌥⇧⌘).
+    func testChordGlyphs() {
+        XCTAssertEqual(KeyboardChord(input: "p", command: true, shift: true).glyphs, "⇧⌘P")
+        XCTAssertEqual(KeyboardChord(input: ",", command: true).glyphs, "⌘,")
+        XCTAssertEqual(KeyboardChord(input: "x", command: true, shift: true, control: true, option: true).glyphs,
+                       "⌃⌥⇧⌘X")
+        XCTAssertEqual(KeyboardChord(input: "a").glyphs, "A")
     }
 }

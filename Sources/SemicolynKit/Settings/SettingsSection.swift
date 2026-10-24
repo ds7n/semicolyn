@@ -1,25 +1,68 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-/// Where the unified Settings screen is being shown from.
-public enum SettingsContext: Equatable, Sendable {
-    case preConnect   // host list, no active session
-    case inSession    // long-press Esc, active session
-}
-
-/// The sections of the unified Settings screen.
+/// The rows of the unified Settings screen. Every row is enabled in every context:
+/// Keybar and Macros edit the same global store before connecting and in a session,
+/// so changes made from the host list apply to the next session.
 public enum SettingsSection: String, CaseIterable, Sendable {
-    case appearance, terminal, keybar, launcher, defaults, privacy, diagnostics, experimental
-}
+    case appearance, terminal, keybar, macros, keyboard, defaults, sshKeys, knownHosts, privacy
+    case tips, diagnostics, about
 
-/// Decides which Settings sections are interactive in a given context. Keybar and
-/// Launcher edit the LIVE session's input surface, so they are disabled pre-connect;
-/// every other section applies in both contexts.
-public enum SettingsGate {
-    public static func isEnabled(_ section: SettingsSection, in context: SettingsContext) -> Bool {
-        switch section {
-        case .keybar, .launcher: return context == .inSession
-        default:                 return true
+    /// The row title (also the pushed screen's title).
+    public var title: String {
+        switch self {
+        case .appearance:  return "Appearance"
+        case .terminal:    return "Terminal"
+        case .keybar:      return "Keybar"
+        case .macros:      return "Macros"
+        case .keyboard:    return "Keyboard"
+        case .defaults:    return "Connection Defaults"
+        case .sshKeys:     return "SSH Keys"
+        case .knownHosts:  return "Known Hosts"
+        case .privacy:     return "Suggestions & Privacy"
+        case .tips:        return "Tips & Gestures"
+        case .diagnostics: return "Diagnostics"
+        case .about:       return "About"
         }
     }
+
+    /// The SF Symbol shown beside the title.
+    public var symbol: String {
+        switch self {
+        case .appearance:  return "paintpalette"
+        case .terminal:    return "terminal"
+        case .keybar:      return "keyboard"
+        case .macros:      return "command"
+        case .keyboard:    return "keyboard.badge.ellipsis"
+        case .defaults:    return "slider.horizontal.3"
+        case .sshKeys:     return "key"
+        case .knownHosts:  return "checkmark.shield"
+        case .privacy:     return "hand.raised"
+        case .tips:        return "questionmark.circle"
+        case .diagnostics: return "ladybug"
+        case .about:       return "info.circle"
+        }
+    }
+}
+
+/// One headed group of Settings rows. `header == nil` is the un-headed first group.
+public struct SettingsGroup: Equatable, Sendable {
+    public let header: String?
+    public let sections: [SettingsSection]
+    public init(header: String?, sections: [SettingsSection]) {
+        self.header = header
+        self.sections = sections
+    }
+}
+
+/// The Settings screen layout, top to bottom (below the in-session Session section).
+/// Each `SettingsSection` appears exactly once.
+public enum SettingsLayout {
+    public static let groups: [SettingsGroup] = [
+        SettingsGroup(header: nil, sections: [.appearance, .terminal]),
+        SettingsGroup(header: "Input", sections: [.keybar, .macros, .keyboard]),
+        SettingsGroup(header: "Connections", sections: [.defaults, .sshKeys, .knownHosts]),
+        SettingsGroup(header: "Privacy", sections: [.privacy]),
+        SettingsGroup(header: "Help", sections: [.tips, .diagnostics, .about]),
+    ]
 }

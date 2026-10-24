@@ -4,11 +4,11 @@ import SwiftUI
 import SemicolynKit
 
 /// The Diagnostics sections + their state, factored out of `DiagnosticsSettingsView` so they
-/// can be embedded INLINE in `ExperimentalSettingsView` (one screen, no nested navigation)
-/// while the diagnostics code stays in this file. Owns all diagnostics `@State`/`@AppStorage`;
-/// renders its 5 `Section`s (via `body`) plus the keystroke confirmation dialog. Embed with
-/// `DiagnosticsContent()` directly inside a parent `List` (a `View` inside `List` flattens to
-/// its sections). `DiagnosticsSettingsView` is now a thin standalone wrapper around it.
+/// can be embedded inside any parent `List` while the diagnostics code stays in this file.
+/// Owns all diagnostics `@State`/`@AppStorage`; renders its 5 `Section`s (via `body`) plus the
+/// keystroke confirmation dialog. Embed with `DiagnosticsContent()` directly inside a parent
+/// `List` (a `View` inside `List` flattens to its sections). `DiagnosticsSettingsView`
+/// (Settings > Diagnostics) is the thin standalone wrapper around it.
 struct DiagnosticsContent: View {
     /// MASTER logging switch. Independent of destination (panel / remote): when off,
     /// nothing is recorded anywhere.
@@ -59,10 +59,9 @@ struct DiagnosticsContent: View {
 
     private var transport: LogTransport { LogTransport(rawValue: transportRaw) ?? .tls }
 
-    /// The sections only (no enclosing `List`): the parent supplies the `List`/`Form` so this
-    /// can render standalone (via `DiagnosticsSettingsView`) OR inline inside another screen
-    /// (`ExperimentalSettingsView`). The keystroke confirmation dialog + logging reapply ride
-    /// on the section group so they travel with it in both hosts.
+    /// The sections only (no enclosing `List`): the parent supplies the `List`/`Form`
+    /// (`DiagnosticsSettingsView`). The keystroke confirmation dialog + logging reapply ride
+    /// on the section group so they travel with it.
     var body: some View {
         Group {
             Section {
@@ -71,8 +70,7 @@ struct DiagnosticsContent: View {
                         DebugLog.shared.configureFromDefaults(reason: "toggle")
                     }
             } footer: {
-                Text("Master switch. When off, nothing is recorded — to the panel or the "
-                     + "remote stream. Turn on, then pick destinations below. Off by default.")
+                Text("When off, nothing is recorded. Turn on, then choose where logs go below.")
             }
 
             // Everything below depends on the master switch: gray it all out (non-interactive
@@ -90,16 +88,23 @@ struct DiagnosticsContent: View {
                 Toggle("Enable remote log stream", isOn: $remoteEnabled)
                     .onChange(of: remoteEnabled) { _, _ in rebuildSink() }
                 if remoteEnabled {
-                    TextField("Host", text: $remoteHost)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .onChange(of: remoteHost) { _, _ in rebuildSink() }
-                    TextField("Port", value: $remotePort, format: .number.grouping(.never))
-                        .keyboardType(.numberPad)
-                        .onChange(of: remotePort) { _, _ in rebuildSink() }
-                    Picker("Transport", selection: $transportRaw) {
-                        Text("UDP (514)").tag(LogTransport.udp.rawValue)
-                        Text("TCP (514)").tag(LogTransport.tcp.rawValue)
-                        Text("TLS (6514)").tag(LogTransport.tls.rawValue)
+                    LabeledContent("Server") {
+                        TextField("logs.example.com", text: $remoteHost)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .multilineTextAlignment(.trailing)
+                            .onChange(of: remoteHost) { _, _ in rebuildSink() }
+                    }
+                    LabeledContent("Port") {
+                        TextField("6514", value: $remotePort, format: .number.grouping(.never))
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .onChange(of: remotePort) { _, _ in rebuildSink() }
+                    }
+                    // "Protocol", not "Transport": avoids a clash with the connection type.
+                    Picker("Protocol", selection: $transportRaw) {
+                        Text("TLS (recommended)").tag(LogTransport.tls.rawValue)
+                        Text("TCP").tag(LogTransport.tcp.rawValue)
+                        Text("UDP (may cut long lines)").tag(LogTransport.udp.rawValue)
                     }
                     .onChange(of: transportRaw) { _, _ in rebuildSink() }
                     Button("Test connection") { runTest() }
@@ -112,9 +117,8 @@ struct DiagnosticsContent: View {
             } header: {
                 Text("Stream logs to a server")
             } footer: {
-                Text("A destination for logs (requires \"Enable logging\"). Streams the verbose "
-                     + "trace off-device as RFC 5424 syslog. Receiver: see tools/syslog-sink "
-                     + "(docker compose up). TLS uses a self-signed cert (verification off).")
+                Text("Sends diagnostic logs to your own syslog server (RFC 5424). TLS encrypts "
+                     + "but doesn't verify the server certificate.")
             }
 
             Section {
@@ -136,7 +140,7 @@ struct DiagnosticsContent: View {
                     }
             } footer: {
                 Text("Off: only structural key events (lengths, backspace) are logged. On: the "
-                     + "actual keys are logged too — password/prompt lines are still redacted "
+                     + "actual keys are logged too; password/prompt lines are still redacted "
                      + "(shown as REDACTED, never dropped). Off by default.")
             }
 
@@ -154,8 +158,8 @@ struct DiagnosticsContent: View {
             } header: {
                 Text("Log categories")
             } footer: {
-                Text("Which diagnostic categories are recorded. Low-volume categories are on "
-                     + "by default; render/input/predictor/keybar are verbose and off by default.")
+                Text("Which events are recorded. Gesture, Input, Predictor, Keybar and Transport "
+                     + "are verbose and off by default.")
             }
             }
             .disabled(!loggingEnabled)
@@ -201,9 +205,8 @@ struct DiagnosticsContent: View {
     }
 }
 
-/// Standalone Settings → Diagnostics screen: the `DiagnosticsContent` sections wrapped in
-/// their own `List` + title. Kept for any direct navigation to Diagnostics; the Experimental
-/// screen embeds `DiagnosticsContent` inline instead of linking here.
+/// Settings → Diagnostics: the `DiagnosticsContent` sections wrapped in their own `List` +
+/// title.
 struct DiagnosticsSettingsView: View {
     var body: some View {
         List { DiagnosticsContent() }

@@ -44,14 +44,14 @@ struct SessionView: View {
     /// Set to true when the stored secret lookup failed to find a password,
     /// indicating the user must provide one manually.
     @State private var needsPasswordEntry = false
+    /// The password typed into the Reconnect prompt (`vm.reconnectNeedsPassword`).
+    @State private var reconnectPassword = ""
     /// True while `resolveCredentials()` has not yet run (first `onAppear` not
     /// yet fired). Guards against showing a misleading "Connecting to …" spinner
     /// before we know whether a stored credential exists.
     @State private var resolving = true
     /// Set when the user confirms an ssh:// link tap; drives a nested session cover.
     @State private var quickConnectHost: IdentifiableHost?
-    /// Drives the "Disconnect from <host>?" confirmation dialog.
-    @State private var confirmingDisconnect = false
     /// Master logging switch and the panel destination (Settings → Diagnostics; both off
     /// by default). The 🐞 panel needs BOTH: logging on (so there's anything to show) and
     /// the panel destination chosen.
@@ -201,28 +201,16 @@ struct SessionView: View {
             }
         }
         .animation(.easeInOut, value: vm.resumeRawPrompt)
-        // Connected-state Disconnect affordance: a small top-trailing control (the
-        // connected view has no nav bar). Confirms before tearing down so a session
-        // isn't lost by an accidental tap. Shown only while a live shell is up.
+        // The way into the session menu when the keybar is NOT on screen (keyboard down
+        // or failed, or the keybar hidden with a hardware keyboard): tap opens the
+        // in-session Settings sheet (Session section: Reconnect / Disconnect), long-press
+        // raises the keyboard. With the keybar showing, long-press Esc (or ⌘,) instead.
         .overlay(alignment: .topTrailing) {
-            if case .shell = vm.state {
-                Button {
-                    InputClickFeedback.play()
-                    confirmingDisconnect = true
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(Color(theme.text.secondary))
-                        .padding(8)
-                        .accessibilityLabel("Disconnect")
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 4).padding(.trailing, 6)
-            }
+            SessionMenuButton(vm: vm, hardwareKeyboard: hardwareKeyboard)
         }
+        // ⇧⌘W asks here (the Session section's Disconnect confirms inside Settings).
         .confirmationDialog("Disconnect from \(host.label)?",
-                            isPresented: $confirmingDisconnect, titleVisibility: .visible) {
+                            isPresented: $vm.confirmingDisconnect, titleVisibility: .visible) {
             Button("Disconnect", role: .destructive) { InputClickFeedback.play(); vm.disconnect() }
             Button("Cancel", role: .cancel) {}
         }
@@ -266,7 +254,7 @@ struct SessionView: View {
             // instead of leaving us to guess). Ungated: records even when logging is off.
             if case .shell = newState { DebugLog.shared.logConfig(reason: "connect") }
         }
-        // Host-key prompt sheet, mirrors ConnectView exactly.
+        // Host-key prompt sheet.
         // `onDismiss` fails closed: if the sheet is dismissed without an explicit
         // button tap, treat it as rejection so the continuation is never leaked.
         .sheet(item: $vm.pendingPrompt, onDismiss: { vm.resolvePrompt(false) }) { prompt in
@@ -289,6 +277,20 @@ struct SessionView: View {
         }
         .sheet(item: $vm.presentedSheet) { sheet in
             sessionSheet(sheet)
+        }
+        // Reconnect with nothing to sign in with (a cold-reattached password host):
+        // ask here; the live session stays up until the user confirms.
+        .alert("Reconnect to \(host.label)", isPresented: $vm.reconnectNeedsPassword) {
+            SecureField("Password", text: $reconnectPassword)
+            Button("Reconnect") {
+                InputClickFeedback.play()
+                let typed = reconnectPassword
+                reconnectPassword = ""
+                vm.reconnect(withPassword: typed)
+            }
+            Button("Cancel", role: .cancel) { reconnectPassword = "" }
+        } message: {
+            Text("Enter your password to reconnect.")
         }
         // Confirmed ssh:// link → open a nested session for the (found-or-created) host.
         .fullScreenCover(item: $quickConnectHost) { wrapper in
@@ -329,9 +331,10 @@ struct SessionView: View {
     @ViewBuilder private func sessionSheet(_ sheet: SessionSheet) -> some View {
         switch sheet {
         case .settings:
-            SettingsView(context: .inSession, keybarSettings: AppStores.shared.keybarSettings)
+            SettingsView(keybarSettings: AppStores.shared.keybarSettings,
+                         session: vm.sessionControls)
         case .launcher:
-            NavigationStack { MacroLibraryView(store: AppStores.shared.keybarSettings) }
+            NavigationStack { MacroLibraryView(store: AppStores.shared.keybarSettings, showsDoneButton: true) }
         case .tips:
             NavigationStack { TipsView() }
         case .hostPicker:
@@ -405,9 +408,10 @@ struct SessionView: View {
         switch credentialResolution(hasUsableKey: hostHasUsableKey(defaults: defaults),
                                      hasStoredPassword: storedPassword != nil) {
         case .connectWithKey:
-            // `authenticate` uses the resolved identity's key and ignores the
-            // password argument, so an empty password is correct here.
-            vm.connect(savedHost: host, password: "")
+            // `authenticate` tries each resolved key in order, then this password
+            // (a stored one, if any). With no stored password it is empty and the
+            // password step is skipped once a key has been tried.
+            vm.connect(savedHost: host, password: storedPassword ?? "")
         case .connectWithStoredPassword:
             password = storedPassword ?? ""
             vm.connect(savedHost: host, password: password)
@@ -418,26 +422,13 @@ struct SessionView: View {
 
     /// The host's non-empty stored password, or nil (absent, unreadable, or empty).
     private func storedPassword() -> String? {
-        guard let passwordID = host.passwordRef.value,
-              let data = try? AppStores.shared.secrets.getSecret(.password(id: passwordID))
-        else { return nil }
-        let stored = String(decoding: data, as: UTF8.self)
-        return stored.isEmpty ? nil : stored
+        ConnectionViewModel.storedPassword(for: host)
     }
 
-    /// True if the host resolves to an identity whose private key is available on
-    /// this device, the same check `ConnectionViewModel.authenticate` gates on.
-    /// A Keychain read error is treated as "no usable key" here (the connect path
-    /// re-reads and surfaces a genuine failure), so a transient error only means we
-    /// fall back to the password prompt rather than silently blocking.
+    /// True if any identity the host resolves to has its private key on this
+    /// device, the same check `ConnectionViewModel.authenticate` gates on.
     private func hostHasUsableKey(defaults: Defaults) -> Bool {
-        guard let identityID = resolveIdentities(host: host, defaults: defaults).first else {
-            return false
-        }
-        // privateKeyOpenSSH returns String? (nil = absent); `try?` collapses a read
-        // error to nil too. Either nil → no usable key on this device.
-        let key = try? AppStores.shared.identities.privateKeyOpenSSH(for: identityID)
-        return (key ?? nil) != nil
+        ConnectionViewModel.hasUsableKey(host: host, defaults: defaults)
     }
 
     // MARK: - Password prompt
@@ -459,7 +450,7 @@ struct SessionView: View {
                     SecureField("Password", text: $password)
                     // This prompt only appears when the host has no usable key. Key
                     // auth is used automatically for hosts with an assigned identity.
-                    Text("No SSH key assigned to this host, enter a password, or assign an identity in the host editor to use key auth.")
+                    Text("Enter your password. To sign in with an SSH key instead, edit this host and add a key.")
                         .font(.caption)
                         .foregroundStyle(Color(theme.text.secondary))
                 }
@@ -568,6 +559,49 @@ struct SessionView: View {
                     Button("Close") { InputClickFeedback.play(); dismiss() }
                 }
             }
+        }
+    }
+}
+
+/// The small "≡" corner button over a live session. Shown only while the keybar is not
+/// on screen (`sessionMenuButtonVisible`); observes the keybar settings itself so a
+/// settings change re-renders only this button, not the whole session view.
+private struct SessionMenuButton: View {
+    @ObservedObject var vm: ConnectionViewModel
+    @ObservedObject var hardwareKeyboard: HardwareKeyboardMonitor
+    @ObservedObject private var keybarSettings = AppStores.shared.keybarSettings
+    @Environment(\.theme) private var theme
+
+    private var visible: Bool {
+        sessionMenuButtonVisible(
+            inShell: vm.state == .shell,
+            keybarAttached: vm.keybarAttached,
+            hardwareKeyboardConnected: hardwareKeyboard.isConnected,
+            hideKeybarWithHardwareKeyboard: keybarSettings.settings.hideKeybarWithHardwareKeyboard)
+    }
+
+    var body: some View {
+        if visible {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color(theme.text.secondary))
+                .frame(width: 32, height: 32)
+                .background(Color(theme.surface.panel).opacity(0.85), in: Circle())
+                .contentShape(Circle())
+                .padding(.top, 4).padding(.trailing, 6)
+                .onTapGesture {
+                    InputClickFeedback.play()
+                    vm.presentedSheet = .settings
+                }
+                .onLongPressGesture {
+                    InputClickFeedback.play()
+                    vm.requestKeyboardFocus()
+                }
+                .accessibilityElement()
+                .accessibilityLabel("Session menu")
+                .accessibilityHint("Opens Settings with Reconnect and Disconnect.")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction(named: "Show keyboard") { vm.requestKeyboardFocus() }
         }
     }
 }

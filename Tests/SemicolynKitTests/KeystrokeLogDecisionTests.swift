@@ -45,4 +45,23 @@ final class KeystrokeLogDecisionTests: XCTestCase {
             keystrokeLogDecision(event: "deleteBackward", content: "", logContent: false, isPasswordLine: false),
             "deleteBackward(len=0)")
     }
+
+    // MARK: - Privacy screen summary (M-61)
+
+    func testSummaryOffWhenMasterSwitchOff() {
+        XCTAssertEqual(keystrokeLoggingSummary(loggingEnabled: false, inputCategoryOn: true, contentOn: true), "Off")
+    }
+
+    func testSummaryOffWhenInputCategoryOff() {
+        XCTAssertEqual(keystrokeLoggingSummary(loggingEnabled: true, inputCategoryOn: false, contentOn: true), "Off")
+    }
+
+    func testSummaryLengthsOnlyWithoutContent() {
+        XCTAssertEqual(keystrokeLoggingSummary(loggingEnabled: true, inputCategoryOn: true, contentOn: false),
+                       "Lengths only")
+    }
+
+    func testSummaryOnWithContent() {
+        XCTAssertEqual(keystrokeLoggingSummary(loggingEnabled: true, inputCategoryOn: true, contentOn: true), "On")
+    }
 }

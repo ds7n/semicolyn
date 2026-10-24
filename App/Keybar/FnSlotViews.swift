@@ -21,7 +21,8 @@ struct FkeySlotView: View {
     }
 }
 
-/// The Fn toggle slot. Background reflects Fn mode (armed/locked). A single tap
+/// The Fn toggle slot. Background reflects Fn mode (armed/locked), and a locked Fn
+/// also shows a small lock glyph so the two on states read differently. A single tap
 /// recognizer cycles off->armed->locked->off (`vm.fnTap()`); the former `count:2`
 /// double-tap-to-lock was removed because the sibling recognizer forced SwiftUI
 /// to wait out the double-tap window before firing the tap, which felt laggy.
@@ -37,10 +38,25 @@ struct FnSlotView: View {
         case .off:    return Color(theme.keybar.slotBg)
         }
     }
+    private var fnAccessibilityLabel: String {
+        switch mode {
+        case .locked: return "Fn, locked"
+        case .armed:  return "Fn, on for one key"
+        case .off:    return "Fn"
+        }
+    }
     var body: some View {
         SlotChrome(bg: bg) {
-            Text("Fn").font(.caption).foregroundStyle(Color(theme.text.primary))
+            HStack(spacing: 1) {
+                Text("Fn").font(.caption)
+                if mode == .locked {
+                    Image(systemName: "lock.fill").font(.system(size: 7, weight: .semibold))
+                }
+            }
+            .foregroundStyle(Color(theme.text.primary))
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(fnAccessibilityLabel)
         .onInputClickTap { vm.fnTap() }
     }
 }

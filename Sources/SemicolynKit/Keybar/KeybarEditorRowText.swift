@@ -8,7 +8,7 @@ public func keybarEditorTitle(for slot: KeybarSlot, library: KeybarLibrary) -> S
     switch slot {
     case .escPill:        return "Esc pill"
     case .pad:            return "Pad (arrows + pane)"
-    case .modifier:       return "Modifier (Ctrl/Alt/Shift)"
+    case .modifier:       return "Ctrl / Alt / Shift"
     case .tab:            return "Tab"
     case .fn:             return "Fn (function keys)"
     case .symbol(let s):  return "Symbol “\(s)”"
@@ -26,8 +26,9 @@ public func keybarEditorTitle(for slot: KeybarSlot, library: KeybarLibrary) -> S
 /// key does, so the user needn't open every key's editor. Symbols and Tab show
 /// their effective swipe secondaries (user override, else built-in default); a
 /// macro key shows its tap macro; a gesture key lists every bound gesture in
-/// display order. Nil for keys with nothing to show (Esc, Pad, Modifier, Fn) and
-/// for a missing macro/gesture key (the title already says "missing").
+/// display order; the Modifier explains its three gestures. Nil for keys with
+/// nothing to show (Esc, Pad, Fn) and for a missing macro/gesture key (the title
+/// already says "missing").
 public func keybarEditorDetail(for slot: KeybarSlot, settings: KeybarSettings) -> String? {
     let library = settings.library
     switch slot {
@@ -45,7 +46,9 @@ public func keybarEditorDetail(for slot: KeybarSlot, settings: KeybarSettings) -
             return _gesturePrefix(gesture) + name
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    case .escPill, .pad, .modifier, .fn:
+    case .modifier:
+        return "Tap: Ctrl. Swipe up: Alt. Swipe down: Shift."
+    case .escPill, .pad, .fn:
         return nil
     }
 }
@@ -62,4 +65,10 @@ private func _gesturePrefix(_ gesture: CustomSlotGesture) -> String {
     case .swipeDown: return "↓ "
     case .longPress: return "Hold: "
     }
+}
+
+/// The confirmation message for deleting a macro that keybar keys use, e.g.
+/// "It's used by 2 keybar keys." (singular for one key).
+public func macroDeleteUsageMessage(keyCount: Int) -> String {
+    keyCount == 1 ? "It's used by 1 keybar key." : "It's used by \(keyCount) keybar keys."
 }

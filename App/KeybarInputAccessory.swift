@@ -38,6 +38,9 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     var enableInputClicksWhenVisible: Bool { true }
 
     private let host: UIHostingController<KeybarAccessoryRoot>
+    /// Told when this accessory enters or leaves a window (keyboard up or down), which
+    /// drives the session's "≡" corner button (`sessionMenuButtonVisible`).
+    private weak var vm: ConnectionViewModel?
 
     /// Off-screen measuring hosts for the two children, sized independently. We do NOT
     /// measure the live `host` for height: `host.sizeThatFits` proved self-contaminating
@@ -67,6 +70,7 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
                                        theme: theme,
                                        hardwareKeyboardConnected: hardwareKeyboardConnected)
         self.host = UIHostingController(rootView: root)
+        self.vm = vm
         // The hosting controller computes its own intrinsic size from the live SwiftUI
         // content; the input view then hugs it (see `intrinsicContentSize`).
         host.sizingOptions = .intrinsicContentSize
@@ -173,13 +177,15 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     /// `UIDevice.playInputClick()` from SwiftUI tap handlers that render inside this
     /// accessory; if this host never attaches to a window, that call is a silent
     /// no-op (see `InputClickFeedback.swift`'s header). This is the device-verify
-    /// probe for that question.
+    /// probe for that question. The same edge tells the VM whether the keybar is on screen.
     override func didMoveToWindow() {
         super.didMoveToWindow()
         let inChain = (window != nil)
         InputClickFeedback.hostInChainDescription = inChain ? "audioFeedbackHost@window" : "detached"
+        let vm = self.vm
         MainActor.assumeIsolated {
             DebugLog.shared.log(.keybar, "keybar:clickprobe host=\(InputClickFeedback.hostInChainDescription) conformsAudioFeedback=true")
+            vm?.noteKeybarAttached(inChain)
         }
     }
 }

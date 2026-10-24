@@ -67,8 +67,46 @@ final class TerminalSettingsTests: XCTestCase {
         XCTAssertFalse(TerminalSettings.cursorStyle(fromDECSCUSR: 99).blink)  // unknown → steady
     }
 
-    func testScrollbackPresetsIncludeSpecValues() {
-        XCTAssertEqual(TerminalSettings.scrollbackPresets, [1000, 2000, 5000, 10000, Int.max])
+    func testScrollbackPresetsHaveNoUnlimited() {
+        // No Int.max: SwiftTerm sizes its buffer as scrollback + rows, which would trap.
+        XCTAssertEqual(TerminalSettings.scrollbackPresets, [1000, 2000, 5000, 10000])
+    }
+
+    func testEffectiveScrollbackClampsOutOfRangeValues() {
+        var s = TerminalSettings()
+        XCTAssertEqual(s.effectiveScrollback, 5000)              // default passes through
+        s.scrollbackLines = Int.max                               // legacy "unlimited"
+        XCTAssertEqual(s.effectiveScrollback, 100_000)
+        s.scrollbackLines = 100_000                               // max
+        XCTAssertEqual(s.effectiveScrollback, 100_000)
+        s.scrollbackLines = 100_001                               // max + 1
+        XCTAssertEqual(s.effectiveScrollback, 100_000)
+        s.scrollbackLines = 0                                     // min
+        XCTAssertEqual(s.effectiveScrollback, 0)
+        s.scrollbackLines = -1                                    // min - 1
+        XCTAssertEqual(s.effectiveScrollback, 0)
+    }
+
+    func testScrollbackChoicesAddANonPresetCurrentValueInOrder() {
+        XCTAssertEqual(TerminalSettings.scrollbackChoices(current: 5000), [1000, 2000, 5000, 10000])
+        XCTAssertEqual(TerminalSettings.scrollbackChoices(current: 9000), [1000, 2000, 5000, 9000, 10000])
+        XCTAssertEqual(TerminalSettings.scrollbackChoices(current: 100_000),
+                       [1000, 2000, 5000, 10000, 100_000])
+    }
+
+    func testScrollbackLabels() {
+        XCTAssertEqual(TerminalSettings.scrollbackLabel(1000), "1,000 lines")
+        XCTAssertEqual(TerminalSettings.scrollbackLabel(10000), "10,000 lines")
+        XCTAssertEqual(TerminalSettings.scrollbackLabel(100_000), "100,000 lines")
+        XCTAssertEqual(TerminalSettings.scrollbackLabel(999), "999 lines")
+        XCTAssertEqual(TerminalSettings.scrollbackLabel(1_000_000), "1,000,000 lines")
+        XCTAssertEqual(TerminalSettings.scrollbackLabel(1), "1 line")
+        XCTAssertEqual(TerminalSettings.scrollbackLabel(0), "0 lines")
+    }
+
+    func testCursorStyleNamesInPickerOrder() {
+        XCTAssertEqual(CursorStyle.allCases, [.block, .underline, .bar])
+        XCTAssertEqual(CursorStyle.allCases.map(\.displayName), ["Block", "Underline", "Bar"])
     }
 
     // altScrollMode defaults to .wheel and round-trips through Codable.
