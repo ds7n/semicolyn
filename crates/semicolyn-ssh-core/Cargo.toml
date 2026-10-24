@@ -3,6 +3,7 @@ name = "semicolyn-ssh-core"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-only"
+publish = false
 
 [lib]
 name = "semicolyn_ssh_core"

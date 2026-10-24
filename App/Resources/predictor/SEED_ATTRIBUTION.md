@@ -45,7 +45,10 @@ https://github.com/rspeer/wordfreq, version 3.1.1 data. Licensed under the Creat
 Commons Attribution-ShareAlike 4.0 International License
 (https://creativecommons.org/licenses/by-sa/4.0/). Changes were made: word frequencies
 were blended into the English scores. Because of this, `english_v2.bin` is distributed
-under CC-BY-SA-4.0.
+under CC-BY-SA-4.0. wordfreq's data includes Google Books Ngrams, the Leeds Internet
+Corpus, Wikipedia, ParaCrawl, OPUS OpenSubtitles 2018 (from OpenSubtitles.org) and the
+SUBTLEX word lists by Marc Brysbaert et al.; as wordfreq's terms require, we credit the
+SUBTLEX authors and note that SUBTLEX is freely available data.
 
 ## Wikipedia page titles (Wikipedia contributors): CC-BY-SA-4.0
 https://dumps.wikimedia.org/enwiki/20261001/ (all-titles-in-ns0). Licensed under the

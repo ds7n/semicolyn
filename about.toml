@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 True Positive LLC
+# SPDX-License-Identifier: GPL-3.0-only
+
+# cargo-about config for the "Rust libraries" licence document shown on the About
+# screen (App/Resources/Licenses/Rust-libraries.txt). Regenerate it with
+# scripts/gen-rust-licences.sh after any Cargo.lock change.
+#
+# The accepted list mirrors deny.toml's allow list, so a crate under any other
+# licence fails generation instead of being silently left out.
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+    "OpenSSL",
+]
+
+# Only what is linked into the iOS app: the device and simulator triples the
+# xcframework is built for (scripts/build-xcframework.sh).
+targets = ["aarch64-apple-ios", "aarch64-apple-ios-sim", "x86_64-apple-ios"]
+
+# Build scripts and test-only crates never ship in the app binary.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# Our own crate is GPL-3.0-only and credited as semicolyn itself.
+private = { ignore = true }

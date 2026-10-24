@@ -1,0 +1,7 @@
+SPDX-FileCopyrightText: 2018 Source Foundry Authors
+SPDX-FileCopyrightText: 2003 Bitstream, Inc.
+SPDX-License-Identifier: MIT AND Bitstream-Vera
+
+Hack v3.003 LICENSE.md.
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.

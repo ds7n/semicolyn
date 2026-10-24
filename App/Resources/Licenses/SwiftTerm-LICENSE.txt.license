@@ -1,0 +1,9 @@
+SPDX-FileCopyrightText: 2019-2026 Miguel de Icaza
+SPDX-FileCopyrightText: 2017-2019 The xterm.js authors
+SPDX-FileCopyrightText: 2014-2016 SourceLair Private Company
+SPDX-FileCopyrightText: 2012-2013 Christopher Jeffrey
+SPDX-License-Identifier: MIT
+
+SwiftTerm v1.20.0 LICENSE.
+Licence text shipped verbatim in the app so About > Acknowledgements can show it.
+It is the upstream project's text, not True Positive LLC's.
