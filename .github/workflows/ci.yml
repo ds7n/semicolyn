@@ -109,6 +109,8 @@ jobs:
         run: |
           bash scripts/check-app-view-only.sh --selftest
           bash scripts/check-app-view-only.sh App
+      - name: REUSE compliance (every file has copyright + licence info)
+        uses: fsfe/reuse-action@v5
 
   # ---- Apple-gated build (the reason for macOS CI) ----
   macos:
