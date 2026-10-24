@@ -1,0 +1,33 @@
+version = 1
+
+# Files that cannot carry an SPDX header comment (lockfiles, JSON, images, test
+# keys) and project docs, configs and mockups without one. Every other file
+# carries its own header or a .license sidecar.
+
+[[annotations]]
+path = [
+    ".gitmodules",
+    "Cargo.toml",
+    "Cargo.lock",
+    "Package.swift",
+    "Package.resolved",
+    "README.md",
+    "crates/semicolyn-ssh-core/Cargo.toml",
+    "scripts/build-xcframework.sh",
+    "docker/sshd-legacy.conf",
+    "tools/syslog-sink/**",
+    "docs/**",
+    "mockups/**",
+    "plans/**",
+    "App/Assets.xcassets/**",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 True Positive LLC"
+SPDX-License-Identifier = "GPL-3.0-only"
+
+# Throwaway keys generated for the SSH test fixtures; not secrets.
+[[annotations]]
+path = "crates/semicolyn-ssh-core/tests/fixtures/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 True Positive LLC"
+SPDX-License-Identifier = "GPL-3.0-only"

@@ -24,7 +24,7 @@ lipo -create \
 
 # 3. Generate the Swift bindings + module map from the built library.
 mkdir -p "$BUILD_DIR/Headers"
-cargo run --release -p semicolyn-ssh-core --bin uniffi-bindgen -- generate \
+cargo run --release -p semicolyn-ssh-core --features bindgen --bin uniffi-bindgen -- generate \
   --library "target/$DEVICE/release/$LIB_NAME" \
   --language swift \
   --out-dir "$BUILD_DIR/Generated"
