@@ -358,6 +358,20 @@ public struct PasswordEntryDetector: Sendable {
         let trimmed = lastLine.trimmingTrailingSpaces()
         return Self.promptPatterns.contains { trimmed.hasSuffix($0) }
             || Self.endsWithAccountPrompt(trimmed)
+            || Self.isSecretQuestion(trimmed)
+    }
+
+    /// True if `line` ends with a colon and names a passphrase or PIN anywhere
+    /// before it: `enter passphrase for key '/path': `, `enter passphrase (empty
+    /// for no passphrase):`, `bad passphrase, try again for /path:`, `enter pin
+    /// for 'piv card':`. These carry text between the keyword and the colon, so a
+    /// suffix pattern misses them. `password` is left to the narrower rules above,
+    /// since it shows up in ordinary output lines that end in a colon.
+    private static func isSecretQuestion(_ line: String) -> Bool {
+        guard line.hasSuffix(":") else { return false }
+        if line.contains("passphrase") { return true }
+        let words = line.split { !$0.isLetter }
+        return words.contains("pin")
     }
 
     /// True if `line` ends with `password for <word>:`, one non-space word then the

@@ -145,6 +145,50 @@ final class PasswordEntryDetectorTests: XCTestCase {
                                typed: "hunter2", echoed: false))
     }
 
+    // The prompt text alone must suppress these (echoed: true), so a line that
+    // somehow echoes at a passphrase prompt is still never learned.
+
+    func testKeyPassphrasePromptWithQuotedPathSuppressesEvenIfEchoed() {
+        XCTAssertFalse(verdict(promptOutput: "Enter passphrase for key '/home/a/.ssh/id_ed25519': ",
+                               typed: "hunter2", echoed: true))
+    }
+
+    func testKeygenPassphrasePromptSuppressesEvenIfEchoed() {
+        XCTAssertFalse(verdict(promptOutput: "Enter passphrase (empty for no passphrase): ",
+                               typed: "hunter2", echoed: true))
+    }
+
+    func testKeygenRepeatPassphrasePromptSuppressesEvenIfEchoed() {
+        XCTAssertFalse(verdict(promptOutput: "Enter same passphrase again: ",
+                               typed: "hunter2", echoed: true))
+    }
+
+    func testBadPassphraseRetryPromptSuppressesEvenIfEchoed() {
+        XCTAssertFalse(verdict(promptOutput: "Bad passphrase, try again for /home/a/.ssh/id_rsa: ",
+                               typed: "hunter2", echoed: true))
+    }
+
+    func testPinPromptSuppressesEvenIfEchoed() {
+        XCTAssertFalse(verdict(promptOutput: "Enter PIN for 'PIV Card Holder pin (PIV AUTH key)': ",
+                               typed: "123456", echoed: true))
+    }
+
+    func testPassphraseAfterColonIsNotAPrompt() {
+        // The colon must end the line: text after it means this is output, not a prompt.
+        XCTAssertTrue(verdict(promptOutput: "passphrase: rotated\nalice@host:~$ ",
+                              typed: "ls", echoed: true))
+    }
+
+    func testPassphraseWithoutColonIsNotAPrompt() {
+        XCTAssertTrue(verdict(promptOutput: "your passphrase was changed ",
+                              typed: "ls", echoed: true))
+    }
+
+    func testPinSubstringIsNotAPrompt() {
+        // "pin" inside another word ("spinning", "ping") is not a PIN prompt.
+        XCTAssertTrue(verdict(promptOutput: "spinning up ping:", typed: "ls", echoed: true))
+    }
+
     func testVerificationCodePromptSuppresses() {
         // 2FA/OTP is also secret-shaped.
         XCTAssertFalse(verdict(promptOutput: "Verification code: ",
