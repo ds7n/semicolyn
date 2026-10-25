@@ -110,6 +110,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Nil before a session starts. In private mode it is a non-learning engine
     /// (`learns: false`) that still suggests from the built-in dictionaries.
     private var predictor: PredictorActor?
+    /// Whether `predictor:inactive` was already logged for this session.
+    private var predictorMissingLogged = false
     private var tracker = InputTokenTracker()
     /// Coalesces remote output for the screen-word harvest: capped at 8 KiB (newest
     /// bytes win) with at most one harvest in flight, so a big `cat` costs bounded
@@ -868,6 +870,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         state = .connecting
         DebugLog.shared.log(.connect,
             "resume:coldReattach transport=\(record.transport.rawValue) endpoint=\(record.host):\(record.port)")
+        // A reattach never runs `connect(savedHost:)`, so apply the host's session
+        // policies here too (teardown on suspend cleared the predictor).
+        applySessionPolicies(host: host,
+                             defaults: (try? AppStores.shared.hosts.defaults()) ?? Defaults(),
+                             entry: "resume")
         switch record.transport {
         case .mosh: reattachMosh(host: host, record: record, key: secret)
         case .et:
@@ -2316,10 +2323,40 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         try? AppStores.shared.purgePredictorLearned()
     }
 
+    /// Per-host session policy every entry point must apply before input flows: the
+    /// OSC 52 clipboard gate and the predictor engine. Fresh connects AND Mosh
+    /// cold/warm reattach call this; a resume that skips it would run with no
+    /// suggestions and the default (allow) clipboard policy whatever the host says.
+    private func applySessionPolicies(host: Host, defaults: Defaults, entry: String) {
+        osc52Allowed = resolveOsc52Allow(host: host, defaults: defaults)
+        // resolveOsc52Allow reads the leaf-independent `semicolyn.osc52.allow`
+        // (host container's leaf, else Defaults container's leaf, else true).
+        // Log both containers' explicit-vs-inherit state alongside the result.
+        let hostSemicolynExplicit: Bool
+        if case .explicit = host.semicolyn { hostSemicolynExplicit = true } else { hostSemicolynExplicit = false }
+        let defaultsSemicolynExplicit: Bool
+        if case .explicit = defaults.semicolyn { defaultsSemicolynExplicit = true } else { defaultsSemicolynExplicit = false }
+        DebugLog.shared.log(.connect, decisionLine(
+            "connect:osc52",
+            inputs: [("entry", entry),
+                     ("hostSemicolynExplicit", "\(hostSemicolynExplicit)"),
+                     ("defaultsSemicolynExplicit", "\(defaultsSemicolynExplicit)")],
+            outputs: [("osc52Allowed", "\(osc52Allowed)")],
+            reason: nil))
+        startPredictor(host: host, defaults: defaults, entry: entry)
+    }
+
     /// Build the session predictor: a learning engine, or a non-learning one when
     /// private mode ("Don't learn from my typing") is on for this host.
-    private func startPredictor(host: Host, defaults: Defaults) {
-        guard !resolvePredictorIncognito(host: host, defaults: defaults) else {
+    private func startPredictor(host: Host, defaults: Defaults, entry: String) {
+        predictorMissingLogged = false
+        let incognito = resolvePredictorIncognito(host: host, defaults: defaults)
+        DebugLog.shared.log(.predictor, decisionLine(
+            "predictor:start",
+            inputs: [("entry", entry)],
+            outputs: [("learns", incognito ? "0" : "1")],
+            reason: incognito ? "private" : "learning"))
+        guard !incognito else {
             // Private mode ("Don't learn from my typing"): suggestions still come from
             // the built-in dictionaries, but the engine starts with nothing learned,
             // records and harvests nothing (`learns: false`), and has no learned store
@@ -2394,7 +2431,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// is decided right here at the Enter (so input typed on the next line can never
     /// change it) and the detector is reset for the next line.
     private func observePredictorInput(_ bytes: [UInt8]) {
-        guard predictor != nil else { return }
+        guard predictor != nil else {
+            // Log once per session, not per keystroke: typing with no engine means no
+            // suggestions, which was invisible in the log before.
+            if !predictorMissingLogged {
+                predictorMissingLogged = true
+                DebugLog.shared.log(.predictor, "predictor:inactive reason=noEngine")
+            }
+            return
+        }
         // L1: snapshot the pre-delivery cursor as THIS call's echo anchor, then
         // after a bounded window classify this call's keystrokes against the grid.
         // The anchor is captured per-call (not shared state), so concurrent
@@ -2623,21 +2668,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 }
                 // Probe + branch on tmux availability.
                 let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
-                osc52Allowed = resolveOsc52Allow(host: savedHost, defaults: defaults2)
-                // resolveOsc52Allow reads the leaf-independent `semicolyn.osc52.allow`
-                // (host container's leaf, else Defaults container's leaf, else true).
-                // Log both containers' explicit-vs-inherit state alongside the result.
-                let hostSemicolynExplicit: Bool
-                if case .explicit = savedHost.semicolyn { hostSemicolynExplicit = true } else { hostSemicolynExplicit = false }
-                let defaultsSemicolynExplicit: Bool
-                if case .explicit = defaults2.semicolyn { defaultsSemicolynExplicit = true } else { defaultsSemicolynExplicit = false }
-                DebugLog.shared.log(.connect, decisionLine(
-                    "connect:osc52",
-                    inputs: [("hostSemicolynExplicit", "\(hostSemicolynExplicit)"),
-                             ("defaultsSemicolynExplicit", "\(defaultsSemicolynExplicit)")],
-                    outputs: [("osc52Allowed", "\(osc52Allowed)")],
-                    reason: nil))
-                startPredictor(host: savedHost, defaults: defaults2)
+                applySessionPolicies(host: savedHost, defaults: defaults2, entry: "connect")
                 switch resolveTransport(host: savedHost, defaults: defaults2) {
                 case .et:
                     switch await attachET(conn: conn, host: savedHost, defaults: defaults2) {
@@ -2717,21 +2748,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 }
                 // Probe + branch on tmux availability.
                 let defaults2 = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
-                osc52Allowed = resolveOsc52Allow(host: hostRecord, defaults: defaults2)
-                // resolveOsc52Allow reads the leaf-independent `semicolyn.osc52.allow`
-                // (host container's leaf, else Defaults container's leaf, else true).
-                // Log both containers' explicit-vs-inherit state alongside the result.
-                let hostSemicolynExplicit: Bool
-                if case .explicit = hostRecord.semicolyn { hostSemicolynExplicit = true } else { hostSemicolynExplicit = false }
-                let defaultsSemicolynExplicit: Bool
-                if case .explicit = defaults2.semicolyn { defaultsSemicolynExplicit = true } else { defaultsSemicolynExplicit = false }
-                DebugLog.shared.log(.connect, decisionLine(
-                    "connect:osc52",
-                    inputs: [("hostSemicolynExplicit", "\(hostSemicolynExplicit)"),
-                             ("defaultsSemicolynExplicit", "\(defaultsSemicolynExplicit)")],
-                    outputs: [("osc52Allowed", "\(osc52Allowed)")],
-                    reason: nil))
-                startPredictor(host: hostRecord, defaults: defaults2)
+                applySessionPolicies(host: hostRecord, defaults: defaults2, entry: "connect")
                 switch resolveTransport(host: hostRecord, defaults: defaults2) {
                 case .et:
                     switch await attachET(conn: conn, host: hostRecord, defaults: defaults2) {
