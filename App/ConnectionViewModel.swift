@@ -2454,11 +2454,15 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         var typedLine = ""
         if hasEnter {
             typedLine = tracker.line
-            if !moshUnconfirmed {
+            // After a Tab, `line` holds only the post-Tab text (often none), so the row
+            // could confirm at most that tail. Leave the verdict to the per-keystroke
+            // echo checks, which cover the whole line including the text before the Tab.
+            if !moshUnconfirmed && !tracker.completedThisLine {
                 commitRow = renderedTextBeforeCursor(oracle: echoOracle, maxChars: typedLine.count + 1)
             }
         }
         let resetsBefore = tracker.lineResets
+        let completionsBefore = tracker.droppedAfterCompletion
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
         }
@@ -2476,6 +2480,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 outputs: [("paste", "\(dPaste)"), ("secret", "\(dSecret)")],
                 reason: dSecret > 0 ? "L4b-secret" : "L3-paste"))
         }
+        // A Tab-completed word is never learned (only the remote saw it whole); the
+        // tokens before it stay buffered. Counts only, never token text.
+        let dCompleted = tracker.droppedAfterCompletion - completionsBefore
+        if dCompleted > 0 {
+            DebugLog.shared.log(.predictor, decisionLine(
+                "predictor:drop-gate",
+                inputs: [("bytes", "\(bytes.count)")],
+                outputs: [("completed", "\(dCompleted)"), ("kept", "\(pendingLineTokens.count)")],
+                reason: "tab-completed"))
+        }
         if hasEnter {
             commitPredictorLine(typedLine: typedLine, row: commitRow, moshUnconfirmed: moshUnconfirmed)
         } else if tracker.lineResets != resetsBefore {
@@ -2487,7 +2501,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             predictorLineGeneration += 1
             clearPredictorChips()
         } else if tracker.line.isEmpty {
-            // Backspaced to an empty line: nothing to suggest for.
+            // Backspaced to an empty line, or a Tab restarted it: nothing to suggest for.
+            // A Tab keeps the line's buffered tokens and echo state (it is not a reset).
             clearPredictorChips()
         }
         let deadline = DispatchTime.now() + .milliseconds(40)
