@@ -45,19 +45,58 @@ public struct LineContext: Equatable, Sendable {
     }
 }
 
-private let wrapperCommands: Set<String> = [
-    "sudo", "doas", "xargs", "env", "time", "watch", "nohup", "exec", "nice", "command",
+/// The options of a wrapper command that take a value in the next word.
+private struct WrapperOptions {
+    /// Short option letters that take a value (`-u alice`, or attached: `-ualice`).
+    var valueLetters: Set<Character> = []
+    /// Long options that take a value in the next word (`--user alice`).
+    var valueLongOptions: Set<String> = []
+}
+
+private let wrapperCommands: [String: WrapperOptions] = [
+    "sudo": WrapperOptions(
+        valueLetters: ["u", "g", "p", "C", "D", "r", "t", "T", "U"],
+        valueLongOptions: ["--user", "--group", "--prompt", "--chdir", "--close-from", "--role",
+                           "--type", "--command-timeout", "--other-user"]),
+    "doas": WrapperOptions(valueLetters: ["u", "C"]),
+    "env": WrapperOptions(valueLetters: ["u", "C"], valueLongOptions: ["--unset", "--chdir"]),
+    "nice": WrapperOptions(valueLetters: ["n"], valueLongOptions: ["--adjustment"]),
+    "watch": WrapperOptions(valueLetters: ["n"], valueLongOptions: ["--interval"]),
+    "xargs": WrapperOptions(
+        valueLetters: ["I", "n", "P", "L", "s", "d", "a", "E"],
+        valueLongOptions: ["--max-args", "--max-procs", "--max-lines", "--max-chars", "--delimiter",
+                           "--arg-file"]),
+    "time": WrapperOptions(valueLetters: ["f", "o"], valueLongOptions: ["--format", "--output"]),
+    "exec": WrapperOptions(valueLetters: ["a"]),
+    "nohup": WrapperOptions(),
+    "command": WrapperOptions(),
 ]
 
-/// Drops leading wrapper commands and, after each, the options (`-x`) and assignments (`A=1`)
-/// that follow it. Words without a leading wrapper are returned untouched.
+/// True when option `word` of a wrapper with `options` leaves its value to the next word:
+/// a listed long option, or a short cluster whose first value letter is its last letter
+/// (`-u`, `-Eu`; in `-ualice` the value is attached).
+private func optionTakesNextWord(_ word: String, _ options: WrapperOptions) -> Bool {
+    if word.hasPrefix("--") { return options.valueLongOptions.contains(word) }
+    let letters = word.dropFirst()
+    guard let first = letters.firstIndex(where: { options.valueLetters.contains($0) }) else {
+        return false
+    }
+    return letters.index(after: first) == letters.endIndex
+}
+
+/// Drops leading wrapper commands and, after each, its options (`-x`, with their values:
+/// `sudo -u alice`) and assignments (`A=1`). Words without a leading wrapper are returned
+/// untouched.
 public func strippingWrappers(_ words: [String]) -> [String] {
     var i = 0
-    while i < words.count, wrapperCommands.contains(words[i]) {
+    while i < words.count, let options = wrapperCommands[words[i]] {
         i += 1
-        while i < words.count, words[i].hasPrefix("-") || words[i].contains("=") { i += 1 }
+        while i < words.count, words[i].hasPrefix("-") || words[i].contains("=") {
+            let takesValue = words[i].hasPrefix("-") && optionTakesNextWord(words[i], options)
+            i += takesValue ? 2 : 1
+        }
     }
-    return Array(words[i...])
+    return Array(words[min(i, words.count)...])
 }
 
 private struct LineScan {
@@ -123,8 +162,12 @@ private func scanLine(_ line: String) -> LineScan {
         case " ", "\t":
             endToken()
         case "|":
-            if next == "|" { i += 1 }
+            // `||` is a list separator; `|` and `|&` (stderr too) pipe into the next segment.
+            if next == "|" || next == "&" { i += 1 }
             endSegment(nextAfterPipe: next != "|")
+        case "&" where token.last == ">" || token.last == "<" || next == ">":
+            // A redirection, not a separator: `2>&1`, `>&2`, `<&3`, `&>log`, `&>>log`.
+            token.append(c)
         case "&":
             if next == "&" { i += 1 }
             endSegment(nextAfterPipe: false)
@@ -144,7 +187,8 @@ private func scanLine(_ line: String) -> LineScan {
     return scan
 }
 
-/// Splits `line` into command segments at unquoted `|`, `||`, `;`, `&&`, `&`, `$(` and backtick.
+/// Splits `line` into command segments at unquoted `|`, `|&`, `||`, `;`, `&&`, `&`, `$(` and
+/// backtick. An `&` inside a redirection (`2>&1`, `&>log`) stays part of its word.
 /// Empty segments (for example after a trailing separator) are omitted.
 public func commandSegments(of line: String) -> [CommandSegment] {
     scanLine(line).segments.filter { !$0.words.isEmpty }
