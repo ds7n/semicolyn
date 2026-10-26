@@ -112,6 +112,8 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// True when the word being completed is flag-shaped (`--pass` Tab): its value
     /// may be a secret, so the token after it is dropped (L4b, conservatively).
     private var completedWordIsFlag = false
+    /// True when any of the completed word was typed (before or after its Tabs).
+    private var completedWordHadTypedText = false
     /// Set when a completed flag word ended: the next token is treated as its value.
     private var nextTokenMayBeSecretValue = false
     /// Monotonic count of line-context resets (ESC, Ctrl-C/U/W, cursor keys,
@@ -442,6 +444,7 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// word ends continue a word only the remote knows; `endCompletedWord` drops it.
     private mutating func beginCompletion() {
         if !inCompletedWord { completedWordIsFlag = current.hasPrefix("-") }
+        if !current.isEmpty { completedWordHadTypedText = true }
         inCompletedWord = true
         completedThisLine = true
         current = ""
@@ -453,24 +456,31 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// as a bigram predecessor, since its full text was never seen. Its own bytes
     /// still meet the L4b check first, so a secret value typed straight after a Tab
     /// is tallied as one.
+    ///
+    /// When nothing was typed into the word (`mysql -p <Tab> hunter2`), the secret
+    /// predecessor is kept, so the next token is still checked against `-p`: the
+    /// Tab inserted nothing, or a word that may itself be the flag's value.
     private mutating func endCompletedWord() {
+        let hadTypedText = completedWordHadTypedText || !current.isEmpty
         if !current.isEmpty, isSecretValueToken(current, precededBy: secretCheckPrev) {
             droppedAsSecret += 1
-        } else {
+        } else if hadTypedText {
             droppedAfterCompletion += 1
         }
         nextTokenMayBeSecretValue = completedWordIsFlag
         inCompletedWord = false
         completedWordIsFlag = false
+        completedWordHadTypedText = false
         current = ""
         previous = nil
-        secretCheckPrev = nil
+        if hadTypedText { secretCheckPrev = nil }
     }
 
     private mutating func clearCompletionState() {
         completedThisLine = false
         inCompletedWord = false
         completedWordIsFlag = false
+        completedWordHadTypedText = false
         nextTokenMayBeSecretValue = false
     }
 

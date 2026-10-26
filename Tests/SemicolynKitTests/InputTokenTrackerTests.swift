@@ -153,6 +153,52 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertEqual(committed.map(\.token), ["mysql"])
     }
 
+    /// Review finding: a Tab on an empty word after a secret flag, then a space,
+    /// must keep the flag as the value's predecessor.
+    func testTabAfterSecretFlagAndSpaceStillDropsTheValue() {
+        for (prefix, value) in [("mysql -p ", "hunter2"), ("app --password ", "x1"),
+                                ("app --token ", "tok"), ("curl -H Authorization: ", "tok")] {
+            var t = InputTokenTracker()
+            let committed = t.observe(bytes(prefix) + [0x09] + bytes(" \(value) "))
+            XCTAssertFalse(committed.map(\.token).contains(value), prefix)
+            XCTAssertEqual(t.droppedAsSecret, 1, prefix)
+            XCTAssertEqual(t.droppedAfterCompletion, 0, prefix)   // nothing was typed into it
+        }
+    }
+
+    func testFlagValueStateDoesNotCrossALineReset() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("mysql --pass") + [0x09] + bytes(" "))
+        _ = t.observe([0x15])                                     // Ctrl-U
+        XCTAssertEqual(t.observe(bytes("ls ")).map(\.token), ["ls"])
+    }
+
+    func testResetMidCompletionClearsIt() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("cd pro") + [0x09])
+        t.reset()
+        XCTAssertFalse(t.completedThisLine)
+        XCTAssertEqual(t.observe(bytes("ls ")).map(\.token), ["ls"])
+    }
+
+    func testCompletedFlagTalliesExactly() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("mysql --pass") + [0x09] + bytes(" hunter2 "))
+        XCTAssertEqual(t.droppedAfterCompletion, 1)
+        XCTAssertEqual(t.droppedAsSecret, 1)
+        var u = InputTokenTracker()
+        _ = u.observe(bytes("mysql --pass") + [0x09] + bytes("hunter2 "))
+        XCTAssertEqual(u.droppedAfterCompletion, 1)               // the value was the fragment
+        XCTAssertEqual(u.droppedAsSecret, 0)
+    }
+
+    func testEmptyTabThenSpaceIsNotCountedAsACompletedWord() {
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("ls ") + [0x09] + bytes(" -l "))
+        XCTAssertEqual(committed.map(\.token), ["ls", "-l"])
+        XCTAssertEqual(t.droppedAfterCompletion, 0)
+    }
+
     func testCompletedNonFlagDoesNotDropTheNextWord() {
         var t = InputTokenTracker()
         let committed = t.observe(bytes("cat note") + [0x09] + bytes(" hunter2 "))

@@ -219,11 +219,19 @@ public struct PasswordEntryDetector: Sendable {
     /// verdict). A nil reading (grid unreadable) clears an earlier `true` verdict
     /// (it is no longer backed by a fresh reading) but keeps an earlier `false`.
     public mutating func noteCommitRow(typedLine: String, renderedBeforeCursor: String?) {
-        guard let renderedBeforeCursor else {
+        noteCommitRow(verdict: renderedBeforeCursor.map {
+            rowConfirmsEcho(typedLine: typedLine, renderedBeforeCursor: $0)
+        })
+    }
+
+    /// Record a commit-row verdict computed by the caller (a line split by Tab
+    /// completions: see `SegmentedRowVerdict`). nil behaves like an unreadable row.
+    public mutating func noteCommitRow(verdict: Bool?) {
+        guard let verdict else {
             if commitRowVerdict == true { commitRowVerdict = nil }
             return
         }
-        commitRowVerdict = rowConfirmsEcho(typedLine: typedLine, renderedBeforeCursor: renderedBeforeCursor)
+        commitRowVerdict = verdict
     }
 
     /// The verdict for the line that just committed (Enter). `true` only when the

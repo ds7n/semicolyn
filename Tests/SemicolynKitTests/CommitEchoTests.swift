@@ -9,6 +9,62 @@ import XCTest
 /// not simply suppressing everything.
 final class CommitEchoTests: XCTestCase {
 
+    // MARK: - SegmentedRowVerdict: a line split by Tab completions
+
+    func testNoSegmentsIsNoVerdict() {
+        XCTAssertNil(SegmentedRowVerdict().verdict)
+    }
+
+    func testAllSegmentsEchoedConfirms() {
+        var v = SegmentedRowVerdict()
+        v.noteSegment(typed: "git checkout ma", renderedBeforeCursor: "$ git checkout ma")
+        v.noteSegment(typed: " -b x", renderedBeforeCursor: "$ git checkout main -b x")
+        XCTAssertEqual(v.verdict, true)
+    }
+
+    func testOneHiddenSegmentFailsTheLine() {
+        // Echoed before the Tab, hidden after it (a prompt the completion raised).
+        var v = SegmentedRowVerdict()
+        v.noteSegment(typed: "scp host:/long/pa", renderedBeforeCursor: "$ scp host:/long/pa")
+        v.noteSegment(typed: "correct horse battery", renderedBeforeCursor: "Passcode: ")
+        XCTAssertEqual(v.verdict, false)
+        // Order does not matter.
+        var w = SegmentedRowVerdict()
+        w.noteSegment(typed: "hunter2", renderedBeforeCursor: "Password: ")
+        w.noteSegment(typed: " ls", renderedBeforeCursor: "$ ls")
+        XCTAssertEqual(w.verdict, false)
+    }
+
+    func testUnreadableRowFailsTheLine() {
+        var v = SegmentedRowVerdict()
+        v.noteSegment(typed: "cd pro", renderedBeforeCursor: nil)
+        XCTAssertEqual(v.verdict, false)
+    }
+
+    func testUnverifiableSegmentFailsTheLine() {
+        var v = SegmentedRowVerdict()
+        v.noteSegment(typed: "cd pro", renderedBeforeCursor: "$ cd pro")
+        v.noteUnverifiable()
+        XCTAssertEqual(v.verdict, false)
+    }
+
+    func testEmptySegmentsAreIgnored() {
+        // A Tab at the start of a segment (double Tab) or an Enter right after a Tab.
+        var v = SegmentedRowVerdict()
+        v.noteSegment(typed: "", renderedBeforeCursor: nil)
+        XCTAssertNil(v.verdict)
+        v.noteSegment(typed: "cd proj", renderedBeforeCursor: "$ cd proj")
+        v.noteSegment(typed: "  ", renderedBeforeCursor: nil)
+        XCTAssertEqual(v.verdict, true)
+    }
+
+    func testResetClearsSegments() {
+        var v = SegmentedRowVerdict()
+        v.noteSegment(typed: "hunter2", renderedBeforeCursor: "Password: ")
+        v.reset()
+        XCTAssertNil(v.verdict)
+    }
+
     // MARK: - rowConfirmsEcho: echoed partitions
 
     func testEchoed() {
