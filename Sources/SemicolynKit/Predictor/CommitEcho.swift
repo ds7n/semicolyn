@@ -6,6 +6,37 @@
 // non-echoing (or masking) prompt never appears on screen, so it fails here on
 // every transport (SSH, plain tmux, Mosh, ET), with no per-keystroke settle timer.
 
+/// The commit-row check for a line split by Tab completions. After a Tab the
+/// tracker's line restarts at the post-Tab text, so each typed segment is checked
+/// against the row read when it ended (at its Tab, and at Enter), and the line is
+/// confirmed only when every segment with text is. A row read at Enter alone could
+/// confirm at most the last segment.
+public struct SegmentedRowVerdict: Equatable, Sendable {
+    private var confirmed: Bool?
+
+    public init() {}
+
+    /// The combined verdict: nil when no segment had text, else whether all were echoed.
+    public var verdict: Bool? { confirmed }
+
+    /// Fold one segment: `typed` is the text typed since the line start or the last
+    /// Tab, `renderedBeforeCursor` the row read as it ended (nil when unreadable,
+    /// which fails the line). A segment with no text is ignored.
+    public mutating func noteSegment(typed: String, renderedBeforeCursor: String?) {
+        guard !trimmingTrailingSpaces(typed).isEmpty else { return }
+        let echoed = renderedBeforeCursor.map {
+            rowConfirmsEcho(typedLine: typed, renderedBeforeCursor: $0)
+        } ?? false
+        confirmed = (confirmed ?? true) && echoed
+    }
+
+    /// Fail the line: a segment could not be checked (its text and the Tab arrived
+    /// in one chunk, so the row was read before the text reached it).
+    public mutating func noteUnverifiable() { confirmed = false }
+
+    public mutating func reset() { confirmed = nil }
+}
+
 /// True when `renderedBeforeCursor` (the screen text immediately before the
 /// cursor at commit) shows `typedLine` echoed.
 ///

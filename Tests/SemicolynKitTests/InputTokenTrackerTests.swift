@@ -64,20 +64,146 @@ final class InputTokenTrackerTests: XCTestCase {
     }
 
     /// Probe (final review): `git che` Tab `m` left `line == "git chem"` while the
-    /// remote showed `git checkout m`, so accepting `chemical` sent `ical `. Tab is a
-    /// line-context reset: the line restarts at what is typed after it.
-    func testTabResetsLineSoTrackerMatchesOnlyPostTabText() {
+    /// remote showed `git checkout m`, so accepting `chemical` sent `ical `. The line
+    /// text restarts at what is typed after a Tab, but the Tab is not a line reset:
+    /// the words before it are kept for learning.
+    func testTabRestartsLineTextButIsNotALineReset() {
         var t = InputTokenTracker()
         _ = t.observe(bytes("git che"))
-        let before = t.lineResets
         _ = t.observe([0x09])
-        XCTAssertEqual(t.lineResets, before + 1)
+        XCTAssertEqual(t.lineResets, 0)
+        XCTAssertTrue(t.completedThisLine)
         XCTAssertEqual(t.line, "")
         _ = t.observe(bytes("m"))
         XCTAssertEqual(t.line, "m")
         XCTAssertEqual(t.current, "m")
         XCTAssertNil(t.previous)
-        XCTAssertEqual(t.lineResets, before + 1)
+        XCTAssertEqual(t.lineResets, 0)
+    }
+
+    // MARK: - Tab completion keeps the words typed before it
+
+    func testWordsBeforeTabAreCommittedAndCompletedWordIsDropped() {
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("git checkout ma") + [0x09] + bytes("in -b x\r"))
+        // `main` was completed remotely and is never seen whole, so neither `ma` nor
+        // `in` is learned, and `-b` does not pair with a word it never saw.
+        XCTAssertEqual(committed, [
+            CommittedToken(token: "git", previous: nil),
+            CommittedToken(token: "checkout", previous: "git"),
+            CommittedToken(token: "-b", previous: nil),
+            CommittedToken(token: "x", previous: "-b"),
+        ])
+        XCTAssertEqual(t.droppedAfterCompletion, 1)
+    }
+
+    func testSpaceRightAfterTabEndsTheCompletedWord() {
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("cd pro") + [0x09] + bytes(" ls "))
+        XCTAssertEqual(committed, [
+            CommittedToken(token: "cd", previous: nil),
+            CommittedToken(token: "ls", previous: nil),
+        ])
+        XCTAssertEqual(t.droppedAfterCompletion, 1)
+    }
+
+    func testDoubleTabIsOneCompletedWord() {
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("git che") + [0x09, 0x09] + bytes("m x "))
+        XCTAssertEqual(committed.map(\.token), ["git", "x"])
+        XCTAssertEqual(t.droppedAfterCompletion, 1)
+    }
+
+    func testEnterRightAfterTabKeepsEarlierWords() {
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("cd proj") + [0x09] + bytes("\r"))
+        XCTAssertEqual(committed, [CommittedToken(token: "cd", previous: nil)])
+        XCTAssertFalse(t.completedThisLine)          // cleared by the Enter
+    }
+
+    func testOtherResetsStillClearCompletionState() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("cd pro") + [0x09])
+        _ = t.observe([0x15])                        // Ctrl-U
+        XCTAssertFalse(t.completedThisLine)
+        let committed = t.observe(bytes("ls -l "))
+        XCTAssertEqual(committed.map(\.token), ["ls", "-l"])   // not a fragment
+    }
+
+    // MARK: - Security (L4b): a Tab-completed flag still guards its value
+
+    func testCompletedFlagDropsTheValueAfterIt() {
+        // `--pass` Tab → the shell shows `--password`; the value typed next is secret.
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("mysql --pass") + [0x09] + bytes(" hunter2 "))
+        XCTAssertEqual(committed.map(\.token), ["mysql"])
+        XCTAssertEqual(t.droppedAsSecret, 1)
+    }
+
+    func testCompletedFlagWithAutoSpaceDropsTheValue() {
+        // The completion added the space itself, so the value is typed straight on.
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("mysql --pass") + [0x09] + bytes("hunter2 "))
+        XCTAssertEqual(committed.map(\.token), ["mysql"])
+    }
+
+    func testCompletedFlagWithAttachedValueIsDropped() {
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("mysql --pass") + [0x09] + bytes("word=hunter2 "))
+        XCTAssertEqual(committed.map(\.token), ["mysql"])
+    }
+
+    /// Review finding: a Tab on an empty word after a secret flag, then a space,
+    /// must keep the flag as the value's predecessor.
+    func testTabAfterSecretFlagAndSpaceStillDropsTheValue() {
+        for (prefix, value) in [("mysql -p ", "hunter2"), ("app --password ", "x1"),
+                                ("app --token ", "tok"), ("curl -H Authorization: ", "tok")] {
+            var t = InputTokenTracker()
+            let committed = t.observe(bytes(prefix) + [0x09] + bytes(" \(value) "))
+            XCTAssertFalse(committed.map(\.token).contains(value), prefix)
+            XCTAssertEqual(t.droppedAsSecret, 1, prefix)
+            XCTAssertEqual(t.droppedAfterCompletion, 0, prefix)   // nothing was typed into it
+        }
+    }
+
+    func testFlagValueStateDoesNotCrossALineReset() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("mysql --pass") + [0x09] + bytes(" "))
+        _ = t.observe([0x15])                                     // Ctrl-U
+        XCTAssertEqual(t.observe(bytes("ls ")).map(\.token), ["ls"])
+    }
+
+    func testResetMidCompletionClearsIt() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("cd pro") + [0x09])
+        t.reset()
+        XCTAssertFalse(t.completedThisLine)
+        XCTAssertEqual(t.observe(bytes("ls ")).map(\.token), ["ls"])
+    }
+
+    func testCompletedFlagTalliesExactly() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("mysql --pass") + [0x09] + bytes(" hunter2 "))
+        XCTAssertEqual(t.droppedAfterCompletion, 1)
+        XCTAssertEqual(t.droppedAsSecret, 1)
+        var u = InputTokenTracker()
+        _ = u.observe(bytes("mysql --pass") + [0x09] + bytes("hunter2 "))
+        XCTAssertEqual(u.droppedAfterCompletion, 1)               // the value was the fragment
+        XCTAssertEqual(u.droppedAsSecret, 0)
+    }
+
+    func testEmptyTabThenSpaceIsNotCountedAsACompletedWord() {
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("ls ") + [0x09] + bytes(" -l "))
+        XCTAssertEqual(committed.map(\.token), ["ls", "-l"])
+        XCTAssertEqual(t.droppedAfterCompletion, 0)
+    }
+
+    func testCompletedNonFlagDoesNotDropTheNextWord() {
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("cat note") + [0x09] + bytes(" hunter2 "))
+        XCTAssertEqual(committed.map(\.token), ["cat", "hunter2"])
+        XCTAssertEqual(t.droppedAsSecret, 0)
     }
 
     /// The accepted chip edits only what was typed after the Tab.
@@ -110,12 +236,13 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertEqual(t.droppedAsSecret, 1)
     }
 
-    /// A Tab on a fresh line is still a reset, and the line's opt-out is evaluated
-    /// from the first real byte as before (no space first, so not opted out).
-    func testTabOnEmptyLineCountsAsResetAndDoesNotOptOut() {
+    /// A Tab on a fresh line is a completion, not a reset, and the line's opt-out is
+    /// evaluated from the first real byte as before (no space first, so not opted out).
+    func testTabOnEmptyLineIsACompletionAndDoesNotOptOut() {
         var t = InputTokenTracker()
         _ = t.observe([0x09])
-        XCTAssertEqual(t.lineResets, 1)
+        XCTAssertEqual(t.lineResets, 0)
+        XCTAssertTrue(t.completedThisLine)
         _ = t.observe(bytes("ls"))
         XCTAssertFalse(t.lineOptedOut)
         XCTAssertEqual(t.line, "ls")
@@ -658,8 +785,8 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertEqual(t.lineResets, 3)
         _ = t.observe([0x7f])                         // backspace: not a break
         XCTAssertEqual(t.lineResets, 3)
-        _ = t.observe([0x09])                         // tab: remote completion, a break
-        XCTAssertEqual(t.lineResets, 4)
+        _ = t.observe([0x09])                         // tab: a completion, not a break
+        XCTAssertEqual(t.lineResets, 3)
     }
 
     func testLineResetsUnchangedByResponseAndPasteMarkers() {
