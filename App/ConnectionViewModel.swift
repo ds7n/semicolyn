@@ -156,6 +156,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Tokens committed on the current input line, buffered until the line commits
     /// so the whole line is learned or dropped as a unit per the detector verdict.
     private var pendingLineTokens: [CommittedToken] = []
+    /// Commit-row checks of the current line's segments when Tabs split it.
+    private var lineSegmentRows = SegmentedRowVerdict()
     /// Chip texts the user accepted on the current input line, passed to `record` so
     /// a tapped word graduates faster. Cleared at each line commit and line reset.
     private var acceptedThisLine: Set<String> = []
@@ -747,6 +749,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         lastDropAsSecret = 0
         passwordDetector.reset()          // clear echo/prompt state across sessions
         pendingLineTokens.removeAll()     // drop any un-flushed line tokens
+        lineSegmentRows.reset()
         acceptedThisLine.removeAll()
         predictorLineGeneration += 1      // orphan any settle still scheduled
         moshPredictAlways = false
@@ -2450,15 +2453,36 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let hasEnter = bytes.contains { $0 == 0x0d || $0 == 0x0a }
         // Read the row BEFORE the tracker folds the Enter (which empties `line`).
         let moshUnconfirmed = moshPredictAlways && moshSession != nil
-        var commitRow: String?
+        var rowVerdict: Bool?
+        var rowRead = false
         var typedLine = ""
+        func readRow(for typed: String) -> String? {
+            moshUnconfirmed ? nil : renderedTextBeforeCursor(oracle: echoOracle, maxChars: typed.count + 1)
+        }
         if hasEnter {
             typedLine = tracker.line
-            if !moshUnconfirmed {
-                commitRow = renderedTextBeforeCursor(oracle: echoOracle, maxChars: typedLine.count + 1)
+            let row = readRow(for: typedLine)
+            rowRead = row != nil
+            if tracker.completedThisLine {
+                // After a Tab, `line` holds only the post-Tab text: the row can confirm
+                // that last segment; the earlier ones were checked at their Tabs.
+                lineSegmentRows.noteSegment(typed: typedLine, renderedBeforeCursor: row)
+                rowVerdict = moshUnconfirmed ? nil : lineSegmentRows.verdict
+            } else {
+                rowVerdict = row.map { rowConfirmsEcho(typedLine: typedLine, renderedBeforeCursor: $0) }
+            }
+        } else if bytes.contains(0x09) {
+            // A Tab ends a segment: check the text typed since the last one against the
+            // row now, before the remote's completion lands. A chunk carrying text with
+            // the Tab cannot be checked (that text is not on the row yet).
+            if bytes.allSatisfy({ $0 == 0x09 }) {
+                lineSegmentRows.noteSegment(typed: tracker.line, renderedBeforeCursor: readRow(for: tracker.line))
+            } else {
+                lineSegmentRows.noteUnverifiable()
             }
         }
         let resetsBefore = tracker.lineResets
+        let completionsBefore = tracker.droppedAfterCompletion
         for committed in tracker.observe(bytes) {
             pendingLineTokens.append(committed)
         }
@@ -2476,18 +2500,30 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 outputs: [("paste", "\(dPaste)"), ("secret", "\(dSecret)")],
                 reason: dSecret > 0 ? "L4b-secret" : "L3-paste"))
         }
+        // A Tab-completed word is never learned (only the remote saw it whole); the
+        // tokens before it stay buffered. Counts only, never token text.
+        let dCompleted = tracker.droppedAfterCompletion - completionsBefore
+        if dCompleted > 0 {
+            DebugLog.shared.log(.predictor, decisionLine(
+                "predictor:drop-gate",
+                inputs: [("bytes", "\(bytes.count)")],
+                outputs: [("completed", "\(dCompleted)"), ("kept", "\(pendingLineTokens.count)")],
+                reason: "tab-completed"))
+        }
         if hasEnter {
-            commitPredictorLine(typedLine: typedLine, row: commitRow, moshUnconfirmed: moshUnconfirmed)
+            commitPredictorLine(rowVerdict: rowVerdict, rowRead: rowRead, moshUnconfirmed: moshUnconfirmed)
         } else if tracker.lineResets != resetsBefore {
             // Context break (ESC, Ctrl-C/U/W, cursor keys, other controls): the line
             // was abandoned, so its buffered tokens and per-line echo state go with it.
             pendingLineTokens.removeAll(keepingCapacity: true)
             acceptedThisLine.removeAll()
+            lineSegmentRows.reset()
             passwordDetector.resetLine()
             predictorLineGeneration += 1
             clearPredictorChips()
         } else if tracker.line.isEmpty {
-            // Backspaced to an empty line: nothing to suggest for.
+            // Backspaced to an empty line, or a Tab restarted it: nothing to suggest for.
+            // A Tab keeps the line's buffered tokens and echo state (it is not a reset).
             clearPredictorChips()
         }
         let deadline = DispatchTime.now() + .milliseconds(40)
@@ -2519,17 +2555,18 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// The Enter half of `observePredictorInput`: record the commit-time row reading,
     /// take the learn decision NOW, hand the line's tokens to the engine (or drop
     /// them), and reset the per-line state for the next line.
-    private func commitPredictorLine(typedLine: String, row: String?, moshUnconfirmed: Bool) {
+    private func commitPredictorLine(rowVerdict: Bool?, rowRead: Bool, moshUnconfirmed: Bool) {
         clearPredictorChips()   // line committed: clear stale chips immediately
         // After the Enter chunk's `noteInput` (which keeps a verdict on control-only
         // input) and before the verdict is read.
-        passwordDetector.noteCommitRow(typedLine: typedLine, renderedBeforeCursor: row)
+        passwordDetector.noteCommitRow(verdict: rowVerdict)
+        lineSegmentRows.reset()
         let verdict = passwordDetector.committedLineVerdict()
         let learn = verdict.learn && !moshUnconfirmed
         let reason = moshUnconfirmed ? "mosh-predict-always" : verdict.reason.rawValue
         DebugLog.shared.log(.predictor, decisionLine(
             "predictor:echo",
-            inputs: [("row", row == nil ? "nil" : "read")],
+            inputs: [("row", rowRead ? "read" : "nil")],
             outputs: [("learn", learn ? "1" : "0")],
             reason: reason))
         // L4a: the tracker latches the just-committed line's opt-out at its Enter,

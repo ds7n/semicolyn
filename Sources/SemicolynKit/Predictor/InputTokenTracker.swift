@@ -13,16 +13,17 @@ public struct CommittedToken: Equatable, Sendable {
 /// the user sends to the remote. A terminal has no text field, so the predictor's
 /// prefix is derived here by watching the outgoing stream. Pure and best-effort:
 /// control sequences (arrows, Ctrl-*) reset the line context rather than tracking
-/// cursor motion, and Tab resets it too, since remote-side completion (whose result
-/// arrives as output) is not reflected; both are acceptable v1 limitations.
+/// cursor motion. Tab keeps the tokens committed before it but drops the word it
+/// completes, since remote-side completion (whose result arrives as output) is not
+/// reflected. Both are acceptable v1 limitations.
 public struct InputTokenTracker: Equatable, Sendable {
     /// The token currently being typed (since the last delimiter).
     public private(set) var current: String = ""
     /// The full input line since the last line reset (for line-shape context).
     /// Intentionally RETAINS paste-suppressed (L3) text, unlike `current`, which
     /// drops it: line-SHAPE detection wants what the user physically typed. A Tab
-    /// resets it (the remote's completion is not visible here). `line` is a transient shape signal only, it is never
-    /// learned or logged verbatim.
+    /// restarts it (the remote's completion is not visible here). `line` is a
+    /// transient shape signal only, it is never learned or logged verbatim.
     public private(set) var line: String = ""
     /// Cursor position within `line` (cursor is assumed at the end today).
     public var cursorIndex: Int { line.count }
@@ -98,7 +99,24 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// Monotonic tally of tokens DROPPED by the L4b secret-value gate. Privacy-safe
     /// count only (see `droppedInPaste`).
     public private(set) var droppedAsSecret = 0
-    /// Monotonic count of line-context resets (ESC, Tab, Ctrl-C/U/W, cursor keys,
+    /// Monotonic tally of words DROPPED because a Tab completed them on the remote
+    /// (the whole word is never seen). Privacy-safe count only.
+    public private(set) var droppedAfterCompletion = 0
+    /// True once a Tab completed something on the current line; cleared at Enter and
+    /// at a line reset. The App uses it to read the commit row only when the
+    /// post-Tab text can be compared with it.
+    public private(set) var completedThisLine = false
+    /// True from a Tab until the word it completed ends (space, Enter): the bytes
+    /// typed in between continue a word whose start only the remote knows.
+    private var inCompletedWord = false
+    /// True when the word being completed is flag-shaped (`--pass` Tab): its value
+    /// may be a secret, so the token after it is dropped (L4b, conservatively).
+    private var completedWordIsFlag = false
+    /// True when any of the completed word was typed (before or after its Tabs).
+    private var completedWordHadTypedText = false
+    /// Set when a completed flag word ended: the next token is treated as its value.
+    private var nextTokenMayBeSecretValue = false
+    /// Monotonic count of line-context resets (ESC, Ctrl-C/U/W, cursor keys,
     /// other controls, an aborted sequence), never Enter. The App compares it across
     /// `observe` to spot a context break and reset its per-line state. Cleared by
     /// `reset()`.
@@ -196,11 +214,12 @@ public struct InputTokenTracker: Equatable, Sendable {
             secretCheckPrev = nil
             lineOptedOut = false
             sawLineStart = false
+            clearCompletionState()
         case 0x7f, 0x08:                // backspace → pop one char
             if !current.isEmpty { current.removeLast() }
             if !line.isEmpty { line.removeLast() }
-        case 0x09:                      // tab → remote completion: the line is
-            resetLineContext(keepingSecretContext: true)   // now what the remote shows
+        case 0x09:                      // tab → remote completion of the current word
+            beginCompletion()
         case let c where Self.editingC0.contains(c):   // Ctrl-W/U/K/A/C/E → reset
             resetLineContext()
             // The tmux prefix additionally arms a one-shot swallow of the binding key
@@ -381,7 +400,20 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// `secretCheckPrev` to the dropped secret so the token AFTER it is not
     /// cascadingly dropped by the flag→value rule.
     private mutating func commitCurrent(into committed: inout [CommittedToken]) {
+        if inCompletedWord {
+            endCompletedWord()
+            return
+        }
         guard !current.isEmpty else { return }
+        // L4b after a Tab-completed flag (`--pass` Tab): the flag's full text was
+        // never seen, so its value is dropped without the denylist check.
+        if nextTokenMayBeSecretValue {
+            nextTokenMayBeSecretValue = false
+            secretCheckPrev = nil
+            current = ""
+            droppedAsSecret += 1
+            return
+        }
         // L3: inside a paste, drop; do NOT touch `previous` or `secretCheckPrev`.
         if withinPaste {
             current = ""
@@ -404,22 +436,64 @@ public struct InputTokenTracker: Equatable, Sendable {
         current = ""
     }
 
-    /// ESC / unknown-control line reset (matches the pre-Phase-2 `default` case).
+    /// Tab: the remote completes the current word, so the typed text no longer
+    /// matches the screen. `line` restarts at what is typed next (acceptance edits
+    /// only that), but the line has not ended: tokens already committed stay, as do
+    /// the leading-space opt-out (L4a) and the secret-flag predecessor (L4b), so
+    /// `mysql -p <Tab>hunter2` still drops the value. The bytes typed until the
+    /// word ends continue a word only the remote knows; `endCompletedWord` drops it.
+    private mutating func beginCompletion() {
+        if !inCompletedWord { completedWordIsFlag = current.hasPrefix("-") }
+        if !current.isEmpty { completedWordHadTypedText = true }
+        inCompletedWord = true
+        completedThisLine = true
+        current = ""
+        line = ""
+        previous = nil
+    }
+
+    /// The Tab-completed word ended (space or Enter). It is never learned, nor used
+    /// as a bigram predecessor, since its full text was never seen. Its own bytes
+    /// still meet the L4b check first, so a secret value typed straight after a Tab
+    /// is tallied as one.
     ///
-    /// `keepingSecretContext` is the Tab variant: the remote completed the word, so
-    /// the typed text no longer matches the screen and is dropped, but the line has
-    /// not ended. The leading-space opt-out (L4a) and the secret-flag predecessor
-    /// (L4b) stay, so `mysql -p <Tab>hunter2` still drops the value and a
-    /// leading-space line stays opted out after a Tab.
-    private mutating func resetLineContext(keepingSecretContext: Bool = false) {
+    /// When nothing was typed into the word (`mysql -p <Tab> hunter2`), the secret
+    /// predecessor is kept, so the next token is still checked against `-p`: the
+    /// Tab inserted nothing, or a word that may itself be the flag's value.
+    private mutating func endCompletedWord() {
+        let hadTypedText = completedWordHadTypedText || !current.isEmpty
+        if !current.isEmpty, isSecretValueToken(current, precededBy: secretCheckPrev) {
+            droppedAsSecret += 1
+        } else if hadTypedText {
+            droppedAfterCompletion += 1
+        }
+        nextTokenMayBeSecretValue = completedWordIsFlag
+        inCompletedWord = false
+        completedWordIsFlag = false
+        completedWordHadTypedText = false
+        current = ""
+        previous = nil
+        if hadTypedText { secretCheckPrev = nil }
+    }
+
+    private mutating func clearCompletionState() {
+        completedThisLine = false
+        inCompletedWord = false
+        completedWordIsFlag = false
+        completedWordHadTypedText = false
+        nextTokenMayBeSecretValue = false
+    }
+
+    /// ESC / unknown-control line reset (matches the pre-Phase-2 `default` case).
+    private mutating func resetLineContext() {
         lineResets += 1
         current = ""
         line = ""
         previous = nil
-        guard !keepingSecretContext else { return }
         secretCheckPrev = nil
         lineOptedOut = false
         sawLineStart = false
+        clearCompletionState()
     }
 
     /// Clear all context (e.g. a context/host switch).
@@ -434,6 +508,8 @@ public struct InputTokenTracker: Equatable, Sendable {
         sawLineStart = false
         droppedInPaste = 0
         droppedAsSecret = 0
+        droppedAfterCompletion = 0
         lineResets = 0
+        clearCompletionState()
     }
 }

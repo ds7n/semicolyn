@@ -609,6 +609,50 @@ final class PasswordEntryDetectorTests: XCTestCase {
         XCTAssertTrue(d.shouldLearnCommittedLine())
     }
 
+    /// A line split by Tab completions passes its combined segment verdict.
+    func testRowVerdictLearnsUnderAlternateBuffer() {
+        var d = PasswordEntryDetector()
+        let oracle = ScriptedEchoOracle()
+        oracle.isAlternateBuffer = true
+        d.setOracle(oracle)
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        d.noteCommitRow(verdict: true)
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: true, reason: .row))
+    }
+
+    func testRowVerdictFalseSuppressesAnEchoedLine() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        XCTAssertTrue(d.shouldLearnCommittedLine())                 // byte path alone learns
+        d.noteCommitRow(verdict: false)
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: false, reason: .row))
+    }
+
+    func testRowVerdictCannotOverridePrompt() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("password: ".utf8))
+        d.resetLine()
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        d.noteCommitRow(verdict: true)
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: false, reason: .prompt))
+    }
+
+    func testNilRowVerdictClearsOnlyATrueOne() {
+        var d = PasswordEntryDetector()
+        d.noteInput(Array("ls".utf8))
+        d.noteCommitRow(verdict: false)
+        d.noteCommitRow(verdict: nil)
+        XCTAssertEqual(d.committedLineVerdict().reason, .row)       // false kept
+        var e = PasswordEntryDetector()
+        e.noteInput(Array("ls".utf8))
+        e.noteCommitRow(verdict: true)
+        e.noteCommitRow(verdict: nil)
+        XCTAssertNotEqual(e.committedLineVerdict().reason, .row)    // true dropped
+    }
+
     func testAlternateBufferWithoutVerdictStillSuppresses() {
         // No commit-row verdict: the oracle path's alt-screen suppression applies
         // as before, even though every keystroke classified echoed.
