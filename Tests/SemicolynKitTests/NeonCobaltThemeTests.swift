@@ -5,7 +5,7 @@ import XCTest
 
 /// Neon Cobalt color-fidelity guards. Core tier: assert the exact locked/derived
 /// values so any palette drift (or a wrong role-map slot) fails the build. Values
-/// come from mockups/drafts/themes/neon-cobalt.itermcolors via themes/build.py.
+/// come from neon-cobalt.itermcolors via the local theme build script.
 final class NeonCobaltThemeTests: XCTestCase {
     private let theme = Theme.neonCobalt
 

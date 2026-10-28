@@ -35,7 +35,6 @@ The design keeps the **Apple-only UI/SDK layer thin** so the maximum surface sta
 | `Sources/SeedKit/`, `Sources/semicolyn-dictbuild/`, `Sources/semicolyn-predeval/` | Build-time predictor tooling: dictionary builders (English, commands) and the replay evaluation harness |
 | `Tests/` | `SemicolynKitTests`, `SeedKitTests`, `BridgeTests` (macOS) |
 | `docs/brainstorming-decisions.md` | Every locked decision, by topic, with the deferred list |
-| `mockups/specs/`, `mockups/drafts/` | Locked visual record · pre-decision explorations |
 | `scripts/` | `build-xcframework.sh`, `build-mosh-xcframework.sh`, `build-english-dict.sh`, `build-command-dict.sh`, `dict/` |
 | `corpora/eval/` | Predictor evaluation text only (commands and prose replay); never shipped or used to build a dictionary |
 

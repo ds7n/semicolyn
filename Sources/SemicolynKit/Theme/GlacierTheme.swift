@@ -3,8 +3,8 @@
 
 // Glacier — the "soft" blue theme (Piece 2 of the themed-ANSI roadmap): desaturated
 // pastel (Nord/Catppuccin family) on a lighter slate base, low contrast. Palette source:
-// mockups/drafts/themes/glacier.itermcolors. Chrome (surfaces / text / highlight) is
-// DERIVED from the palette by themes/build.py and baked in here; status + accent are
+// glacier.itermcolors. Chrome (surfaces / text / highlight) is
+// DERIVED from the palette by the local theme build script and baked in here; status + accent are
 // pinned to ANSI slots. Regenerate the literals with `uv run python build.py --swift`.
 
 private let glacierANSI = ANSIPalette([

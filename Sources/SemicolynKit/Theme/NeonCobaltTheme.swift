@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 // Neon Cobalt — the "electric" blue theme (Piece 2 of the themed-ANSI roadmap).
-// Palette source: mockups/drafts/themes/neon-cobalt.itermcolors. Chrome (surfaces /
-// text / highlight) is DERIVED from the palette by themes/build.py and baked in here;
+// Palette source: neon-cobalt.itermcolors. Chrome (surfaces /
+// text / highlight) is DERIVED from the palette by the local theme build script and baked in here;
 // status + accent are pinned to ANSI slots via the role map. Regenerate the literals
-// with `uv run python build.py --swift` and copy from themes/generated/.
+// with `uv run python build.py --swift`.
 
 private let neonCobaltANSI = ANSIPalette([
         ThemeColor("#0A0C1A"), ThemeColor("#FD4E66"), ThemeColor("#4EFDAC"), ThemeColor("#FDCF4E"),

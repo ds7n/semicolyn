@@ -1,7 +1,7 @@
 version = 1
 
 # Files that cannot carry an SPDX header comment (lockfiles, JSON, images, test
-# keys) and project docs, configs and mockups without one. Every other file
+# keys) and project docs and configs without one. Every other file
 # carries its own header or a .license sidecar.
 
 [[annotations]]
@@ -17,8 +17,6 @@ path = [
     "docker/sshd-legacy.conf",
     "tools/syslog-sink/**",
     "docs/**",
-    "mockups/**",
-    "plans/**",
     "App/Assets.xcassets/**",
 ]
 precedence = "closest"

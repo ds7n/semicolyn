@@ -72,6 +72,13 @@
 # per the global ignore and intentionally not overridden.)
 /TODO.md
 /docs/superpowers/
+# Design explorations, theme-palette sources, naming research, review punch
+# lists and audit reports: local-only too (untracked + purged 2026-10-28).
+/mockups/
+/plans/
+/docs/ideas/
+/docs/final-review-punchlist.md
+/docs/*-naming-*.md
 
 # Git worktrees (SDD isolated workspaces)
 .worktrees/
