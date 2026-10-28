@@ -5,7 +5,7 @@ import XCTest
 
 /// Glacier color-fidelity guards. Core tier: assert the exact locked/derived values
 /// so palette drift or a wrong role-map slot fails the build. Values come from
-/// mockups/drafts/themes/glacier.itermcolors via themes/build.py.
+/// glacier.itermcolors via the local theme build script.
 final class GlacierThemeTests: XCTestCase {
     private let theme = Theme.glacier
 

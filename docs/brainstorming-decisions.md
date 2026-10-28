@@ -19,11 +19,11 @@ Two complementary input mechanisms central to the differentiation:
 
 | Topic | Decision |
 |---|---|
-| Name | **semicolyn** — a respell of *semicolon* (`;`, the shell's command separator that chains one command into the next). Lowercase `semicolyn` in path / code contexts; capitalized `Semicolyn` only as the proper noun at sentence start. (Naming journey: Glymr → neotilde (2026-06-24, forced off the LIVE registered GLYMR trademark) → **semicolyn** (2026-06-28); see `docs/2026-06-28-naming-decision-semicolyn.md`.) |
+| Name | **semicolyn** — a respell of *semicolon* (`;`, the shell's command separator that chains one command into the next). Lowercase `semicolyn` in path / code contexts; capitalized `Semicolyn` only as the proper noun at sentence start. (Naming journey: Glymr → neotilde (2026-06-24, forced off the LIVE registered GLYMR trademark) → **semicolyn** (2026-06-28).) |
 | Goal | Solve a personal annoyance (CLI / AI / security adjacent) |
 | Differentiator | Make the iOS keyboard pleasant for terminal work |
 | Security posture | Security-first: SE-default for new identities, per-host auth policy, no telemetry, public-key always copyable. (Audit log dropped from v1 entirely per `2026-06-16-icloud-sync-scope-design.md`; code-level stub reserved for a future Pro compliance feature.) |
-| Brand palette | **"Neon Midnight"** — coral accent `#FF6F5E` (the orange-red glow of neon) on darker blue-near-black `#07090E`, verdigris `#5FB0A2` as success/tension color, error `#E5455E`. Bell-only glow (accent solid at rest; anti-CP2077). Bell-bronze kept as a Pro-cosmetic alternate. See `mockups/specs/design-system.html` and `docs/superpowers/specs/2026-06-25-neon-midnight-theme-design.md`. |
+| Brand palette | **"Neon Midnight"** — coral accent `#FF6F5E` (the orange-red glow of neon) on darker blue-near-black `#07090E`, verdigris `#5FB0A2` as success/tension color, error `#E5455E`. Bell-only glow (accent solid at rest; anti-CP2077). Bell-bronze kept as a Pro-cosmetic alternate. See `docs/superpowers/specs/2026-06-25-neon-midnight-theme-design.md`. |
 
 ### Connections & sessions
 
@@ -60,7 +60,7 @@ Two complementary input mechanisms central to the differentiation:
 | Slot interaction | Three actions per slot: tap = primary, swipe-up = secondary, swipe-down = tertiary. Long-press = edit the slot (rebind, replace, pin a new macro). Each key shows the two swipe chars as small dim glyphs on the same key (top and bottom edges). |
 | Modifier behavior | **Ctrl, Alt, Shift = sticky-for-one-keystroke.** Tap → armed for the next key, auto-disarms. **Ctrl additionally double-tap-to-lock** (Emacs chord case); tap again unlocks. Alt/Shift stay sticky-only (their swipe-based gestures don't support double-arming cleanly; iOS already provides caps-lock for Shift). Esc and Tab fire on tap (no sticky/toggle). |
 | Arrow input | **Single Blink-style arrow-pad slot.** Touch and drag from center in any direction (↑↓←→) to fire that arrow. Replaces four discrete arrow keys. |
-| Default slots (v0) | 10 slots: **core** (Esc, Ctrl/Alt/Shift, Tab, arrow-pad) + **convenience** (`/`, `\|`, `~`, `-`, `(`, `)`). Convenience slots are removable. Core slots are locked. Full layout: `mockups/specs/keybar.html`. |
+| Default slots (v0) | 10 slots: **core** (Esc, Ctrl/Alt/Shift, Tab, arrow-pad) + **convenience** (`/`, `\|`, `~`, `-`, `(`, `)`). Convenience slots are removable. Core slots are locked. |
 | Iteration plan | Defaults are a v0 best-guess. Public character-frequency data for shell typing on mobile doesn't exist. Plan: ship defensible defaults, make customization first-class, tune defaults in v1.5 from predictor's keystroke telemetry (with consent). |
 
 ### Window switching
@@ -216,7 +216,7 @@ Two complementary input mechanisms central to the differentiation:
 | Dynamic Island handling rule | **A+C.** All top-edge chrome (chip-equivalents and banners alike) honors `safeAreaInsets.top` — placed flush below whatever the OS owns (DI / notch / status bar). Top-bar background tints around the DI so the cutout reads as part of our chrome rather than a hole. **No interactive UI in the flank** (Apple HIG, tap-collision). |
 | Live Activities (DI background presence) | **Out of scope for v1.** Worth revisiting post-v1; chip's data model designed so a Live Activity could feed off it later. |
 
-**Mockup**: see `mockups/drafts/host-management.html`. CRUD flow + multi-connection switching semantics still deferred.
+CRUD flow + multi-connection switching semantics still deferred.
 
 ### Host config model
 
@@ -259,7 +259,7 @@ Two complementary input mechanisms central to the differentiation:
 | Refused-if-referenced delete | If host is a `proxyJump` ref target, delete refused with a tappable list of dependents ("Used as jumphost by: prod-db, staging-api"). Tapping a dependent navigates into its editor with Jump chain pre-expanded. No cascade. Identity records are never deleted by host delete. |
 | Defaults editor | Same form shell; no `label`/`hostName`/Delete; all sections collapsed by default; each row shows **inherit unset** vs **set** state; **swipe-left to Clear override** (revert to system fallback). Entry: dedicated row at top of Settings → Hosts. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-15-host-crud-design.md`. **Mockup**: `mockups/specs/host-crud.html`.
+**Full spec**: see `docs/superpowers/specs/2026-06-15-host-crud-design.md`.
 
 ### Identities & Keys management surface
 
@@ -281,7 +281,7 @@ Two complementary input mechanisms central to the differentiation:
 | Tab label | **"Create new"** (formerly "Mint new" — renamed throughout for plain language). |
 | Entry points | `Settings → Identities & Keys` (list), plus tappable identity refs from host CRUD (push directly to detail). |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-15-identities-keys-management-design.md`. **Mockup**: `mockups/specs/identities-keys.html`.
+**Full spec**: see `docs/superpowers/specs/2026-06-15-identities-keys-management-design.md`.
 
 ### Multi-connection switching semantics
 
@@ -300,7 +300,7 @@ Two complementary input mechanisms central to the differentiation:
 | Picker visual | Live group shows Awake (solid, green dot) and Sleeping (lower opacity + `zZ` glyph) under one header. Recent group capped at 10, sorted by last-disconnected. |
 | Activity indicators | **No** per-host new-output dot. Dots carry connection-health semantics only. "Notify on command done" deferred to v1.5+. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-15-multi-connection-switching-design.md`. **Mockup**: `mockups/drafts/multi-connection-banner.html`.
+**Full spec**: see `docs/superpowers/specs/2026-06-15-multi-connection-switching-design.md`.
 
 ### Keybar layout, customization, gesture-ownership (revisit)
 
@@ -317,7 +317,7 @@ Two complementary input mechanisms central to the differentiation:
 | Gesture ownership | **Touch-down location decides** which recognizer claims the gesture. Esc pill and Pad own their bounds (Blink-style); pan engages from anywhere else. |
 | Macro creation | Record mode (start recording, type the sequence, stop) or Template mode (literal string + inline modifier chord tokens). Created in Launcher or via "Record new" from a slot binding. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-15-keybar-customization-design.md`. **Mockup**: `mockups/drafts/esc-pill.html`.
+**Full spec**: see `docs/superpowers/specs/2026-06-15-keybar-customization-design.md`.
 
 ### iCloud sync scope
 
@@ -348,7 +348,7 @@ Two complementary input mechanisms central to the differentiation:
 | Cut from tooltips | Predictor row (self-explanatory by existing); keybar swipe-up/down secondaries (covered by keybar orientation paragraph; dim glyphs on each key already telegraph affordance). |
 | Out of scope (v1) | JIT tooltips, demo PTY / sample session, prefilled example host, multi-page swipe tour, unread badges, localisation. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-16-first-host-onboarding-design.md`. **Mockup**: `mockups/specs/first-host-onboarding.html`.
+**Full spec**: see `docs/superpowers/specs/2026-06-16-first-host-onboarding-design.md`.
 
 ### Settings sub-screens (Security · App preferences · About & Help)
 
@@ -366,7 +366,7 @@ Two complementary input mechanisms central to the differentiation:
 | About & Help cuts | No **Terms of Service** (no account, no service). No **Rate the app** (friction-y). No **Changelog** (defer until v1.5 has content). |
 | Cross-cutting | All destructive actions use the same action-sheet idiom as Identity delete (destructive row in top group, Cancel in bottom group). Footer captions used sparingly — only Predictor toggle, iCloud sync group, App lock when on. No badges, no "new" pips anywhere in Settings. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-16-settings-sub-screens-design.md`. **Mockup**: `mockups/specs/settings-sub-screens.html`.
+**Full spec**: see `docs/superpowers/specs/2026-06-16-settings-sub-screens-design.md`.
 
 ### Pro / paid scope
 
@@ -381,7 +381,7 @@ Two complementary input mechanisms central to the differentiation:
 | Visibility | **No upsell prompts anywhere else in the app.** Not in onboarding, not after the Nth connection, not on any preference change. No "Pro" lock icons on any feature (there are no features to lock). The About row is the only entry point. |
 | Enterprise (deferred) | **Explicitly out of v1.** Candidate features captured but not designed: **audit log** (compliance — stub already at data layer), **team-shared host configs** (most natural subscription candidate if there ever is one — needs backend), **MDM-friendly configuration**, **centralized policy enforcement**, **SSO into the app**, **sealed org-curated snippet packs**, **concurrent-device licensing / seat management**, **premium support**. None designed; revisit when a real customer asks. Even in an enterprise tier, the qualification rule still applies — enterprise features must be things that *only make sense in an org context*, not solo features pay-walled. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-16-pro-paid-scope-design.md`. **Mockup**: `mockups/specs/pro-paid.html`.
+**Full spec**: see `docs/superpowers/specs/2026-06-16-pro-paid-scope-design.md`.
 
 ### Connection-status banner expanded view
 
@@ -398,7 +398,7 @@ Two complementary input mechanisms central to the differentiation:
 | Obscured terminal | Accepted — user tapped a "something is wrong" banner; covering the terminal underneath is fine. |
 | Out of scope (v1) | Per-state custom layouts beyond the two templates · editable thresholds · full roam-history log (deferred to v1.5+) · "Switch network" inline action (iOS doesn't allow it programmatically) · "Change identity" inline action (Edit host covers it) · ShareSheet for diagnostics (Copy is enough) · iPad adaptation · localisation. |
 
-**Full spec**: see `docs/superpowers/specs/2026-06-16-banner-expanded-design.md`. **Mockups**: `mockups/drafts/banner-expanded-layouts.html` (three layouts compared) · `mockups/specs/banner-expanded-templates.html` (both templates rendered with example states).
+**Full spec**: see `docs/superpowers/specs/2026-06-16-banner-expanded-design.md`.
 
 ### iPad scope (v1)
 
