@@ -168,11 +168,49 @@ final class PredictorEngineTests: XCTestCase {
 
     func testLowConfidenceTokenNeverCompletes() {
         var e = engine()
+        XCTAssertFalse(e.filter.excludes("deployxyz"), "control: the token filter must not be what hides it")
         for prev in ["run", "make", "just"] {
-            e.record("deploysecretxyz", count: 2, after: prev, echoConfirmed: false)
+            e.record("deployxyz", count: 2, after: prev, echoConfirmed: false)
         }
         XCTAssertEqual(texts(e, "deploy"), [], "low-confidence token must never surface as a literal completion")
-        XCTAssertFalse(e.state.unigram.containsLiteral("deploysecretxyz"))
+        XCTAssertFalse(e.state.unigram.containsLiteral("deployxyz"))
+    }
+
+    func testUnechoedGraduatingOccurrenceWithholdsTheLiteral() {
+        // Echoed twice, then unechoed in the third context that graduates it: the
+        // graduating call is low, so nothing is stored as a literal.
+        var e = engine()
+        e.record("deployxyz", count: 2, after: "run", echoConfirmed: true)
+        e.record("deployxyz", count: 2, after: "make", echoConfirmed: true)
+        e.record("deployxyz", count: 2, after: "just", echoConfirmed: false)
+        XCTAssertEqual(texts(e, "deploy"), [])
+        XCTAssertFalse(e.state.unigram.containsLiteral("deployxyz"))
+    }
+
+    func testLowConfidenceSuccessorNeverSuggestedAsNextWord() {
+        var e = engine()
+        for prev in ["run", "make", "just"] {
+            e.record("deployxyz", count: 2, after: prev, echoConfirmed: false)
+        }
+        XCTAssertEqual(texts(e, "run "), [], "a low-confidence successor must not surface as a next word")
+        XCTAssertEqual(learnedSuccessors(e, after: "run"), [:])
+    }
+
+    func testLowConfidenceGraduationThenOneEchoedUseCompletesAtOnce() {
+        // The low-confidence graduation is real (count-only): one later echoed use
+        // passes straight through and stores the literal, where a fresh engine
+        // would still defer a single occurrence.
+        var e = engine()
+        for prev in ["run", "make", "just"] {
+            e.record("deployprod", count: 2, after: prev, echoConfirmed: false)
+        }
+        XCTAssertEqual(texts(e, "deploy"), [])
+        e.record("deployprod", after: "ship", echoConfirmed: true)
+        XCTAssertEqual(texts(e, "deploy"), ["deployprod"])
+
+        var fresh = engine()
+        fresh.record("deployprod", after: "ship", echoConfirmed: true)
+        XCTAssertEqual(texts(fresh, "deploy"), [], "control: one occurrence alone stays deferred")
     }
 
     func testHighConfidenceTokenCompletes() {

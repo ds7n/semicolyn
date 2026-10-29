@@ -97,6 +97,28 @@ final class InputTokenTrackerTests: XCTestCase {
         XCTAssertEqual(t.droppedAfterCompletion, 1)
     }
 
+    func testTabAtTheEndOfAPasteDoesNotDropTheNextTypedWord() {
+        // A pasted Tab is inserted text, not a completion request: the word typed
+        // after the paste is learned.
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("ls ") + pasteOn + bytes("foo") + [0x09] + pasteOff + bytes("-la\r"))
+        XCTAssertEqual(committed, [
+            CommittedToken(token: "ls", previous: nil),
+            CommittedToken(token: "-la", previous: "ls"),
+        ])
+        XCTAssertEqual(t.droppedAfterCompletion, 0)
+        XCTAssertEqual(t.droppedInPaste, 1)
+    }
+
+    func testTabInsideAPasteSplitsPastedWordsAndIsNotACompletion() {
+        var t = InputTokenTracker()
+        let committed = t.observe(pasteOn + bytes("a") + [0x09] + bytes("b") + pasteOff)
+        XCTAssertEqual(committed, [])
+        XCTAssertEqual(t.droppedInPaste, 2, "both pasted words are dropped by the paste gate")
+        XCTAssertFalse(t.completedThisLine)
+        XCTAssertEqual(t.line, "a b", "the pasted Tab reads as a blank on the row")
+    }
+
     func testSpaceRightAfterTabEndsTheCompletedWord() {
         var t = InputTokenTracker()
         let committed = t.observe(bytes("cd pro") + [0x09] + bytes(" ls "))

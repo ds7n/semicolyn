@@ -218,6 +218,9 @@ public struct InputTokenTracker: Equatable, Sendable {
         case 0x7f, 0x08:                // backspace → pop one char
             if !current.isEmpty { current.removeLast() }
             if !line.isEmpty { line.removeLast() }
+        case 0x09 where withinPaste:    // pasted tab → inserted text, splits words like a space
+            commitCurrent(into: &committed)
+            line.unicodeScalars.append(" ")
         case 0x09:                      // tab → remote completion of the current word
             beginCompletion()
         case let c where Self.editingC0.contains(c):   // Ctrl-W/U/K/A/C/E → reset
