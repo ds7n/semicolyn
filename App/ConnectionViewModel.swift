@@ -2456,10 +2456,29 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         var rowVerdict: Bool?
         var rowRead = false
         var typedLine = ""
+        var editedLine = false
         func readRow(for typed: String) -> String? {
             moshUnconfirmed ? nil : renderedTextBeforeCursor(oracle: echoOracle, maxChars: typed.count + 1)
         }
-        if hasEnter {
+        if hasEnter, let edited = tracker.editedLine {
+            // A line edited in place is learned from the tracker's edit buffer, so the
+            // whole of it must be on screen as the buffer holds it, on both sides of
+            // the cursor. Only an Enter sent on its own can be checked (any text in
+            // the same chunk has not echoed yet); an unreadable screen fails the line.
+            editedLine = true
+            let enterOnly = bytes.allSatisfy { $0 == 0x0d || $0 == 0x0a }
+            let before = enterOnly && !moshUnconfirmed
+                ? renderedTextBeforeCursor(oracle: echoOracle, maxChars: edited.beforeCursor.count + 1) : nil
+            let after = enterOnly && !moshUnconfirmed
+                ? renderedTextFromCursor(oracle: echoOracle, maxChars: edited.afterCursor.count + 1) : nil
+            rowRead = before != nil && after != nil
+            if let before, let after {
+                rowVerdict = editedLineConfirmed(typedBefore: edited.beforeCursor, typedAfter: edited.afterCursor,
+                                                 renderedBeforeCursor: before, renderedFromCursor: after)
+            } else {
+                rowVerdict = false
+            }
+        } else if hasEnter {
             typedLine = tracker.line
             let row = readRow(for: typedLine)
             rowRead = row != nil
@@ -2511,10 +2530,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 reason: "tab-completed"))
         }
         if hasEnter {
-            commitPredictorLine(rowVerdict: rowVerdict, rowRead: rowRead, moshUnconfirmed: moshUnconfirmed)
+            commitPredictorLine(rowVerdict: rowVerdict, rowRead: rowRead, edited: editedLine,
+                                moshUnconfirmed: moshUnconfirmed)
         } else if tracker.lineResets != resetsBefore {
-            // Context break (ESC, Ctrl-C/U/W, cursor keys, other controls): the line
-            // was abandoned, so its buffered tokens and per-line echo state go with it.
+            // Context break (ESC, Ctrl-C/U/W, cursor keys, other controls): the words
+            // buffered so far no longer match the line, so they and the per-line echo
+            // state go. A line edited in place is re-emitted whole by the tracker at
+            // Enter (see `editedLine`); any other break abandons the earlier words.
             pendingLineTokens.removeAll(keepingCapacity: true)
             acceptedThisLine.removeAll()
             lineSegmentRows.reset()
@@ -2555,7 +2577,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// The Enter half of `observePredictorInput`: record the commit-time row reading,
     /// take the learn decision NOW, hand the line's tokens to the engine (or drop
     /// them), and reset the per-line state for the next line.
-    private func commitPredictorLine(rowVerdict: Bool?, rowRead: Bool, moshUnconfirmed: Bool) {
+    private func commitPredictorLine(rowVerdict: Bool?, rowRead: Bool, edited: Bool, moshUnconfirmed: Bool) {
         clearPredictorChips()   // line committed: clear stale chips immediately
         // After the Enter chunk's `noteInput` (which keeps a verdict on control-only
         // input) and before the verdict is read.
@@ -2566,7 +2588,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let reason = moshUnconfirmed ? "mosh-predict-always" : verdict.reason.rawValue
         DebugLog.shared.log(.predictor, decisionLine(
             "predictor:echo",
-            inputs: [("row", rowRead ? "read" : "nil")],
+            inputs: [("row", rowRead ? "read" : "nil"), ("edited", edited ? "1" : "0")],
             outputs: [("learn", learn ? "1" : "0")],
             reason: reason))
         // L4a: the tracker latches the just-committed line's opt-out at its Enter,

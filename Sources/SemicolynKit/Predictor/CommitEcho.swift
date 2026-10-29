@@ -53,6 +53,46 @@ public func rowConfirmsEcho(typedLine: String, renderedBeforeCursor: String) -> 
     return rendered.hasSuffix(String(typed.dropLast()))
 }
 
+/// True when the screen shows an edited line exactly as the edit buffer holds it:
+/// the text before the cursor ends with `typedBefore`, and the text from the cursor
+/// starts with `typedAfter` followed by a blank or the end of the read. The line
+/// must hold some non-space text. There is no slack for a byte in flight: the
+/// check runs at an Enter that arrives on its own, after every edit has echoed.
+///
+/// The boundary after `typedAfter` rejects a screen that holds more of the word
+/// than the buffer does (a character typed somewhere the buffer did not follow).
+public func editedLineConfirmed(typedBefore: String, typedAfter: String,
+                                renderedBeforeCursor: String, renderedFromCursor: String) -> Bool {
+    guard (typedBefore + typedAfter).contains(where: { $0 != " " }) else { return false }
+    guard renderedBeforeCursor.hasSuffix(typedBefore),
+          renderedFromCursor.hasPrefix(typedAfter) else { return false }
+    let rest = renderedFromCursor.dropFirst(typedAfter.count)
+    return rest.first.map { $0 == " " } ?? true
+}
+
+/// The rendered text from the cursor to the end of the line: the cursor row from
+/// the cursor column to the last column, then each following row while the row
+/// before it is full (its last cell non-blank, so the line wrapped), until
+/// `maxChars` characters are gathered. Blank cells read as spaces.
+///
+/// Returns nil (fail-safe: no verdict) when the cursor or `columns` is unreadable,
+/// the cursor lies outside the grid, or any needed cell is unreadable.
+public func renderedTextFromCursor(oracle: EchoOracle, maxChars: Int) -> String? {
+    guard let cursor = oracle.cursor(), let columns = oracle.columns else { return nil }
+    guard columns > 0, cursor.row >= 0, cursor.col >= 0, cursor.col <= columns else { return nil }
+    guard var text = readRow(oracle: oracle, row: cursor.row, from: cursor.col, upTo: columns) else { return nil }
+    var row = cursor.row
+    var lastRow = text
+    while text.count < maxChars, lastRow.unicodeScalars.last.map({ $0 != " " }) ?? false {
+        row += 1
+        // A row past the grid reads as unreadable: the wrap simply ends there.
+        guard let next = readRow(oracle: oracle, row: row, from: 0, upTo: columns) else { break }
+        text += next
+        lastRow = next
+    }
+    return text
+}
+
 /// The rendered text before the cursor: the cursor row from column 0 up to (not
 /// including) the cursor. Earlier rows are prepended (oldest first, while fewer
 /// than `maxChars` characters are gathered) ONLY for a real wrap: the cursor is
@@ -81,11 +121,11 @@ public func renderedTextBeforeCursor(oracle: EchoOracle, maxChars: Int) -> Strin
     return text
 }
 
-/// Columns `0..<end` of `row` as text (blank cells as spaces), or nil if any
+/// Columns `start..<end` of `row` as text (blank cells as spaces), or nil if any
 /// cell is unreadable.
-private func readRow(oracle: EchoOracle, row: Int, upTo end: Int) -> String? {
+private func readRow(oracle: EchoOracle, row: Int, from start: Int = 0, upTo end: Int) -> String? {
     var scalars = String.UnicodeScalarView()
-    for col in 0..<end {
+    for col in start..<max(start, end) {
         guard let cell = oracle.cell(row: row, col: col) else { return nil }
         scalars.append(cell.scalar ?? " ")
     }

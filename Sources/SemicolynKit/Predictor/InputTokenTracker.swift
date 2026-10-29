@@ -12,10 +12,11 @@ public struct CommittedToken: Equatable, Sendable {
 /// Reconstructs the current partial token + the previous token from the raw bytes
 /// the user sends to the remote. A terminal has no text field, so the predictor's
 /// prefix is derived here by watching the outgoing stream. Pure and best-effort:
-/// control sequences (arrows, Ctrl-*) reset the line context rather than tracking
-/// cursor motion. Tab keeps the tokens committed before it but drops the word it
-/// completes, since remote-side completion (whose result arrives as output) is not
-/// reflected. Both are acceptable v1 limitations.
+/// editing keys (arrows, Home/End, Ctrl-*) reset the prefix context, while a
+/// ``LineEditBuffer`` follows the in-place edits so the final line can still be
+/// learned at Enter. Tab keeps the tokens committed before it but drops the word
+/// it completes, since remote-side completion (whose result arrives as output) is
+/// not reflected.
 public struct InputTokenTracker: Equatable, Sendable {
     /// The token currently being typed (since the last delimiter).
     public private(set) var current: String = ""
@@ -62,6 +63,9 @@ public struct InputTokenTracker: Equatable, Sendable {
         case stringSequence
         /// Inside `.stringSequence`, just saw an ESC: mirrors `.oscEscape`.
         case stringSequenceEscape
+        /// After `ESC O` (SS3): the next byte names the key. Cursor keys arrive this
+        /// way in application-cursor mode (`ESC O D` is Left), F1-F4 always.
+        case ss3
         /// A sequence exceeded the max-length guard with no final/terminator byte
         /// seen. Keep discarding CSI-shaped bytes (0x20-0x3f, the param/intermediate
         /// range) so trailing garbage from the SAME malformed sequence never leaks
@@ -121,14 +125,35 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// `observe` to spot a context break and reset its per-line state. Cleared by
     /// `reset()`.
     public private(set) var lineResets = 0
+    /// The command line as typed, with a cursor, for learning a line edited in
+    /// place (see ``LineEditBuffer``). Cleared at Enter, Ctrl-C and `reset()`.
+    private var editBuffer = LineEditBuffer()
+
+    /// The current line split at the cursor, while it has been edited in place and
+    /// every edit was one the buffer follows; nil otherwise. At Enter such a line is
+    /// learned from this text (re-read as typed), not from the words committed as
+    /// they were typed, so the App checks both halves against the screen first.
+    public var editedLine: (beforeCursor: String, afterCursor: String)? {
+        guard editBuffer.edited, editBuffer.usable else { return nil }
+        return (editBuffer.beforeCursor, editBuffer.afterCursor)
+    }
 
     public init() {}
 
     /// Fold one chunk of outgoing bytes. Returns the tokens committed by this chunk
     /// (newest last), in order, for the caller to learn.
+    ///
+    /// Only tokens committed after the chunk's last line reset are returned: the App
+    /// drops its buffered words at a reset it sees between chunks, and a reset inside
+    /// one chunk must drop the words before it the same way (an edited line is then
+    /// re-emitted whole at Enter, so they are never learned twice).
     public mutating func observe(_ bytes: [UInt8]) -> [CommittedToken] {
         var committed: [CommittedToken] = []
-        for b in bytes { handleByte(b, into: &committed) }
+        for b in bytes {
+            let resets = lineResets
+            handleByte(b, into: &committed)
+            if lineResets != resets { committed.removeAll() }
+        }
         return committed
     }
 
@@ -170,6 +195,8 @@ public struct InputTokenTracker: Equatable, Sendable {
             handleStringSequenceByte(b, into: &committed)
         case .stringSequenceEscape:
             handleStringSequenceEscapeByte(b, into: &committed)
+        case .ss3:
+            handleSS3Byte(b, into: &committed)
         case .abortedSequence:
             handleAbortedSequenceByte(b, into: &committed)
         }
@@ -202,12 +229,18 @@ public struct InputTokenTracker: Equatable, Sendable {
         case 0x21...0x7e:               // printable, non-space → extend the token
             current.unicodeScalars.append(UnicodeScalar(b))
             line.unicodeScalars.append(UnicodeScalar(b))
+            editBuffer.insert(UnicodeScalar(b))
         case 0x20:                      // space → commit (unless within paste)
             commitCurrent(into: &committed)
             line.unicodeScalars.append(UnicodeScalar(b))
+            editBuffer.insert(UnicodeScalar(b))
         case 0x0d, 0x0a:                // enter → commit, latch the line's opt-out
             commitCurrent(into: &committed)
             lastCommittedLineOptedOut = lineOptedOut   // latch BEFORE the reset below
+            if editBuffer.edited && editBuffer.usable {
+                commitEditedLine(into: &committed)
+            }
+            editBuffer.clear()
             current = ""
             line = ""
             previous = nil
@@ -218,18 +251,60 @@ public struct InputTokenTracker: Equatable, Sendable {
         case 0x7f, 0x08:                // backspace → pop one char
             if !current.isEmpty { current.removeLast() }
             if !line.isEmpty { line.removeLast() }
+            editBuffer.deleteBackward()
         case 0x09 where withinPaste:    // pasted tab → inserted text, splits words like a space
             commitCurrent(into: &committed)
             line.unicodeScalars.append(" ")
         case 0x09:                      // tab → remote completion of the current word
             beginCompletion()
+            editBuffer.markUnusable()
         case let c where Self.editingC0.contains(c):   // Ctrl-W/U/K/A/C/E → reset
+            applyEditingC0(c)
             resetLineContext()
             // The tmux prefix additionally arms a one-shot swallow of the binding key
             // that follows (the other editing keys take normal text after them).
             if c == Self.tmuxPrefix { expectingPrefixCommand = true }
         default:                        // other control → reset line context
+            editBuffer.markUnusable()
             resetLineContext()
+        }
+    }
+
+    /// The line edit an editing control key makes. Ctrl-A is also the tmux prefix,
+    /// so whether it moved the cursor is unknown: the buffer stops following.
+    private mutating func applyEditingC0(_ c: UInt8) {
+        switch c {
+        case 0x17: editBuffer.killWordBackward()   // Ctrl-W
+        case 0x15: editBuffer.killToStart()        // Ctrl-U
+        case 0x0b: editBuffer.killToEnd()          // Ctrl-K
+        case 0x05: editBuffer.moveToEnd()          // Ctrl-E
+        case 0x03: editBuffer.clear()              // Ctrl-C: the line is abandoned
+        default: editBuffer.markUnusable()         // Ctrl-A (tmux prefix)
+        }
+    }
+
+    /// Learn an edited line from the buffer: re-read its final text as if typed in
+    /// one go, so the paste-free secret gates (L4a leading space, L4b secret values)
+    /// apply to it exactly as to a typed line.
+    private mutating func commitEditedLine(into committed: inout [CommittedToken]) {
+        var retyped = InputTokenTracker()
+        committed += retyped.observe(Array(editBuffer.text.utf8) + [0x0d])
+        droppedAsSecret += retyped.droppedAsSecret
+        lastCommittedLineOptedOut = lastCommittedLineOptedOut || retyped.lastCommittedLineOptedOut
+    }
+
+    /// The line edit a cursor key makes: Left, Right, Home, End and Delete move or
+    /// delete within the buffer; Up/Down (history), Page keys and modified keys
+    /// (Ctrl-Left moves by word) stop the buffer following the line.
+    private mutating func applyCursorKey(final: UInt8, param0: Int?, modified: Bool) {
+        guard !modified else { editBuffer.markUnusable(); return }
+        switch (final, param0) {
+        case (UInt8(ascii: "D"), _): editBuffer.moveLeft()
+        case (UInt8(ascii: "C"), _): editBuffer.moveRight()
+        case (UInt8(ascii: "H"), _), (UInt8(ascii: "~"), 1), (UInt8(ascii: "~"), 7): editBuffer.moveToStart()
+        case (UInt8(ascii: "F"), _), (UInt8(ascii: "~"), 4), (UInt8(ascii: "~"), 8): editBuffer.moveToEnd()
+        case (UInt8(ascii: "~"), 3): editBuffer.deleteForward()
+        default: editBuffer.markUnusable()
         }
     }
 
@@ -246,14 +321,39 @@ public struct InputTokenTracker: Equatable, Sendable {
             enterState(.osc)
         case UInt8(ascii: "P"), UInt8(ascii: "X"), UInt8(ascii: "^"), UInt8(ascii: "_"):
             enterState(.stringSequence)
+        case UInt8(ascii: "O"):
+            enterState(.ss3)
         case 0x30...0x7e:
-            // Two-byte ESC-final sequence (e.g. ESC c, ESC =, ESC >): discard, back to ground.
+            // Two-byte ESC-final sequence (e.g. ESC c, ESC =, ESC >): discard, back to
+            // ground. From a keyboard this is a Meta key (ESC b moves back a word),
+            // which the edit buffer does not follow.
             backToGround()
+            editBuffer.markUnusable()
         default:
             // A bare ESC followed by a deviating byte (not a recognized sequence
             // starter): the ESC itself is a line reset (preserve existing "ESC ⇒
             // reset" behavior); the deviating byte is re-handled in ground.
             backToGround()
+            editBuffer.markUnusable()
+            resetLineContext()
+            handleByte(b, into: &committed)
+        }
+    }
+
+    /// `.ss3`: the key after `ESC O`. A cursor key is a line edit, as its CSI form
+    /// is; F1-F4 and keypad keys are swallowed. A byte that cannot end the sequence
+    /// resets the line and is re-handled in ground.
+    private mutating func handleSS3Byte(_ b: UInt8, into committed: inout [CommittedToken]) {
+        backToGround()
+        switch b {
+        case UInt8(ascii: "A"), UInt8(ascii: "B"), UInt8(ascii: "C"), UInt8(ascii: "D"),
+             UInt8(ascii: "H"), UInt8(ascii: "F"):
+            applyCursorKey(final: b, param0: nil, modified: false)
+            resetLineContext()
+        case 0x40...0x7e:
+            editBuffer.markUnusable()
+        default:
+            editBuffer.markUnusable()
             resetLineContext()
             handleByte(b, into: &committed)
         }
@@ -280,6 +380,7 @@ public struct InputTokenTracker: Equatable, Sendable {
         default:
             // Unexpected byte inside a CSI sequence: abort defensively.
             backToGround()
+            editBuffer.markUnusable()
             resetLineContext()
         }
     }
@@ -291,13 +392,22 @@ public struct InputTokenTracker: Equatable, Sendable {
     ) {
         backToGround()
         let param0 = Self.parseParam0(paramBytes)
+        let modified = paramBytes.contains(UInt8(ascii: ";"))
         switch csiKind(finalByte: finalByte, hadPrivateMarker: hadPrivateMarker, param0: param0) {
         case .editing:
+            applyCursorKey(final: finalByte, param0: param0, modified: modified)
+            resetLineContext()
+        case .responseOrFormat where !hadPrivateMarker && finalByte == UInt8(ascii: "~")
+                && [4, 7, 8].contains(param0):
+            // The other Home/End encodings (`ESC[7~`, `ESC[4~`, `ESC[8~`) edit the
+            // line like `ESC[1~` and `ESC[F` do.
+            applyCursorKey(final: finalByte, param0: param0, modified: modified)
             resetLineContext()
         case .responseOrFormat:
             break   // swallow, `current` untouched
         case .pasteEnter:
             withinPaste = true
+            editBuffer.markUnusable()
         case .pasteExit:
             if withinPaste {
                 if !current.isEmpty { droppedInPaste += 1 }
@@ -392,6 +502,7 @@ public struct InputTokenTracker: Equatable, Sendable {
     private mutating func enforceSequenceGuard(into committed: inout [CommittedToken]) -> Bool {
         guard sequenceLength >= Self.maxSequenceLength else { return false }
         parseState = .abortedSequence
+        editBuffer.markUnusable()
         resetLineContext()
         return true
     }
@@ -403,6 +514,12 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// `secretCheckPrev` to the dropped secret so the token AFTER it is not
     /// cascadingly dropped by the flag→value rule.
     private mutating func commitCurrent(into committed: inout [CommittedToken]) {
+        // An edited line is learned whole from the edit buffer at Enter; a word
+        // committed now may still be edited, so nothing is emitted for it.
+        if editBuffer.edited && editBuffer.usable {
+            current = ""
+            return
+        }
         if inCompletedWord {
             endCompletedWord()
             return
@@ -513,6 +630,7 @@ public struct InputTokenTracker: Equatable, Sendable {
         droppedAsSecret = 0
         droppedAfterCompletion = 0
         lineResets = 0
+        editBuffer.clear()
         clearCompletionState()
     }
 }
