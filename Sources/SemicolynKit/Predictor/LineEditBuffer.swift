@@ -17,6 +17,8 @@ struct LineEditBuffer: Equatable, Sendable {
     private(set) var edited = false
     /// False once something the buffer cannot follow happened on this line.
     private(set) var usable = true
+    /// True when the first character typed on the line was a space (L4a opt-out).
+    private(set) var typedWithLeadingSpace = false
 
     /// The text left of the cursor.
     var beforeCursor: String { Self.string(scalars[..<cursor]) }
@@ -26,6 +28,7 @@ struct LineEditBuffer: Equatable, Sendable {
     var text: String { Self.string(scalars[...]) }
 
     mutating func insert(_ scalar: Unicode.Scalar) {
+        if scalars.isEmpty && !edited && scalar == " " { typedWithLeadingSpace = true }
         scalars.insert(scalar, at: cursor)
         cursor += 1
     }

@@ -538,9 +538,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     }
 
     /// Paste the system clipboard's text into the terminal (`⌘V`, hardware path).
+    /// Bracketed like the Paste menu item: the shell then treats it as pasted text, and
+    /// the predictor's paste gate (L3) sees the markers and never learns the paste.
     private func pasteFromClipboard() {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
-        sendTerminalInput(Array(text.utf8))
+        sendTerminalInput(SemicolynKit.bracketedPasteBytes(text, bracketed: true))
     }
 
     /// Re-run the last saved-host connect (`⇧⌘R`, the Session menu, the session-ended
@@ -2529,6 +2531,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 outputs: [("completed", "\(dCompleted)"), ("kept", "\(pendingLineTokens.count)")],
                 reason: "tab-completed"))
         }
+        // An edit key or other line break sent in the same chunk as the Enter (a keybar
+        // macro can do this) changed the line after the row was read, and the words
+        // buffered from earlier chunks no longer match it: the line cannot be checked.
+        if hasEnter && tracker.lineResets != resetsBefore { rowVerdict = false }
         if hasEnter {
             commitPredictorLine(rowVerdict: rowVerdict, rowRead: rowRead, edited: editedLine,
                                 moshUnconfirmed: moshUnconfirmed)

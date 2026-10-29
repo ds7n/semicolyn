@@ -174,8 +174,9 @@ final class InputTokenTrackerLineEditTests: XCTestCase {
 
     func testHomeThenLeadingSpaceOptsTheLineOut() {
         var t = InputTokenTracker()
-        _ = t.observe(bytes("ls -la") + home + bytes(" ") + bytes("\r"))
+        let committed = t.observe(bytes("ls -la") + home + bytes(" ") + bytes("\r"))
         XCTAssertTrue(t.lastCommittedLineOptedOut, "a leading space added by an edit still opts the line out")
+        XCTAssertEqual(committed.map(\.token), ["ls", "-la"], "the App drops opted-out tokens; the tracker reports them")
     }
 
     func testEditedLineStillDropsSecretFlagValues() {
@@ -241,6 +242,59 @@ final class InputTokenTrackerLineEditTests: XCTestCase {
         var t = InputTokenTracker()
         _ = t.observe(bytes("ab") + left + bytes("é"))
         XCTAssertNil(t.editedLine)
+    }
+
+    func testPastedEnterDoesNotLetTheRestOfThePastePassAsTyped() {
+        var t = InputTokenTracker()
+        _ = t.observe(pasteOn + bytes("x\rhunter2") + pasteOff)
+        _ = t.observe(left)
+        XCTAssertNil(t.editedLine, "pasted text must never be re-read as typed")
+        XCTAssertFalse(t.observe(bytes("\r")).contains { $0.token.contains("hunter") })
+    }
+
+    func testPastedCtrlCDoesNotLetTheRestOfThePastePassAsTyped() {
+        var t = InputTokenTracker()
+        _ = t.observe(pasteOn + bytes("x") + [0x03] + bytes("hunter2") + pasteOff)
+        _ = t.observe(left)
+        XCTAssertNil(t.editedLine)
+        XCTAssertFalse(t.observe(bytes("\r")).contains { $0.token.contains("hunter") })
+    }
+
+    func testSpaceInsertedAfterAnEditDoesNotOptTheLineOut() {
+        var t = InputTokenTracker()
+        let committed = t.observe(bytes("gitstatus") + repeated(left, 6) + bytes(" ") + bytes("\r"))
+        XCTAssertEqual(committed.map(\.token), ["git", "status"])
+        XCTAssertFalse(t.lastCommittedLineOptedOut)
+    }
+
+    func testLeadingSpaceTypedFirstStillOptsOutAfterAnEdit() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes(" ls") + left + right + bytes("\r"))
+        XCTAssertTrue(t.lastCommittedLineOptedOut)
+    }
+
+    func testOtherSwallowedKeysStopFollowing() {
+        for key in ["\u{1b}[2~", "\u{1b}[Z", "\u{1b}[15~", "\u{1b}[9001~"] {
+            var t = InputTokenTracker()
+            _ = t.observe(bytes("ab") + left + bytes(key))
+            XCTAssertNil(t.editedLine, "key \(key.debugDescription) must stop the buffer")
+        }
+    }
+
+    func testSecretFlagContextSurvivesALineBreak() {
+        // `-p`, a control key that breaks the line, then the value: still dropped.
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("mysql -p ") + [0x04])
+        let committed = t.observe(bytes("hunter2\r"))
+        XCTAssertFalse(committed.contains { $0.token == "hunter2" })
+        XCTAssertEqual(t.droppedAsSecret, 1)
+    }
+
+    func testCtrlCEndsTheSecretFlagContext() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("mysql -p ") + [0x03])
+        XCTAssertEqual(t.observe(bytes("hunter2\r")), [CommittedToken(token: "hunter2", previous: nil)],
+                       "a new line after Ctrl-C has no flag before it")
     }
 
     func testWordsBeforeAResetInTheSameChunkAreNotReturned() {

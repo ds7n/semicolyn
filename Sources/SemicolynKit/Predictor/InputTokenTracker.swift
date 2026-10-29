@@ -240,7 +240,7 @@ public struct InputTokenTracker: Equatable, Sendable {
             if editBuffer.edited && editBuffer.usable {
                 commitEditedLine(into: &committed)
             }
-            editBuffer.clear()
+            clearEditBuffer()
             current = ""
             line = ""
             previous = nil
@@ -278,19 +278,30 @@ public struct InputTokenTracker: Equatable, Sendable {
         case 0x15: editBuffer.killToStart()        // Ctrl-U
         case 0x0b: editBuffer.killToEnd()          // Ctrl-K
         case 0x05: editBuffer.moveToEnd()          // Ctrl-E
-        case 0x03: editBuffer.clear()              // Ctrl-C: the line is abandoned
+        case 0x03:                                 // Ctrl-C: the line is abandoned
+            clearEditBuffer()
+            secretCheckPrev = nil
         default: editBuffer.markUnusable()         // Ctrl-A (tmux prefix)
         }
     }
 
     /// Learn an edited line from the buffer: re-read its final text as if typed in
     /// one go, so the paste-free secret gates (L4a leading space, L4b secret values)
-    /// apply to it exactly as to a typed line.
+    /// apply to it exactly as to a typed line. The line is opted out if it begins
+    /// with a space now or did when typed (a space inserted after an edit is not a
+    /// line start).
     private mutating func commitEditedLine(into committed: inout [CommittedToken]) {
         var retyped = InputTokenTracker()
         committed += retyped.observe(Array(editBuffer.text.utf8) + [0x0d])
         droppedAsSecret += retyped.droppedAsSecret
-        lastCommittedLineOptedOut = lastCommittedLineOptedOut || retyped.lastCommittedLineOptedOut
+        lastCommittedLineOptedOut = editBuffer.typedWithLeadingSpace || retyped.lastCommittedLineOptedOut
+    }
+
+    /// Start a new edit buffer. Inside a paste it stays unusable: a pasted Enter or
+    /// Ctrl-C must not let the rest of the paste pass as typed text.
+    private mutating func clearEditBuffer() {
+        editBuffer.clear()
+        if withinPaste { editBuffer.markUnusable() }
     }
 
     /// The line edit a cursor key makes: Left, Right, Home, End and Delete move or
@@ -403,6 +414,12 @@ public struct InputTokenTracker: Equatable, Sendable {
             // line like `ESC[1~` and `ESC[F` do.
             applyCursorKey(final: finalByte, param0: param0, modified: modified)
             resetLineContext()
+        case .responseOrFormat where !hadPrivateMarker
+                && (finalByte == UInt8(ascii: "~") || finalByte == UInt8(ascii: "Z")):
+            // Other keys (Insert, F5 and up, Shift-Tab, the app's private tmux gesture
+            // keys): swallowed as before, but the edit buffer stops following, since
+            // the remote may have acted on the line (or switched tmux window).
+            editBuffer.markUnusable()
         case .responseOrFormat:
             break   // swallow, `current` untouched
         case .pasteEnter:
@@ -605,12 +622,15 @@ public struct InputTokenTracker: Equatable, Sendable {
     }
 
     /// ESC / unknown-control line reset (matches the pre-Phase-2 `default` case).
+    ///
+    /// The secret-flag predecessor (L4b) survives: the line has not ended, so a value
+    /// typed after the break (`mysql -p`, an edit key, ` hunter2`) is still checked
+    /// against the flag. At worst one harmless word after a flag is over-dropped.
     private mutating func resetLineContext() {
         lineResets += 1
         current = ""
         line = ""
         previous = nil
-        secretCheckPrev = nil
         lineOptedOut = false
         sawLineStart = false
         clearCompletionState()
