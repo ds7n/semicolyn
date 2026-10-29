@@ -9,7 +9,7 @@ import SemicolynKit   // LogTransport (used by configureFromDefaults' sink const
 /// `dev.truepositive.semicolyn`, category `debug`).
 ///
 /// SACRED-PATH SAFE: `log` takes an `@autoclosure`, and when diagnostics is disabled
-/// (the default) it returns immediately WITHOUT evaluating the message — so a
+/// (the default) it returns immediately WITHOUT evaluating the message, so a
 /// `DebugLog.shared.log("input[\(n)B] → …")` on the keystroke path costs nothing (no
 /// string built, no `Date()`, no allocation, no publish) unless the user turned
 /// diagnostics on. The buffer is deliberately NOT `@Published`: appends must not fire
@@ -25,7 +25,7 @@ final class DebugLog: ObservableObject {
     /// This is INDEPENDENT of where logs go: the on-screen panel and the remote stream are
     /// separate destination toggles. Previously the on-screen-panel switch doubled as the
     /// master gate, so remote streaming silently required the panel to be on (the "zero
-    /// .gesture lines" trap, build 44) — now decoupled.
+    /// .gesture lines" trap, build 44), now decoupled.
     var enabled = UserDefaults.standard.bool(forKey: DiagnosticsContent.loggingEnabledKey)
 
     /// Newest-last rolling buffer; capped so it can't grow unbounded. Plain (not
@@ -71,7 +71,7 @@ final class DebugLog: ObservableObject {
         enabledCategories = set
     }
 
-    /// Record one diagnostic line in `category` — ONLY when diagnostics is enabled AND the
+    /// Record one diagnostic line in `category`, ONLY when diagnostics is enabled AND the
     /// category is on. The message is an autoclosure: nothing is evaluated when gated out
     /// (zero sacred-path cost). `category` defaults to `.lifecycle` for legacy call sites.
     /// Whether `category` would currently be recorded (master gate + per-category toggle).
@@ -114,7 +114,7 @@ final class DebugLog: ObservableObject {
     /// Configure the master gate + remote sink from persisted settings AT LAUNCH, so
     /// remote streaming works from a cold start without first visiting the Diagnostics
     /// screen (previously the sink was only attached in `DiagnosticsSettingsView.onAppear`,
-    /// so a session connected before opening Settings streamed nothing — part of the
+    /// so a session connected before opening Settings streamed nothing, part of the
     /// build-44 empty-log trap). Idempotent; safe to call once from app `init`.
     func configureFromDefaults(reason: String = "launch") {
         let d = UserDefaults.standard
@@ -128,7 +128,7 @@ final class DebugLog: ObservableObject {
             let transport = (d.string(forKey: RemoteLogConfig.transportKey))
                 .flatMap(LogTransport.init(rawValue:)) ?? RemoteLogConfig.defaultTransport
             let signature = "\(host):\(port):\(transport.rawValue)"
-            // Only tear down + rebuild the sink when the config actually changed — so a
+            // Only tear down + rebuild the sink when the config actually changed, so a
             // foreground with unchanged settings doesn't needlessly reconnect (and
             // re-emit the banner) each time.
             if signature != remoteSignature {

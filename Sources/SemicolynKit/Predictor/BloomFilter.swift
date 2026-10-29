@@ -62,7 +62,7 @@ public struct BloomFilter: Equatable, Sendable {
         let bitCount = Int(m), hashCount = Int(k)
         guard bitCount > 0, hashCount > 0 else { return nil }
         // Checked all the way through, mirroring the CMS deserialize guards, so a
-        // hostile blob can never overflow the byte-count math (defensive — on a
+        // hostile blob can never overflow the byte-count math (defensive, on a
         // 64-bit target a UInt32 bitCount can't actually overflow Int).
         let (plus7, ov1) = bitCount.addingReportingOverflow(7)
         guard !ov1 else { return nil }

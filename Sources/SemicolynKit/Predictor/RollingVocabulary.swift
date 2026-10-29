@@ -115,7 +115,7 @@ public struct RollingVocabulary: Equatable, Sendable {
     }
 
     /// A representative high-frequency magnitude for `today ⊕ rolling_<window>`:
-    /// the ~90th percentile of all token counts, mirroring `Vocabulary.magnitude()`.
+    /// the ~90th percentile of all token counts (nearest rank).
     /// Used to normalize the learned source onto the same scale as the seeds before
     /// blending. Returns 0 for an empty vocabulary.
     public func magnitude(window: RollingWindow) -> UInt32 {

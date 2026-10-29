@@ -20,7 +20,7 @@ services:
     # parallel on one UDP socket. Against Docker's embedded DNS (127.0.0.11)
     # under load, the two near-simultaneous packets hit a Linux conntrack insert
     # race, one reply is dropped, and the lookup fails with EAI_AGAIN
-    # ("Temporary failure in name resolution") — the sole cause of flaky
+    # ("Temporary failure in name resolution"), the sole cause of flaky
     # linux-rust failures on CI. single-request-reopen serialises A/AAAA so they
     # can't race; the timeout/attempts bump is belt-and-suspenders.
     dns_opt:
@@ -60,7 +60,7 @@ services:
 
   # Legacy SSH server that offers only Tier-3 algorithms (Task 3). Uses a
   # minimal entrypoint (host keys only) instead of the modern one, so it does
-  # not race the modern fixture on the shared /testkeys CA file — that race
+  # not race the modern fixture on the shared /testkeys CA file, that race
   # made ssh-keygen fail "bad permissions" and the container exit 255, which
   # the old blind probe mislabeled as "sshd not reachable". See
   # docker/sshd-legacy-entrypoint.sh.

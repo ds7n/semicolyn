@@ -31,7 +31,7 @@ struct CoreIdentityMinter: IdentityMinter {
     /// Maps a UniFFI `KeyMaterial` record to a `SemicolynKit.KeyMaterial` value.
     ///
     /// An unmodeled algorithm string is surfaced as `IdentityServiceError.minting`
-    /// rather than a crash — Rust already rejects unsupported algorithms via
+    /// rather than a crash, Rust already rejects unsupported algorithms via
     /// `KeyError.UnsupportedAlgorithm`, so this branch is a belt-and-suspenders
     /// guard for future algorithm additions that Rust models but Swift hasn't
     /// added to `KeyAlgorithm` yet.

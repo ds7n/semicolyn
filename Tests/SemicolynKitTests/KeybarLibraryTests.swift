@@ -95,7 +95,7 @@ final class KeybarLibraryTests: XCTestCase {
 
     func testPre4d2SettingsBlobDecodesWithEmptyLibrary() throws {
         // A persisted blob written before 4d-2 has no "library" key. It must still
-        // decode (and not reset the user's layout) — library defaults to empty.
+        // decode (and not reset the user's layout), library defaults to empty.
         let oldBlob = Data("""
         {"layout":{"locked":[{"kind":"escPill"},{"kind":"pad"}],
                    "scroll":[{"kind":"symbol","value":"/"}]},

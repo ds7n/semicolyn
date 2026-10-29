@@ -4,7 +4,7 @@ import XCTest
 @testable import SemicolynKit
 
 /// RFC 5424 syslog framing: PRI+version header, per-transport octet counting.
-/// HOSTNAME is always the nil value `-` (no device-name lookup — see `syslogFrame`).
+/// HOSTNAME is always the nil value `-` (no device-name lookup, see `syslogFrame`).
 final class SyslogFrameTests: XCTestCase {
     private let ts = "2026-07-11T03:40:51.123Z"
 
@@ -28,7 +28,7 @@ final class SyslogFrameTests: XCTestCase {
         XCTAssertEqual(tls, tcp)
     }
 
-    // BVA: multibyte content — octet count is BYTES not characters.
+    // BVA: multibyte content, octet count is BYTES not characters.
     func testMultibyteOctetCountIsBytes() {
         let content = "café→x"   // é = 2 bytes, → = 3 bytes
         let msg = "<135>1 2026-07-11T03:40:51.123Z - semicolyn - - - \(content)"

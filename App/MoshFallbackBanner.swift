@@ -4,7 +4,7 @@ import SwiftUI
 import SemicolynKit
 
 /// Amber banner: a Mosh session failed (bootstrap or a fast handshake failure), so
-/// the session fell back to plain SSH. Persists until the user taps ✕ to dismiss —
+/// the session fell back to plain SSH. Persists until the user taps ✕ to dismiss,
 /// it carries the real failure reason (from mosh's captured stderr via `onEnd`, or
 /// `moshBranchOutcome`'s `.fallback(reason:)`), which the user needs time to read.
 /// Free text (unlike `DegradedBanner`, bound to the tmux-specific `DegradeReason`).

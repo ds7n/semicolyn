@@ -9,7 +9,7 @@ import SemicolynKit
 /// Drive pattern:
 /// 1. Call `configure(color:)` once at setup (or when the theme changes).
 /// 2. On each `bell()` delegate call: update your `BellStateMachine`, then call
-///    `start(machine:)` — this arms/restarts the `CADisplayLink`.
+///    `start(machine:)`, this arms/restarts the `CADisplayLink`.
 /// 3. The display link self-terminates when `intensity` reaches 0.
 ///
 /// The glow is drawn on a `CALayer` sublayer inset `borderInset` points from
@@ -19,10 +19,10 @@ import SemicolynKit
 /// on the outer view so the glow fades each frame without re-layout.
 ///
 /// UIKit/CALayer assumptions:
-/// - `CADisplayLink(target:selector:)` + `.add(to: .main, forMode: .common)` —
+/// - `CADisplayLink(target:selector:)` + `.add(to: .main, forMode: .common)`,
 ///   standard UIKit (iOS 3.1+).
 /// - `CALayer` sublayer with `borderColor`, `borderWidth`, `cornerRadius`,
-///   `shadowColor`, `shadowRadius`, `shadowOpacity`, `shadowOffset` — standard
+///   `shadowColor`, `shadowRadius`, `shadowOpacity`, `shadowOffset`, standard
 ///   `CALayer` properties available since iOS 2.0.
 /// - This file cannot be compiled on Linux; macOS CI validates it.
 final class BellHaloView: UIView {
@@ -32,7 +32,7 @@ final class BellHaloView: UIView {
     private static let borderInset: CGFloat = 2
     /// Width of the glow border drawn on the sublayer.
     private static let borderWidth: CGFloat = 3
-    /// Corner radius of the glow sublayer — rounds the inner ring slightly.
+    /// Corner radius of the glow sublayer, rounds the inner ring slightly.
     private static let cornerRadius: CGFloat = 4
     /// Blur radius for the shadow that gives the glow its soft look.
     private static let glowRadius: CGFloat = 6

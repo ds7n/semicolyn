@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /// Trailing-debounce policy for suggestion recomputation. Each keystroke calls
 /// `requestRefresh(at:)`; a check scheduled `quietWindow` later recomputes only if
-/// `isDue(at:)` — i.e. no newer request arrived — so a typing burst collapses to a
+/// `isDue(at:)`, i.e. no newer request arrived, so a typing burst collapses to a
 /// single trailing recompute instead of one per keystroke. Time is injected so the
 /// policy is pure and Linux-testable (no wall-clock in Kit).
 public struct SuggestionRefreshCoalescer: Sendable {

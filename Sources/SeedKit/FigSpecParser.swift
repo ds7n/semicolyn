@@ -2,26 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
-/// Extracts top-level `(command, subcommand)` / `(command, flag)` pairs from a
-/// Fig (withfig/autocomplete) TypeScript completion spec. The structured data
-/// lives inside a `.ts` module, so this tokenizes the source (consuming comments,
-/// strings, and template literals whole to keep brace balance) and walks a frame
-/// stack, emitting a member `name` only when it is a direct element of the spec's
-/// own top-level `subcommands:` / `options:` array. Returns the same
-/// `[[command, member]]` shape ``TldrParser`` does, so ``SeedBuilder`` ingests
-/// both identically. See `2026-06-21-predictor-fig-ingestion-design`.
+/// Reads Fig (withfig/autocomplete) TypeScript completion specs. The structured
+/// data lives inside a `.ts` module, so this tokenizes the source (consuming
+/// comments, strings, regex and template literals whole to keep brace balance);
+/// `spec(fromSource:command:maxDepth:)` (in `FigTree.swift`) walks the tokens into
+/// a nested ``FigCommandSpec``.
 public enum FigSpecParser {
-    /// `[command, member]` pairs for every top-level subcommand/flag name in
-    /// `source`. `command` is the caller-supplied filename stem (more robust than
-    /// parsing the spec's own `name`). `[]` if the spec has no top-level members.
-    public static func invocations(fromSpec source: String, command: String) -> [[String]] {
-        var results: [[String]] = []
-        for member in topLevelMemberNames(in: tokenize(source)) {
-            results.append([command, member])
-        }
-        return results
-    }
-
     // MARK: - Tokenizing
 
     enum Token: Equatable {
@@ -31,8 +17,8 @@ public enum FigSpecParser {
         case spread                      // `...`, only with operators
     }
 
-    /// Reduce TS source to the only tokens that matter — `{}[]:,`, string/template
-    /// literals, identifiers — skipping comments, whitespace, and everything else
+    /// Reduce TS source to the only tokens that matter, `{}[]:,`, string/template
+    /// literals, identifiers, skipping comments, whitespace, and everything else
     /// (operators, numbers, parens, `;`). Every brace/bracket outside a string or
     /// comment is preserved, so nesting stays balanced. With `operators`, the tokens
     /// needed to resolve references are kept too: `(`, `)`, `.`, a lone assignment
@@ -87,7 +73,7 @@ public enum FigSpecParser {
                         lastSig = c
                         continue
                     }
-                    i += 1   // operators, digits, parens, `;`, `=>` — irrelevant
+                    i += 1   // operators, digits, parens, `;`, `=>`, irrelevant
                     lastSig = c
                 }
             }
@@ -118,7 +104,7 @@ public enum FigSpecParser {
 
     /// Whether a `/` in this position opens a regex literal (vs. a division
     /// operator), judged by the preceding significant character. A regex follows
-    /// a value-position char — `( , = : [ { ! & | ? ; >` (the `>` of `=>`) — or the
+    /// a value-position char, `( , = : [ { ! & | ? ; >` (the `>` of `=>`), or the
     /// start of input; division follows a completed value (identifier, `)`, `]`).
     private static func startsRegex(after lastSig: Character?) -> Bool {
         guard let last = lastSig else { return true }
@@ -173,97 +159,5 @@ public enum FigSpecParser {
 
     private static func isIdentContinue(_ c: Character) -> Bool {
         isIdentStart(c) || c.isNumber
-    }
-
-    // MARK: - Frame-stack walk
-
-    private enum Frame {
-        case object(isTopMember: Bool)
-        case array(key: String?, topLevel: Bool)
-    }
-
-    /// Walk the token stream, returning the `name` value of every object that is a
-    /// direct element of a top-level `subcommands:` / `options:` array (a string
-    /// name, or each alias of a `["…","…"]` name array; templated names skipped).
-    private static func topLevelMemberNames(in tokens: [Token]) -> [String] {
-        var names: [String] = []
-        var stack: [Frame] = []
-        var pendingKey: String? = nil
-        var lastIdent: String? = nil
-        var skippingImport = false
-        var idx = 0
-
-        while idx < tokens.count {
-            let token = tokens[idx]
-
-            if skippingImport {
-                if case .string = token { skippingImport = false }
-                idx += 1
-                continue
-            }
-
-            // Intercept a top-level member's own `name:` value before generic handling.
-            if pendingKey == "name", case .object(let isTopMember)? = stack.last, isTopMember {
-                if case .string(let value, let template) = token {
-                    if !template { names.append(value) }
-                    pendingKey = nil
-                    idx += 1
-                    continue
-                }
-                if case .punct("[") = token {
-                    idx = collectAliasArray(tokens, from: idx, into: &names)
-                    pendingKey = nil
-                    continue
-                }
-                pendingKey = nil   // a computed/unhandled name value; fall through
-            }
-
-            switch token {
-            case .ident(let name):
-                if name == "import", stack.isEmpty { skippingImport = true } else { lastIdent = name }
-            case .punct(":"):
-                pendingKey = lastIdent
-                lastIdent = nil
-            case .punct("["):
-                let topLevel: Bool
-                if stack.count == 1, case .object = stack[0] { topLevel = true } else { topLevel = false }
-                stack.append(.array(key: pendingKey, topLevel: topLevel))
-                pendingKey = nil
-            case .punct("{"):
-                var isTopMember = false
-                if case .array(let key, let topLevel)? = stack.last,
-                   topLevel, key == "subcommands" || key == "options" {
-                    isTopMember = true
-                }
-                stack.append(.object(isTopMember: isTopMember))
-                pendingKey = nil
-            case .punct("]"), .punct("}"):
-                if !stack.isEmpty { stack.removeLast() }
-                pendingKey = nil
-            default:                       // string value, comma, stray punct
-                pendingKey = nil
-            }
-            idx += 1
-        }
-        return names
-    }
-
-    /// Consume a `["a", "b"]` name-alias array starting at the `[` at `start`,
-    /// appending each non-template string alias to `names`. Returns the index just
-    /// past the matching `]` (bracket-depth balanced).
-    private static func collectAliasArray(_ tokens: [Token], from start: Int,
-                                          into names: inout [String]) -> Int {
-        var idx = start + 1
-        var depth = 1
-        while idx < tokens.count, depth > 0 {
-            switch tokens[idx] {
-            case .punct("["): depth += 1
-            case .punct("]"): depth -= 1
-            case .string(let value, let template) where depth == 1 && !template: names.append(value)
-            default: break
-            }
-            idx += 1
-        }
-        return idx
     }
 }

@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// RollingBigramVocabulary — Core tier. Next-token prediction with daily
+/// RollingBigramVocabulary, Core tier. Next-token prediction with daily
 /// time-windowing: record → today, rollover slides each window, queries read
 /// `today ⊕ rolling_W` for one previous token's successors. See
 /// `2026-06-21-predictor-bigram-rollover-design`.
@@ -89,12 +89,13 @@ final class RollingBigramVocabularyTests: XCTestCase {
         s.record(previous: "git", next: "", count: 5)
         s.record(previous: "git", next: "status", count: 0)
         s.record(previous: "gi\u{1F}t", next: "status", count: 5)
+        s.record(previous: "git", next: "sta\u{1F}tus", count: 5)
         XCTAssertEqual(s.candidates(after: "git", window: .days7), [],
                        "empty/zero/separator-bearing pairs must not be recorded")
         XCTAssertNil(count(s, .days7, previous: "", next: "status"))
     }
 
-    // MARK: serialization (Critical tier — persisted learned state)
+    // MARK: serialization (Critical tier, persisted learned state)
 
     func testSerializationRoundTripPreservesWindowsAndAdjacency() {
         var s = RollingBigramVocabulary()

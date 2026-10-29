@@ -6,7 +6,7 @@ import SemicolynKit
 
 /// Registers bundled + imported Nerd Fonts with CoreText and resolves a
 /// `TerminalFont` to a concrete `UIFont`. The resolver always returns a real
-/// font — an unresolvable name falls back through the Kit default to the
+/// font, an unresolvable name falls back through the Kit default to the
 /// system monospace, never tofu.
 @MainActor final class TerminalFontProvider {
     static let shared = TerminalFontProvider()
@@ -32,7 +32,7 @@ import SemicolynKit
 
     /// Directory where user-imported font files are copied so they survive relaunch.
     /// The picker copies into here; `registerImportedFonts()` re-registers them at launch.
-    /// Pure path computation — reading it does NOT create the directory (use
+    /// Pure path computation, reading it does NOT create the directory (use
     /// `ensureImportedFontsDirectory()` for that, so a plain read has no side effect).
     static var importedFontsDirectory: URL? {
         try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,

@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// LearnedStore — Critical tier. Persists/restores the user's windowed learned
+/// LearnedStore, Critical tier. Persists/restores the user's windowed learned
 /// vocabulary; fail-soft to empty on first run or corruption. Exercised against
 /// real temp directories. See `2026-06-21-predictor-learned-store-design`.
 final class LearnedStoreTests: XCTestCase {

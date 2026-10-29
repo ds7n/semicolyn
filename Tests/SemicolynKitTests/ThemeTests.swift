@@ -9,7 +9,7 @@ final class ThemeTests: XCTestCase {
     }
 
     func testSharedReferenceIsDriftProof() {
-        // bell.edge and accent.primary both map to bronze500 — same value.
+        // bell.edge and accent.primary both map to bronze500, same value.
         XCTAssertEqual(Theme.bellBronze.bell.edge, Theme.bellBronze.accent.primary)
     }
 
@@ -88,7 +88,7 @@ final class ThemeTests: XCTestCase {
     }
 
     func testNeonMidnightAnsiCoralAndCrimsonSlots() {
-        // accent(coral) lives in brightRed; error(crimson) in red — kept distinct.
+        // accent(coral) lives in brightRed; error(crimson) in red, kept distinct.
         XCTAssertEqual(Theme.neonMidnight.ansi[.brightRed], ThemeColor("#FF6F5E"))
         XCTAssertEqual(Theme.neonMidnight.ansi[.red], ThemeColor("#E5455E"))
     }

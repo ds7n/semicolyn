@@ -4,11 +4,11 @@ import Foundation
 
 /// Decide how a keystroke event is rendered in the diagnostic trace.
 ///
-/// - `logContent == false` (default): structural only — the event verb + length, no
+/// - `logContent == false` (default): structural only, the event verb + length, no
 ///   characters. Diagnoses key-path behavior (e.g. backspace repeat) without exposing
 ///   what was typed.
 /// - `logContent == true` on a password/prompt line: a VISIBLE redaction marker with the
-///   length and reason — never the content, and never a silent drop (the trace still
+///   length and reason, never the content, and never a silent drop (the trace still
 ///   shows a password line happened).
 /// - `logContent == true` otherwise: the actual content.
 public func keystrokeLogDecision(event: String, content: String,

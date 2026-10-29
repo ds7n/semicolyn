@@ -6,7 +6,7 @@ import UIKit
 /// On-screen diagnostic panel (Settings → Diagnostics). Shows the rolling `DebugLog`
 /// buffer with Copy (→ clipboard) and Clear. The buffer is not `@Published` (so
 /// recording never invalidates SwiftUI per keystroke); the panel instead observes
-/// `log.revision` and drives `refresh()` on a ~0.5s timer while visible — a redraw
+/// `log.revision` and drives `refresh()` on a ~0.5s timer while visible, a redraw
 /// cadence the human eye can't out-pace, at zero cost to the input path.
 struct DebugLogPanel: View {
     @ObservedObject var log = DebugLog.shared

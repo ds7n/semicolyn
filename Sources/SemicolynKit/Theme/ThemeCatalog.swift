@@ -26,7 +26,7 @@ public struct ThemeDescriptor: Equatable, Sendable {
 }
 
 extension Theme {
-    /// Ordered theme catalog — the free default first. Single source of truth for
+    /// Ordered theme catalog, the free default first. Single source of truth for
     /// both the picker's order and `Theme.all`.
     public static let catalog: [ThemeDescriptor] = [
         ThemeDescriptor(id: ThemeID("neonMidnight"), displayName: "Neon Midnight",
@@ -45,7 +45,7 @@ extension Theme {
 
 /// Resolves the descriptor that should actually be applied, enforcing the
 /// Pro-gate: a Pro theme requires `isPro`, otherwise it falls back to the free
-/// default; an unknown id also falls back. This is the single gate decision — the
+/// default; an unknown id also falls back. This is the single gate decision, the
 /// UI cannot leak a locked theme even with a stale persisted id.
 public func resolveDescriptor(
     selectedID: ThemeID,

@@ -12,12 +12,12 @@ final class PredictorInputFilterTests: XCTestCase {
         XCTAssertEqual(predictorScalars(Array("ls".utf8)), s("ls"))
     }
 
-    // BVA: space (0x20) is the low boundary — included.
+    // BVA: space (0x20) is the low boundary, included.
     func testSpaceIsIncluded() {
         XCTAssertEqual(predictorScalars([0x20]), s(" "))
     }
 
-    // BVA: tilde (0x7e) is the high boundary — included.
+    // BVA: tilde (0x7e) is the high boundary, included.
     func testTildeIsIncluded() {
         XCTAssertEqual(predictorScalars([0x7e]), s("~"))
     }

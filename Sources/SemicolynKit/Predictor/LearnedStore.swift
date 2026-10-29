@@ -14,7 +14,7 @@ public struct LearnedState: Equatable, Sendable {
         self.bigram = bigram
     }
 
-    /// A fresh, empty state at the spec's default dimensions — the first-launch
+    /// A fresh, empty state at the spec's default dimensions, the first-launch
     /// (and fail-soft) value.
     public static var empty: LearnedState {
         LearnedState(unigram: RollingVocabulary(), bigram: RollingBigramVocabulary())
@@ -60,7 +60,7 @@ public struct LearnedStore {
     /// launch) or the file is corrupt. Never throws and never returns nil: a
     /// missing or damaged store restarts learning rather than breaking input.
     ///
-    /// Caller caution: an empty result does **not** prove the user has no history —
+    /// Caller caution: an empty result does **not** prove the user has no history,
     /// a *transient* read failure also yields empty (notably an iOS
     /// `NSFileProtectionComplete` file is unreadable while the device is locked).
     /// Callers must not treat an empty load as authoritative and unconditionally

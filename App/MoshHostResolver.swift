@@ -5,7 +5,7 @@ import Foundation
 /// Resolves a host string to a NUMERIC IP for the Mosh client.
 ///
 /// Why this exists: `mosh-client` (via `libmoshios`) calls `getaddrinfo` with
-/// `AI_NUMERICHOST`, which accepts ONLY a numeric IP and does NO DNS resolution — so
+/// `AI_NUMERICHOST`, which accepts ONLY a numeric IP and does NO DNS resolution, so
 /// handing it a hostname (`server01.example.com`) fails with "Bad IP address …
 /// nodename nor servname provided" and the whole Mosh session dies at handshake
 /// (device trace, build 24). SSH resolves the name itself, so SSH connects fine; the

@@ -4,16 +4,16 @@
 #
 # View-only gate: fail if an App/**.swift file contains pure decision logic that
 # belongs in Sources/SemicolynKit/. Heuristic + allowlisted; see
-# docs/app-view-only-gate.md. Low-false-positive by design — flag only the
+# docs/app-view-only-gate.md. Low-false-positive by design, flag only the
 # clearest smells (free-function value-returning math on plain Int/Double).
 set -euo pipefail
 
 APP_DIR="${1:-App}"
 
 # Smell: a private/free func returning a scalar computed from scalar args with a
-# modulo/arithmetic body — the window-step class. Extended cautiously over time.
+# modulo/arithmetic body, the window-step class. Extended cautiously over time.
 # Allowlist: SwiftUI/UIKit wiring never matches because it returns View/Void or
-# touches self./view./@Published — excluded below.
+# touches self./view./@Published, excluded below.
 scan() {
   local dir="$1"
   # -P: Perl regex; match a func returning a bare scalar (`-> Int|Double|Bool {`),
@@ -51,7 +51,7 @@ if [ "${1:-}" = "--selftest" ]; then selftest; exit 0; fi
 
 hits="$(scan "$APP_DIR")"
 if [ -n "$hits" ]; then
-  echo "View-only gate: pure logic found in App/ — move it to Sources/SemicolynKit/ and unit-test it:" >&2
+  echo "View-only gate: pure logic found in App/, move it to Sources/SemicolynKit/ and unit-test it:" >&2
   echo "$hits" >&2
   echo "(See docs/app-view-only-gate.md. If this is a false positive, refine the allowlist there.)" >&2
   exit 1

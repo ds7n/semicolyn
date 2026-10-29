@@ -16,7 +16,7 @@ public protocol AsyncByteSink: Sendable {
 ///
 /// Enqueuing is synchronous and non-blocking; a single long-lived consumer task
 /// awaits each `send` fully before starting the next. This preserves ordering
-/// even when the sink stalls under back-pressure — the failure mode of spawning
+/// even when the sink stalls under back-pressure, the failure mode of spawning
 /// one unstructured `Task` per write, where suspended tasks can resume in any
 /// order and deliver bytes out of sequence.
 public final class SerialByteWriter: Sendable {
@@ -48,7 +48,7 @@ public final class SerialByteWriter: Sendable {
         continuation.finish()
     }
 
-    /// Await the consumer after `finish()` — all queued chunks have been sent.
+    /// Await the consumer after `finish()`, all queued chunks have been sent.
     public func waitUntilDrained() async {
         await consumer.value
     }

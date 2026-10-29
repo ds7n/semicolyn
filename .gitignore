@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: 2026 True Positive LLC
 # SPDX-License-Identifier: GPL-3.0-only
 
-# Diagnostics syslog sink — local cert + captured logs (never commit)
+# Diagnostics syslog sink, local cert + captured logs (never commit)
 /tools/syslog-sink/logs/
 /tools/syslog-sink/cert/
 
 # Rust / Cargo
 /target/
-# Cargo.lock IS committed — this crate ships into a shipped app binary.
+# Cargo.lock IS committed, this crate ships into a shipped app binary.
 # cargo-mutants output (on-demand mutation testing artifacts)
 /mutants.out/
 /mutants.out.old/
@@ -28,7 +28,7 @@
 .env
 /data/
 
-# Local dev/tooling state that must NEVER be committed — these are the user's
+# Local dev/tooling state that must NEVER be committed, these are the user's
 # shell rc files, IDE dirs, MCP registration, and Claude Code harness placeholders
 # that a `git add -A` swept in once (commit 54465ba). Ignore so they can't recur.
 /.mcp.json
@@ -58,10 +58,10 @@
 # Build-time seed artifacts (from the retired legacy seed build)
 /seeds/
 
-# Superpowers scratch — SDD progress ledger + brainstorm visual-companion sessions
+# Superpowers scratch, SDD progress ledger + brainstorm visual-companion sessions
 /.superpowers/
 
-# Review-skill output (findings reports — regenerated on demand, not source)
+# Review-skill output (findings reports, regenerated on demand, not source)
 /.code-review/
 /.security-review/
 

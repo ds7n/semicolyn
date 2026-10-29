@@ -5,11 +5,11 @@
 /// updated on `bufferActivated` / `mouseModeChanged` delegate events; the gesture
 /// layer routes drag / tap / selection per mode. One unambiguous drag-owner each.
 public enum InteractionMode: Equatable, Sendable {
-    /// Normal screen, no mouse reporting — SwiftTerm's native scroll owns the drag.
+    /// Normal screen, no mouse reporting, SwiftTerm's native scroll owns the drag.
     case localScroll
-    /// Alternate screen (vim/htop/Claude) — we translate drag→arrows, tap→mouse.
+    /// Alternate screen (vim/htop/Claude), we translate drag→arrows, tap→mouse.
     case appOwnsInput
-    /// Normal screen, app enabled mouse reporting — forward events to the app.
+    /// Normal screen, app enabled mouse reporting, forward events to the app.
     case mouseReporting
 }
 

@@ -4,13 +4,13 @@ import XCTest
 @testable import SemicolynKit
 
 final class TmuxSessionNameTests: XCTestCase {
-    // normalizedTmuxSessionName — trim + empty→nil
+    // normalizedTmuxSessionName, trim + empty→nil
     func testNormalizeTrims() { XCTAssertEqual(normalizedTmuxSessionName("  x  "), "x") }
     func testNormalizeEmptyIsNil() { XCTAssertNil(normalizedTmuxSessionName("")) }
     func testNormalizeWhitespaceOnlyIsNil() { XCTAssertNil(normalizedTmuxSessionName("   ")) }
     func testNormalizeKeepsValidName() { XCTAssertEqual(normalizedTmuxSessionName("semicolyn"), "semicolyn") }
 
-    // isValidTmuxSessionName — Critical tier (command-injection surface): EP + adversarial
+    // isValidTmuxSessionName, Critical tier (command-injection surface): EP + adversarial
     func testValidNames() {
         for n in ["semicolyn", "work", "my-session", "dev_2", "A1"] {
             XCTAssertTrue(isValidTmuxSessionName(n), "\(n) should be valid")

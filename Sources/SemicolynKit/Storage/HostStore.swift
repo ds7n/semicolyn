@@ -36,7 +36,7 @@ public enum StoreError: Error, Equatable {
 }
 
 /// The result of a successful save. Duplicate labels are a soft-uniqueness
-/// **warning** (the save still happened) — never a failure.
+/// **warning** (the save still happened), never a failure.
 public struct SaveOutcome: Equatable, Sendable {
     public let duplicateLabels: [HostRef]
     public init(duplicateLabels: [HostRef]) {
@@ -85,7 +85,7 @@ public struct HostStore {
     }
 
     /// Delete the host. Throws `.jumpHostInUse` if any other host references it as
-    /// a jump host (no silent cascade — the user reroutes the dependents first).
+    /// a jump host (no silent cascade, the user reroutes the dependents first).
     public func deleteHost(id: UUID) throws {
         let referrers = try allHosts()
             .filter { $0.id != id && $0.resolvedJumpChain.contains { isRef($0, to: id) } }

@@ -39,9 +39,9 @@ gesture/selection/key/scroll/tmux trace in a logfile you can `tail -f`.
 
 - **TLS 6514** (recommended): encrypted, self-signed cert above.
 - **TCP 514**: reliable plaintext, no cert needed (`Transport = TCP`).
-- **UDP 514**: plaintext, lossy — fine for a quick check (`Transport = UDP`).
+- **UDP 514**: plaintext, lossy, fine for a quick check (`Transport = UDP`).
 
 For a bare listener without this stack you can also just run
 `ncat --ssl -l 6514` (TLS) or `nc -l 514` (plain TCP) to eyeball lines live.
 
-`cert/` and `logs/` are gitignored — they hold your local cert + captured logs.
+`cert/` and `logs/` are gitignored, they hold your local cert + captured logs.

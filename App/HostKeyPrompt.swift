@@ -11,7 +11,7 @@ enum HostKeyPrompt: Identifiable, Equatable {
     case firstTrust(hostLabel: String, keyType: String, offered: String)
     case mismatch(hostLabel: String, keyType: String, stored: String, offered: String)
 
-    /// Stable identifier per case + content — safe for `.sheet(item:)`.
+    /// Stable identifier per case + content, safe for `.sheet(item:)`.
     var id: String {
         switch self {
         case .firstTrust(let h, let k, let o):
@@ -24,7 +24,7 @@ enum HostKeyPrompt: Identifiable, Equatable {
 
 // MARK: - First-trust modal
 
-/// "Trust this host?" — shown when no stored key exists for the offered
+/// "Trust this host?", shown when no stored key exists for the offered
 /// algorithm. Resolves via `onDecision`: `true` = trust & connect,
 /// `false` = cancel (no entry written).
 struct FirstTrustModal: View {
@@ -109,7 +109,7 @@ struct FirstTrustModal: View {
 
 // MARK: - Mismatch modal
 
-/// "⚠ Host key changed" — shown when the offered key doesn't match the
+/// "⚠ Host key changed", shown when the offered key doesn't match the
 /// stored entry. Resolves via `onDecision`: `true` = replace & connect
 /// (only after a secondary destructive confirmation), `false` = cancel.
 struct MismatchModal: View {
@@ -146,7 +146,7 @@ struct MismatchModal: View {
                         .font(.subheadline)
                         .foregroundStyle(Color(theme.text.secondary))
 
-                    // Body copy — verbatim from spec
+                    // Body copy, verbatim from spec
                     Text(
                         "This may indicate a man-in-the-middle attack. Only continue if you know the host key legitimately changed (server reinstall, key rotation)."
                     )

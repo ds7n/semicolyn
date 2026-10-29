@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// RollingVocabulary — Core tier. The daily-windowing state machine: record →
+/// RollingVocabulary, Core tier. The daily-windowing state machine: record →
 /// today, rollover slides each window, queries read today ⊕ rolling.
 final class RollingVocabularyTests: XCTestCase {
     /// Summed `today ⊕ rolling_<window>` count for the exact `token`, or nil if
@@ -69,7 +69,7 @@ final class RollingVocabularyTests: XCTestCase {
     func testSevenDayEvictionStaysCorrectAfterPruningIsActive() {
         // Drive past the 90-day horizon so the dailies array is being pruned
         // (shifted) on every rollover, then verify the 7-day window still evicts
-        // at exactly the right boundary — catching any index drift introduced by
+        // at exactly the right boundary, catching any index drift introduced by
         // the post-prune array shift.
         var s = RollingVocabulary()
         for _ in 0..<95 { s.rollover() }       // pruning now active each rollover
@@ -91,7 +91,7 @@ final class RollingVocabularyTests: XCTestCase {
         XCTAssertNil(count(s, .days7, ""), "empty token must not be recorded")
     }
 
-    // MARK: serialization (Critical tier — persisted learned state)
+    // MARK: serialization (Critical tier, persisted learned state)
 
     func testSerializationRoundTripPreservesWindows() {
         var s = RollingVocabulary()
@@ -163,7 +163,7 @@ final class RollingVocabularyTests: XCTestCase {
 
     func testDailyCountRetentionBoundary() {
         // BVA on the retention horizon (90): a hand-assembled blob with 90 dailies
-        // is valid; 91 — more than any real pruned state holds — is rejected.
+        // is valid; 91, more than any real pruned state holds, is rejected.
         func blob(dailies: Int) -> [UInt8] {
             var b: [UInt8] = Array("GRLV".utf8)
             b.append(0x01)

@@ -30,7 +30,7 @@ public struct GestureBinding: Equatable, Sendable, Codable {
 
 /// A user-created slot: a bundle of up to four gesture bindings plus an optional
 /// primary label/glyph override. A slot with no bindings is meaningless and not
-/// allowed — the editor gates Save on `hasAnyBinding`. (spec "Custom slot
+/// allowed, the editor gates Save on `hasAnyBinding`. (spec "Custom slot
 /// binding model".)
 public struct CustomSlot: Equatable, Sendable, Codable, Identifiable {
     public let id: CustomSlotID

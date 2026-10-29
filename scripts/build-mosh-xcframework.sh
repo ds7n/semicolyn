@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 True Positive LLC
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# build-mosh-xcframework.sh — cross-compile the vendored blinksh/mosh C++ into
+# build-mosh-xcframework.sh, cross-compile the vendored blinksh/mosh C++ into
 # Mosh.xcframework for iOS (arm64 device + arm64/x86_64 simulator).
 #
 # This is macOS-only build engineering: it drives Xcode's clang, autotools,
@@ -14,7 +14,7 @@
 #   1. Cross-build Mosh's four REQUIRED native deps as iOS static libs:
 #        OpenSSL, Nettle, ncurses (tinfo), protobuf (runtime lib).
 #      `protoc` (the codegen compiler) is built ONCE for the build host so it
-#      can run natively — we never cross-run protoc.
+#      can run natively, we never cross-run protoc.
 #   2. autogen + configure + make the Mosh iOS controller library, pointing its
 #      pkg-config / CPPFLAGS / LDFLAGS at the per-slice dep prefix. The product
 #      is src/frontend/libmoshiosclient.a (which contains `mosh_main`).
@@ -79,7 +79,7 @@ SLICES=(
 # Small utilities.                                                            #
 # --------------------------------------------------------------------------- #
 
-# fetch <url> <dest-tarball> — download a source tarball once (idempotent).
+# fetch <url> <dest-tarball>, download a source tarball once (idempotent).
 fetch() {
   local url="$1" dest="$2"
   if [[ -f "$dest" ]]; then
@@ -90,7 +90,7 @@ fetch() {
   curl -fsSL "$url" -o "$dest"
 }
 
-# extract <tarball> <parent-dir> — untar into parent-dir, echoing the top dir.
+# extract <tarball> <parent-dir>, untar into parent-dir, echoing the top dir.
 extract() {
   local tarball="$1" parent="$2"
   mkdir -p "$parent"
@@ -136,7 +136,7 @@ build_host_protoc() {
 # CC/CXX/CFLAGS/CXXFLAGS/LDFLAGS are exported by build_slice before calling.   #
 # --------------------------------------------------------------------------- #
 
-# build_ncurses <prefix> — ncurses provides the tinfo library Mosh requires
+# build_ncurses <prefix>, ncurses provides the tinfo library Mosh requires
 # (the iOS SDK ships no curses). We build the tinfo half only.
 build_ncurses() {
   local prefix="$1"
@@ -172,7 +172,7 @@ build_ncurses() {
     # BUILD compiler clean host flags via --with-build-c*flags so the probe passes.
     # Put a modern tic first on PATH for MKfallback.sh.
     # --with-ospeed=int: with the default (short), ncurses sets NCURSES_OSPEED_COMPAT=1,
-    # and lib_baudrate.c then does `#include <sys/ttydev.h>` on __APPLE__ — a header the
+    # and lib_baudrate.c then does `#include <sys/ttydev.h>` on __APPLE__, a header the
     # iOS SDK doesn't ship (macOS does), so the cross-build fails "file not found". A
     # non-short ospeed type sets the compat macro to 0 and drops the include entirely.
     local host_sdk; host_sdk="$(xcrun --sdk macosx --show-sdk-path)"
@@ -207,7 +207,7 @@ build_ncurses() {
   fi
 }
 
-# build_protobuf_target <prefix> — cross-build libprotobuf (runtime) for the
+# build_protobuf_target <prefix>, cross-build libprotobuf (runtime) for the
 # iOS slice. protoc is NOT built here (we use the host protoc from build_host_protoc).
 build_protobuf_target() {
   local prefix="$1"
@@ -308,7 +308,7 @@ build_slice() {
   test -f "$produced" || { echo "FATAL: $name did not produce $LIB_NAME"; exit 1; }
 
   # `libmoshiosclient.a` (frontend: moshiosbridge.o + iosclient.o + terminaloverlay.o)
-  # is NOT self-contained — it references the sibling Mosh static libs (util defines
+  # is NOT self-contained, it references the sibling Mosh static libs (util defines
   # is_utf8_locale/set_native_locale/freeze_timestamp/LocaleVar::str, plus network/
   # crypto/terminal/statesync/protobuf) exactly as the frontend Makefile.am LDADD lists.
   # A normal Mosh build links those into the final executable; shipping the frontend .a
@@ -318,9 +318,9 @@ build_slice() {
   # DO NOT merge with `libtool -static <a.a> <b.a> …`: Apple libtool de-dups members
   # ACROSS input archives by bare basename (keeping the first), so a basename collision
   # with the autotools-built libprotobuf.a / libncurses.a silently drops whole Mosh
-  # members — this exact bug ate locale_utils.o's definitions (they stayed `U` in the
+  # members, this exact bug ate locale_utils.o's definitions (they stayed `U` in the
   # output). Instead explode every archive into its OWN scratch dir (identical basenames
-  # from different archives can't clobber) and re-archive the resulting OBJECT files —
+  # from different archives can't clobber) and re-archive the resulting OBJECT files,
   # objects carry no basename-dedup semantics, so nothing is dropped.
   local -a src_archives=(
     "$produced"
@@ -362,7 +362,7 @@ build_slice() {
   # Re-archive the plain OBJECTS (not archives): no cross-archive basename dedup, so
   # every definition is preserved; libtool also writes a proper Mach-O symbol table and
   # tolerates empty objects like iOS's pty_compat.o. (No -no_warning_for_no_symbol* flag:
-  # its spelling varies across libtool builds and it is purely cosmetic — the empty-member
+  # its spelling varies across libtool builds and it is purely cosmetic, the empty-member
   # warnings are harmless.)
   rm -f "$workdir/$LIB_NAME"
   echo "    re-archiving ${#all_objs[@]} objects from ${#src_archives[@]} archives"
@@ -378,11 +378,11 @@ build_slice() {
   slice_nm="$(nm -arch "$arch" "$workdir/$LIB_NAME" 2>/dev/null || true)"
   sentinel_def="$(printf '%s\n' "$slice_nm" | grep -E '[[:space:]]T[[:space:]]+_?__Z17set_native_localev$' || true)"
   if [[ -z "$sentinel_def" ]]; then
-    echo "FATAL: $name $LIB_NAME is missing the set_native_locale DEFINITION (T) —" \
+    echo "FATAL: $name $LIB_NAME is missing the set_native_locale DEFINITION (T)," \
          "the object merge dropped util objects." >&2
     echo "  --- locale/native symbols present (for diagnosis): ---" >&2
     printf '%s\n' "$slice_nm" | grep -Ei "set_native_locale|locale_utils|is_utf8" | head -20 >&2 \
-      || echo "  (no locale symbols AT ALL — locale_utils.o was not extracted/merged)" >&2
+      || echo "  (no locale symbols AT ALL, locale_utils.o was not extracted/merged)" >&2
     exit 1
   fi
   rm -rf "$objdir"
@@ -478,18 +478,18 @@ main() {
   fi
 
   # SELF-CONTAINMENT GATE on the FINAL packaged device slice (belt-and-suspenders over
-  # build_slice's per-slice guard): exporting mosh_main is necessary but NOT sufficient —
+  # build_slice's per-slice guard): exporting mosh_main is necessary but NOT sufficient,
   # the frontend lib references sibling helpers (set_native_locale in libmoshutil) that
   # must be merged in, or the app link fails with "Undefined symbols". Match the MANGLED
-  # C++ name (`__Z17set_native_localev`) — it is C++-linkage, not extern "C" like
+  # C++ name (`__Z17set_native_localev`), it is C++-linkage, not extern "C" like
   # mosh_main, so it never appears unmangled. Assert it's DEFINED (T), not undefined (U).
   local sentinel_hit
   sentinel_hit="$(printf '%s\n' "$nm_out" | grep -E "[[:space:]]T[[:space:]]+_?__Z17set_native_localev$" || true)"
   if [[ -n "$sentinel_hit" ]]; then
-    echo "OK: set_native_locale is DEFINED (T) in the packaged device slice — self-contained."
+    echo "OK: set_native_locale is DEFINED (T) in the packaged device slice, self-contained."
     echo "SUCCESS: built $OUT"
   else
-    echo "GATE FAIL: set_native_locale is not a defined (T) symbol in $device_lib — the sibling" >&2
+    echo "GATE FAIL: set_native_locale is not a defined (T) symbol in $device_lib, the sibling" >&2
     echo "  Mosh objects were not merged in; the app will fail to link. Check build_slice's object merge." >&2
     printf '%s\n' "$nm_out" | grep -Ei "locale|native" | head -20 >&2 || true
     exit 1

@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// `MacroRecorder` — the pure accumulation model behind record mode: captures
+/// `MacroRecorder`, the pure accumulation model behind record mode: captures
 /// input events in order, then lets the review UI reorder / delete / insert
 /// chips before saving (keybar-customization spec "Record mode").
 final class MacroRecorderTests: XCTestCase {

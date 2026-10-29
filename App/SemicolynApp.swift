@@ -30,7 +30,7 @@ struct SemicolynApp: App {
 /// Observes the appearance + Pro stores, resolves the active theme through the
 /// pure gate, and injects it into the environment so every `@Environment(\.theme)`
 /// consumer recolors live. (Before this, nothing injected `\.theme`, so the app
-/// was stuck on the default — this is the wire that makes themes switchable.)
+/// was stuck on the default, this is the wire that makes themes switchable.)
 private struct RootView: View {
     @ObservedObject private var appearance = AppStores.shared.appearance
     @ObservedObject private var pro = AppStores.shared.pro

@@ -14,7 +14,7 @@ public func classifyURL(_ link: String) -> URLKind? {
     return nil
 }
 
-/// Join a URL split across a hard row wrap — only when part1 ends mid-token
+/// Join a URL split across a hard row wrap, only when part1 ends mid-token
 /// (no trailing whitespace) and part2 starts at column 0 (no leading whitespace).
 public func joinWrappedURL(part1: String, part2: String) -> String? {
     guard let last = part1.last, !last.isWhitespace else { return nil }

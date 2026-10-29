@@ -12,7 +12,7 @@ public enum KeyInput: Equatable, Sendable {
     case enter
     case backspace
     case arrow(ArrowDirection)
-    case function(Int)   // F1–F12
+    case function(Int)   // F1-F12
 }
 
 /// The modifier set armed against a keystroke.
@@ -26,7 +26,7 @@ public struct KeyModifiers: Equatable, Sendable, Codable {
 }
 
 /// The control byte for `ch` in caret notation, or nil when `ch` has no control
-/// form (e.g. a digit). `a`–`z`/`A`–`Z`→1–26, `@A–Z[\]^_`→`&0x1f`, space/`@`→0, `?`→DEL.
+/// form (e.g. a digit). `a`-`z`/`A`-`Z`→1-26, `@A-Z[\]^_`→`&0x1f`, space/`@`→0, `?`→DEL.
 private func controlByte(for ch: Character) -> UInt8? {
     guard let a = ch.asciiValue else { return nil }
     switch a {
@@ -122,7 +122,7 @@ public func encodeKey(_ key: KeyInput, modifiers: KeyModifiers, applicationCurso
         case 10: return Array("\u{1b}[21~".utf8)
         case 11: return Array("\u{1b}[23~".utf8)
         case 12: return Array("\u{1b}[24~".utf8)
-        default: return []   // outside F1–F12
+        default: return []   // outside F1-F12
         }
     case .char(let ch):
         var base: [UInt8]

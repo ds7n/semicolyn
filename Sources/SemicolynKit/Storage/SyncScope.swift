@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-/// Where a stored item lives and how it is protected — the storage backbone from
+/// Where a stored item lives and how it is protected, the storage backbone from
 /// the host-config-model / iCloud-sync-scope specs.
 public enum SyncBackend: Equatable, Sendable {
     /// CloudKit Private DB, client-side AES-256-GCM. Syncs across Apple devices.
@@ -42,7 +42,7 @@ public enum SyncItem: CaseIterable, Sendable {
     }
 }
 
-/// Reserved Pro-tier compliance audit log — **dropped from v1**. The namespace
+/// Reserved Pro-tier compliance audit log, **dropped from v1**. The namespace
 /// and emission hook are reserved (per iCloud-sync-scope) so a future Pro
 /// feature can turn them on without retroactive instrumentation. `record` is a
 /// no-op in v1: it writes nowhere and allocates nothing (the `@autoclosure`

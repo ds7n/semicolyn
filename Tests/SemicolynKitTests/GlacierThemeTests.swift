@@ -42,7 +42,7 @@ final class GlacierThemeTests: XCTestCase {
         XCTAssertEqual(theme.terminal.selection, ThemeColor("#8AA6E8", opacity: 0.30))
     }
 
-    // Distinctly LIGHTER base than the dark themes — Glacier's defining trait.
+    // Distinctly LIGHTER base than the dark themes, Glacier's defining trait.
     // brightBlack (line source) sits well above near-black; assert the slate ground.
     func testLighterSlateBase() {
         XCTAssertEqual(theme.surface.bg, ThemeColor("#181F30"))

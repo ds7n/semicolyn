@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 /// Ctrl arming state (function-keys spec, amended: tap=arm one-shot). The former
-/// `.locked` state and its double-tap gesture were removed — the double-tap
+/// `.locked` state and its double-tap gesture were removed, the double-tap
 /// recognizer forced SwiftUI to wait out the double-tap window before firing the
 /// single-tap arm, which made touching Ctrl feel laggy (~0.5s). Ctrl is one-shot
 /// only now; Alt/Shift already were.
@@ -36,7 +36,7 @@ public struct ModifierState: Equatable, Sendable {
         KeyModifiers(control: ctrl != .off, option: altArmed, shift: shiftArmed)
     }
 
-    /// True when any modifier is armed or locked — i.e. a plain character typed on
+    /// True when any modifier is armed or locked, i.e. a plain character typed on
     /// the terminal keyboard should be re-encoded through `encodeKey` rather than
     /// sent raw.
     public var hasArmedModifier: Bool { ctrl != .off || altArmed || shiftArmed }

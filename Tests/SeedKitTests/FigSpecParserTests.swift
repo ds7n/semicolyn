@@ -3,16 +3,15 @@
 import XCTest
 @testable import SeedKit
 
-/// FigSpecParser — Core tier. Extracts top-level (command, subcommand)/(command,
-/// flag) pairs from a Fig TypeScript completion spec, robust to TS noise. See
-/// `2026-06-21-predictor-fig-ingestion-design`.
+/// FigSpecParser tokenizer, Core tier: the top-level subcommand and option names
+/// `spec(fromSource:command:)` reads from a Fig TypeScript completion spec, robust
+/// to TS noise (comments, templates, regex literals, function bodies).
 final class FigSpecParserTests: XCTestCase {
-    /// Set of `next` members the parser attributes to `command`.
+    /// The top-level subcommand names (every alias) and option names of the spec.
     private func members(_ source: String, command: String) -> Set<String> {
-        let pairs = FigSpecParser.invocations(fromSpec: source, command: command)
-        // Every pair is [command, member].
-        for p in pairs { XCTAssertEqual(p.first, command, "every pair leads with the command") }
-        return Set(pairs.compactMap { $0.count == 2 ? $0[1] : nil })
+        let spec = FigSpecParser.spec(fromSource: source, command: command)
+        XCTAssertEqual(spec.names, [command], "the root is named by the command")
+        return Set(spec.subcommands.flatMap(\.names) + spec.options)
     }
 
     func testExtractsTopLevelSubcommandsAndOptions() {
@@ -95,7 +94,7 @@ final class FigSpecParserTests: XCTestCase {
         let src = #"""
         import { filepaths } from "@fig/autocomplete-generators";
         const gen = { script: (ctx) => { return `ls ${ctx[0]}`; }, postProcess: (o) => { return o; } };
-        const c: Fig.Spec = {
+        const completionSpec: Fig.Spec = {
           name: "kubectl",
           args: { generators: gen },
           subcommands: [{ name: "get", args: { name: "resource", generators: gen } }],
@@ -157,6 +156,7 @@ final class FigSpecParserTests: XCTestCase {
         let src = """
         const c: Fig.Spec = { name: "noop", args: { name: "x" } };
         """
-        XCTAssertEqual(FigSpecParser.invocations(fromSpec: src, command: "noop"), [])
+        let spec = FigSpecParser.spec(fromSource: src, command: "noop")
+        XCTAssertEqual(spec, FigCommandSpec(names: ["noop"], subcommands: [], options: []))
     }
 }

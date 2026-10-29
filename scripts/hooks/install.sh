@@ -22,5 +22,5 @@ if [[ ! -e "$overlay" && -e "$template" ]]; then
     chmod +x "$overlay"
     printf '\033[33m→ seeded %s (edit its `terms` list with your own name/paths)\033[0m\n' "$overlay"
 else
-    printf '   (local overlay already present or no template — skipping)\n'
+    printf '   (local overlay already present or no template, skipping)\n'
 fi

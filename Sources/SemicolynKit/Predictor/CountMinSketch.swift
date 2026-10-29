@@ -35,7 +35,7 @@ public struct CountMinSketch: Equatable, Sendable {
         }
     }
 
-    /// Estimated frequency of `token` — the minimum across its rows. Never below
+    /// Estimated frequency of `token`, the minimum across its rows. Never below
     /// the true count (one-sided error), unless a `subtract` has clamped a cell.
     public func estimate(_ token: String) -> UInt32 {
         let idx = StableHash.indices(token, count: depth, modulo: width)
@@ -59,7 +59,7 @@ public struct CountMinSketch: Equatable, Sendable {
     }
 
     /// Pointwise subtract `other` from self (eviction), clamping each cell at
-    /// zero — never underflows/wraps. Returns false and does nothing if
+    /// zero, never underflows/wraps. Returns false and does nothing if
     /// dimensions differ. A subtracted sketch may then under-estimate; that is
     /// the spec's accepted, tolerable noise for rollover eviction.
     @discardableResult
@@ -84,7 +84,7 @@ public struct CountMinSketch: Equatable, Sendable {
     }
 
     /// Reconstruct from a blob. Fails closed (`nil`) on wrong magic, unknown
-    /// version, dimension overflow, or wrong length — a corrupt or hostile
+    /// version, dimension overflow, or wrong length, a corrupt or hostile
     /// (synced) blob never yields a half-populated sketch.
     public init?(deserializing bytes: [UInt8]) {
         guard bytes.count >= Self.headerSize,

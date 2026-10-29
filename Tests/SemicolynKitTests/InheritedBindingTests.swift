@@ -93,11 +93,11 @@ final class InheritedBindingTests: XCTestCase {
         XCTAssertEqual(out, .explicit(22))
     }
 
-    // MARK: - textToInheritedInt(minimum: 0) — serverAlive fields
+    // MARK: - textToInheritedInt(minimum: 0), serverAlive fields
     //
     // For ServerAliveInterval/CountMax, `0` is a meaningful value (OpenSSH:
     // keepalives disabled), so those bindings pass `minimum: 0`. The boundary is
-    // the whole point of the fix — a user typing `0` must reach `.explicit(0)`,
+    // the whole point of the fix, a user typing `0` must reach `.explicit(0)`,
     // not silently become `.inherit`.
 
     func testZeroWithMinimumZeroBecomesExplicitZero() {
@@ -169,7 +169,7 @@ final class InheritedBindingTests: XCTestCase {
         XCTAssertEqual(selectionToInheritedBool(inheritedBoolToSelection(.explicit(false))), .explicit(false))
     }
 
-    /// `.explicit(nil)` has no distinct Picker representation; it collapses to `.inherit` on round-trip — intentional.
+    /// `.explicit(nil)` has no distinct Picker representation; it collapses to `.inherit` on round-trip, intentional.
     func testBoolExplicitNilRoundTripCollapsesToInherit() {
         XCTAssertEqual(selectionToInheritedBool(inheritedBoolToSelection(.explicit(nil))), .inherit)
     }
@@ -217,7 +217,7 @@ final class InheritedBindingTests: XCTestCase {
         XCTAssertEqual(selectionToInheritedSHKC(.yes), .explicit(.yes))
     }
 
-    /// `.explicit(nil)` has no distinct Picker representation; it collapses to `.inherit` on round-trip — intentional.
+    /// `.explicit(nil)` has no distinct Picker representation; it collapses to `.inherit` on round-trip, intentional.
     func testSHKCExplicitNilRoundTripCollapsesToInherit() {
         XCTAssertEqual(selectionToInheritedSHKC(inheritedSHKCToSelection(.explicit(nil))), .inherit)
     }
@@ -271,7 +271,7 @@ final class InheritedBindingTests: XCTestCase {
         XCTAssertEqual(result, .explicit([.publicKey, .password, .keyboardInteractive]))
     }
 
-    /// `.explicit(nil)` has no distinct Picker representation; it collapses to `.inherit` on round-trip — intentional.
+    /// `.explicit(nil)` has no distinct Picker representation; it collapses to `.inherit` on round-trip, intentional.
     func testAuthMethodsExplicitNilRoundTripCollapsesToInherit() {
         XCTAssertEqual(selectionToInheritedAuthMethods(inheritedAuthMethodsToSelection(.explicit(nil))), .inherit)
     }
@@ -281,7 +281,7 @@ final class InheritedBindingTests: XCTestCase {
     }
 
     func testAuthMethodsRoundTripExplicit() {
-        // All three — canonical order preserved through round-trip.
+        // All three, canonical order preserved through round-trip.
         let input: Inherited<[AuthMethod]> = .explicit([.publicKey, .password, .keyboardInteractive])
         let out = selectionToInheritedAuthMethods(inheritedAuthMethodsToSelection(input))
         XCTAssertEqual(out, input)

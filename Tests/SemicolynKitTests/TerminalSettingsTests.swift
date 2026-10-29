@@ -40,7 +40,7 @@ final class TerminalSettingsTests: XCTestCase {
     }
 
     // A fractional value persisted from an earlier pinch normalizes to an int on init AND
-    // on decode (the two entry points that store fontSize) — no fractional size survives.
+    // on decode (the two entry points that store fontSize), no fractional size survives.
     func testFontSizeIsAlwaysIntegerViaInitAndDecode() throws {
         XCTAssertEqual(TerminalSettings(fontSize: 8.043364099818564).fontSize, 8)
         // Decode a blob carrying a fractional fontSize → normalized to 8 on load.

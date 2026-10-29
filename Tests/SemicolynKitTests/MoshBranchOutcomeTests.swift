@@ -22,24 +22,24 @@ final class MoshBranchOutcomeTests: XCTestCase {
     func testDisabledIsFallbackDisabledReason() {
         let out = "MOSH CONNECT 60001 KEYKEYKEYKEY"
         XCTAssertEqual(moshBranchOutcome(stdout: out, enabled: false),
-                       .fallback(reason: "Mosh not enabled for this host — using SSH"))
+                       .fallback(reason: "Mosh not enabled for this host, using SSH"))
     }
 
     // Invalid: no MOSH CONNECT line → mosh-server-not-found fallback.
     func testNoConnectLineIsNotFoundFallback() {
         XCTAssertEqual(moshBranchOutcome(stdout: "mosh-server: command not found", enabled: true),
-                       .fallback(reason: "mosh-server not found on host — using SSH"))
+                       .fallback(reason: "mosh-server not found on host, using SSH"))
     }
 
     // Boundary: empty stdout (bootstrap timeout is passed as "") → not-found fallback.
     func testEmptyStdoutIsNotFoundFallback() {
         XCTAssertEqual(moshBranchOutcome(stdout: "", enabled: true),
-                       .fallback(reason: "mosh-server not found on host — using SSH"))
+                       .fallback(reason: "mosh-server not found on host, using SSH"))
     }
 
     // Invalid: malformed line (non-numeric port) → parse-failure fallback.
     func testMalformedLineIsParseFallback() {
         XCTAssertEqual(moshBranchOutcome(stdout: "MOSH CONNECT abc KEY", enabled: true),
-                       .fallback(reason: "couldn't parse mosh-server output — using SSH"))
+                       .fallback(reason: "couldn't parse mosh-server output, using SSH"))
     }
 }

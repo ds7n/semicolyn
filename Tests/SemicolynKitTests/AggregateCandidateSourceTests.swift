@@ -3,13 +3,19 @@
 import XCTest
 @testable import SemicolynKit
 
-/// AggregateCandidateSource — Core tier. Realizes `today ⊕ rolling` on the read
+/// AggregateCandidateSource, Core tier. Realizes `today ⊕ rolling` on the read
 /// side: union the candidate tokens, sum their counts (saturating).
 final class AggregateCandidateSourceTests: XCTestCase {
-    private func vocab(_ entries: [(String, UInt32)]) -> Vocabulary {
-        var v = Vocabulary(depth: 4, width: 1 << 14)
-        for (t, c) in entries { v.record(t, count: c) }
-        return v
+    /// A source holding exact counts: answers a prefix with its matching entries.
+    private struct FixedSource: CandidateSource {
+        let entries: [String: UInt32]
+        func candidates(forPrefix prefix: String) -> [TokenCount] {
+            entries.filter { $0.key.hasPrefix(prefix) }.map { TokenCount(token: $0.key, count: $0.value) }
+        }
+    }
+
+    private func vocab(_ entries: [(String, UInt32)]) -> FixedSource {
+        FixedSource(entries: Dictionary(uniqueKeysWithValues: entries))
     }
 
     func testSumsCountForSharedToken() {
@@ -29,9 +35,7 @@ final class AggregateCandidateSourceTests: XCTestCase {
     }
 
     func testSumSaturatesNeverWraps() {
-        var a = Vocabulary(depth: 4, width: 1 << 14); a.record("x", count: .max)
-        var b = Vocabulary(depth: 4, width: 1 << 14); b.record("x", count: 100)
-        let agg = AggregateCandidateSource([a, b])
+        let agg = AggregateCandidateSource([vocab([("x", .max)]), vocab([("x", 100)])])
         XCTAssertEqual(agg.candidates(forPrefix: "x"), [TokenCount(token: "x", count: .max)],
                        "summed counts must saturate at UInt32.max, not wrap")
     }

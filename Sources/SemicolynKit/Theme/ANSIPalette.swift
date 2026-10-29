@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-/// The 16 ANSI colors in SwiftTerm's `installColors` index order — `rawValue`
+/// The 16 ANSI colors in SwiftTerm's `installColors` index order, `rawValue`
 /// IS the palette index (0…15), so the enum doubles as the ordering key.
 public enum ANSISlot: Int, CaseIterable, Sendable {
     case black = 0, red, green, yellow, blue, magenta, cyan, white
@@ -9,7 +9,7 @@ public enum ANSISlot: Int, CaseIterable, Sendable {
     case brightBlue, brightMagenta, brightCyan, brightWhite
 }
 
-/// A theme's authored 16-color ANSI palette — the single source of hue.
+/// A theme's authored 16-color ANSI palette, the single source of hue.
 /// UI semantic tokens reference into this; the terminal bridge installs `ordered()`.
 public struct ANSIPalette: Equatable, Sendable {
     private let colors: [ThemeColor]

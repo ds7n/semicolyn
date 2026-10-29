@@ -4,7 +4,7 @@
 #
 # TEMPLATE for a LOCAL-ONLY pre-commit overlay. `install.sh` copies this to
 # .git/hooks/pre-commit.local (which is NOT tracked). Edit the `terms` list with
-# YOUR OWN name/handles/home paths — they stay local so they never enter this
+# YOUR OWN name/handles/home paths, they stay local so they never enter this
 # public repo. Sourced by the tracked scripts/hooks/pre-commit. This scans staged
 # CONTENT and blocks the commit on a match. Bypass with `git commit --no-verify`.
 set -euo pipefail
@@ -12,7 +12,7 @@ set -euo pipefail
 red() { printf '\033[31m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$1"; }
 
-# >>> EDIT THESE for your machine (placeholders — replace with your identifiers) <<<
+# >>> EDIT THESE for your machine (placeholders, replace with your identifiers) <<<
 terms=(
     'your-username'
     'your-name'

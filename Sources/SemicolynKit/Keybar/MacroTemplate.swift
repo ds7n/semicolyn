@@ -23,7 +23,7 @@ public enum MacroTemplateError: Error, Equatable, Sendable {
 ///
 ///   - Named keys: `{Enter}` `{Tab}` `{Esc}`/`{Escape}` `{Backspace}` `{Space}`
 ///     `{Up}` `{Down}` `{Left}` `{Right}` `{F1}`…`{F12}`.
-///   - Chords: `{Ctrl+R}`, `{Ctrl+Shift+K}`, `{Alt+X}` — one or more modifiers
+///   - Chords: `{Ctrl+R}`, `{Ctrl+Shift+K}`, `{Alt+X}`, one or more modifiers
 ///     (Ctrl/Control, Alt/Option/Opt, Shift) joined to a final key by `+`.
 ///   - Literal braces: `{{` → `{`, `}}` → `}`.
 ///   - Shell-style `${...}` is plain text: `${` starts a literal run through the

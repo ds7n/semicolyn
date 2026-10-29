@@ -30,7 +30,7 @@ final class NeonCobaltThemeTests: XCTestCase {
         XCTAssertEqual(theme.state.broken, theme.ansi[.red])
     }
 
-    // Accent (blue) and failure (red) must not collide — different roles, different hue.
+    // Accent (blue) and failure (red) must not collide, different roles, different hue.
     func testAccentAndBrokenDistinct() {
         XCTAssertNotEqual(theme.accent.primary, theme.state.broken)
     }

@@ -4,7 +4,7 @@ import Foundation
 
 /// A sorted, de-duplicated set of token strings with binary-search prefix
 /// lookup. Supplies the *candidate* tokens a frequency sketch can't enumerate
-/// (a `CountMinSketch` is lossy). Case-sensitive — terminal tokens are. See
+/// (a `CountMinSketch` is lossy). Case-sensitive, terminal tokens are. See
 /// `2026-06-21-predictor-prefix-ranking-design`.
 ///
 /// Ordering, equality, and prefix matching are all by **UTF-8 bytes**, not by
@@ -12,7 +12,7 @@ import Foundation
 /// ordering, "all tokens having a byte prefix form a contiguous sorted run" is a
 /// theorem (byte lexicographic order ↔ byte prefix), so the binary-search +
 /// forward-scan below is provably complete. Relying on `String.<` vs grapheme
-/// `hasPrefix` instead would be only "correct in practice" — they can disagree on
+/// `hasPrefix` instead would be only "correct in practice", they can disagree on
 /// combining marks. Byte semantics are also the right model for terminal tokens
 /// (the user types bytes, and distinct byte sequences are distinct tokens even
 /// when canonically equivalent).
@@ -88,7 +88,7 @@ public struct PrefixIndex: Equatable, Sendable {
 
     /// Reconstruct from a blob. Fails closed (`nil`) on wrong magic, unknown
     /// version, a length field that overruns the buffer, trailing slack, or tokens
-    /// that are not strictly ascending by UTF-8 bytes — the latter would silently
+    /// that are not strictly ascending by UTF-8 bytes, the latter would silently
     /// break the binary search, so a corrupt/hostile blob is rejected rather than
     /// trusted. Never pre-allocates from the untrusted count.
     public init?(deserializing bytes: [UInt8]) {
@@ -102,7 +102,7 @@ public struct PrefixIndex: Equatable, Sendable {
         var previousBytes: [UInt8]? = nil
         for _ in 0..<count {
             guard let tokenBytes = readLengthPrefixed(bytes, &p) else { return nil }
-            // Reject invalid UTF-8 outright — lossy decoding would desync the
+            // Reject invalid UTF-8 outright, lossy decoding would desync the
             // stored string's bytes from the order validated here. `String(bytes:
             // encoding:)` returns nil on invalid UTF-8 (strict, like the stdlib
             // `String(validating:as:)`) and, unlike it, is available on iOS 17 / macOS 14.

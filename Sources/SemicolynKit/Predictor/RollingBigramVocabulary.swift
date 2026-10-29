@@ -7,30 +7,30 @@ import Foundation
 /// `record` writes today; `rollover` (called at user-local midnight) seals today
 /// and slides each window; `nextSource(after:window:)` exposes a previous token's
 /// successors as `today ⊕ rolling_W`. A windowed bigram is a windowed unigram over
-/// the composite key `previous + US + next`, so this wraps ``RollingVocabulary``
-/// exactly as ``BigramVocabulary`` wraps ``Vocabulary``. See
+/// the composite key `previous + US + next` (``BigramKey``), so this wraps
+/// ``RollingVocabulary``. See
 /// `2026-06-21-predictor-bigram-rollover-design`.
 public struct RollingBigramVocabulary: Equatable, Sendable {
     private var rolling: RollingVocabulary
 
     /// A new windowed bigram store whose composite-key sketches have the given
-    /// dimensions (default: the spec's bigram `4 × 2^16`, matching
-    /// ``BigramVocabulary``).
+    /// dimensions (default: the spec's bigram `4 × 2^16`, wider than the unigram
+    /// table because the `(previous, next)` pair space is larger).
     public init(depth: Int = 4, width: Int = 1 << 16) {
         rolling = RollingVocabulary(depth: depth, width: width)
     }
 
     /// Learn `count` occurrences of `next` following `previous` into today's
     /// sketch. Ignored when the pair is unrecordable
-    /// (see ``BigramVocabulary/compositeKey(previous:next:)``) or `count` is zero.
+    /// (see ``BigramKey/compositeKey(previous:next:)``) or `count` is zero.
     public mutating func record(previous: String, next: String, count: UInt32 = 1,
                             storeLiteral: Bool = true) {
         guard count > 0,
-              let key = BigramVocabulary.compositeKey(previous: previous, next: next) else { return }
+              let key = BigramKey.compositeKey(previous: previous, next: next) else { return }
         rolling.record(key, count: count, storeLiteral: storeLiteral)
     }
 
-    /// Seal today into the rolling pre-aggregates and start a fresh day —
+    /// Seal today into the rolling pre-aggregates and start a fresh day,
     /// inherited verbatim from ``RollingVocabulary`` (the composite key is just a
     /// string to the rollover arithmetic).
     public mutating func rollover() {
@@ -44,7 +44,7 @@ public struct RollingBigramVocabulary: Equatable, Sendable {
     }
 
     /// Successors of `previous` having `prefix` over the given window, byte-sorted
-    /// with estimated counts — sugar over `nextSource(after:window:)`. Empty
+    /// with estimated counts, sugar over `nextSource(after:window:)`. Empty
     /// `prefix` (the default) returns every known successor.
     public func candidates(after previous: String, window: RollingWindow,
                            prefix: String = "") -> [TokenCount] {
@@ -77,5 +77,43 @@ public struct RollingBigramVocabulary: Equatable, Sendable {
               bytes[4] == Self.formatVersion,
               let rolling = RollingVocabulary(deserializing: Array(bytes[Self.headerSize...])) else { return nil }
         self.rolling = rolling
+    }
+}
+
+/// The bigram composite-key encoding: `previous + US + next`, where US is the
+/// ASCII unit separator (0x1F), a control byte no shell token contains, so the
+/// key is unambiguous and reversible.
+enum BigramKey {
+    static let separator: Character = "\u{1F}"
+    private static let separatorByte: UInt8 = 0x1F
+
+    /// The composite key for a `(previous, next)` pair, or `nil` when the pair is
+    /// unrecordable: either side empty, or either side carrying the separator byte
+    /// (which would corrupt the encoding).
+    static func compositeKey(previous: String, next: String) -> String? {
+        guard !previous.isEmpty, !next.isEmpty,
+              !previous.utf8.contains(separatorByte),
+              !next.utf8.contains(separatorByte) else { return nil }
+        return previous + String(separator) + next
+    }
+}
+
+/// Adapts one previous token's slice of a composite-key ``CandidateSource`` into a
+/// next-token source: queries `previous + US + prefix`, then strips the
+/// `previous + US` lead off each composite key to recover the bare `next`.
+struct NextTokenSource: CandidateSource {
+    let base: any CandidateSource
+    let previous: String
+
+    func candidates(forPrefix prefix: String) -> [TokenCount] {
+        let lead = previous + String(BigramKey.separator)
+        // Strip the lead by byte count and decode the remainder: byte-consistent
+        // with the module and immune to a leading combining mark a Character-wise
+        // drop could mishandle.
+        let dropBytes = lead.utf8.count
+        return base.candidates(forPrefix: lead + prefix).map { candidate in
+            let next = String(decoding: candidate.token.utf8.dropFirst(dropBytes), as: UTF8.self)
+            return TokenCount(token: next, count: candidate.count)
+        }
     }
 }

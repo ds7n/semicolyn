@@ -18,7 +18,7 @@ semicolyn is an **iOS / iPadOS SSH + mosh terminal client built for touch**: ter
 └───────────────────────────┬─────────────────────────────┘   └──────────────┬─────────────┘
                             UniFFI XCFramework bridge ────────────────────────┘
 ┌───────────────────────────┴──────────────────────────┐
-│  Rust (crates/semicolyn-ssh-core) — russh, aws-lc-rs   │
+│  Rust (crates/semicolyn-ssh-core), russh, aws-lc-rs   │
 │  handshake · auth · PTY · forwards · ProxyJump        │
 └───────────────────────────────────────────────────────┘
 ```
@@ -42,19 +42,19 @@ The design keeps the **Apple-only UI/SDK layer thin** so the maximum surface sta
 
 Every v1 subsystem has a locked internal design spec (not published in this repository). The designs by area:
 
-**Connection & SSH** — `ssh-algorithms` (4-tier allowlist, PQC `mlkem768x25519` in Tier 1) · `host-key-trust` (TOFU + mismatch) · `ssh-cert-auth` · `chain-auth` (ProxyJump) · `pty-shell-channel` · `mosh-transport` (vendored `blinksh/mosh` → `Mosh.xcframework`, russh bootstrap → `MoshSession` bridge → SwiftTerm; M1–M4 shipped, on TestFlight; device feel-pass pending).
+**Connection & SSH**, `ssh-algorithms` (4-tier allowlist, PQC `mlkem768x25519` in Tier 1) · `host-key-trust` (TOFU + mismatch) · `ssh-cert-auth` · `chain-auth` (ProxyJump) · `pty-shell-channel` · `mosh-transport` (vendored `blinksh/mosh` → `Mosh.xcframework`, russh bootstrap → `MoshSession` bridge → SwiftTerm; M1-M4 shipped, on TestFlight; device feel-pass pending).
 
 **Terminal & tmux**: `terminal-emulator-scope` (`xterm-256color`, OSC policy, mouse modes) · `terminal-ux-additions` (font zoom, URL tap, cursor, scrollback, resize) · `terminal-feedback` (bell halo + haptic, never sound) · `degraded-mode` (tmux ≥3.0, raw-PTY fallback) · `context-detection` · `tmux-session` · `phase-3c-terminal-ux-integration`. tmux is plain tmux driven by gestures (`single-gesture-engine`, `tmux-private-gesture-bindings`); the earlier `tmux-control-*` control-mode (`-CC`) family is superseded (see the 2026-10-18 entry in [brainstorming-decisions.md](brainstorming-decisions.md)).
 
-**Input — keybar & keyboard** — `keybar-customization` (layout / gesture ownership) · `function-keys` (Fn / caps-lock SM) · `external-keyboard`.
+**Input, keybar & keyboard**, `keybar-customization` (layout / gesture ownership) · `function-keys` (Fn / caps-lock SM) · `external-keyboard`.
 
 **On-device predictor**: `2026-10-17-predictor-rework-design` is the current design: one engine (`PredictorEngine`, `SuggestionRanker`) scores every candidate on one scale from the shipped English dictionary, the command tree, learned words (CMS+Bloom rolling stores, `predictor-learned-store` / `-rolling-serialization`), screen words harvested from output (`predictor-output-harvesting`), bigram context and spelling corrections; `predictor-privacy-filter` and the secret-exclusion layers gate what is learned. Two dictionary files ship in `App/Resources/predictor/`: `english_v2.bin` (GDIC, words and word pairs with 1-byte scores) and `commands_v2.bin` (GCMT, a scored command, subcommand and flag tree), each with a `.provenance.txt` record and REUSE sidecar; attribution is in `SEED_ATTRIBUTION.md`. They are built by `scripts/build-english-dict.sh` and `scripts/build-command-dict.sh` (the `semicolyn-dictbuild` tool, inside the dev container) from sources fetched by `scripts/dict/fetch-sources.sh`; tldr pages held out by `TldrHoldout` give the command tree only their tool name, never their examples. `semicolyn-predeval` replays text through the engine (`replay -t <file> [-l] [-n 5] --english <f> --commands <f>`: keystrokes saved per 100, zero-suggestion rate, hits by slot, p95 latency); `tldr-eval` writes the held-out command lines (`corpora/eval/commands_eval.txt`), and `corpora/eval/dev_v1.txt` + `prompt_v1.txt` are the prose text. Suggestion-surface hygiene (typed-echo-only learning, chip clearing) is `2026-07-07-predictor-suggestion-hygiene-design`.
 
-**Data, host model & sync** — `host-config-model` (schema, resolution, storage backbone) · `identities-keys-management` · `icloud-sync-scope` (what syncs vs stays local).
+**Data, host model & sync**, `host-config-model` (schema, resolution, storage backbone) · `identities-keys-management` · `icloud-sync-scope` (what syncs vs stays local).
 
-**UI, product & ship** — `host-crud` · `multi-connection-switching` · `banner-expanded` · `first-host-onboarding` · `settings-sub-screens` · `pro-paid-scope` · `ipad-scope` · `design-tokens` (theming) · `neon-midnight-theme` (the default theme) · `themed-ansi-palette-infra` (terminal ANSI-16 palette + strict derivation).
+**UI, product & ship**, `host-crud` · `multi-connection-switching` · `banner-expanded` · `first-host-onboarding` · `settings-sub-screens` · `pro-paid-scope` · `ipad-scope` · `design-tokens` (theming) · `neon-midnight-theme` (the default theme) · `themed-ansi-palette-infra` (terminal ANSI-16 palette + strict derivation).
 
-**Security, privacy & cross-cutting** — `screen-capture-protection` · `privacy-statement` · `testing-standards`.
+**Security, privacy & cross-cutting**, `screen-capture-protection` · `privacy-statement` · `testing-standards`.
 
 ## Plans & roadmap
 

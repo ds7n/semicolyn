@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// Critical-tier: L6 is the format-agnostic backstop — a token that graduates too
+/// Critical-tier: L6 is the format-agnostic backstop, a token that graduates too
 /// early could persist a once-typed secret. Tests pin the exact N boundary
 /// (N−1 defers, N graduates), distinct-context counting, and the backfill.
 final class GraduationTierTests: XCTestCase {
@@ -48,7 +48,7 @@ final class GraduationTierTests: XCTestCase {
         var t = GraduationTier(threshold: 3)
         // The SAME (token, NON-nil previous) three times = ONE distinct context and
         // nilCount stays 0 → defer. A password re-typed at the same `sudo` prompt
-        // never graduates — the core secret-protection guarantee of L6.
+        // never graduates, the core secret-protection guarantee of L6.
         XCTAssertEqual(t.admit(token: "pw", previous: "sudo", count: 1, confidence: .high), [])
         XCTAssertEqual(t.admit(token: "pw", previous: "sudo", count: 1, confidence: .high), [])
         XCTAssertEqual(t.admit(token: "pw", previous: "sudo", count: 1, confidence: .high), [])
@@ -97,7 +97,7 @@ final class GraduationTierTests: XCTestCase {
         _ = t.admit(token: "deploy", previous: "git", count: 1, confidence: .high)
         _ = t.admit(token: "deploy", previous: "make", count: 1, confidence: .high)
         t.reset()
-        // After reset, prior contexts are gone — the third distinct context alone
+        // After reset, prior contexts are gone, the third distinct context alone
         // does NOT graduate (count restarts).
         XCTAssertEqual(t.admit(token: "deploy", previous: "npm", count: 1, confidence: .high), [])
     }
@@ -122,6 +122,27 @@ final class GraduationTierTests: XCTestCase {
         XCTAssertEqual(flushed.count, 3)
         XCTAssertTrue(flushed.allSatisfy { $0.confidence == .low })
         XCTAssertEqual(Set(flushed.map(\.previous)), ["run", "make", "just"])
+    }
+
+    func testGraduatingCallConfidenceStampsTheWholeBackfill() {
+        // Two echoed occurrences, then an unechoed one that graduates the token: the
+        // graduating call's confidence covers every backfilled occurrence.
+        var tier = GraduationTier(threshold: 3)
+        _ = tier.admit(token: "deploy", previous: "run", count: 1, confidence: .high)
+        _ = tier.admit(token: "deploy", previous: "make", count: 1, confidence: .high)
+        let flushed = tier.admit(token: "deploy", previous: "just", count: 1, confidence: .low)
+        XCTAssertEqual(Set(flushed), [
+            GraduatedOccurrence(token: "deploy", previous: "run", count: 1, confidence: .low),
+            GraduatedOccurrence(token: "deploy", previous: "make", count: 1, confidence: .low),
+            GraduatedOccurrence(token: "deploy", previous: "just", count: 1, confidence: .low),
+        ])
+    }
+
+    func testAdmitPostGraduationPassesThroughLowConfidence() {
+        var tier = GraduationTier(threshold: 1)
+        _ = tier.admit(token: "ls", previous: nil, count: 1, confidence: .high)  // graduates now
+        let after = tier.admit(token: "ls", previous: "sudo", count: 2, confidence: .low)
+        XCTAssertEqual(after, [GraduatedOccurrence(token: "ls", previous: "sudo", count: 2, confidence: .low)])
     }
 
     func testAdmitPostGraduationPassesThroughConfidence() {
