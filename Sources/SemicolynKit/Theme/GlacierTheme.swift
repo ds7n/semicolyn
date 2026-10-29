@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Glacier — the "soft" blue theme (Piece 2 of the themed-ANSI roadmap): desaturated
+// Glacier, the "soft" blue theme (Piece 2 of the themed-ANSI roadmap): desaturated
 // pastel (Nord/Catppuccin family) on a lighter slate base, low contrast. Palette source:
 // glacier.itermcolors. Chrome (surfaces / text / highlight) is
 // DERIVED from the palette by the local theme build script and baked in here; status + accent are

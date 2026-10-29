@@ -61,7 +61,7 @@ public func inheritedIntToText(_ inherited: Inherited<Int>) -> String {
 /// Empty string → `.inherit`. Non-numeric, or a number below `minimum` → `.inherit`.
 /// An integer `>= minimum` → `.explicit(int)`.
 ///
-/// `minimum` defaults to `1`, which rejects `0` — correct for a port field. Pass
+/// `minimum` defaults to `1`, which rejects `0`, correct for a port field. Pass
 /// `minimum: 0` for fields where `0` is a meaningful value the user should be
 /// able to enter, e.g. `ServerAliveInterval 0` (OpenSSH "keepalives disabled")
 /// or `ServerAliveCountMax 0`. Negatives are always rejected → `.inherit`.
@@ -75,7 +75,7 @@ public func textToInheritedInt(_ text: String, minimum: Int = 1) -> Inherited<In
 /// Converts `Inherited<Bool>` to a `Bool?` for use as a Picker selection tag.
 /// `.inherit` and `.explicit(nil)` → `nil` ("Default" option).
 /// `.explicit(true)` → `true`; `.explicit(false)` → `false`.
-/// `.explicit(nil)` has no distinct Picker representation and collapses to `.inherit` on round-trip — intentional.
+/// `.explicit(nil)` has no distinct Picker representation and collapses to `.inherit` on round-trip, intentional.
 public func inheritedBoolToSelection(_ inherited: Inherited<Bool>) -> Bool? {
     inherited.value
 }
@@ -93,7 +93,7 @@ public func selectionToInheritedBool(_ selection: Bool?) -> Inherited<Bool> {
 /// for use as a Picker selection tag.
 /// `.inherit` and `.explicit(nil)` → `nil` ("Default" option).
 /// `.explicit(v)` → `v`.
-/// `.explicit(nil)` has no distinct Picker representation and collapses to `.inherit` on round-trip — intentional.
+/// `.explicit(nil)` has no distinct Picker representation and collapses to `.inherit` on round-trip, intentional.
 public func inheritedSHKCToSelection(_ inherited: Inherited<StrictHostKeyChecking>) -> StrictHostKeyChecking? {
     inherited.value
 }
@@ -111,7 +111,7 @@ public func selectionToInheritedSHKC(_ selection: StrictHostKeyChecking?) -> Inh
 /// Converts `Inherited<[AuthMethod]>` to a `Set<AuthMethod>?` for multi-toggle UI.
 /// `.inherit` and `.explicit(nil)` → `nil` (no selection; "use default").
 /// `.explicit(methods)` → `Set(methods)` (selected methods, order lost on round-trip).
-/// `.explicit(nil)` has no distinct Picker representation and collapses to `.inherit` on round-trip — intentional.
+/// `.explicit(nil)` has no distinct Picker representation and collapses to `.inherit` on round-trip, intentional.
 public func inheritedAuthMethodsToSelection(_ inherited: Inherited<[AuthMethod]>) -> Set<AuthMethod>? {
     guard let methods = inherited.value else { return nil }
     return Set(methods)

@@ -14,7 +14,7 @@ public struct KeybarLibrary: Equatable, Sendable, Codable {
         self.customSlots = customSlots
     }
 
-    /// An empty library (the v1 default — no user macros or custom slots yet).
+    /// An empty library (the v1 default, no user macros or custom slots yet).
     public static let empty = KeybarLibrary()
 
     // MARK: - Lookups

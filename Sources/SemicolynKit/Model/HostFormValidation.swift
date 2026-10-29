@@ -131,7 +131,7 @@ public func validateHostForm(
     return issues
 }
 
-/// Returns `true` iff `issues` contains no `.hardBlock` — the Save action is allowed.
+/// Returns `true` iff `issues` contains no `.hardBlock`, the Save action is allowed.
 public func canSave(_ issues: [ValidationIssue]) -> Bool {
     !issues.contains { $0.severity == .hardBlock }
 }

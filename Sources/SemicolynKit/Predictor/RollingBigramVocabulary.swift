@@ -30,7 +30,7 @@ public struct RollingBigramVocabulary: Equatable, Sendable {
         rolling.record(key, count: count, storeLiteral: storeLiteral)
     }
 
-    /// Seal today into the rolling pre-aggregates and start a fresh day —
+    /// Seal today into the rolling pre-aggregates and start a fresh day,
     /// inherited verbatim from ``RollingVocabulary`` (the composite key is just a
     /// string to the rollover arithmetic).
     public mutating func rollover() {
@@ -44,7 +44,7 @@ public struct RollingBigramVocabulary: Equatable, Sendable {
     }
 
     /// Successors of `previous` having `prefix` over the given window, byte-sorted
-    /// with estimated counts — sugar over `nextSource(after:window:)`. Empty
+    /// with estimated counts, sugar over `nextSource(after:window:)`. Empty
     /// `prefix` (the default) returns every known successor.
     public func candidates(after previous: String, window: RollingWindow,
                            prefix: String = "") -> [TokenCount] {

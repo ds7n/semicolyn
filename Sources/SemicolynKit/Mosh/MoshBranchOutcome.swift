@@ -21,16 +21,16 @@ public func moshBranchOutcome(stdout: String, enabled: Bool) -> MoshBranchOutcom
         // Re-derive a user-facing banner from the underlying cause. Recompute the
         // parse to distinguish the failure classes (cheap; keeps this a pure map).
         if !enabled {
-            return .fallback(reason: "Mosh not enabled for this host — using SSH")
+            return .fallback(reason: "Mosh not enabled for this host, using SSH")
         }
         switch parseMoshConnect(stdout) {
         case .failed(.noConnectLine):
-            return .fallback(reason: "mosh-server not found on host — using SSH")
+            return .fallback(reason: "mosh-server not found on host, using SSH")
         case .failed(.malformed):
-            return .fallback(reason: "couldn't parse mosh-server output — using SSH")
+            return .fallback(reason: "couldn't parse mosh-server output, using SSH")
         case .success:
             // Unreachable: enabled + success would have returned .mosh above.
-            return .fallback(reason: "mosh-server not found on host — using SSH")
+            return .fallback(reason: "mosh-server not found on host, using SSH")
         }
     }
 }

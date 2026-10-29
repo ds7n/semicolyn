@@ -18,7 +18,7 @@ public enum MoshConnect: Equatable, Sendable {
 
 /// Parses `mosh-server new` output for its `MOSH CONNECT <port> <key>` handoff
 /// line, tolerating surrounding banner/motd text. Returns a typed failure rather
-/// than throwing — the caller falls back to plain SSH on any failure.
+/// than throwing, the caller falls back to plain SSH on any failure.
 public func parseMoshConnect(_ output: String) -> MoshConnect {
     for line in output.split(whereSeparator: \.isNewline) {
         guard line.hasPrefix("MOSH CONNECT ") else { continue }

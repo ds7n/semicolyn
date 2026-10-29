@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// `MacroTemplate.parse` — turns a `{Ctrl+R}docker{Enter}` template string into a
+/// `MacroTemplate.parse`, turns a `{Ctrl+R}docker{Enter}` template string into a
 /// `[MacroEvent]` body. Untrusted text input, so: equivalence partitions for each
 /// token class, boundary values on the F-key range, and a negative case asserting
 /// the SPECIFIC error for every malformed class (keybar-customization spec

@@ -227,7 +227,7 @@ async fn empty_password_auth_is_a_clean_failure() {
 async fn keyboard_interactive_with_no_responses_is_a_clean_failure() {
     // Empty/boundary auth for keyboard-interactive: with an empty `responses`
     // vec, the server's (non-empty) password prompt cannot be answered. This must
-    // return a typed AuthOutcome::Failure — NOT send a short/blank reply that
+    // return a typed AuthOutcome::Failure, NOT send a short/blank reply that
     // trips the SSH reply-count mismatch and drops the transport, and NOT hang.
     // (Regression guard for the fail-fast-on-exhaustion fix.)
     let Some(addr) = sshd_addr() else {

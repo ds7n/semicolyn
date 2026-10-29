@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn import_p521_key_is_an_unsupported_algorithm_error() {
-        // P-521 is parsed fine by ssh-key but rejected by algorithm_tag —
+        // P-521 is parsed fine by ssh-key but rejected by algorithm_tag,
         // ssh-key's `p521` feature is enabled transitively, so it reaches the
         // Semicolyn UnsupportedAlgorithm gate rather than failing at parse.
         let err = import_private_key(P521_FIXTURE.to_string(), None).unwrap_err();

@@ -7,7 +7,7 @@ import Foundation
 ///
 /// The former `firstFrameSeen` discriminator was removed: real mosh emits an
 /// init/clear framebuffer diff BEFORE the UDP handshake is confirmed, so
-/// `onFirstFrame` fired for a connection that then failed — a device trace showed a
+/// `onFirstFrame` fired for a connection that then failed, a device trace showed a
 /// nonzero exit 90ms after `onFirstFrame`, wrongly routed to the crash banner. Exit
 /// reason + elapsed time classify correctly instead.
 public enum MoshExitDecision: Equatable, Sendable {

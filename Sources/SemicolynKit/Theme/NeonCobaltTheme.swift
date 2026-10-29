@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Neon Cobalt — the "electric" blue theme (Piece 2 of the themed-ANSI roadmap).
+// Neon Cobalt, the "electric" blue theme (Piece 2 of the themed-ANSI roadmap).
 // Palette source: neon-cobalt.itermcolors. Chrome (surfaces /
 // text / highlight) is DERIVED from the palette by the local theme build script and baked in here;
 // status + accent are pinned to ANSI slots via the role map. Regenerate the literals

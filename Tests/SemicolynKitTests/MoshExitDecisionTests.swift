@@ -31,10 +31,10 @@ final class MoshExitDecisionTests: XCTestCase {
         XCTAssertEqual(moshExitDecision(reason: "boom", elapsed: 30), .crashBanner)
     }
 
-    // Regression pin: the EXACT device trace — reason string at 0.09s → fallback.
+    // Regression pin: the EXACT device trace, reason string at 0.09s → fallback.
     func testDeviceTraceStringAtNinetyMsIsFallback() {
         XCTAssertEqual(
-            moshExitDecision(reason: "Mosh connection failed — using SSH", elapsed: 0.09),
+            moshExitDecision(reason: "Mosh connection failed, using SSH", elapsed: 0.09),
             .fallbackSSH)
     }
 

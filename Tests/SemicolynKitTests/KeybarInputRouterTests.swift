@@ -16,7 +16,7 @@ final class KeybarInputRouterTests: XCTestCase {
         return (router, spy)
     }
 
-    // MARK: keyboardInput — armed keybar modifiers applied to chars typed on the
+    // MARK: keyboardInput, armed keybar modifiers applied to chars typed on the
     // SwiftTerm/iOS keyboard (device bug: armed Ctrl then typing 'a' sent plain 'a').
 
     func testKeyboardInputAppliesArmedCtrlToSingleChar() {

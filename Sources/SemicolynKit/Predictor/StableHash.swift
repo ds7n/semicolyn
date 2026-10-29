@@ -5,13 +5,13 @@ import Foundation
 /// Deterministic, process-independent hashing for the predictor's sketches.
 ///
 /// **Why not `Swift.Hasher`:** it is randomly seeded per process, so the same
-/// token would hash differently across launches and devices — which would
+/// token would hash differently across launches and devices, which would
 /// corrupt every cross-device sketch merge (sketches sync via CloudKit). This
 /// uses a frozen FNV-1a instead; the sketch serialization format carries a
 /// version byte so any future change to this hashing is an explicit, detectable
 /// format bump rather than a silent divergence.
 enum StableHash {
-    /// Canonical 64-bit FNV-1a offset basis — the standard starting value.
+    /// Canonical 64-bit FNV-1a offset basis, the standard starting value.
     static let basisA: UInt64 = 0xcbf2_9ce4_8422_2325
     /// A second basis (the FNV prime, reused as a seed) to decorrelate the two
     /// base hashes used for double hashing.
@@ -30,7 +30,7 @@ enum StableHash {
         return h
     }
 
-    /// `count` indices in `[0, modulo)` for `token`, via Kirsch–Mitzenmacher
+    /// `count` indices in `[0, modulo)` for `token`, via Kirsch-Mitzenmacher
     /// double hashing: `idx(i) = (h1 + i*h2) mod modulo`. One pair of full
     /// hashes synthesizes any number of indices. `modulo` must be positive.
     static func indices(_ token: String, count: Int, modulo: Int) -> [Int] {
@@ -69,8 +69,8 @@ func readLE32(_ bytes: [UInt8], _ offset: Int) -> UInt32? {
 }
 
 /// Read a length-prefixed chunk (`LE32 length | that many bytes`) starting at
-/// `offset`, advancing `offset` past the chunk on success. Returns `nil` — and
-/// leaves `offset` unspecified — when the length field is missing or runs past
+/// `offset`, advancing `offset` past the chunk on success. Returns `nil`, and
+/// leaves `offset` unspecified, when the length field is missing or runs past
 /// the buffer. The single bounds-checked "read a sized sub-blob" primitive the
 /// fail-closed deserializers share, so the overrun guard lives in one place.
 /// `Int(len)` is safe on the 64-bit-only targets: `len ≤ UInt32.max` and

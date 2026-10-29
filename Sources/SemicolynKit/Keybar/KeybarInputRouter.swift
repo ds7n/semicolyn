@@ -4,7 +4,7 @@
 /// Ties the keybar's gesture events to byte output: holds the `ModifierState`,
 /// encodes each keystroke with `encodeKey` against the live cursor-key mode, and
 /// emits via the injected `send`. Pure (no UIKit); the App's slot views call
-/// these methods. Modifier-gesture methods only arm state — they never send.
+/// these methods. Modifier-gesture methods only arm state, they never send.
 public final class KeybarInputRouter {
     private var state = ModifierState()
     private let applicationCursorKeys: () -> Bool
@@ -32,12 +32,12 @@ public final class KeybarInputRouter {
     public func tapEscape()               { fire(.escape) }
     public func tapTab()                  { fire(.tab) }
     public func arrow(_ d: ArrowDirection) { fire(.arrow(d)) }
-    /// Emit a function key F1–F12. Modifiers are not applied to F-keys in v1.
+    /// Emit a function key F1-F12. Modifiers are not applied to F-keys in v1.
     public func tapFKey(_ n: Int) { fire(.function(n)) }
 
     /// Emits a macro body as a single coalesced write. A macro is a self-contained
     /// recorded sequence: it carries its own per-event modifiers, so firing it
-    /// neither applies nor consumes the globally-armed `ModifierState` — an armed
+    /// neither applies nor consumes the globally-armed `ModifierState`, an armed
     /// Ctrl stays armed for the user's next real keystroke.
     public func fireMacro(_ body: [MacroEvent]) {
         let bytes = encodeMacroBody(body, applicationCursorKeys: applicationCursorKeys())
@@ -60,8 +60,8 @@ public final class KeybarInputRouter {
 
     /// Bytes typed on the terminal keyboard (SwiftTerm delegate). When a keybar
     /// modifier is armed and the input is exactly one printable ASCII byte
-    /// (0x20–0x7e), re-encode it through the armed modifiers (e.g. armed Ctrl + 'a'
-    /// → 0x01) and consume one-shot arms — so the keybar's Ctrl/Alt/Shift apply to
+    /// (0x20-0x7e), re-encode it through the armed modifiers (e.g. armed Ctrl + 'a'
+    /// → 0x01) and consume one-shot arms, so the keybar's Ctrl/Alt/Shift apply to
     /// real keyboard keys, not just keys pressed on the keybar. Anything else
     /// (multi-byte sequences: arrows, paste, already-encoded control bytes) passes
     /// through untouched and does not consume the arm.

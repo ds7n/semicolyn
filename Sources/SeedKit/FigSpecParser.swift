@@ -17,8 +17,8 @@ public enum FigSpecParser {
         case spread                      // `...`, only with operators
     }
 
-    /// Reduce TS source to the only tokens that matter — `{}[]:,`, string/template
-    /// literals, identifiers — skipping comments, whitespace, and everything else
+    /// Reduce TS source to the only tokens that matter, `{}[]:,`, string/template
+    /// literals, identifiers, skipping comments, whitespace, and everything else
     /// (operators, numbers, parens, `;`). Every brace/bracket outside a string or
     /// comment is preserved, so nesting stays balanced. With `operators`, the tokens
     /// needed to resolve references are kept too: `(`, `)`, `.`, a lone assignment
@@ -73,7 +73,7 @@ public enum FigSpecParser {
                         lastSig = c
                         continue
                     }
-                    i += 1   // operators, digits, parens, `;`, `=>` — irrelevant
+                    i += 1   // operators, digits, parens, `;`, `=>`, irrelevant
                     lastSig = c
                 }
             }
@@ -104,7 +104,7 @@ public enum FigSpecParser {
 
     /// Whether a `/` in this position opens a regex literal (vs. a division
     /// operator), judged by the preceding significant character. A regex follows
-    /// a value-position char — `( , = : [ { ! & | ? ; >` (the `>` of `=>`) — or the
+    /// a value-position char, `( , = : [ { ! & | ? ; >` (the `>` of `=>`), or the
     /// start of input; division follows a completed value (identifier, `)`, `]`).
     private static func startsRegex(after lastSig: Character?) -> Bool {
         guard let last = lastSig else { return true }

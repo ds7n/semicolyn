@@ -49,7 +49,7 @@ fn sshd_addr() -> Option<String> {
     std::env::var("SEMICOLYN_TEST_SSHD").ok()
 }
 
-/// Poll `pred` up to ~5s (100 × 50ms). Returns its final value — true once the
+/// Poll `pred` up to ~5s (100 × 50ms). Returns its final value, true once the
 /// async condition holds, false if it never did (so the test fails on a real
 /// timeout rather than hanging).
 async fn wait_until(mut pred: impl FnMut() -> bool) -> bool {
@@ -140,7 +140,7 @@ async fn shell_resize_changes_window_size() {
         .expect("open shell");
     session.resize(120, 40).await.expect("resize");
     session.write(b"stty size\n".to_vec()).await.expect("write");
-    // `stty size` prints "<rows> <cols>" — the resized terminal is 40x120.
+    // `stty size` prints "<rows> <cols>", the resized terminal is 40x120.
     let saw = wait_until(|| col.text().contains("40 120")).await;
     assert!(
         saw,
@@ -182,7 +182,7 @@ async fn write_after_close_returns_typed_error() {
         .await
         .expect("open shell");
     session.close().await.expect("close");
-    // Wait for the pump task to actually finish (drops the receiver) — only then
+    // Wait for the pump task to actually finish (drops the receiver), only then
     // is a further send guaranteed to fail rather than being buffered.
     let closed = wait_until(|| col.exit().is_some()).await;
     assert!(closed, "session did not close");

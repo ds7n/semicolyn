@@ -54,7 +54,7 @@ struct DiagnosticsContent: View {
     @State private var showKeystrokeNag = false
     /// True only for the single `keystrokeContent` change that the nag's "Turn On"
     /// causes, so that confirmation doesn't re-trigger the nag (which re-set the value
-    /// to off and re-showed the dialog — the "popup re-pops after Turn On" bug).
+    /// to off and re-showed the dialog, the "popup re-pops after Turn On" bug).
     @State private var confirmedKeystroke = false
 
     private var transport: LogTransport { LogTransport(rawValue: transportRaw) ?? .tls }

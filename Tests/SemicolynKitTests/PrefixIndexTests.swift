@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// PrefixIndex — Core tier. Sorted-unique invariant + prefix lookup.
+/// PrefixIndex, Core tier. Sorted-unique invariant + prefix lookup.
 final class PrefixIndexTests: XCTestCase {
     private func index(_ tokens: [String]) -> PrefixIndex {
         var i = PrefixIndex()
@@ -62,7 +62,7 @@ final class PrefixIndexTests: XCTestCase {
     }
 
     func testBytePrefixMatchesCombiningMarkTokenContiguously() {
-        // "e\u{301}" is e + COMBINING ACUTE — ONE grapheme, so grapheme hasPrefix
+        // "e\u{301}" is e + COMBINING ACUTE, ONE grapheme, so grapheme hasPrefix
         // would NOT match "e". Byte-prefix DOES (first byte is 0x65) and keeps the
         // matching run contiguous. This is the guarantee the byte ordering buys.
         let combining = "e\u{301}"
@@ -70,7 +70,7 @@ final class PrefixIndexTests: XCTestCase {
         XCTAssertEqual(i.matching(prefix: "e"), ["ef", combining])
     }
 
-    // MARK: serialization (Critical tier — blob is a synced/seed format)
+    // MARK: serialization (Critical tier, blob is a synced/seed format)
 
     func testSerializationRoundTrip() {
         let i = index(["grep", "git", "go", "café"])

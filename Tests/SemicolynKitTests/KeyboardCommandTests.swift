@@ -126,7 +126,7 @@ final class KeyboardCommandTests: XCTestCase {
 
     func testCatalogCoversEveryDistinctAction() {
         // Each distinct action from the spec must appear at least once.
-        // (⌘F/find is intentionally absent — deferred, see the external-keyboard spec.)
+        // (⌘F/find is intentionally absent, deferred, see the external-keyboard spec.)
         let actions = Set(KeyboardCommandCatalog.all.map(\.command))
         let expected: Set<KeyboardCommand> = [
             .newWindow, .closeWindow, .switchWindow(1), .prevWindow, .nextWindow,

@@ -148,11 +148,11 @@ async fn mosh_server_emits_connect_line() {
 
     let port: u16 = parts[2]
         .parse()
-        .unwrap_or_else(|_| panic!("port {:?} must parse as u16 (0–65535)", parts[2]));
-    // mosh-server defaults to the 60000–61000 range; validate it's in the expected range.
+        .unwrap_or_else(|_| panic!("port {:?} must parse as u16 (0-65535)", parts[2]));
+    // mosh-server defaults to the 60000-61000 range; validate it's in the expected range.
     assert!(
         (60000..=61000).contains(&port),
-        "mosh-server port {port} should be in the default range 60000–61000"
+        "mosh-server port {port} should be in the default range 60000-61000"
     );
 
     let key = parts[3];

@@ -177,7 +177,7 @@ async fn dynamic_forward_rejects_non_socks5_greeting() {
     let mut sock = tokio::net::TcpStream::connect(("127.0.0.1", fwd.bound_port()))
         .await
         .expect("connect proxy");
-    // SOCKS4 greeting (VER=4) — unsupported; server must close without a v5 reply.
+    // SOCKS4 greeting (VER=4), unsupported; server must close without a v5 reply.
     sock.write_all(&[0x04, 0x01, 0x00, 0x16])
         .await
         .expect("write");
@@ -185,7 +185,7 @@ async fn dynamic_forward_rejects_non_socks5_greeting() {
     let r = tokio::time::timeout(Duration::from_secs(2), sock.read(&mut buf))
         .await
         .expect("timeout");
-    // Either EOF (0 bytes) or a non-0x05 first byte — never a SOCKS5 success.
+    // Either EOF (0 bytes) or a non-0x05 first byte, never a SOCKS5 success.
     match r {
         Ok(0) => {} // connection closed: acceptable
         Ok(_) => assert_ne!(buf[0], 0x05, "must not speak SOCKS5 to a v4 client"),

@@ -34,19 +34,19 @@ xcodebuild -project Semicolyn.xcodeproj -scheme Semicolyn \
 The Docker `sshd` fixture used by the Rust integration tests works as a target.
 From the simulator you can also reach any host your Mac can reach.
 
-1. Bring up the fixture (user `tester`, key-only by default — for a password
+1. Bring up the fixture (user `tester`, key-only by default, for a password
    smoke test point at any host that accepts passwords, or your own machine's
    `sshd`).
 2. In the app: enter host, port (22), user, password → **Connect**.
 3. Expect: the form swaps to a terminal; typing echoes, `ls` / the prompt
    render, and rotating the simulator reflows the grid.
 
-## MVP limitations (intentional — next slices)
+## MVP limitations (intentional, next slices)
 
 - **Password auth only**; publickey/cert deferred.
 - **Host key is auto-trusted** (no prompt, no persistence). Real trust-on-first-use
   + `known_hosts` persistence wires the already-built `HostKeyStore`.
-- **No saved hosts/credentials** — re-entered each launch. Wiring the built
+- **No saved hosts/credentials**, re-entered each launch. Wiring the built
   `HostStore` (Phase 2a) is the immediate follow-up.
 - **Raw PTY**, no tmux control mode yet (the `open_exec` + `TmuxSessionController`
   stack is built and is the next terminal slice).

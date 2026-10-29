@@ -6,14 +6,14 @@ import Foundation
 /// by `(type, id)`. The CloudKit Private DB implements this on Apple (Phase 2b);
 /// `InMemoryBlobStore`/`FileBlobStore` back tests and local persistence.
 ///
-/// Blobs are opaque to the store — `EncryptedRecordStore` seals/opens them, so a
+/// Blobs are opaque to the store, `EncryptedRecordStore` seals/opens them, so a
 /// backend (and CloudKit) only ever sees AES-GCM ciphertext.
 public protocol BlobStore {
     /// Store `data` under `(type, id)`, overwriting any existing blob.
     func putBlob(_ data: Data, type: String, id: UUID) throws
     /// The blob at `(type, id)`, or `nil` if none exists.
     func getBlob(type: String, id: UUID) throws -> Data?
-    /// Remove the blob at `(type, id)`. Idempotent — removing a missing blob is a no-op.
+    /// Remove the blob at `(type, id)`. Idempotent, removing a missing blob is a no-op.
     func deleteBlob(type: String, id: UUID) throws
     /// Every `(id, data)` pair stored under `type`, in unspecified order.
     func listBlobs(type: String) throws -> [(id: UUID, data: Data)]

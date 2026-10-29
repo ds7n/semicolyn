@@ -10,12 +10,12 @@ snippet launcher, gestures that drive plain tmux windows and panes on every
 transport, an on-device predictor that learns your vocabulary, and security-first
 credential handling with end-to-end-encrypted sync.
 
-> The name **semicolyn** is a respell of *semicolon* — the `;` that chains one
+> The name **semicolyn** is a respell of *semicolon*, the `;` that chains one
 > shell command into the next. The everyday punctuation of the command line,
 > reimagined for touch.
 
 **Status:** design complete; a connect-and-get-a-shell MVP (SSH + mosh, password
-and publickey auth) builds for the iOS Simulator and is now **on TestFlight** —
+and publickey auth) builds for the iOS Simulator and is now **on TestFlight**,
 the macOS CI runner archives, signs, and uploads a device-installable build. The
 protocol + logic tiers are built and Linux-tested; the app shell is built and
 validated by macOS CI.
@@ -23,35 +23,35 @@ validated by macOS CI.
 
 ## What makes it different
 
-- **Touch-native terminal UX** — context-aware key bar (locked-left + scroll,
+- **Touch-native terminal UX**, context-aware key bar (locked-left + scroll,
   fused Esc pill, arrow Pad, sticky/lockable modifiers), iOS-native selection and
   a delta-drag cursor halo instead of a joystick.
 - **Gesture-driven tmux**: plain tmux on SSH, Mosh and Eternal Terminal, driven
   by swipes, taps, long-presses and hardware-keyboard shortcuts through private
   key bindings (your own tmux keys stay untouched), with a raw-shell fallback
   when tmux is missing or turned off.
-- **On-device predictor** — learns your command vocabulary with Count-Min Sketch
+- **On-device predictor**, learns your command vocabulary with Count-Min Sketch
   + Bloom filters (a lossy frequency fingerprint, never recoverable text),
   ranks it with bundled English and command dictionaries, and harvests just-seen
   tokens from command output. Write-time privacy filter keeps secrets out of the model.
-- **Security-first, zero-telemetry** — no analytics, crash reporting, ads, or
+- **Security-first, zero-telemetry**, no analytics, crash reporting, ads, or
   third-party SDKs. Keys live in iCloud Keychain or Secure Enclave; CloudKit
   records are client-side AES-256-GCM so Apple sees only ciphertext.
-- **Post-quantum SSH** — `mlkem768x25519` PQC key exchange in the Tier-1 allowlist.
-- **Open-source + one-time Pro** — GPL-3.0; Pro is cosmetic-only (no feature paywall).
+- **Post-quantum SSH**, `mlkem768x25519` PQC key exchange in the Tier-1 allowlist.
+- **Open-source + one-time Pro**, GPL-3.0; Pro is cosmetic-only (no feature paywall).
 
 ## Architecture
 
 A Rust SSH core (`crates/semicolyn-ssh-core`, russh) is exposed to Swift through a
 UniFFI XCFramework. The Swift splits into a **platform-agnostic, Linux-tested**
 tier (`Sources/SemicolynKit/`: model, storage, tmux launch and gestures, predictor) and
-a **thin Apple-gated** tier (`App/` — SwiftUI, SwiftTerm, Keychain/SE, CloudKit),
+a **thin Apple-gated** tier (`App/`, SwiftUI, SwiftTerm, Keychain/SE, CloudKit),
 so the maximum surface stays testable off-Mac. Full diagram, rationale, repo
 layout, and the spec/plan map: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Quickstart
 
-The platform-agnostic tier runs in a Docker dev image (Swift 6.1 + Rust) — no
+The platform-agnostic tier runs in a Docker dev image (Swift 6.1 + Rust), no
 Mac required:
 
 ```bash
@@ -70,7 +70,7 @@ Early-stage solo project with a locked, spec-driven design. To get oriented:
 read this README, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 [docs/brainstorming-decisions.md](docs/brainstorming-decisions.md) before any code. The platform-agnostic tier (`crates/`,
 `Sources/SemicolynKit/`) is fully buildable and testable on Linux via the
-quickstart above — start there. Please open an issue before a large PR so it can be
+quickstart above, start there. Please open an issue before a large PR so it can be
 checked against the locked design.
 
 ## License

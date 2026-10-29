@@ -5,7 +5,7 @@ import XCTest
 
 final class TitleSanitizeTests: XCTestCase {
     func testNormalTitlePassesTrimmed() {
-        XCTAssertEqual(sanitizeTerminalTitle("  ~/code — vim  "), "~/code — vim")
+        XCTAssertEqual(sanitizeTerminalTitle("  ~/code \u{2014} vim  "), "~/code \u{2014} vim")
     }
     func testEmptyOrWhitespaceRejected() {
         XCTAssertNil(sanitizeTerminalTitle(""))

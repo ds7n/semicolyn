@@ -13,7 +13,7 @@
 
 ## License
 
-Mosh upstream is **GPLv3+**; Blink's fork is **GPLv3**. Semicolyn is **GPL-3.0-only** — all compatible.
+Mosh upstream is **GPLv3+**; Blink's fork is **GPLv3**. Semicolyn is **GPL-3.0-only**, all compatible.
 
 The vendored tree retains its **upstream copyright and license headers unchanged**. It is **NOT relicensed to True Positive LLC**. No first-party SPDX headers are added to any files under `extern/mosh`.
 
@@ -23,14 +23,14 @@ App Store distribution relies on the upstream **`COPYING.iOS`** App Store except
 
 ## REUSE compliance note
 
-This repo uses per-file SPDX headers only (no `.reuse/dep5`, no `REUSE.toml`, no `LICENSES/` directory, and REUSE is not enforced in CI). A git submodule's files are tracked only as a gitlink (commit pointer + `.gitmodules` entry) — upstream files are not tracked in our repository. Therefore upstream headers stand as-is and no first-party REUSE entries are required for the vendored tree.
+This repo uses per-file SPDX headers only (no `.reuse/dep5`, no `REUSE.toml`, no `LICENSES/` directory, and REUSE is not enforced in CI). A git submodule's files are tracked only as a gitlink (commit pointer + `.gitmodules` entry), upstream files are not tracked in our repository. Therefore upstream headers stand as-is and no first-party REUSE entries are required for the vendored tree.
 
 ## Files used by M1 build tasks
 
-- `src/frontend/moshiosbridge.h` — iOS bridge header
-- `src/frontend/moshiosbridge.cc` — iOS bridge implementation
-- `src/frontend/mosh-ios-controller.cc` — iOS controller frontend
-- `configure.ac` — autotools, exposes `--enable-ios-controller`
+- `src/frontend/moshiosbridge.h`, iOS bridge header
+- `src/frontend/moshiosbridge.cc`, iOS bridge implementation
+- `src/frontend/mosh-ios-controller.cc`, iOS controller frontend
+- `configure.ac`, autotools, exposes `--enable-ios-controller`
 
 ## How to bump the pin
 

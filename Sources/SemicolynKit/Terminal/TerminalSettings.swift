@@ -51,7 +51,7 @@ public struct BundledFont: Equatable, Sendable {
 public enum FontCatalog {
     public static let bundled: [BundledFont] = [
         // postScriptName values are the fonts' REAL PostScript names (nameID 6),
-        // read from the shipped Nerd Fonts v3.4.0 .ttf files — NOT the file names.
+        // read from the shipped Nerd Fonts v3.4.0 .ttf files, NOT the file names.
         // `UIFont(name:)` needs the PostScript name; a mismatch silently tofu-falls
         // back to the system font. Reconciled in Task 5 (see the plan).
         BundledFont(displayName: "Hack Nerd Font",
@@ -63,7 +63,7 @@ public enum FontCatalog {
                     fileName: "JetBrainsMonoNerdFont-Regular",
                     license: "OFL-1.1"),
     ]
-    public static let `default`: BundledFont = bundled[0]   // Hack — mobile-legible
+    public static let `default`: BundledFont = bundled[0]   // Hack, mobile-legible
 
     /// Resolve a face to the PostScript name to render with.
     /// - Returns: `nil` for `.system` (caller uses `monospacedSystemFont`);

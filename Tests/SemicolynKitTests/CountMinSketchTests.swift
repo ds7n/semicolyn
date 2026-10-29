@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// Count-Min Sketch — Critical tier (correctness-critical, and the serialized
+/// Count-Min Sketch, Critical tier (correctness-critical, and the serialized
 /// blob is a synced format). Verifies one-sided error, saturating add, pointwise
 /// merge, clamp-at-zero subtract, and fail-closed (de)serialization.
 final class CountMinSketchTests: XCTestCase {

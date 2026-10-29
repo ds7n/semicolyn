@@ -1,4 +1,4 @@
-# Export compliance — encryption classification
+# Export compliance, encryption classification
 
 **Summary:** semicolyn self-classifies as **mass-market encryption software, ECCN
 5D992.c** (standard, published cryptographic algorithms used to secure the user's
@@ -9,18 +9,18 @@ LLC asserts the mass-market exemption for this usage.
 This document records the basis for that classification so it can be reviewed or
 revised (e.g. with counsel) rather than re-derived each release.
 
-## TL;DR — obligations & triggers
+## TL;DR, obligations & triggers
 
 **Ongoing obligations today: effectively none.** With russh + standard published
 algorithms, keeping this posture requires:
 
 - ❌ No export license, no government pre-approval.
-- ❌ No CCATS (that's for non-standard/proprietary crypto — we have none).
+- ❌ No CCATS (that's for non-standard/proprietary crypto, we have none).
 - ❌ No BIS/NSA self-classification report (removed for standard-algorithm
   mass-market software by the March 2021 BIS rule change).
 - ❌ No annual filing.
-- ✅ One truthful Info.plist checkbox (`ITSAppUsesNonExemptEncryption = NO`) — done.
-- ✅ Keep France excluded in App Store Connect availability — already set.
+- ✅ One truthful Info.plist checkbox (`ITSAppUsesNonExemptEncryption = NO`), done.
+- ✅ Keep France excluded in App Store Connect availability, already set.
 
 **Only two things would create real work (revisit if either happens):**
 
@@ -30,12 +30,12 @@ algorithms, keeping this posture requires:
    (a notification, not an approval; not triggered by TestFlight or other markets).
 
 Before any **public, non-TestFlight release**, a short confirmation with export-control
-counsel is cheap insurance — but nothing must be filed to ship a TestFlight build or to
+counsel is cheap insurance, but nothing must be filed to ship a TestFlight build or to
 distribute standard-crypto SSH outside France.
 
 ## What crypto the app actually uses
 
-All cryptography is **standard, well-known, and published** — no custom primitives:
+All cryptography is **standard, well-known, and published**, no custom primitives:
 
 | Path | Backend | Algorithms |
 |---|---|---|
@@ -43,7 +43,7 @@ All cryptography is **standard, well-known, and published** — no custom primit
 | **SSH transport** | **russh 0.61** → `aws-lc-rs` (+ RustCrypto: `aes`, `chacha20`, `curve25519-dalek`, `ed25519-dalek`) | AES-CTR/GCM, ChaCha20-Poly1305, curve25519 (X25519/Ed25519), ECDSA, RSA |
 | Key storage | iOS Keychain / Secure Enclave | ed25519 / SE-backed keys |
 
-The encryption exists to secure the **user's own remote-shell connections** — the
+The encryption exists to secure the **user's own remote-shell connections**, the
 core, and mass-market, function of a terminal client.
 
 ## Why this is the mass-market case, not the fully-exempt case
@@ -105,7 +105,7 @@ qualify for it because the SSH path's crypto comes from **russh → aws-lc-rs / 
 exemption would be to adopt **[`swift-nio-ssh`](https://github.com/apple/swift-nio-ssh)**
 (which brings `swift-crypto`, routing to CryptoKit/CommonCrypto on Apple platforms).
 
-**That is a full SSH-core replacement, not a crypto swap** — russh only exposes
+**That is a full SSH-core replacement, not a crypto swap**, russh only exposes
 `aws-lc-rs`/`ring` backends, and swift-nio-ssh is a whole competing engine, so you cannot
 bolt swift-crypto onto russh without hand-writing a russh↔CommonCrypto backend (a
 multi-month, high-risk crypto-plumbing project). It would also discard the project's

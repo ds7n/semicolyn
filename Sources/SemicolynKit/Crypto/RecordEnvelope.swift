@@ -4,7 +4,7 @@ import Foundation
 #if canImport(CryptoKit)
 import CryptoKit
 #else
-import Crypto   // Apple's swift-crypto — API-compatible on Linux
+import Crypto   // Apple's swift-crypto, API-compatible on Linux
 #endif
 
 public enum RecordEnvelopeError: Error, Equatable {

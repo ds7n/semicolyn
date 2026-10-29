@@ -4,10 +4,10 @@
 /// L4b argument-position denylist. Given a reconstructed line's tokens, returns
 /// the indexes whose token is a secret-bearing VALUE (or a `flag=value` token that
 /// embeds one) and must never be learned. Conservative, deterministic, typed table
-/// — no regex over the whole line, no user-editable rules in v1.
+///, no regex over the whole line, no user-editable rules in v1.
 ///
 /// Reframe: over-suppression is cheap (one skipped word); a missed value leaks a
-/// credential — so ambiguous forms drop the value.
+/// credential, so ambiguous forms drop the value.
 
 /// Flags whose FOLLOWING token (space-separated) or `=`-suffix (joined) is secret.
 /// Compared case-insensitively.
@@ -25,7 +25,7 @@ public func secretValueIndexes(in tokens: [String]) -> Set<Int> {
     var drop: Set<Int> = []
     for (i, token) in tokens.enumerated() {
         let lower = token.lowercased()
-        // `--flag=value` — the whole token embeds the secret.
+        // `--flag=value`, the whole token embeds the secret.
         if let eq = token.firstIndex(of: "=") {
             let flagPart = String(token[token.startIndex..<eq]).lowercased()
             if secretFlags.contains(flagPart) { drop.insert(i); continue }

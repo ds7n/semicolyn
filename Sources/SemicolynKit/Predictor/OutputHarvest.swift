@@ -4,8 +4,8 @@ import Foundation
 
 /// A short-lived, bounded store of tokens harvested from command *output*
 /// (filenames, pod names, branch names…), so they surface as one-tap completions
-/// when the user types a matching prefix. Recency-ordered and capacity-bounded —
-/// new output pushes old output out — which models "short-lived" deterministically
+/// when the user types a matching prefix. Recency-ordered and capacity-bounded,
+/// new output pushes old output out, which models "short-lived" deterministically
 /// without a clock. Ephemeral: never persisted. A ``CandidateSource`` whose
 /// natural ranking is recency. See `2026-06-21-predictor-output-harvesting-design`.
 public struct OutputHarvest: CandidateSource, Sendable {

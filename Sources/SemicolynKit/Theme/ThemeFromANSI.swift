@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 /// Which ANSI slot feeds each strictly-derived UI semantic role. `accent.highlight`
-/// is intentionally absent — it is an authored decorative tint, not a slot.
+/// is intentionally absent, it is an authored decorative tint, not a slot.
 public struct ANSIRoleMap: Equatable, Sendable {
     public let accentPrimary: ANSISlot
     public let success, degraded, broken, warning: ANSISlot
@@ -21,7 +21,7 @@ extension Theme {
     /// Builds a Theme whose accent-primary + state colors are RESOLVED from `ansi`
     /// via `roles` (strict derivation), while `highlight`, surfaces, text, and the
     /// terminal tokens are authored directly. bell/focus/keybar/predictor/banner
-    /// are derived here — the single place that logic lives.
+    /// are derived here, the single place that logic lives.
     public static func fromANSI(
         ansi: ANSIPalette, roles: ANSIRoleMap, highlight: ThemeColor,
         surface: Surface, text: Text, terminal: Terminal

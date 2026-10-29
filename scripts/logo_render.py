@@ -42,7 +42,7 @@ app = typer.Typer(add_completion=False, help=__doc__)
 _HIRES = 2048
 
 # Neon Midnight defaults (verbatim from the theme catalog).
-_DEFAULT_MARK = "#FF6F5E"  # coral-red — what Recraft fills the glyph with
+_DEFAULT_MARK = "#FF6F5E"  # coral-red, what Recraft fills the glyph with
 _DEFAULT_BG = "#07090E"  # midnight near-black
 
 
@@ -76,7 +76,7 @@ def _drop_fill(svg: str, color: tuple[int, int, int]) -> str:
     """Make every path filled with ``color`` transparent (``fill="none"``).
 
     Used to strip a baked-in full-canvas background rect so the glyph renders on
-    transparency — a prerequisite for building the glow from its alpha channel.
+    transparency, a prerequisite for building the glow from its alpha channel.
     """
     r, g, b = color
     svg = re.sub(rf'fill="rgb\(\s*{r}\s*,\s*{g}\s*,\s*{b}\s*\)"', 'fill="none"', svg)
@@ -97,7 +97,7 @@ def _build_glow(
 
     Two stacked Gaussian blurs (a tight bright core + a wide soft falloff) give a
     convincing even glow. Because it is a blur of the mark, the falloff is uniform
-    by construction — no painterly blotches.
+    by construction, no painterly blotches.
     """
     alpha = glyph.split()[3]
     canvas = Image.new("RGBA", glyph.size, (0, 0, 0, 0))

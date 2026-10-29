@@ -12,7 +12,7 @@ public enum LogTransport: String, Sendable, CaseIterable {
 /// version 1; NILVALUE `-` for HOSTNAME/procid/msgid/structured-data). The HOSTNAME
 /// field is intentionally the nil value `-`: deriving a device name on iOS requires
 /// `ProcessInfo.hostName`, which does a synchronous mDNS lookup that blocks the main
-/// thread and triggers the Local Network permission prompt — not worth it. The build
+/// thread and triggers the Local Network permission prompt, not worth it. The build
 /// is identified by the version banner the sink emits on connect instead. TCP and TLS
 /// (RFC 6587 / RFC 5425) are octet-counted: the returned string is
 /// `<utf8-byte-length> <syslog-message>`. UDP (RFC 5426) is the bare message. Newlines

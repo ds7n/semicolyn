@@ -20,7 +20,7 @@ final class SuggestionRefreshCoalescerTests: XCTestCase {
         XCTAssertTrue(c.isDue(at: 1.05))    // exactly 50ms elapsed
     }
 
-    // A newer request within the window resets the clock — the earlier check is no longer due.
+    // A newer request within the window resets the clock, the earlier check is no longer due.
     func testNewerRequestResetsWindow() {
         var c = SuggestionRefreshCoalescer(quietWindow: 0.05)
         c.requestRefresh(at: 1.00)

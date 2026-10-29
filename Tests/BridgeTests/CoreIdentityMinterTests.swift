@@ -8,7 +8,7 @@ import SemicolynSSHCoreFFI
 /// `CoreIdentityMinter`'s only logic is the value mapping from `SemicolynSSHCoreFFI.KeyMaterial`
 /// to `SemicolynKit.KeyMaterial`; the field assertions here cover the source values that
 /// mapping reads. The Xcode-linked `CoreIdentityMinter` (App target) is exercised in
-/// Tasks 4–5; its mapping correctness is validated by these field-level assertions.
+/// Tasks 4-5; its mapping correctness is validated by these field-level assertions.
 ///
 /// Generated Swift symbol names confirmed from `uniffi-bindgen` output:
 ///   - `SemicolynSSHCoreFFI.mintEd25519Identity()`
@@ -41,7 +41,7 @@ final class CoreIdentityMinterTests: XCTestCase {
         XCTAssertEqual(reparsed.algorithm, "ed25519")
     }
 
-    /// Each mint call produces a distinct key — the RNG is seeded fresh.
+    /// Each mint call produces a distinct key, the RNG is seeded fresh.
     func testMintedKeysAreDistinct() throws {
         let a = try SemicolynSSHCoreFFI.mintEd25519Identity()
         let b = try SemicolynSSHCoreFFI.mintEd25519Identity()

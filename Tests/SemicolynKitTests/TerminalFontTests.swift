@@ -29,7 +29,7 @@ final class TerminalFontTests: XCTestCase {
     }
 
     // Hashable: distinct faces are distinct Set members; equal faces collapse. This is
-    // what the picker's `ForEach(..., id: \.self)` relies on for correct row identity —
+    // what the picker's `ForEach(..., id: \.self)` relies on for correct row identity,
     // two imported fonts differing only by PostScript name must NOT collide even when
     // their displayName is identical (the same-basename-import bug the picker guards).
     func testTerminalFontHashableDistinguishesSameDisplayNameDifferentKind() {

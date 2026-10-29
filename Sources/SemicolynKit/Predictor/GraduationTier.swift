@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-/// The privacy confidence a token graduates with — decides whether its literal is
+/// The privacy confidence a token graduates with, decides whether its literal is
 /// persisted (high) or only its lossy frequency count (low). L6 hands this to L7.
 public enum LearnConfidence: Sendable, Equatable { case high, low }
 
@@ -31,20 +31,20 @@ public struct GraduatedOccurrence: Equatable, Hashable, Sendable {
 /// `maxTracked` (oldest-pending eviction) so a long/hostile session can't grow it
 /// unboundedly; eviction only ever DELAYS learning (safe).
 public struct GraduationTier: Equatable, Sendable {
-    /// One recorded admit within the current line — the unit `forgetLastLine` reverses.
+    /// One recorded admit within the current line, the unit `forgetLastLine` reverses.
     private struct LineEntry: Equatable, Sendable {
         let token: String
         let previous: String?
         let count: UInt32
     }
 
-    /// Tokens that have crossed the threshold — record directly, no deferral.
+    /// Tokens that have crossed the threshold, record directly, no deferral.
     private var graduated: Set<String> = []
     /// Un-graduated tokens → their distinct `previous` contexts → accumulated count.
     private var pending: [String: [String?: UInt32]] = [:]
     /// Insertion order of pending token keys, for oldest-first eviction.
     private var pendingOrder: [String] = []
-    /// Tokens admitted since the last `beginLine()`, newest line only — the unit
+    /// Tokens admitted since the last `beginLine()`, newest line only, the unit
     /// `forgetLastLine()` reverses. Bounded implicitly by a line's token count.
     private var lastLineTokens: [LineEntry] = []
     private let threshold: Int
@@ -100,7 +100,7 @@ public struct GraduationTier: Equatable, Sendable {
     public mutating func beginLine() { lastLineTokens.removeAll(keepingCapacity: true) }
 
     /// Reverse the current line's still-pending increments (surgical forget-last-line).
-    /// Graduated tokens are untouched by design — they are in the persistent store and
+    /// Graduated tokens are untouched by design, they are in the persistent store and
     /// not surgically reachable; L7 confidence tiering means a low-confidence one has
     /// no literal to leak. Panic-purge is the fallback for graduated state.
     public mutating func forgetLastLine() {
@@ -120,7 +120,7 @@ public struct GraduationTier: Equatable, Sendable {
     }
 
     /// Clear all ephemeral state (context/incognito/host switch). Graduated tokens
-    /// are also forgotten — this is a session-scoped tier; the persistent store holds
+    /// are also forgotten, this is a session-scoped tier; the persistent store holds
     /// what already graduated.
     public mutating func reset() {
         graduated.removeAll()

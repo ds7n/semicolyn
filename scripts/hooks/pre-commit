@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 #
 # Pre-commit guard. Blocks the commit when a STAGED path matches a known
-# "should never be committed" pattern — the strays that a broad `git add -A`
+# "should never be committed" pattern, the strays that a broad `git add -A`
 # has swept in before (harness bind-mounts, an unexpanded `$TMPDIR` path, scratch
 # screenshots, MCP/IDE/shell-rc dotfiles). Catches them even when `.gitignore` is
 # bypassed with `git add -f`.
@@ -12,7 +12,7 @@
 # (or run scripts/hooks/install.sh). Bypass a false positive with `git commit --no-verify`.
 #
 # A LOCAL, gitignored overlay at .git/hooks/pre-commit.local (if present and
-# executable) is run first — that's where per-user checks (e.g. a personal-name
+# executable) is run first, that's where per-user checks (e.g. a personal-name
 # scan) live, so they never enter the tracked/public repo.
 set -euo pipefail
 
@@ -20,7 +20,7 @@ red() { printf '\033[31m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$1"; }
 
 # 1) Run the optional local overlay first (per-user, gitignored). Reference it via
-#    the real .git dir — NOT `git rev-parse --git-path hooks/...`, which resolves
+#    the real .git dir, NOT `git rev-parse --git-path hooks/...`, which resolves
 #    against core.hooksPath (i.e. scripts/hooks/) once that's set, so it would never
 #    find the overlay in .git/hooks/.
 git_dir="$(git rev-parse --git-dir)"

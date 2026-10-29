@@ -5,11 +5,11 @@ import Foundation
 /// The outcome of evaluating an offered host key against stored trusted keys for
 /// a given `(host, algorithm)` pair.
 public enum HostKeyDecision: Equatable, Sendable {
-    /// The offered fingerprint matches a stored entry of this algorithm — all good.
+    /// The offered fingerprint matches a stored entry of this algorithm, all good.
     case trusted
-    /// No stored entry exists for this algorithm — first-trust opportunity.
+    /// No stored entry exists for this algorithm, first-trust opportunity.
     case firstTrust
-    /// Entries of this algorithm exist but none match the offered fingerprint — potential MITM.
+    /// Entries of this algorithm exist but none match the offered fingerprint, potential MITM.
     case mismatch(stored: [HostKey])
 }
 

@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// Core-tier coverage for `parseSSHURL` — equivalence partitions (host-only, user,
+/// Core-tier coverage for `parseSSHURL`, equivalence partitions (host-only, user,
 /// port, both, path, IPv6) + boundary values on the port, with negative cases
 /// asserting the specific nil for each malformed class.
 final class SSHURLTests: XCTestCase {
@@ -64,7 +64,7 @@ final class SSHURLTests: XCTestCase {
         XCTAssertEqual(parseSSHURL("ssh://host:65535")?.port, 65535)
     }
 
-    // MARK: negative cases — each asserts the specific nil
+    // MARK: negative cases, each asserts the specific nil
 
     func testNonSSHSchemeIsNil() {
         XCTAssertNil(parseSSHURL("http://example.com"))

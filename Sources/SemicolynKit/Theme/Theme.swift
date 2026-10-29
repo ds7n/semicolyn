@@ -3,7 +3,7 @@
 
 /// A resolved color reference: a palette hex plus an opacity multiplier.
 /// Tokens hold `ThemeColor` values so equality is testable without rendering.
-/// This type is platform-agnostic — no SwiftUI here (see ThemeEnvironment.swift).
+/// This type is platform-agnostic, no SwiftUI here (see ThemeEnvironment.swift).
 public struct ThemeColor: Equatable, Sendable {
     public let hex: String
     public let opacity: Double
@@ -19,7 +19,7 @@ public struct ThemeColor: Equatable, Sendable {
     }
 
     /// Parses the `#RRGGBB` hex into normalized components plus the opacity.
-    /// Pure math — unit-tested on Linux; the SwiftUI `Color` bridge consumes it.
+    /// Pure math, unit-tested on Linux; the SwiftUI `Color` bridge consumes it.
     public func rgba() -> (red: Double, green: Double, blue: Double, opacity: Double) {
         let s = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
         let v = UInt64(s, radix: 16) ?? 0
@@ -30,7 +30,7 @@ public struct ThemeColor: Equatable, Sendable {
     }
 }
 
-/// The full semantic-token set for one theme. UI references these tokens only —
+/// The full semantic-token set for one theme. UI references these tokens only,
 /// never palette constants or raw hex. Adding tokens is additive; never inline.
 public struct Theme: Equatable, Sendable {
     public struct Surface: Equatable, Sendable {
@@ -85,7 +85,7 @@ public struct Theme: Equatable, Sendable {
     public let predictor: Predictor
     public let banner: Banner
     public let terminal: Terminal
-    /// Authored 16-color ANSI palette — source of hue for the terminal + UI refs.
+    /// Authored 16-color ANSI palette, source of hue for the terminal + UI refs.
     public let ansi: ANSIPalette
 
     public init(surface: Surface, text: Text, accent: Accent, state: State,

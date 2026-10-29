@@ -13,7 +13,7 @@ in ~2 min instead of discovered on-device after a ~40-min CI/TestFlight round-tr
 `scripts/check-app-view-only.sh` (run in the CI `lint` job) flags the clearest smell:
 a free/private function that returns a scalar computed by arithmetic and does not
 touch `self.`/`view.`/a SwiftUI type. It is deliberately conservative (low false
-positive), so it will miss subtler logic — the primary defence is code review; the
+positive), so it will miss subtler logic, the primary defence is code review; the
 gate is the backstop that catches the obvious regressions.
 
 **If flagged:** move the function to `Sources/SemicolynKit/`, give it a test
@@ -25,4 +25,4 @@ and record the excluded pattern here. Do not disable the gate wholesale.
 
 **Escape hatch:** if the gate proves too noisy in practice, downgrade it from a
 hard CI failure to an informational `lint`-job annotation (drop the `exit 1`) and
-rely on the code-review checklist — this is the spec's documented fallback.
+rely on the code-review checklist, this is the spec's documented fallback.

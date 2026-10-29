@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// Bloom filter — Critical tier. Verifies the defining no-false-negatives
+/// Bloom filter, Critical tier. Verifies the defining no-false-negatives
 /// guarantee and fail-closed (de)serialization.
 final class BloomFilterTests: XCTestCase {
     func testInsertedTokensAlwaysContained() {

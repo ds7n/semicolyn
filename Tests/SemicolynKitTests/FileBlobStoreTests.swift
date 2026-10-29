@@ -13,7 +13,7 @@ final class FileBlobStoreTests: XCTestCase {
     func testPersistsAcrossInstances() throws {
         let id = UUID()
         try FileBlobStore(directory: dir).putBlob(Data([7, 8, 9]), type: "host", id: id)
-        // Fresh instance, same directory — must read what the first wrote.
+        // Fresh instance, same directory, must read what the first wrote.
         let reread = try FileBlobStore(directory: dir).getBlob(type: "host", id: id)
         XCTAssertEqual(reread, Data([7, 8, 9]))
     }

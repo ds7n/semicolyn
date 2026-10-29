@@ -10,7 +10,7 @@ Durable capture of the load-bearing knowledge for cross-compiling `eternaltermli
 fresh session can act without re-deriving the painful bits.
 
 **Source docs** (the load-bearing knowledge this consolidates):
-- `extern/eternaltermlib/docs/porting-ios.md` — the iOS porting findings, verified on Linux.
+- `extern/eternaltermlib/docs/porting-ios.md`, the iOS porting findings, verified on Linux.
 - The template to mirror: `scripts/build-mosh-xcframework.sh` (host protoc + per-slice cross +
   explode-and-combine + create-xcframework).
 
@@ -28,7 +28,7 @@ are downstream (separate plans). (ET now runs gesture-driven plain tmux like SSH
    Keeps the C++/protobuf blob off the Linux `swift test` job; build once + cache.
 2. **Toolchain:** `leetal/ios-cmake` (vendored submodule `extern/ios-cmake`). ET uses CMake and
    calls `find_package(Protobuf)` + `find_library(sodium)`, which the Mosh autotools cross-flags
-   never handled — so a mature CMake iOS toolchain, NOT the hand-rolled cross flags. (The
+   never handled, so a mature CMake iOS toolchain, NOT the hand-rolled cross flags. (The
    hand-rolled attempt was miserable; this is the pivot away from it.)
 3. **libsodium:** consume the **prebuilt `Clibsodium.xcframework`** from `jedisct1/swift-sodium`
    (`extern/swift-sodium`, tag 0.11.0, author-maintained). **NO self-build.** Feed ET's CMake
@@ -47,12 +47,12 @@ are downstream (separate plans). (ET now runs gesture-driven plain tmux like SSH
    `ET_HTTP_TLS=OFF` suppresses the whole header (no vendored edit). Verified on Linux: builds +
    links with zero OpenSSL symbols and a working transport (handshake/stream/roam).
 
-## The 3 traps (learned the hard way — from porting-ios.md)
+## The 3 traps (learned the hard way, from porting-ios.md)
 
 1. **`CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH`, not `ONLY`.** ET calls `find_package(Protobuf)`
    for the **host** protoc + codegen wiring; `ONLY` restricts package search to the iOS SDK and
    configure fails because the host Protobuf is invisible. `BOTH` lets host packages resolve
-   while target link libs still come from the SDK/prefix. leetal sets this itself — verify; if a
+   while target link libs still come from the SDK/prefix. leetal sets this itself, verify; if a
    version regresses, pass `-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH` explicitly.
 2. **Append the iOS libsodium/protobuf prefixes to `CMAKE_FIND_ROOT_PATH`, not just
    `CMAKE_PREFIX_PATH`.** Under the `ONLY` library-search mode, prefixes only in
@@ -69,7 +69,7 @@ exact bug ate `locale_utils.o` in the Mosh gate). Instead, for each slice:
 1. Explode every source archive into its OWN isolated scratch dir (`ar x` in a subshell so CWD
    stays put), renaming extracted objects with a per-archive numeric prefix so identical
    basenames from different archives can't clobber.
-2. `libtool -static -o libETerminal-<slice>.a <all the exploded .o files>` — objects carry no
+2. `libtool -static -o libETerminal-<slice>.a <all the exploded .o files>`, objects carry no
    basename-dedup semantics, so nothing is dropped, and libtool writes a proper Mach-O symbol
    table.
 3. **Guard:** assert the combined `.a` exports `_et_connect` via `nm`. Capture `nm` into a var
@@ -78,7 +78,7 @@ exact bug ate `locale_utils.o` in the Mosh gate). Instead, for each slice:
 
 ET has **THREE** archives to fold in: `libet_base.a` (vendored ET + protobuf srcs),
 `libeternaltermlib.a` (the shim), and the slice's `libprotobuf-lite.a`. **libsodium stays
-SEPARATE** — its own xcframework slice is linked at app-link time, not merged (that's how a
+SEPARATE**, its own xcframework slice is linked at app-link time, not merged (that's how a
 prebuilt binary dep is normally consumed).
 
 ## Slice / xcframework assembly (mirror Mosh)
@@ -105,7 +105,7 @@ prebuilt binary dep is normally consumed).
     Headers/Clibsodium/sodium.h}`
   - sim: `extern/swift-sodium/Clibsodium.xcframework/ios-arm64_arm64e_x86_64-simulator/{libsodium.a,
     Headers/Clibsodium/sodium.h}`
-- Mosh precedent: `scripts/build-mosh-xcframework.sh` — `build_host_protoc` (native protoc once),
+- Mosh precedent: `scripts/build-mosh-xcframework.sh`, `build_host_protoc` (native protoc once),
   `build_protobuf_target <prefix>` (per-slice cross libprotobuf), the explode-and-combine block
   (the `merge-objs` loop + `libtool -static` + the SIGPIPE-safe `nm` guard), the sim `lipo`, and
   the `xcodebuild -create-xcframework` tail.
@@ -125,6 +125,6 @@ prebuilt binary dep is normally consumed).
 
 ## Licensing
 
-libsodium = ISC, protobuf = BSD-3, ET + eternaltermlib = Apache-2.0 — all permissive, compatible
+libsodium = ISC, protobuf = BSD-3, ET + eternaltermlib = Apache-2.0, all permissive, compatible
 with semicolyn (GPL-3.0-only). Preserve ET's `NOTICE`. A combined-binary **license audit is owed
 before distribution** (hygiene, not a CI blocker).

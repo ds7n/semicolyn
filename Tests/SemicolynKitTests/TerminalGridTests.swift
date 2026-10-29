@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// `terminalGrid` — converts a pixel area + cell metrics into a terminal cell
+/// `terminalGrid`, converts a pixel area + cell metrics into a terminal cell
 /// grid. The single accurate source for the tmux client size on rotation/layout,
 /// replacing the old hardcoded ~8×16 estimate. Fail-closed on degenerate input.
 final class TerminalGridTests: XCTestCase {

@@ -3,7 +3,7 @@
 
 /// A hardware-keyboard command action. Each maps to a `UIKeyCommand` in the App
 /// tier and routes to a connection/UI action (external-keyboard spec
-/// "Cmd-shortcut map"). `switchWindow` carries its 1–9 target.
+/// "Cmd-shortcut map"). `switchWindow` carries its 1-9 target.
 public enum KeyboardCommand: Equatable, Hashable, Sendable {
     case newWindow
     case closeWindow

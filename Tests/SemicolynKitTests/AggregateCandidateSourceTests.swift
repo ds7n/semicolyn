@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// AggregateCandidateSource — Core tier. Realizes `today ⊕ rolling` on the read
+/// AggregateCandidateSource, Core tier. Realizes `today ⊕ rolling` on the read
 /// side: union the candidate tokens, sum their counts (saturating).
 final class AggregateCandidateSourceTests: XCTestCase {
     /// A source holding exact counts: answers a prefix with its matching entries.

@@ -3,14 +3,14 @@
 import XCTest
 @testable import SemicolynKit
 
-/// TokenFilter — Critical tier (security). The write-time predicate that keeps
+/// TokenFilter, Critical tier (security). The write-time predicate that keeps
 /// secrets out of the learned vocabulary. EP + BVA + adversarial: a positive per
 /// exclude vector, negatives that must record, entropy boundaries, and gating of
 /// a real store.
 final class TokenFilterTests: XCTestCase {
     private let filter = TokenFilter()
 
-    // MARK: deterministic patterns — positives
+    // MARK: deterministic patterns, positives
 
     func testContainsPasswordTokenSecret() {
         // Bare "password" is an ordinary word now (spec 6.9); see testOrdinaryWordsAllowed.
@@ -138,7 +138,7 @@ final class TokenFilterTests: XCTestCase {
         XCTAssertTrue(filter.excludes("github_pat_11ABCDEF0abcdef1234567890"))
     }
 
-    // MARK: negatives — must be recorded
+    // MARK: negatives, must be recorded
 
     func testNormalCommandsNotExcluded() {
         for token in ["git", "deploy", "kubectl", "README", "main.swift", "/usr/bin/env"] {
@@ -156,9 +156,9 @@ final class TokenFilterTests: XCTestCase {
 
     func testHighEntropyTokenExcludedAtBoundary() {
         // 16 distinct chars → entropy log2(16) = 4.0, exactly the threshold, at
-        // exactly the min length — must exclude (the `>=` boundary).
+        // exactly the min length, must exclude (the `>=` boundary).
         XCTAssertTrue(filter.excludes("abcdefghijklmnop"))
-        // 18 chars — the 16–19 range a min-length of 20 would have leaked.
+        // 18 chars, the 16-19 range a min-length of 20 would have leaked.
         XCTAssertTrue(filter.excludes("abcdefghijklmnopqr"))
         // A realistic pasted secret matching no known prefix.
         XCTAssertTrue(filter.excludes("wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY"))
@@ -166,7 +166,7 @@ final class TokenFilterTests: XCTestCase {
 
     func testShortTokenNeverEntropyExcluded() {
         // 15 distinct chars: below min length, and structurally can't reach 4.0
-        // bits/char (needs ≥16 symbols) — must not exclude.
+        // bits/char (needs ≥16 symbols), must not exclude.
         XCTAssertFalse(filter.excludes("abcdefghijklmno"))
     }
 
@@ -191,7 +191,7 @@ final class TokenFilterTests: XCTestCase {
         XCTAssertFalse(noEntropy.excludes("abcdefghijklmnopqrst"))
     }
 
-    // MARK: shannon entropy — known-answer
+    // MARK: shannon entropy, known-answer
 
     func testShannonEntropyKnownValues() {
         XCTAssertEqual(shannonEntropy(""), 0, accuracy: 1e-9)
@@ -201,7 +201,7 @@ final class TokenFilterTests: XCTestCase {
         XCTAssertEqual(shannonEntropy("abcd"), 2.0, accuracy: 1e-9)   // log2(4)
     }
 
-    // MARK: integration — gates recording into a real store
+    // MARK: integration, gates recording into a real store
 
     func testGatesRecordingIntoStore() {
         var store = RollingVocabulary()
@@ -245,7 +245,7 @@ final class TokenFilterTests: XCTestCase {
     }
 
     func testGithubFineGrainedPatExcluded() {
-        // Already present via `github_pat_` in the shipped defaults — assert it stays.
+        // Already present via `github_pat_` in the shipped defaults, assert it stays.
         XCTAssertTrue(filter.excludes("github_pat_11ABCDEFG_examplekeymaterial"))
     }
 
@@ -253,7 +253,7 @@ final class TokenFilterTests: XCTestCase {
         // A normal command/arg that shares no credential prefix must NOT be excluded.
         XCTAssertFalse(filter.excludes("kubectl"))
         XCTAssertFalse(filter.excludes("git"))
-        // "asia" as a plain word is lowercase — the ASIA prefix is case-sensitive.
+        // "asia" as a plain word is lowercase, the ASIA prefix is case-sensitive.
         XCTAssertFalse(filter.excludes("asia-region"))
     }
 
@@ -272,13 +272,13 @@ final class TokenFilterTests: XCTestCase {
 
     func testNonJwtDottedTokenNotExcluded() {
         // A dotted token that is NOT a JWT (doesn't start with eyJ, wrong shape)
-        // must not be excluded by the structural check — e.g. a hostname or version.
+        // must not be excluded by the structural check, e.g. a hostname or version.
         XCTAssertFalse(filter.excludes("example.com.au"))
         XCTAssertFalse(filter.excludes("1.2.3"))
     }
 
     func testPublicPemHeaderNotExcluded() {
-        // A PUBLIC key / certificate header is not a secret — must NOT be excluded
+        // A PUBLIC key / certificate header is not a secret, must NOT be excluded
         // by the PEM check (only PRIVATE KEY headers are secret-bearing).
         XCTAssertFalse(filter.excludes("-----BEGIN PUBLIC KEY-----"))
         XCTAssertFalse(filter.excludes("-----BEGIN CERTIFICATE-----"))
@@ -302,7 +302,7 @@ final class TokenFilterTests: XCTestCase {
 
     func testPatternAdjacentIgnoresShortToken() {
         let filter = TokenFilter(entropyThreshold: 4.0, entropyMinLength: 16)
-        XCTAssertFalse(filter.isPatternAdjacent("abc123"), "below entropyMinLength — never flagged")
+        XCTAssertFalse(filter.isPatternAdjacent("abc123"), "below entropyMinLength, never flagged")
     }
 
     func testPatternAdjacentFalseWhenBackstopDisabled() {

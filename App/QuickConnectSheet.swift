@@ -4,7 +4,7 @@ import SwiftUI
 import SemicolynKit
 
 /// Confirm-before-connect sheet shown when the user taps an `ssh://` link in
-/// terminal output. A tap never connects silently — the user sees the parsed
+/// terminal output. A tap never connects silently, the user sees the parsed
 /// `user@host:port` and must hit **Connect** (Phase-3c ssh:// link seam).
 struct QuickConnectSheet: View {
     let target: SSHConnectTarget

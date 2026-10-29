@@ -14,7 +14,7 @@ use crate::connection::{ClientHandler, ConnectError, ForwardMap};
 type Handle = russh::client::Handle<ClientHandler>;
 
 /// Copy bytes both directions between a local socket and an SSH channel until
-/// either side closes. Errors are swallowed — a broken tunnel ends that one
+/// either side closes. Errors are swallowed, a broken tunnel ends that one
 /// connection, not the forward.
 async fn pump(mut sock: tokio::net::TcpStream, channel: russh::Channel<russh::client::Msg>) {
     let mut stream = channel.into_stream();
@@ -80,7 +80,7 @@ pub(crate) async fn open_local(
     })
 }
 
-/// A live dynamic (SOCKS5) forward — a device-local SOCKS5 proxy that opens a
+/// A live dynamic (SOCKS5) forward, a device-local SOCKS5 proxy that opens a
 /// direct-tcpip channel per CONNECT. Lifecycle identical to `LocalForward`.
 #[derive(uniffi::Object)]
 pub struct DynamicForward {
