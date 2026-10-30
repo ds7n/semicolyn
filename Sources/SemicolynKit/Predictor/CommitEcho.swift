@@ -59,13 +59,20 @@ public func rowConfirmsEcho(typedLine: String, renderedBeforeCursor: String) -> 
 /// must hold some non-space text. There is no slack for a byte in flight: the
 /// check runs at an Enter that arrives on its own, after every edit has echoed.
 ///
-/// The boundary after `typedAfter` rejects a screen that holds more of the word
-/// than the buffer does (a character typed somewhere the buffer did not follow).
+/// The boundaries on both ends reject a screen that holds more of the word than
+/// the buffer does (a character typed somewhere the buffer did not follow): after
+/// `typedAfter`, and before a line that starts with text (the prompt must end in a
+/// blank, or the read must start with the line).
 public func editedLineConfirmed(typedBefore: String, typedAfter: String,
                                 renderedBeforeCursor: String, renderedFromCursor: String) -> Bool {
-    guard (typedBefore + typedAfter).contains(where: { $0 != " " }) else { return false }
+    let line = typedBefore + typedAfter
+    guard line.contains(where: { $0 != " " }) else { return false }
     guard renderedBeforeCursor.hasSuffix(typedBefore),
           renderedFromCursor.hasPrefix(typedAfter) else { return false }
+    if line.first != " ", let previous = renderedBeforeCursor.dropLast(typedBefore.count).last,
+       previous != " " {
+        return false
+    }
     let rest = renderedFromCursor.dropFirst(typedAfter.count)
     return rest.first.map { $0 == " " } ?? true
 }

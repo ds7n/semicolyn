@@ -972,3 +972,68 @@ final class PasswordEntryDetectorTests: XCTestCase {
                        PasswordEntryDetector.CommitVerdict(learn: true, reason: .row))
     }
 }
+
+/// A prompt that arrives while the line is being typed (`read -p "Password: "`, which
+/// echoes): the answer's echo pushes the prompt off the tail's end before Enter.
+final class LatePasswordPromptTests: XCTestCase {
+    /// Shell prompt, line reset, then the program prints `prompt` and the user types
+    /// `answer` with a visible echo, in separate chunks.
+    private func lateVerdict(prompt: String, answer: String) -> PasswordEntryDetector.CommitVerdict {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("$ ./setup\r\n".utf8))
+        d.resetLine()
+        d.noteOutput(Array(prompt.utf8))
+        for ch in answer {
+            let b = Array(String(ch).utf8)
+            d.noteInput(b)
+            d.noteOutput(b)
+        }
+        return d.committedLineVerdict()
+    }
+
+    func testEchoedAnswerToALatePasswordPromptIsSuppressed() {
+        XCTAssertEqual(lateVerdict(prompt: "Password: ", answer: "hunter2"),
+                       .init(learn: false, reason: .prompt))
+    }
+
+    /// No colon anywhere: only the end-of-chunk check sees this prompt.
+    func testLatePromptWithoutAColonIsSuppressed() {
+        XCTAssertEqual(lateVerdict(prompt: "Enter passphrase ", answer: "hunter2"),
+                       .init(learn: false, reason: .prompt))
+    }
+
+    func testLatePassphrasePromptIsSuppressed() {
+        XCTAssertEqual(lateVerdict(prompt: "Enter passphrase for key '/k': ", answer: "correct horse"),
+                       .init(learn: false, reason: .prompt))
+    }
+
+    /// The prompt and the start of the echoed answer in one output chunk.
+    func testPromptAndAnswerInOneChunkIsSuppressed() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("$ ./setup\r\n".utf8))
+        d.resetLine()
+        d.noteInput(Array("hunter2".utf8))
+        d.noteOutput(Array("Password: hunter2".utf8))
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: false, reason: .prompt))
+    }
+
+    /// Control: a late prompt that is not a secret one leaves the answer learnable.
+    func testLateNonSecretPromptIsLearned() {
+        XCTAssertEqual(lateVerdict(prompt: "Project name: ", answer: "semicolyn"),
+                       .init(learn: true, reason: .bytes))
+    }
+
+    /// The latch lasts one line: after Enter and a fresh shell prompt, lines learn again.
+    func testSuppressionEndsWithTheLine() {
+        var d = PasswordEntryDetector()
+        d.noteOutput(Array("Password: ".utf8))
+        d.noteInput(Array("hunter2".utf8))
+        d.noteOutput(Array("hunter2".utf8))
+        XCTAssertFalse(d.shouldLearnCommittedLine())
+        d.noteOutput(Array("\r\n$ ".utf8))
+        d.resetLine()
+        d.noteInput(Array("ls".utf8))
+        d.noteOutput(Array("ls".utf8))
+        XCTAssertEqual(d.committedLineVerdict(), .init(learn: true, reason: .bytes))
+    }
+}

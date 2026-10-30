@@ -154,6 +154,16 @@ public struct InputTokenTracker: Equatable, Sendable {
             handleByte(b, into: &committed)
             if lineResets != resets { committed.removeAll() }
         }
+        // A key sends its whole sequence in one write, so a chunk that ends right
+        // after `ESC O` is not an SS3 key: it is Esc then O typed apart (vi mode's
+        // open-line command). Treat it as a bare ESC so the next key is not eaten as
+        // the SS3 final.
+        if parseState == .ss3 {
+            backToGround()
+            editBuffer.markUnusable()
+            resetLineContext()
+            committed.removeAll()
+        }
         return committed
     }
 
