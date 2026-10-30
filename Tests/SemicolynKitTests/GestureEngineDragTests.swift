@@ -155,8 +155,8 @@ final class GestureEngineDragTests: XCTestCase {
         XCTAssertEqual(d.intents.last, .endSelectionDrag(gp(225, 30), showMenu: true))
     }
 
-    /// Review Focus 2: holding a handle still never zooms; dragging after still extends.
-    func testHoldingAHandleNeverZooms() {
+    /// Review Focus 2: holding a handle still never long-presses; dragging after still extends.
+    func testHoldingAHandleNeverLongPresses() {
         var d = GestureDriver(gestureContext(selection: sel))
         d.down(25, 30, at: 1.0)
         XCTAssertNil(d.engine.nextDeadline)

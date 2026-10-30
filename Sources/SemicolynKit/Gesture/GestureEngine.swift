@@ -21,7 +21,8 @@ public struct GestureEngine: Sendable {
         /// release is not a tap. `onHandle`: started on a selection handle (never long-presses).
         case pressed(start: GesturePoint, startTime: Double, handle: SelectionEnd?,
                      longPressEligible: Bool, stoppedFling: Bool, context: GestureContext)
-        case longPressed
+        /// Held past the long-press threshold at `at`; the edit menu opens there on release.
+        case longPressed(at: GesturePoint)
         /// `grabOffset`: grabbed cell's centre minus the touch-down point, added to every move
         /// so the grabbed end tracks the finger's travel rather than the cell under it.
         case draggingHandle(anchor: GestureCell, grabOffset: GesturePoint, last: GesturePoint,
@@ -87,12 +88,11 @@ public struct GestureEngine: Sendable {
             lastReason = "tap:held"
         }
         switch state {
-        case let .pressed(_, startTime, _, eligible, _, ctx)
+        case let .pressed(start, startTime, _, eligible, _, _)
             where eligible && time - startTime >= GestureThresholds.longPressDuration:
-            state = .longPressed
+            state = .longPressed(at: start)
             lastReason = "longPress"
             resetTapSequence()
-            if ctx.screen == .plainTmux { out.append(.zoom) }
         case let .flinging(velocity, startTime, _, emitted, at, ctx):
             let momentum = ScrollMomentum(velocity: velocity)
             let t = time - startTime
@@ -201,10 +201,11 @@ public struct GestureEngine: Sendable {
                 return []
             }
             return tapReleased(at: start, time: e.time, context: ctx)
-        case .longPressed:
+        case let .longPressed(at):
+            // iOS standard: touch and hold, release, and the edit menu (Paste) appears.
             state = .idle
             lastReason = "longPressEnd"
-            return []
+            return [.showMenu(at)]
         case .draggingHandle:
             state = .idle
             lastReason = "handleRelease"

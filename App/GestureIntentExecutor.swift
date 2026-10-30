@@ -6,7 +6,7 @@ import SemicolynKit
 
 /// Performs `GestureIntent`s (spec 2026-10-04) with the app's existing pieces: plain-tmux
 /// actions, SwiftTerm selection + scrollback, mouse / arrow / wheel byte encoders, the
-/// Copy/Paste edit menu and the selection magnifier. Holds the current selection, because
+/// Copy/Paste/Zoom Pane edit menu and the selection magnifier. Holds the current selection, because
 /// SwiftTerm's selection service is internal (unreadable from the App).
 @MainActor
 final class GestureIntentExecutor: NSObject {
@@ -84,8 +84,6 @@ final class GestureIntentExecutor: NSObject {
             onScreenTmux()?.onSwitchWindow(delta: delta)
         case let .scroll(lines, cell):
             scroll(lines, at: cell, in: view)
-        case .zoom:
-            onScreenTmux()?.onLongPressZoom()
         }
     }
 
@@ -223,6 +221,12 @@ extension GestureIntentExecutor: @preconcurrency UIEditMenuInteractionDelegate {
                 // The double-tap that opened this menu also selected a word; drop it.
                 self.terminal?.selectNone()
                 self.selection = nil
+            })
+        }
+        // Custom command after the system ones (HIG). Acts on tmux's active pane.
+        if onScreenTmux() != nil {
+            items.append(UIAction(title: "Zoom Pane") { [weak self] _ in
+                self?.onScreenTmux()?.onZoomPane()
             })
         }
         return UIMenu(children: items.isEmpty ? suggestedActions : items)

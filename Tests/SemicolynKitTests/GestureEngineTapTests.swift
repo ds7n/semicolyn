@@ -108,21 +108,48 @@ final class GestureEngineTapTests: XCTestCase {
 
     // MARK: long press
 
-    func testLongPressZoomsAtExactlyHalfASecondAndNeverTaps() {
+    /// iOS standard: touch and hold, release, and the edit menu appears where the finger held.
+    func testLongPressOpensTheMenuOnReleaseAtExactlyHalfASecondAndNeverTaps() {
         var d = GestureDriver(gestureContext())
         d.down(55, 45, at: 1.0)
         XCTAssertEqual(d.engine.nextDeadline, 1.5)
         XCTAssertEqual(d.tick(at: 1.499), [])
-        XCTAssertEqual(d.tick(at: 1.5), [.zoom])
-        XCTAssertEqual(d.up(55, 45, at: 1.8), [])
-        XCTAssertEqual(d.intents, [.zoom])   // device bug build 174: no stray click
+        XCTAssertEqual(d.tick(at: 1.5), [])                       // nothing until release
+        XCTAssertEqual(d.engine.stateName, "longPressed")
+        XCTAssertEqual(d.up(55, 45, at: 1.8), [.showMenu(gp(55, 45))])
+        XCTAssertEqual(d.intents, [.showMenu(gp(55, 45))])   // device bug build 174: no stray click
     }
 
-    func testLongPressInRawShellDoesNothingAndNeverTaps() {
+    func testLongPressInRawShellOpensTheMenuToo() {
         var d = GestureDriver(gestureContext(screen: .rawShell, mode: .local))
         d.down(55, 45, at: 1.0); d.tick(at: 1.5)
         d.up(55, 45, at: 1.8); d.drainTicks()
+        XCTAssertEqual(d.intents, [.showMenu(gp(55, 45))])
+    }
+
+    /// The menu points at where the finger held, not where it drifted (within slop) on release.
+    func testLongPressMenuAnchorsAtThePressPoint() {
+        var d = GestureDriver(gestureContext())
+        d.down(55, 45, at: 1.0); d.tick(at: 1.5)
+        d.move(80, 90, at: 1.6)
+        XCTAssertEqual(d.up(80, 90, at: 1.7), [.showMenu(gp(55, 45))])
+    }
+
+    func testCancelledLongPressOpensNoMenu() {
+        var d = GestureDriver(gestureContext())
+        d.down(55, 45, at: 1.0); d.tick(at: 1.5)
+        XCTAssertEqual(d.send(.cancel, 55, 45, at: 1.6, touches: 0), [])
         XCTAssertEqual(d.intents, [])
+    }
+
+    /// A second finger after the hold turns it into a two-finger touch: no menu on release.
+    func testSecondFingerAfterLongPressOpensNoMenu() {
+        var d = GestureDriver(gestureContext())
+        d.down(55, 45, at: 1.0); d.tick(at: 1.5)
+        d.down(120, 45, at: 1.6, touches: 2)
+        d.up(120, 45, at: 1.7, remaining: 1)
+        d.up(55, 45, at: 1.8)
+        XCTAssertFalse(d.intents.contains { if case .showMenu = $0 { return true }; return false })
     }
 
     func testHoldShorterThanLongPressIsATap() {
@@ -135,7 +162,8 @@ final class GestureEngineTapTests: XCTestCase {
     func testLongPressSlopBoundary() {
         var still = GestureDriver(gestureContext())
         still.down(55, 45, at: 1.0); still.move(64.9, 45, at: 1.1)   // 9.9pt
-        XCTAssertEqual(still.tick(at: 1.5), [.zoom])
+        still.tick(at: 1.5)
+        XCTAssertEqual(still.up(64.9, 45, at: 1.6), [.showMenu(gp(55, 45))])
 
         var moved = GestureDriver(gestureContext())
         moved.down(55, 45, at: 1.0); moved.move(65, 45, at: 1.1)     // 10pt
@@ -147,8 +175,8 @@ final class GestureEngineTapTests: XCTestCase {
     // MARK: tmux off screen
 
     /// Plain tmux attached but off screen (detached / exited to the login shell, or a Mosh
-    /// host without tmux) yields a (rawShell, local) context: no immediate tmux tap, no zoom,
-    /// no window swipe. A horizontal drag scrolls instead.
+    /// host without tmux) yields a (rawShell, local) context: no immediate tmux tap,
+    /// no window swipe; long-press still opens the menu. A horizontal drag scrolls instead.
     func testTmuxOffScreenBehavesLikeTheRawShell() {
         let ctx = gestureContext(screen: GestureScreen(plainTmuxAttached: true, mode: .localScroll),
                                  mode: .local, multiWindow: true)
@@ -159,9 +187,9 @@ final class GestureEngineTapTests: XCTestCase {
 
         var hold = GestureDriver(ctx)
         hold.down(55, 45, at: 1.0)
-        XCTAssertEqual(hold.tick(at: 1.5), [])                                // no zoom
+        XCTAssertEqual(hold.tick(at: 1.5), [])
         hold.up(55, 45, at: 1.8); hold.drainTicks()
-        XCTAssertEqual(hold.intents, [])
+        XCTAssertEqual(hold.intents, [.showMenu(gp(55, 45))])                // menu, as anywhere
 
         var swipe = GestureDriver(ctx)
         swipe.down(300, 100, at: 1.0)

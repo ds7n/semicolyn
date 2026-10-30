@@ -80,7 +80,7 @@ final class TerminalTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDel
     /// Only clears per-sequence bookkeeping: the engine (multi-tap memory, fling) persists.
     /// If UIKit resets us while a sequence is still in flight (forced to fail by another
     /// recognizer), feed the engine a `.cancel` first so it is never stranded in `pressed`
-    /// (where its deadline could fire a spurious long-press zoom).
+    /// (where its deadline could fire a spurious long-press menu).
     override func reset() {
         super.reset()
         if !active.isEmpty, context != nil {
