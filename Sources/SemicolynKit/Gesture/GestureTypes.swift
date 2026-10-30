@@ -127,5 +127,4 @@ public enum GestureIntent: Equatable, Sendable {
     case switchWindow(delta: Int)
     /// Positive `lines` = finger moved down = reveal OLDER content.
     case scroll(lines: Int, at: GestureCell)
-    case zoom
 }

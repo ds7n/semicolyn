@@ -45,8 +45,8 @@ final class PlainTmuxController {
         DebugLog.shared.log(.tmux, "plainTmux:action \(action) -> User\(action.bindingSlot)")
     }
 
-    /// Long-press: toggle zoom on the active pane.
-    func onLongPressZoom() {
+    /// Edit menu "Zoom Pane": toggle zoom on the active pane.
+    func onZoomPane() {
         sendAction(.zoom)
     }
 
