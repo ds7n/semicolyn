@@ -180,4 +180,13 @@ jobs:
           xcodebuild -project Semicolyn.xcodeproj -scheme SemicolynBridgeTests \
             -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
             -skipPackagePluginValidation \
+            -resultBundlePath BridgeTests.xcresult \
             CODE_SIGNING_ALLOWED=NO test
+
+      - name: Upload BridgeTests results (crash logs) on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BridgeTests-xcresult
+          path: BridgeTests.xcresult
+          retention-days: 7
