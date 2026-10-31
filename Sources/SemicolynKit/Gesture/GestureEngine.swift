@@ -90,9 +90,12 @@ public struct GestureEngine: Sendable {
         switch state {
         case let .pressed(start, startTime, _, eligible, _, _)
             where eligible && time - startTime >= GestureThresholds.longPressDuration:
+            // The menu opens while the finger is still down: a held finger drags nothing
+            // here (moves are ignored), so waiting for release would only add delay.
             state = .longPressed(at: start)
             lastReason = "longPress"
             resetTapSequence()
+            out.append(.holdMenu(start))
         case let .flinging(velocity, startTime, _, emitted, at, ctx):
             let momentum = ScrollMomentum(velocity: velocity)
             let t = time - startTime
@@ -201,11 +204,11 @@ public struct GestureEngine: Sendable {
                 return []
             }
             return tapReleased(at: start, time: e.time, context: ctx)
-        case let .longPressed(at):
-            // iOS standard: touch and hold, release, and the edit menu (Paste) appears.
+        case .longPressed:
+            // The menu already opened when the hold was detected; lifting just ends it.
             state = .idle
             lastReason = "longPressEnd"
-            return [.showMenu(at)]
+            return []
         case .draggingHandle:
             state = .idle
             lastReason = "handleRelease"

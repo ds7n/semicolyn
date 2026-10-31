@@ -121,6 +121,8 @@ public enum GestureIntent: Equatable, Sendable {
     case selectLine(row: Int, at: GesturePoint)
     case clearSelection
     case showMenu(GesturePoint)
+    /// Touch-and-hold detected (finger still down): open the edit menu now, with a haptic.
+    case holdMenu(GesturePoint)
     /// Handle drag: the new selection (ordered) and where to show the magnifier.
     case setSelection(start: GestureCell, end: GestureCell, loupe: GesturePoint)
     case endSelectionDrag(GesturePoint, showMenu: Bool)

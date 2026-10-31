@@ -17,8 +17,8 @@ struct TipsView: View {
         List {
             Section("Touch gestures") {
                 tip("Switch tmux windows", "Swipe left or right on the terminal.")
-                tip("Paste", "Touch and hold the terminal, release, then tap Paste.")
-                tip("Zoom a pane", "Touch and hold in tmux, release, then tap Zoom Pane; do it again to unzoom.")
+                tip("Paste", "Touch and hold the terminal until the menu appears, then tap Paste.")
+                tip("Zoom a pane", "Touch and hold in tmux until the menu appears, then tap Zoom Pane; do it again to unzoom.")
                 tip("Panes and windows",
                     "Long-press the arrow pad for Split Right, Split Down, New Window, Zoom and Close Pane.")
                 tip("Select text", "Double-tap a word or triple-tap a line, then drag the handles.")

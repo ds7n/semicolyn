@@ -74,6 +74,11 @@ final class GestureIntentExecutor: NSObject {
             selection = nil
         case let .showMenu(p):
             presentMenu(at: p, in: view)
+        case let .holdMenu(p):
+            // System haptic (honors Settings > Sounds & Haptics > System Haptics), as a
+            // Messages bubble or Home Screen icon does when its menu opens under the finger.
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            presentMenu(at: p, in: view)
         case let .setSelection(start, end, p):
             apply(start: start, end: end, in: view)
             loupe?.show(around: contentPoint(p, in: view), in: view)
