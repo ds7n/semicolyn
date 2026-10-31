@@ -114,7 +114,7 @@ jobs:
 
   # ---- Apple-gated build (the reason for macOS CI) ----
   macos:
-    runs-on: macos-14   # Apple Silicon + Xcode
+    runs-on: macos-15   # Apple Silicon + Xcode (macos-14 retires 2026-11-02)
     steps:
       - uses: actions/checkout@v4
       # Only the submodules the build compiles; a recursive checkout pulls ET's unused
@@ -135,7 +135,7 @@ jobs:
 
       - name: Install CMake + Ninja (eternaltermlib cross-build)
         # The Mosh build already uses cmake for protobuf; ET drives cmake directly via
-        # the leetal/ios-cmake toolchain. macos-14 ships cmake, but pin it defensively.
+        # the leetal/ios-cmake toolchain. macos-15 ships cmake, but pin it defensively.
         run: brew list cmake >/dev/null 2>&1 || brew install cmake ninja
 
       - name: Build ETerminal.xcframework (cross-compile vendored eternaltermlib, ET)
@@ -180,4 +180,13 @@ jobs:
           xcodebuild -project Semicolyn.xcodeproj -scheme SemicolynBridgeTests \
             -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
             -skipPackagePluginValidation \
+            -resultBundlePath BridgeTests.xcresult \
             CODE_SIGNING_ALLOWED=NO test
+
+      - name: Upload BridgeTests results (crash logs) on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BridgeTests-xcresult
+          path: BridgeTests.xcresult
+          retention-days: 7

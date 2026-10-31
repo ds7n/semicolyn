@@ -144,6 +144,34 @@ final class InputTokenTrackerLineEditTests: XCTestCase {
         XCTAssertEqual(committed, [CommittedToken(token: "axb", previous: nil)])
     }
 
+    /// vi mode: Esc and O arrive as separate writes. Not an SS3 key, so the next
+    /// letter must not be swallowed as its final byte.
+    func testViEscThenOTypedApartDoesNotEatTheNextLetter() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("ab"))
+        _ = t.observe([0x1b])
+        _ = t.observe(bytes("O"))
+        XCTAssertNil(t.editedLine, "the line is no longer followed")
+        _ = t.observe(bytes("x"))
+        XCTAssertEqual(t.observe(bytes("yz\r")), [CommittedToken(token: "xyz", previous: nil)])
+    }
+
+    func testEscOEndingAChunkIsNotAnSS3Key() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("\u{1b}O"))
+        XCTAssertEqual(t.observe(bytes("x\r")), [CommittedToken(token: "x", previous: nil)])
+    }
+
+    /// One key per write, as the keybar and hardware keyboard send: still an edit.
+    func testApplicationCursorLeftInItsOwnChunkStillEdits() {
+        var t = InputTokenTracker()
+        _ = t.observe(bytes("ab"))
+        _ = t.observe(bytes("\u{1b}OD"))
+        _ = t.observe(bytes("x"))
+        XCTAssertEqual(t.editedLine?.beforeCursor, "ax")
+        XCTAssertEqual(t.observe(bytes("\r")), [CommittedToken(token: "axb", previous: nil)])
+    }
+
     func testFunctionKeyInSS3FormIsSwallowed() {
         var t = InputTokenTracker()
         let committed = t.observe(bytes("ab") + bytes("\u{1b}OP") + bytes("c\r"))
@@ -344,6 +372,31 @@ final class EditedLineEchoTests: XCTestCase {
     func testReadEndingRightAfterTheTextConfirms() {
         XCTAssertTrue(editedLineConfirmed(typedBefore: "ab", typedAfter: "cd",
                                           renderedBeforeCursor: "$ ab", renderedFromCursor: "cd"))
+    }
+
+    func testTextJoinedToTheWordBeforeTheLineFails() {
+        // A character the buffer never saw sits right before the line on screen.
+        XCTAssertFalse(editedLineConfirmed(typedBefore: "git chec", typedAfter: "kout",
+                                           renderedBeforeCursor: "$ xgit chec", renderedFromCursor: "kout  "))
+    }
+
+    func testCursorAtTheLineStartNeedsABlankBeforeIt() {
+        XCTAssertTrue(editedLineConfirmed(typedBefore: "", typedAfter: "ls -la",
+                                          renderedBeforeCursor: "$ ", renderedFromCursor: "ls -la  "))
+        XCTAssertFalse(editedLineConfirmed(typedBefore: "", typedAfter: "ls -la",
+                                           renderedBeforeCursor: "$x", renderedFromCursor: "ls -la  "))
+    }
+
+    func testLineAtTheStartOfTheReadConfirms() {
+        XCTAssertTrue(editedLineConfirmed(typedBefore: "ab", typedAfter: "cd",
+                                          renderedBeforeCursor: "ab", renderedFromCursor: "cd  "))
+        XCTAssertTrue(editedLineConfirmed(typedBefore: "", typedAfter: "cd",
+                                          renderedBeforeCursor: "", renderedFromCursor: "cd  "))
+    }
+
+    func testLineStartingWithASpaceSkipsTheLeadingBoundary() {
+        XCTAssertTrue(editedLineConfirmed(typedBefore: " ls", typedAfter: "",
+                                          renderedBeforeCursor: "$ ls", renderedFromCursor: "  "))
     }
 
     func testNoTextNeverConfirms() {

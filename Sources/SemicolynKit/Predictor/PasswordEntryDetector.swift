@@ -57,8 +57,12 @@ public struct PasswordEntryDetector: Sendable {
     private var typedThisLine = 0
     /// Printable characters of the current line observed echoed back in output.
     private var echoedThisLine = 0
-    /// Set when the output just before this line looked like a password prompt.
+    /// Set when the output just before this line, or while it was typed, looked like
+    /// a password prompt. Sticky until `resetLine`.
     private var promptSuppressedThisLine = false
+    /// Within one `noteOutput` chunk: a password prompt ended at a colon and no
+    /// newline has followed it yet.
+    private var promptInChunk = false
     /// Rolling tail of recent output (lowercased), for prompt-pattern matching.
     /// Bounded so a large or hostile output stream can't grow this unboundedly.
     private var outputTail = ""
@@ -122,7 +126,19 @@ public struct PasswordEntryDetector: Sendable {
                 if echoedThisLine < typedThisLine { echoedThisLine += 1 }
             }
             appendTail(b)
+            // A prompt that lands while the line is being typed (`read -p "Password: "`
+            // starts after the command's Enter, and its echoed answer then pushes the
+            // prompt off the tail's end) suppresses the line too. Inside a chunk the
+            // answer may follow the prompt, so a colon ending one is remembered unless
+            // a newline later in the chunk shows that output line ended.
+            if b == UInt8(ascii: ":") {
+                promptInChunk = promptInChunk || tailLooksLikePasswordPrompt()
+            } else if b == 0x0d || b == 0x0a {
+                promptInChunk = false
+            }
         }
+        if promptInChunk || tailLooksLikePasswordPrompt() { promptSuppressedThisLine = true }
+        promptInChunk = false
     }
 
     /// Fold the OUTGOING keystroke chunk for the current line. Counts printable
