@@ -358,8 +358,10 @@ struct PadView: View {
         }
     }
 
-    /// Fire the arrow for the current thumb direction.
+    /// Fire the arrow for the current thumb direction, with the keyboard click on every
+    /// arrow (first and each repeat), like a held iOS delete key.
     private func fireArrow() {
+        InputClickFeedback.play()
         vm.keybar.arrow(dominantArrow(dx: lastTranslation.width, dy: lastTranslation.height))
     }
 
