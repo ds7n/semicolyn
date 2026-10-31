@@ -108,48 +108,55 @@ final class GestureEngineTapTests: XCTestCase {
 
     // MARK: long press
 
-    /// iOS standard: touch and hold, release, and the edit menu appears where the finger held.
-    func testLongPressOpensTheMenuOnReleaseAtExactlyHalfASecondAndNeverTaps() {
+    /// The edit menu opens the moment the hold is detected, finger still down, at the press point.
+    func testLongPressOpensTheMenuWhileHeldAtExactlyHalfASecondAndNeverTaps() {
         var d = GestureDriver(gestureContext())
         d.down(55, 45, at: 1.0)
         XCTAssertEqual(d.engine.nextDeadline, 1.5)
         XCTAssertEqual(d.tick(at: 1.499), [])
-        XCTAssertEqual(d.tick(at: 1.5), [])                       // nothing until release
+        XCTAssertEqual(d.tick(at: 1.5), [.holdMenu(gp(55, 45))])
         XCTAssertEqual(d.engine.stateName, "longPressed")
-        XCTAssertEqual(d.up(55, 45, at: 1.8), [.showMenu(gp(55, 45))])
-        XCTAssertEqual(d.intents, [.showMenu(gp(55, 45))])   // device bug build 174: no stray click
+        XCTAssertNil(d.engine.nextDeadline)                       // fires once, never again
+        XCTAssertEqual(d.tick(at: 2.0), [])
+        XCTAssertEqual(d.up(55, 45, at: 1.8), [])                 // release adds nothing
+        XCTAssertEqual(d.intents, [.holdMenu(gp(55, 45))])   // device bug build 174: no stray click
     }
 
     func testLongPressInRawShellOpensTheMenuToo() {
         var d = GestureDriver(gestureContext(screen: .rawShell, mode: .local))
         d.down(55, 45, at: 1.0); d.tick(at: 1.5)
         d.up(55, 45, at: 1.8); d.drainTicks()
-        XCTAssertEqual(d.intents, [.showMenu(gp(55, 45))])
+        XCTAssertEqual(d.intents, [.holdMenu(gp(55, 45))])
     }
 
-    /// The menu points at where the finger held, not where it drifted (within slop) on release.
-    func testLongPressMenuAnchorsAtThePressPoint() {
+    /// Moving after the menu opened neither moves it nor opens another one.
+    func testMovingAfterTheHoldEmitsNothing() {
         var d = GestureDriver(gestureContext())
         d.down(55, 45, at: 1.0); d.tick(at: 1.5)
-        d.move(80, 90, at: 1.6)
-        XCTAssertEqual(d.up(80, 90, at: 1.7), [.showMenu(gp(55, 45))])
+        XCTAssertEqual(d.move(80, 90, at: 1.6), [])
+        XCTAssertEqual(d.up(80, 90, at: 1.7), [])
+        XCTAssertEqual(d.intents, [.holdMenu(gp(55, 45))])
     }
 
-    func testCancelledLongPressOpensNoMenu() {
+    /// A touch cancelled before the threshold never opens the menu.
+    func testCancelBeforeTheHoldOpensNoMenu() {
         var d = GestureDriver(gestureContext())
-        d.down(55, 45, at: 1.0); d.tick(at: 1.5)
-        XCTAssertEqual(d.send(.cancel, 55, 45, at: 1.6, touches: 0), [])
+        d.down(55, 45, at: 1.0); d.tick(at: 1.4)
+        XCTAssertEqual(d.send(.cancel, 55, 45, at: 1.45, touches: 0), [])
+        d.drainTicks()
         XCTAssertEqual(d.intents, [])
     }
 
-    /// A second finger after the hold turns it into a two-finger touch: no menu on release.
-    func testSecondFingerAfterLongPressOpensNoMenu() {
+    /// A second finger before the threshold turns it into a two-finger touch: no menu.
+    func testSecondFingerBeforeTheHoldOpensNoMenu() {
         var d = GestureDriver(gestureContext())
-        d.down(55, 45, at: 1.0); d.tick(at: 1.5)
-        d.down(120, 45, at: 1.6, touches: 2)
+        d.down(55, 45, at: 1.0)
+        d.down(120, 45, at: 1.2, touches: 2)
+        d.tick(at: 1.6)
         d.up(120, 45, at: 1.7, remaining: 1)
         d.up(55, 45, at: 1.8)
-        XCTAssertFalse(d.intents.contains { if case .showMenu = $0 { return true }; return false })
+        d.drainTicks()
+        XCTAssertFalse(d.intents.contains { if case .holdMenu = $0 { return true }; return false })
     }
 
     func testHoldShorterThanLongPressIsATap() {
@@ -162,8 +169,8 @@ final class GestureEngineTapTests: XCTestCase {
     func testLongPressSlopBoundary() {
         var still = GestureDriver(gestureContext())
         still.down(55, 45, at: 1.0); still.move(64.9, 45, at: 1.1)   // 9.9pt
-        still.tick(at: 1.5)
-        XCTAssertEqual(still.up(64.9, 45, at: 1.6), [.showMenu(gp(55, 45))])
+        XCTAssertEqual(still.tick(at: 1.5), [.holdMenu(gp(55, 45))])
+        XCTAssertEqual(still.up(64.9, 45, at: 1.6), [])
 
         var moved = GestureDriver(gestureContext())
         moved.down(55, 45, at: 1.0); moved.move(65, 45, at: 1.1)     // 10pt
@@ -187,9 +194,9 @@ final class GestureEngineTapTests: XCTestCase {
 
         var hold = GestureDriver(ctx)
         hold.down(55, 45, at: 1.0)
-        XCTAssertEqual(hold.tick(at: 1.5), [])
+        XCTAssertEqual(hold.tick(at: 1.5), [.holdMenu(gp(55, 45))])          // menu, as anywhere
         hold.up(55, 45, at: 1.8); hold.drainTicks()
-        XCTAssertEqual(hold.intents, [.showMenu(gp(55, 45))])                // menu, as anywhere
+        XCTAssertEqual(hold.intents, [.holdMenu(gp(55, 45))])
 
         var swipe = GestureDriver(ctx)
         swipe.down(300, 100, at: 1.0)
