@@ -89,8 +89,8 @@ extension View {
                         emit: @escaping (SecondaryValue) -> Void) -> some View {
         keySwipe("fixed") { dir in
             switch dir {
-            case .up:   if let up = secondaries.up { emit(up) }
-            case .down: if let down = secondaries.down { emit(down) }
+            case .up:   if let up = secondaries.up { InputClickFeedback.play(); emit(up) }
+            case .down: if let down = secondaries.down { InputClickFeedback.play(); emit(down) }
             }
         }
     }
@@ -190,6 +190,7 @@ struct ModifierSlotView: View {
         }
         .onInputClickTap { vm.keybar.tapCtrl() }
         .keySwipe("modifier") { dir in
+            InputClickFeedback.play()
             switch dir {
             case .up:   vm.keybar.armAlt()
             case .down: vm.keybar.armShift()
@@ -278,7 +279,11 @@ struct CustomSlotView: View {
         }
         .onInputClickTap { fire(.tap) }
         .onLongPressGesture { fire(.longPress) }
-        .keySwipe("gestureKey") { dir in fire(dir == .up ? .swipeUp : .swipeDown) }
+        .keySwipe("gestureKey") { dir in
+            let gesture: CustomSlotGesture = dir == .up ? .swipeUp : .swipeDown
+            if slot.binding(for: gesture) != nil { InputClickFeedback.play() }   // click only if bound
+            fire(gesture)
+        }
     }
 
     private func hintGlyph(_ s: String) -> some View {
