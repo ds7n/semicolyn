@@ -71,6 +71,51 @@ final class KeyAccessGateTests: XCTestCase {
         XCTAssertTrue(gate.needsCheck(.afterUnlock))
     }
 
+    // BVA on the background grace: just under keeps the period, at and over end it.
+    func testBackgroundGraceBoundary() {
+        var gate = KeyAccessGate()
+        gate.recordVerified(period: gate.period)
+        gate.returnedToForeground(awaySeconds: KeyAccessGate.backgroundGrace - 0.001)
+        XCTAssertFalse(gate.needsCheck(.afterUnlock))
+        gate.returnedToForeground(awaySeconds: KeyAccessGate.backgroundGrace)
+        XCTAssertTrue(gate.needsCheck(.afterUnlock))
+        gate.recordVerified(period: gate.period)
+        gate.returnedToForeground(awaySeconds: 86_400)
+        XCTAssertTrue(gate.needsCheck(.afterUnlock))
+        XCTAssertEqual(KeyAccessGate.backgroundGrace, 300)
+    }
+
+    // Adversarial: a negative away time (clock set back) fails closed.
+    func testNegativeAwayEndsPeriod() {
+        var gate = KeyAccessGate()
+        gate.recordVerified(period: gate.period)
+        gate.returnedToForeground(awaySeconds: -1)
+        XCTAssertTrue(gate.needsCheck(.afterUnlock))
+    }
+
+    // MARK: strictestProtectedIdentity
+
+    private func identity(_ name: String, _ policy: BiometricPolicy) -> Identity {
+        Identity(id: UUID(), displayName: name, flavor: .iCloudKeychain, algorithm: .ed25519,
+                 publicKey: "", fingerprint: "SHA256:\(name)", createdAt: Date(timeIntervalSince1970: 0),
+                 biometricPolicy: policy)
+    }
+
+    func testStrictestPrefersAnyUseOverAfterUnlock() {
+        let a = identity("a", .afterUnlock), b = identity("b", .anyUse), c = identity("c", .never)
+        XCTAssertEqual(strictestProtectedIdentity([a, b, c])?.displayName, "b")
+    }
+
+    func testStrictestTieKeepsFirst() {
+        let a = identity("a", .afterUnlock), b = identity("b", .afterUnlock)
+        XCTAssertEqual(strictestProtectedIdentity([a, b])?.displayName, "a")
+    }
+
+    func testStrictestNilWhenNoneProtectedOrEmpty() {
+        XCTAssertNil(strictestProtectedIdentity([identity("a", .never), identity("b", .never)]))
+        XCTAssertNil(strictestProtectedIdentity([]))
+    }
+
     // EP + BVA over every (old, new) pair: only weakening needs a check.
     func testPolicyChangeNeedsCheckOnlyWhenWeakening() {
         let all: [BiometricPolicy] = [.never, .afterUnlock, .anyUse]

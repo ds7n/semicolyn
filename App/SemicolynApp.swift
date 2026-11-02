@@ -18,6 +18,10 @@ struct SemicolynApp: App {
         // Diagnostics screen (fixes the "connected before visiting Settings → empty
         // stream" trap).
         DebugLog.shared.configureFromDefaults()
+
+        // Start watching device lock / background time for the "Once per Unlock" key
+        // policy before anything can sign in.
+        KeyAccessAuthorizer.start()
     }
 
     var body: some Scene {

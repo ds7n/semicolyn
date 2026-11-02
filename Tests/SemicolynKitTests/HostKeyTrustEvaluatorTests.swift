@@ -62,6 +62,20 @@ final class HostKeyTrustEvaluatorTests: XCTestCase {
         XCTAssertEqual(known.map(\.fingerprint), ["SHA256:AAA", "SHA256:EEE"])
     }
 
+    // Precedence: a changed key of an already-stored type is a mismatch, even when other
+    // types are stored too (never downgraded to the milder new-key-type warning).
+    func testSameTypeChangeIsMismatchEvenWithOtherTypesStored() throws {
+        let (ev, _) = evaluator()
+        let h = UUID()
+        try ev.trust(hostID: h, algorithm: "ssh-ed25519", fingerprint: "SHA256:AAA", at: t0)
+        try ev.trust(hostID: h, algorithm: "ssh-rsa", fingerprint: "SHA256:RRR", at: t0)
+        let decision = try ev.evaluate(hostID: h, algorithm: "ssh-ed25519", fingerprint: "SHA256:BBB")
+        guard case let .mismatch(stored) = decision else {
+            return XCTFail("expected mismatch, got \(decision)")
+        }
+        XCTAssertEqual(stored.map(\.fingerprint), ["SHA256:AAA"])
+    }
+
     // Another host's keys never make this host "known".
     func testOtherHostsKeysDoNotMakeHostKnown() throws {
         let (ev, _) = evaluator()

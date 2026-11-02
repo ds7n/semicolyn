@@ -8,7 +8,7 @@ import SemicolynKit
 /// LocalAuthentication check (Face ID / Touch ID, falling back to the device passcode)
 /// before its private key is used. The decision is Kit's `KeyAccessGate`; this class runs
 /// the system prompt and ends the "Once per Unlock" period when the device locks or the
-/// app leaves the foreground.
+/// app returns after `KeyAccessGate.backgroundGrace` in the background.
 ///
 /// App-level rather than a Keychain `SecAccessControl`: keys sync through iCloud Keychain
 /// (a locked decision), and synchronizable items can't carry a biometric access control.
@@ -18,15 +18,38 @@ final class KeyAccessAuthorizer {
 
     private var gate = KeyAccessGate()
     private var observers: [NSObjectProtocol] = []
+    private var backgroundedAt: Date?
 
     private init() {
         let center = NotificationCenter.default
-        for name in [UIApplication.protectedDataWillBecomeUnavailableNotification,
-                     UIApplication.didEnterBackgroundNotification] {
-            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
-                MainActor.assumeIsolated { self?.endPeriod(reason: note.name.rawValue) }
-            })
-        }
+        observers.append(center.addObserver(
+            forName: UIApplication.protectedDataWillBecomeUnavailableNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.endPeriod(reason: "deviceLocked") }
+        })
+        observers.append(center.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.backgroundedAt = Date() }
+        })
+        observers.append(center.addObserver(
+            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.returnedToForeground() }
+        })
+    }
+
+    /// Create the shared instance early (app launch) so its observers see the first
+    /// background / lock, not only those after the first sign-in.
+    static func start() { _ = shared }
+
+    /// Before a Mosh resume, which reattaches without SSH auth and so never reaches the
+    /// per-key check: check the owner for the strictest policy among `host`'s keys.
+    ///
+    /// - Throws: `KeyAccessError` when the check is cancelled, fails or can't run.
+    func authorizeSessionResume(host: Host, defaults: Defaults) async throws {
+        let identities = resolveIdentities(host: host, defaults: defaults)
+            .compactMap { try? AppStores.shared.hosts.identity(id: $0) }
+        guard let guarded = strictestProtectedIdentity(identities) else { return }
+        try await authorizeKeyUse(identityID: guarded.id)
     }
 
     /// Check the owner if `identityID`'s policy needs it now. Returns normally when the
@@ -65,6 +88,15 @@ final class KeyAccessAuthorizer {
         let result = await Self.evaluate(context, reason: reason, identityName: identityName)
         DebugLog.shared.log(.connect, "keyAccess: prompt -> \(result)")
         try result.get()
+    }
+
+    private func returnedToForeground() {
+        guard let since = backgroundedAt else { return }
+        backgroundedAt = nil
+        let away = Date().timeIntervalSince(since)
+        let before = gate.period
+        gate.returnedToForeground(awaySeconds: away)
+        DebugLog.shared.log(.connect, "keyAccess: foreground away=\(Int(away))s periodEnded=\(gate.period != before)")
     }
 
     private func endPeriod(reason: String) {

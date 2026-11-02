@@ -866,6 +866,25 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             failResume(host: host, record: record, secret: Data(), reason: "no stored secret")
             return
         }
+        // A Mosh reattach skips SSH auth, so the per-key Face ID check (security audit H1)
+        // runs here instead, for the strictest policy among the host's keys. A refusal
+        // shows the resume banner, whose Retry asks again.
+        state = .connecting
+        Task {
+            do {
+                try await KeyAccessAuthorizer.shared.authorizeSessionResume(
+                    host: host, defaults: (try? AppStores.shared.hosts.defaults()) ?? Defaults())
+            } catch {
+                DebugLog.shared.log(.connect, "resume:coldReattach key access refused (\(error)) → banner")
+                failResume(host: host, record: record, secret: secret, reason: "key access refused")
+                return
+            }
+            continueColdReattach(host: host, record: record, secret: secret)
+        }
+    }
+
+    /// `resumeColdReattach` after the key-access check passed.
+    private func continueColdReattach(host: Host, record: ResumableSession, secret: Data) {
         // Adopt this record's id so the connected-edge capture REFRESHES the same record
         // (and a later teardown clears the right one).
         sessionID = record.sessionID

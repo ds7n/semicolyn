@@ -222,8 +222,9 @@ private struct SSHKeyDetailView: View {
                             get: { identity.biometricPolicy },
                             set: { policy in Task { await model.setPolicy(identity, to: policy) } }))
                     } footer: {
-                        Text("Once per Unlock asks the first time you connect after opening semicolyn. "
-                             + "Every Use asks on every connection.")
+                        Text("Once per Unlock asks once, then again after your phone locks or semicolyn "
+                             + "has been in the background for 5 minutes. Every Use asks on every connection "
+                             + "and every Mosh resume.")
                     }
                     Section { SSHKeyActions(model: model, identity: identity) }
                 }

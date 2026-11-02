@@ -9,9 +9,10 @@ import Foundation
 ///
 /// `afterUnlock` ("Once per Unlock"): one passed check covers every `afterUnlock` identity
 /// until the period ends (or the app restarts, which starts unverified). iOS does not
-/// tell a suspended app that the device locked, but every lock sends the app to the
-/// background, so the App ends the period on backgrounding too: stricter, never looser.
-/// `anyUse` ("Every Use") checks every time. `never` never checks.
+/// tell a suspended app that the device locked, so besides a lock seen while running,
+/// the period also ends when the app returns from `backgroundGrace` or more in the
+/// background. A shorter absence can only hide a lock the owner then undid with Face ID
+/// or the passcode. `anyUse` ("Every Use") checks every time. `never` never checks.
 public struct KeyAccessGate: Equatable, Sendable {
     /// Counts ended periods. A check records against the period it STARTED in, so a lock
     /// that lands while the prompt is up never leaves the next period verified.
@@ -36,11 +37,32 @@ public struct KeyAccessGate: Equatable, Sendable {
         verifiedPeriod = started
     }
 
-    /// The device locked or the app left the foreground: the next `afterUnlock` key use
-    /// checks again.
+    /// Background time after which a return to the foreground ends the period (5 min).
+    public static let backgroundGrace: Double = 300
+
+    /// The device locked: the next `afterUnlock` key use checks again.
     public mutating func endPeriod() {
         period += 1
     }
+
+    /// The app is back in the foreground after `awaySeconds` in the background. Ends the
+    /// period at `backgroundGrace` or more, or for a negative span (the clock moved back:
+    /// fail closed).
+    public mutating func returnedToForeground(awaySeconds: Double) {
+        guard awaySeconds >= Self.backgroundGrace || awaySeconds < 0 else { return }
+        endPeriod()
+    }
+}
+
+/// Of `identities`, the one whose policy is strictest (`anyUse` over `afterUnlock`; the
+/// first on a tie), or nil when none needs a check. Gates a Mosh resume, which reattaches
+/// without SSH auth and so never reaches the per-key check.
+public func strictestProtectedIdentity(_ identities: [Identity]) -> Identity? {
+    var best: Identity?
+    for identity in identities where identity.biometricPolicy != .never {
+        if identity.biometricPolicy.strength > (best?.biometricPolicy.strength ?? 0) { best = identity }
+    }
+    return best
 }
 
 extension BiometricPolicy {
