@@ -66,10 +66,14 @@ public struct AuthSequenceOutcome: Equatable, Sendable {
 /// since nothing is left to try after it. When there is no password to try and
 /// every key attempt threw (no server verdict at all, e.g. the connection dropped),
 /// the last key error propagates rather than reading as a plain auth failure.
+///
+/// A `KeyAccessError` from `loadKey` (the identity's Face ID / passcode check was
+/// cancelled, failed or can't run) is different: it ends the sequence and propagates,
+/// with no later key or password tried, since the user refused this sign-in.
 public func authenticateInOrder(
     identities: [IdentityRef],
     password: String,
-    loadKey: (IdentityRef) throws -> String?,
+    loadKey: (IdentityRef) async throws -> String?,
     tryKey: (IdentityRef, String) async throws -> AuthAttemptResult,
     tryPassword: (String) async throws -> AuthAttemptResult,
     onKeyError: (IdentityRef, any Error) -> Void = { _, _ in },
@@ -88,7 +92,9 @@ public func authenticateInOrder(
     for id in identities {
         let key: String?
         do {
-            key = try loadKey(id)
+            key = try await loadKey(id)
+        } catch let refusal as KeyAccessError {
+            throw refusal
         } catch {
             keyErrors.append(id)
             onKeyError(id, error)

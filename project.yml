@@ -109,6 +109,9 @@ targets:
         # Network permission prompt; without this string the connection silently
         # fails. Not an App ID capability, a privacy usage string.
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "semicolyn connects to the SSH and Mosh servers you specify."
+        # A key set to "Require Face ID" is checked before each sign-in (KeyAccessAuthorizer);
+        # Face ID crashes the app without this string.
+        INFOPLIST_KEY_NSFaceIDUsageDescription: "semicolyn uses Face ID to confirm it's you before signing in with an SSH key you protected."
         # No signing in CI; the simulator build is the gate.
         CODE_SIGNING_ALLOWED: NO
         # The Mosh transport bridge (App/Mosh/MoshSession.mm) is Obj-C++ over

@@ -263,6 +263,9 @@ struct SessionView: View {
                 case let .firstTrust(hostLabel, keyType, offered):
                     FirstTrustModal(hostLabel: hostLabel, keyType: keyType, offered: offered,
                                     onDecision: { vm.resolvePrompt($0) })
+                case let .newKeyType(hostLabel, keyType, offered, knownTypes):
+                    NewKeyTypeModal(hostLabel: hostLabel, keyType: keyType, offered: offered,
+                                    knownTypes: knownTypes, onDecision: { vm.resolvePrompt($0) })
                 case let .mismatch(hostLabel, keyType, stored, offered):
                     MismatchModal(hostLabel: hostLabel, keyType: keyType, stored: stored,
                                   offered: offered, onDecision: { vm.resolvePrompt($0) })

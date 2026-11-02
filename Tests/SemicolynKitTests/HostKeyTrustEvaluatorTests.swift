@@ -35,13 +35,60 @@ final class HostKeyTrustEvaluatorTests: XCTestCase {
         XCTAssertEqual(stored.map(\.fingerprint), ["SHA256:AAA"])   // surfaces the stored key for the modal
     }
 
-    func testNewAlgorithmIsFirstTrustEvenWhenAnotherAlgorithmTrusted() throws {
+    // Adversarial (security audit H3): a known host offering a key type it never offered
+    // before is NOT a plain first trust; the stored keys come back so the prompt can warn.
+    func testNewAlgorithmOnKnownHostIsNewKeyType() throws {
         let (ev, _) = evaluator()
         let h = UUID()
         try ev.trust(hostID: h, algorithm: "ssh-ed25519", fingerprint: "SHA256:AAA", at: t0)
-        // A different key type negotiated → independent first-trust, not a mismatch.
-        XCTAssertEqual(try ev.evaluate(hostID: h, algorithm: "rsa-sha2-512",
+        let decision = try ev.evaluate(hostID: h, algorithm: "ssh-rsa", fingerprint: "SHA256:CCC")
+        guard case let .newKeyType(known) = decision else {
+            return XCTFail("expected newKeyType, got \(decision)")
+        }
+        XCTAssertEqual(known.map(\.algorithm), ["ssh-ed25519"])
+        XCTAssertEqual(known.map(\.fingerprint), ["SHA256:AAA"])
+    }
+
+    // EP: every stored key of every other type is surfaced, in stored order.
+    func testNewKeyTypeListsAllKnownKeys() throws {
+        let (ev, _) = evaluator()
+        let h = UUID()
+        try ev.trust(hostID: h, algorithm: "ssh-ed25519", fingerprint: "SHA256:AAA", at: t0)
+        try ev.trust(hostID: h, algorithm: "ecdsa-sha2-nistp256", fingerprint: "SHA256:EEE", at: t0)
+        let decision = try ev.evaluate(hostID: h, algorithm: "ssh-rsa", fingerprint: "SHA256:CCC")
+        guard case let .newKeyType(known) = decision else {
+            return XCTFail("expected newKeyType, got \(decision)")
+        }
+        XCTAssertEqual(known.map(\.fingerprint), ["SHA256:AAA", "SHA256:EEE"])
+    }
+
+    // Another host's keys never make this host "known".
+    func testOtherHostsKeysDoNotMakeHostKnown() throws {
+        let (ev, _) = evaluator()
+        try ev.trust(hostID: UUID(), algorithm: "ssh-ed25519", fingerprint: "SHA256:AAA", at: t0)
+        XCTAssertEqual(try ev.evaluate(hostID: UUID(), algorithm: "ssh-rsa",
                                        fingerprint: "SHA256:CCC"), .firstTrust)
+    }
+
+    // Accepting a new key type adds it beside the old keys (nothing is replaced).
+    func testTrustAfterNewKeyTypeKeepsOldKeys() throws {
+        let (ev, store) = evaluator()
+        let h = UUID()
+        try ev.trust(hostID: h, algorithm: "ssh-ed25519", fingerprint: "SHA256:AAA", at: t0)
+        try ev.trust(hostID: h, algorithm: "ssh-rsa", fingerprint: "SHA256:CCC", at: t0)
+        XCTAssertEqual(try ev.evaluate(hostID: h, algorithm: "ssh-rsa", fingerprint: "SHA256:CCC"), .trusted)
+        XCTAssertEqual(try ev.evaluate(hostID: h, algorithm: "ssh-ed25519", fingerprint: "SHA256:AAA"), .trusted)
+        XCTAssertEqual(try store.entries(forHost: h).map(\.fingerprint), ["SHA256:AAA", "SHA256:CCC"])
+    }
+
+    // The same key (same SHA256 fingerprint) reported under a different algorithm name
+    // (e.g. an RSA signature-algorithm alias) is the same key: trusted, no warning.
+    func testSameFingerprintUnderOtherAlgorithmNameIsTrusted() throws {
+        let (ev, _) = evaluator()
+        let h = UUID()
+        try ev.trust(hostID: h, algorithm: "ssh-rsa", fingerprint: "SHA256:RRR", at: t0)
+        XCTAssertEqual(try ev.evaluate(hostID: h, algorithm: "rsa-sha2-512",
+                                       fingerprint: "SHA256:RRR"), .trusted)
     }
 
     func testRotationWindowBothKeysTrusted() throws {

@@ -111,6 +111,31 @@ final class SSHKeysModel: ObservableObject {
         reload()
     }
 
+    /// Change the key's "Require Face ID" policy. Weakening it verifies the owner first
+    /// (`biometricPolicyChangeNeedsCheck`), so a borrowed unlocked phone can't switch
+    /// "Every Use" off; a device with no passcode has nothing to verify with. A cancelled
+    /// check leaves the policy as it was.
+    func setPolicy(_ identity: Identity, to policy: BiometricPolicy) async {
+        if biometricPolicyChangeNeedsCheck(from: identity.biometricPolicy, to: policy) {
+            do {
+                try await KeyAccessAuthorizer.shared.verifyOwner(
+                    identityName: identity.displayName,
+                    reason: "Change the \(BiometricPolicyPicker.biometryName) setting for \u{201C}\(identity.displayName)\u{201D}")
+            } catch KeyAccessError.unavailable {
+                // No passcode on this device: nothing to verify against.
+            } catch {
+                reload()
+                return
+            }
+        }
+        do {
+            try AppStores.shared.identities.setBiometricPolicy(identityID: identity.id, to: policy)
+        } catch {
+            errorText = "Couldn't change the setting: \(error.localizedDescription)"
+        }
+        reload()
+    }
+
     /// Put the key's public line on the clipboard.
     func copyPublicKey(_ identity: Identity) {
         guard let text = publicKeyShareText(identity) else {
@@ -158,7 +183,8 @@ private struct SSHKeyRow: View {
     }
 }
 
-/// One key in full: the public key with Copy and Share, its details, Rename, Delete.
+/// One key in full: the public key with Copy and Share, its details, its "Require Face ID"
+/// policy, Rename, Delete.
 /// Owns its own model (and so its own dialogs); the list re-reads on return.
 private struct SSHKeyDetailView: View {
     @StateObject private var model = SSHKeysModel()
@@ -190,6 +216,14 @@ private struct SSHKeyDetailView: View {
                         }
                         LabeledContent("Created",
                                        value: identity.createdAt.formatted(date: .abbreviated, time: .omitted))
+                    }
+                    Section {
+                        BiometricPolicyPicker(selection: Binding(
+                            get: { identity.biometricPolicy },
+                            set: { policy in Task { await model.setPolicy(identity, to: policy) } }))
+                    } footer: {
+                        Text("Once per Unlock asks the first time you connect after opening semicolyn. "
+                             + "Every Use asks on every connection.")
                     }
                     Section { SSHKeyActions(model: model, identity: identity) }
                 }
