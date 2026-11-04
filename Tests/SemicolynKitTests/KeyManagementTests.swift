@@ -131,6 +131,27 @@ final class KeyManagementTests: XCTestCase {
         }
     }
 
+    // MARK: Biometric policy
+
+    func testSetBiometricPolicyChangesOnlyThePolicy() throws {
+        let (store, _, svc) = makeStack()
+        let key = try mint(svc, "work")   // minted with .never
+        let changed = try svc.setBiometricPolicy(identityID: key.id, to: .anyUse)
+        XCTAssertEqual(changed.biometricPolicy, .anyUse)
+        let saved = try XCTUnwrap(try store.identity(id: key.id))
+        XCTAssertEqual(saved.biometricPolicy, .anyUse)
+        XCTAssertEqual(saved.displayName, "work")
+        XCTAssertEqual(saved.fingerprint, key.fingerprint)
+        XCTAssertEqual(try svc.privateKeyOpenSSH(for: key.id), privateMarker)
+    }
+
+    func testSetBiometricPolicyMissingKeyIsNotFound() throws {
+        let (_, _, svc) = makeStack()
+        XCTAssertThrowsError(try svc.setBiometricPolicy(identityID: UUID(), to: .never)) {
+            XCTAssertEqual($0 as? IdentityEditError, .notFound)
+        }
+    }
+
     // MARK: Public key text
 
     func testShareTextIsThePublicLineWithTheNameAsComment() throws {

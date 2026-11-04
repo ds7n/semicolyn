@@ -107,6 +107,18 @@ public struct IdentityService {
         return identity
     }
 
+    /// Set the identity's Face ID / passcode policy. Only the policy changes. Callers
+    /// verify the owner first when `biometricPolicyChangeNeedsCheck` says so.
+    ///
+    /// - Throws: `IdentityEditError.notFound` when no identity has `identityID`.
+    @discardableResult
+    public func setBiometricPolicy(identityID: UUID, to policy: BiometricPolicy) throws -> Identity {
+        guard var identity = try store.identity(id: identityID) else { throw IdentityEditError.notFound }
+        identity.biometricPolicy = policy
+        try store.saveIdentity(identity)
+        return identity
+    }
+
     /// Delete the identity everywhere: first every host and Defaults reference
     /// (`HostStore.deleteIdentityRemovingReferences`), then the record, then its
     /// private key and passphrase secrets. Returns the usage that was cleared.

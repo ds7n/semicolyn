@@ -197,18 +197,7 @@ struct IdentityPickerSheet: View {
     }
 
     private var biometricPolicyPicker: some View {
-        Picker("Require \(biometryName)", selection: $biometricPolicy) {
-            Text("Never").tag(BiometricPolicy.never)
-            Text("Once per Unlock").tag(BiometricPolicy.afterUnlock)
-            Text("Every Use").tag(BiometricPolicy.anyUse)
-        }
-    }
-
-    /// "Touch ID" on Touch ID devices, otherwise "Face ID".
-    private var biometryName: String {
-        let context = LAContext()
-        _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
-        return context.biometryType == .touchID ? "Touch ID" : "Face ID"
+        BiometricPolicyPicker(selection: $biometricPolicy)
     }
 
     private func generate() {
@@ -327,5 +316,26 @@ private struct IdentityRow: View {
                 .font(.body)
                 .foregroundStyle(Color(theme.text.secondary))
         }
+    }
+}
+
+/// The "Require Face ID" picker, shared by key create / import and the key detail screen.
+/// Enforced at sign-in by `KeyAccessAuthorizer`.
+struct BiometricPolicyPicker: View {
+    @Binding var selection: BiometricPolicy
+
+    var body: some View {
+        Picker("Require \(Self.biometryName)", selection: $selection) {
+            Text("Never").tag(BiometricPolicy.never)
+            Text("Once per Unlock").tag(BiometricPolicy.afterUnlock)
+            Text("Every Use").tag(BiometricPolicy.anyUse)
+        }
+    }
+
+    /// "Touch ID" on Touch ID devices, otherwise "Face ID".
+    static var biometryName: String {
+        let context = LAContext()
+        _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        return context.biometryType == .touchID ? "Touch ID" : "Face ID"
     }
 }

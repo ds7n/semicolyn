@@ -245,5 +245,63 @@ final class AuthSequenceTests: XCTestCase {
         }
     }
 
+    // Security audit H1: a refused Face ID / passcode check ends the whole sequence.
+
+    func testKeyAccessRefusalEndsSequenceWithoutTryingPassword() async {
+        var reported: [UUID] = []
+        do {
+            _ = try await authenticateInOrder(
+                identities: [a, b], password: "pw",
+                loadKey: { id in
+                    if id == self.a { throw KeyAccessError.cancelled(identityName: "work") }
+                    return "KEY-B"
+                },
+                tryKey: { _, _ in XCTFail("no key may be tried after a refusal"); return .success },
+                tryPassword: { _ in XCTFail("no password after a refusal"); return .success },
+                onKeyError: { id, _ in reported.append(id) })
+            XCTFail("expected the refusal to propagate")
+        } catch let e as KeyAccessError {
+            XCTAssertEqual(e, .cancelled(identityName: "work"))
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+        XCTAssertEqual(reported, [])   // not reported as a skippable key error
+    }
+
+    func testKeyAccessRefusalOnSecondKeyAfterFirstRejected() async {
+        var keysSent: [String] = []
+        do {
+            _ = try await authenticateInOrder(
+                identities: [a, b], password: "pw",
+                loadKey: { id in
+                    if id == self.b { throw KeyAccessError.unavailable(identityName: "home") }
+                    return "KEY-A"
+                },
+                tryKey: { _, key in keysSent.append(key); return .failure },
+                tryPassword: { _ in XCTFail("no password after a refusal"); return .success })
+            XCTFail("expected the refusal to propagate")
+        } catch let e as KeyAccessError {
+            XCTAssertEqual(e, .unavailable(identityName: "home"))
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+        XCTAssertEqual(keysSent, ["KEY-A"])
+    }
+
+    func testAsyncLoadKeyIsAwaitedBeforeTryKey() async throws {
+        var order: [String] = []
+        let out = try await authenticateInOrder(
+            identities: [a], password: "",
+            loadKey: { _ in
+                await Task.yield()
+                order.append("load")
+                return "KEY-A"
+            },
+            tryKey: { _, _ in order.append("try"); return .success },
+            tryPassword: { _ in .failure })
+        XCTAssertEqual(out.result, .success)
+        XCTAssertEqual(order, ["load", "try"])
+    }
+
     private enum KeychainBroken: Error, Equatable { case instance }
 }

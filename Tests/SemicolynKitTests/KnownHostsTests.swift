@@ -74,7 +74,11 @@ final class KnownHostsTests: XCTestCase {
 
         try store.remove(fingerprint: "SHA256:E", forHost: web.id)
 
-        XCTAssertEqual(try ev.evaluate(hostID: web.id, algorithm: "ssh-ed25519", fingerprint: "SHA256:E"), .firstTrust)
+        // The host is still known by its RSA key, so the removed Ed25519 key re-offered
+        // warns as a new key type (not a plain first trust), listing the remaining key.
+        XCTAssertEqual(try ev.evaluate(hostID: web.id, algorithm: "ssh-ed25519", fingerprint: "SHA256:E"),
+                       .newKeyType(known: [HostKey(algorithm: "ssh-rsa", fingerprint: "SHA256:R",
+                                                   addedAt: t1, source: .trustOnFirstUse)]))
         XCTAssertEqual(try ev.evaluate(hostID: web.id, algorithm: "ssh-rsa", fingerprint: "SHA256:R"), .trusted)
     }
 

@@ -39,6 +39,16 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
             if ok { try? trust.trust(hostID: hostID, algorithm: info.keyType,
                                      fingerprint: info.fingerprint, at: Date()) }
             return ok
+        case .newKeyType(let known):
+            // Security audit H3: a known host switching key type is warned, not treated as new.
+            let knownTypes = Array(Set(known.map(\.algorithm))).sorted()
+            await DebugLog.shared.log(.connect, "hostkey: NEW KEY TYPE (\(info.keyType)), known=\(knownTypes) → prompting user")
+            let ok = await present(.newKeyType(hostLabel: info.hostLabel, keyType: info.keyType,
+                                               offered: info.fingerprint, knownTypes: knownTypes))
+            await DebugLog.shared.log(.connect, "hostkey: newKeyType → user \(ok ? "ACCEPTED (storing trust)" : "REJECTED")")
+            if ok { try? trust.trust(hostID: hostID, algorithm: info.keyType,
+                                     fingerprint: info.fingerprint, at: Date()) }
+            return ok
         case .mismatch(let stored):
             await DebugLog.shared.log(.connect, "hostkey: MISMATCH (\(info.keyType)), stored key differs → prompting user")
             let ok = await present(.mismatch(hostLabel: info.hostLabel, keyType: info.keyType,

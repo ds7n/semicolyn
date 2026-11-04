@@ -9,6 +9,9 @@ import SemicolynKit
 /// data needed to render it. Used as `.sheet(item:)` source.
 enum HostKeyPrompt: Identifiable, Equatable {
     case firstTrust(hostLabel: String, keyType: String, offered: String)
+    /// A known host offering a key type it has not offered before (security audit H3).
+    /// `knownTypes`: the key types already stored for the host.
+    case newKeyType(hostLabel: String, keyType: String, offered: String, knownTypes: [String])
     case mismatch(hostLabel: String, keyType: String, stored: String, offered: String)
 
     /// Stable identifier per case + content, safe for `.sheet(item:)`.
@@ -16,6 +19,8 @@ enum HostKeyPrompt: Identifiable, Equatable {
         switch self {
         case .firstTrust(let h, let k, let o):
             return "firstTrust|\(h)|\(k)|\(o)"
+        case .newKeyType(let h, let k, let o, let known):
+            return "newKeyType|\(h)|\(k)|\(o)|\(known.joined(separator: ","))"
         case .mismatch(let h, let k, let s, let o):
             return "mismatch|\(h)|\(k)|\(s)|\(o)"
         }
@@ -101,6 +106,94 @@ struct FirstTrustModal: View {
                 }
                 .buttonStyle(.bordered)
                 .foregroundStyle(Color(theme.text.secondary))
+            }
+            .padding()
+        }
+    }
+}
+
+// MARK: - New key type modal
+
+/// "⚠ New key type", shown when a host already trusted with one key type offers a key of
+/// another type (security audit H3). Servers keep offering the same type, so this can mean
+/// the connection is being intercepted. Resolves via `onDecision`: `true` = trust the new
+/// key alongside the old ones and connect, `false` = cancel (no entry written).
+struct NewKeyTypeModal: View {
+    let hostLabel: String
+    let keyType: String
+    let offered: String
+    let knownTypes: [String]
+    let onDecision: (Bool) -> Void
+
+    @Environment(\.theme) private var theme
+    @State private var expanded = false
+
+    private var knownList: String {
+        knownTypes.map(hostKeyTypeLabel).joined(separator: ", ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("⚠ New key type")
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color(theme.state.broken))
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(hostLabel)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color(theme.text.primary))
+
+                    Text(
+                        "You've connected to this server before with a \(knownList) key. It now offers a "
+                        + "\(hostKeyTypeLabel(keyType)) key. A server upgrade can do this, but so can someone "
+                        + "intercepting the connection. Only continue if you expected this change."
+                    )
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(Color(theme.text.primary))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Now offering:")
+                            .font(.caption)
+                            .foregroundStyle(Color(theme.text.secondary))
+                        let fp = Fingerprint(offered)
+                        Text(expanded ? fp.full : fp.truncated)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(Color(theme.text.primary))
+                            .textSelection(.enabled)
+                            .onTapGesture { expanded.toggle() }
+                            .animation(.default, value: expanded)
+                    }
+                }
+                .padding()
+            }
+
+            Divider()
+
+            HStack(spacing: 12) {
+                Button {
+                    InputClickFeedback.play()
+                    onDecision(false)
+                } label: {
+                    Text("Cancel")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .foregroundStyle(Color(theme.text.secondary))
+
+                Button(role: .destructive) {
+                    InputClickFeedback.play()
+                    onDecision(true)
+                } label: {
+                    Text("Trust New Key")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
             .padding()
         }

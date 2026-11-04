@@ -866,6 +866,25 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             failResume(host: host, record: record, secret: Data(), reason: "no stored secret")
             return
         }
+        // A Mosh reattach skips SSH auth, so the per-key Face ID check (security audit H1)
+        // runs here instead, for the strictest policy among the host's keys. A refusal
+        // shows the resume banner, whose Retry asks again.
+        state = .connecting
+        Task {
+            do {
+                try await KeyAccessAuthorizer.shared.authorizeSessionResume(
+                    host: host, defaults: (try? AppStores.shared.hosts.defaults()) ?? Defaults())
+            } catch {
+                DebugLog.shared.log(.connect, "resume:coldReattach key access refused (\(error)) → banner")
+                failResume(host: host, record: record, secret: secret, reason: "key access refused")
+                return
+            }
+            continueColdReattach(host: host, record: record, secret: secret)
+        }
+    }
+
+    /// `resumeColdReattach` after the key-access check passed.
+    private func continueColdReattach(host: Host, record: ResumableSession, secret: Data) {
         // Adopt this record's id so the connected-edge capture REFRESHES the same record
         // (and a later teardown clears the right one).
         sessionID = record.sessionID
@@ -1295,7 +1314,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let sequence = try await authenticateInOrder(
             identities: identities,
             password: password,
-            loadKey: { try AppStores.shared.identities.privateKeyOpenSSH(for: $0) },
+            loadKey: { identityID in
+                // The key's "Require Face ID" policy (security audit H1): only a key that is
+                // on this device is checked, and a refused check ends the sign-in.
+                guard let key = try AppStores.shared.identities.privateKeyOpenSSH(for: identityID) else { return nil }
+                try await KeyAccessAuthorizer.shared.authorizeKeyUse(identityID: identityID)
+                return key
+            },
             tryKey: { identityID, key in
                 DebugLog.shared.log(.connect, "authenticate: publickey (identity=\(identityID))")
                 let outcome = try await conn.authenticatePublickey(user: user, privateKeyOpenssh: key)
@@ -2757,6 +2782,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     DebugLog.shared.log(.lifecycle, "connect(saved): → attachSSHShell (tmux/raw)")
                     try await attachSSHShell(conn: conn, host: savedHost, defaults: defaults2)
                 }
+            } catch let refusal as KeyAccessError {
+                DebugLog.shared.log(.connect, "connect: key access refused (\(refusal)) → .failed")
+                state = .failed(refusal.errorDescription ?? "Authentication cancelled")
             } catch ConnectError.HostKeyRejected {
                 DebugLog.shared.log(.connect, "connect(saved): HostKeyRejected → .failed")
                 state = .failed("Host key not trusted")
@@ -2837,6 +2865,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     DebugLog.shared.log(.lifecycle, "connect(adhoc): → attachSSHShell (tmux/raw)")
                     try await attachSSHShell(conn: conn, host: hostRecord, defaults: defaults2)
                 }
+            } catch let refusal as KeyAccessError {
+                DebugLog.shared.log(.connect, "connect: key access refused (\(refusal)) → .failed")
+                state = .failed(refusal.errorDescription ?? "Authentication cancelled")
             } catch ConnectError.HostKeyRejected {
                 DebugLog.shared.log(.connect, "connect(adhoc): HostKeyRejected → .failed")
                 state = .failed("Host key not trusted")

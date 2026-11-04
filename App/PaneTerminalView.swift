@@ -94,6 +94,14 @@ final class PaneTerminalView: TerminalView {
         .none
     }
 
+    // SwiftTerm's own `paste:` (reachable from the system Paste command) sends the clipboard
+    // unfiltered, so an embedded `ESC[201~` could end the paste early (security audit H2).
+    // Send it through the same sanitizing, always-bracketed path as the edit menu and ⌘V.
+    override func paste(_ sender: Any?) {
+        guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        send(SemicolynKit.bracketedPasteBytes(text, bracketed: true))
+    }
+
     // Single gesture engine (spec 2026-10-04): every touch goes through OUR
     // `TerminalTouchRecognizer` (plus the stock pinch). Every other tap, long-press and pan
     // recognizer, SwiftTerm's own (including the selection / mouse pans it re-creates each
