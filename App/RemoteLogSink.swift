@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 import Network
+import Security
 import UIKit
 import SemicolynKit
 
@@ -44,13 +45,16 @@ enum BuildBanner {
 /// died while backgrounded stayed dead until relaunch (device 2026-10-05). This class
 /// must never log through `DebugLog` (it IS DebugLog's remote sink: recursion).
 ///
-/// TLS uses `NWProtocolTLS` with certificate verification DISABLED, this targets the
-/// developer's own diagnostics host (self-signed cert from `tools/syslog-sink/`), not a
-/// general secure channel. Documented and intentional.
+/// TLS pins the server's leaf certificate on first connect (the diagnostics host is
+/// usually self-signed, e.g. `tools/syslog-sink/`) and refuses a different one, asking the
+/// user whether to trust it (`RemoteLogCertPrompt`). Only TLS carries typed content
+/// (`DebugLog.logSensitive`).
 final class RemoteLogSink {
     private let host: NWEndpoint.Host
     private let port: NWEndpoint.Port
-    private let transport: LogTransport
+    /// `remoteLogPinKey(host:port:)` for this server.
+    let pinKey: String
+    let transport: LogTransport
     private let queue = DispatchQueue(label: "dev.truepositive.semicolyn.remotelog")
     private var connection: NWConnection?
     /// True once the connection reached `.ready`. Before that, sends are BUFFERED (see
@@ -88,6 +92,7 @@ final class RemoteLogSink {
     init(host: String, port: Int, transport: LogTransport) {
         self.host = NWEndpoint.Host(host)
         self.port = NWEndpoint.Port(rawValue: UInt16(clamping: port)) ?? 6514
+        self.pinKey = remoteLogPinKey(host: host, port: port)
         self.transport = transport
         start()
         // Belt-and-braces lifecycle triggers alongside the RootView `scenePhase` calls
@@ -117,13 +122,40 @@ final class RemoteLogSink {
         case .tcp:
             return NWParameters(tls: nil, tcp: Self.keepaliveTCPOptions())
         case .tls:
-            // TLS with verification disabled (developer's self-signed diagnostics host).
+            // Pin-on-first-use (security audit M3): the diagnostics host is usually
+            // self-signed, so the chain isn't validated; instead the leaf certificate's
+            // fingerprint is pinned the first time and must match afterwards. The TLS
+            // handshake itself still proves the server holds that certificate's key.
             let tls = NWProtocolTLS.Options()
+            let pinKey = self.pinKey
             sec_protocol_options_set_verify_block(
                 tls.securityProtocolOptions,
-                { _, _, complete in complete(true) },   // accept any certificate
+                { _, trust, complete in
+                    Self.verifyPinned(trust: trust, pinKey: pinKey, complete: complete)
+                },
                 queue)
             return NWParameters(tls: tls, tcp: Self.keepaliveTCPOptions())
+        }
+    }
+
+    /// Accept the presented leaf certificate only if it matches this server's pin (pinning
+    /// it when none exists). A mismatch is refused and reported for the user to decide.
+    private static func verifyPinned(trust: sec_trust_t, pinKey: String,
+                                     complete: (Bool) -> Void) {
+        let secTrust = sec_trust_copy_ref(trust).takeRetainedValue()
+        guard let chain = SecTrustCopyCertificateChain(secTrust) as? [SecCertificate],
+              let leaf = chain.first else { complete(false); return }
+        let der = SecCertificateCopyData(leaf) as Data
+        let presented = certificateFingerprint(der: Array(der))
+        switch remoteLogCertDecision(pinned: RemoteLogCertPins.pin(for: pinKey), presented: presented) {
+        case .pinFirst:
+            RemoteLogCertPins.setPin(presented, for: pinKey)
+            complete(true)
+        case .match:
+            complete(true)
+        case .mismatch(let pinned):
+            RemoteLogCertPrompt.report(pinKey: pinKey, pinned: pinned, presented: presented)
+            complete(false)
         }
     }
 

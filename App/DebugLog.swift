@@ -93,6 +93,32 @@ final class DebugLog: ObservableObject {
         remote?.send(line)
     }
 
+    /// Record a line that carries typed content (security audit M3). The in-app buffer
+    /// gets `content`; the device log gets it marked private (hidden from Console.app and
+    /// sysdiagnose); the remote stream gets it only over pinned TLS, else `redacted`.
+    func logSensitive(_ category: LogCategory, content: @autoclosure () -> String,
+                      redacted: @autoclosure () -> String) {
+        guard enabled, enabledCategories.contains(category) else { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        if start == nil { start = now }
+        let t = now - (start ?? now)
+        let line = String(format: "%7.2f  %@", t, content())
+        lines.append(line)
+        if lines.count > cap { lines.removeFirst(lines.count - cap) }
+        logger.debug("\(line, privacy: .private)")
+        guard let remote else { return }
+        remote.send(remoteLogMaySendContent(transport: remote.transport)
+                    ? line : String(format: "%7.2f  %@", t, redacted()))
+    }
+
+    /// Rebuild the remote sink even if its settings are unchanged (e.g. after the user
+    /// trusted a new certificate or forgot the pinned one).
+    func restartRemote(reason: String) {
+        setRemote(nil)
+        remoteSignature = nil
+        configureFromDefaults(reason: reason)
+    }
+
     func setRemote(_ sink: RemoteLogSink?) {
         remote?.stop()
         remote = sink

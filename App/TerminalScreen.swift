@@ -400,7 +400,16 @@ struct TerminalScreen: UIViewRepresentable {
                 // from the VM's passwordDetector when the coordinator's weak ref is alive.
                 let content = String(decoding: Array(data), as: UTF8.self)
                 let isPwd = vm?.currentLineIsPassword() ?? false
-                DebugLog.shared.log(.input, "key:\(keystrokeLogDecision(event: event, content: content, logContent: logContent, isPasswordLine: isPwd))")
+                if logContent {
+                    // Typed content: private in the device log, and only streamed over
+                    // pinned TLS (lengths only otherwise). Security audit M3.
+                    DebugLog.shared.logSensitive(
+                        .input,
+                        content: "key:\(keystrokeLogDecision(event: event, content: content, logContent: true, isPasswordLine: isPwd))",
+                        redacted: "key:\(keystrokeLogDecision(event: event, content: content, logContent: false, isPasswordLine: isPwd))")
+                } else {
+                    DebugLog.shared.log(.input, "key:\(keystrokeLogDecision(event: event, content: content, logContent: false, isPasswordLine: isPwd))")
+                }
             }
             onSend(Array(data))
         }
@@ -529,9 +538,13 @@ struct TerminalScreen: UIViewRepresentable {
         }
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
         func clipboardCopy(source: TerminalView, content: Data) {
-            if case let .write(bytes) = osc52Action(allow: osc52Allowed, content: Array(content)) {
+            let action = osc52Action(allow: osc52Allowed, content: Array(content))
+            if case let .write(bytes) = action {
                 UIPasteboard.general.string = String(decoding: bytes, as: UTF8.self)
             }
+            // Never silent (security audit M1): say what the server did to the clipboard.
+            guard let notice = osc52Notice(action) else { return }
+            MainActor.assumeIsolated { vm?.showNotice(notice) }
         }
         func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
             guard let kind = classifyURL(link), let url = URL(string: link) else { return }

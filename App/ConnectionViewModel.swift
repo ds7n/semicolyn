@@ -101,6 +101,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Last OSC 0/2 title received from the remote (sanitized). Phase-4 Esc-pill
     /// Live row reads this to display the current window title.
     @Published var terminalTitle: String?
+    /// A brief notice shown over the session (e.g. "Server copied 12 characters to the
+    /// clipboard"); cleared after a few seconds by `showNotice`.
+    @Published private(set) var notice: String?
+    private var noticeClear: Task<Void, Never>?
+
+    /// Show `text` as the session notice for 2.5 seconds (a newer notice replaces it).
+    func showNotice(_ text: String) {
+        notice = text
+        noticeClear?.cancel()
+        noticeClear = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            self?.notice = nil
+        }
+    }
     /// Whether OSC 52 clipboard writes are permitted for the active session.
     /// Resolved from `resolveOsc52Allow` at connect time; read by the terminal views.
     private(set) var osc52Allowed: Bool = true

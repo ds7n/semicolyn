@@ -57,6 +57,9 @@ struct SessionView: View {
     /// the panel destination chosen.
     @AppStorage(DiagnosticsContent.loggingEnabledKey) private var loggingEnabled = false
     @AppStorage(DiagnosticsContent.showDebugPanelKey) private var diagnosticsPanelEnabled = false
+    /// Keystroke-content logging inputs, for the "Logging keys" indicator.
+    @AppStorage(LogCategory.input.storageKey) private var inputCategoryOn = LogCategory.input.defaultOn
+    @AppStorage(RemoteLogConfig.keystrokeContentKey) private var keystrokeContent = false
     /// Transient: whether the panel is currently expanded (only meaningful when enabled).
     @State private var showDebugPanel = false
 
@@ -218,17 +221,46 @@ struct SessionView: View {
         // with Copy/Clear, capturing the connection/tmux/input-routing trace. Gated
         // behind Settings → Diagnostics → "Show debug log panel" (off by default).
         .overlay(alignment: .topLeading) {
-            if case .shell = vm.state, loggingEnabled, diagnosticsPanelEnabled {
-                Button { InputClickFeedback.play(); showDebugPanel.toggle() } label: {
-                    Image(systemName: "ladybug.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(.green)
-                        .padding(6)
-                        .background(Color.black.opacity(0.6), in: Circle())
+            if case .shell = vm.state {
+                HStack(spacing: 6) {
+                    if loggingEnabled, diagnosticsPanelEnabled {
+                        Button { InputClickFeedback.play(); showDebugPanel.toggle() } label: {
+                            Image(systemName: "ladybug.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(.green)
+                                .padding(6)
+                                .background(Color.black.opacity(0.6), in: Circle())
+                        }
+                    }
+                    // Always visible while typed content is being recorded (security
+                    // audit M3), so it can't be left on, or switched on, unnoticed.
+                    if keystrokeContentActive(loggingEnabled: loggingEnabled,
+                                              inputCategoryOn: inputCategoryOn,
+                                              contentOn: keystrokeContent) {
+                        Label("Logging keys", systemImage: "record.circle")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Color.red.opacity(0.85), in: Capsule())
+                            .accessibilityLabel("Keystroke logging is on")
+                    }
                 }
                 .padding(.leading, 6).padding(.top, 2)
             }
         }
+        .overlay(alignment: .top) {
+            if let notice = vm.notice {
+                Text(notice)
+                    .font(.footnote)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Color.black.opacity(0.75), in: Capsule())
+                    .padding(.top, 36)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(.easeInOut, value: vm.notice)
         .overlay(alignment: .top) {
             if showDebugPanel {
                 DebugLogPanel(onClose: { showDebugPanel = false })

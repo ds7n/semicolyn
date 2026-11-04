@@ -28,3 +28,10 @@ public func keystrokeLoggingSummary(loggingEnabled: Bool, inputCategoryOn: Bool,
     guard loggingEnabled && inputCategoryOn else { return "Off" }
     return contentOn ? "On" : "Lengths only"
 }
+
+/// Whether typed content is actually being recorded right now: the condition for the
+/// in-session "Logging keys" indicator (security audit M3).
+public func keystrokeContentActive(loggingEnabled: Bool, inputCategoryOn: Bool,
+                                   contentOn: Bool) -> Bool {
+    loggingEnabled && inputCategoryOn && contentOn
+}
