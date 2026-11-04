@@ -77,6 +77,16 @@ final class AppStores {
         // Keychain-backed secrets (iCloud Keychain synced).
         let secrets = KeychainSecretStore()
 
+        // Security audit M4: credentials written before the per-item accessibility change
+        // are `AfterFirstUnlock`; move them to `WhenUnlocked`. A failure (e.g. launched
+        // while locked) leaves them as they were and the next launch retries.
+        do {
+            let moved = try secrets.migrateAccessibility()
+            DebugLog.shared.log(.lifecycle, "keychain:accessibility migrated=\(moved)")
+        } catch {
+            DebugLog.shared.log(.lifecycle, "keychain:accessibility migrate-failed error=\(error)")
+        }
+
         // Generate or retrieve the AES-256 record encryption key.
         let key = try recordKey(in: secrets)
 

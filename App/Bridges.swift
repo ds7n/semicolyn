@@ -17,16 +17,32 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
         self.hostID = hostID; self.trust = trust; self.present = present
     }
 
+    /// Shown when the stored host keys couldn't be read and the connection was refused.
+    static let storeFailureMessage =
+        "Couldn't read the saved host keys for this server, so semicolyn didn't connect. Try again."
+
+    private let failureLock = NSLock()
+    private var storeFailed = false
+
+    /// `true` once `verify` refused a connection because the stored host keys couldn't be
+    /// read (security audit M2: a storage fault must not hide a mismatch).
+    var refusedForStoreFailure: Bool { failureLock.withLock { storeFailed } }
+
     func verify(info: HostKeyInfo) async -> Bool {
-        let evaluated = try? trust.evaluate(hostID: hostID, algorithm: info.keyType,
-                                            fingerprint: info.fingerprint)
         // DebugLog is @MainActor; verify() is non-isolated async, so these hops need
         // `await`. Fine here, host-key verify runs once per connect, not on any hot
         // path, so the main-actor hop cost is irrelevant.
-        if evaluated == nil {
-            await DebugLog.shared.log(.connect, "hostkey: trust.evaluate THREW → defaulting to firstTrust")
+        let decision: HostKeyDecision
+        do {
+            decision = try trust.evaluate(hostID: hostID, algorithm: info.keyType,
+                                          fingerprint: info.fingerprint)
+        } catch {
+            // Fail closed: treating an unreadable store as "never seen" would show the
+            // first-connect prompt for a server whose key may have changed.
+            failureLock.withLock { storeFailed = true }
+            await DebugLog.shared.log(.connect, "hostkey: trust.evaluate THREW (\(error)) → REJECT (fail closed)")
+            return false
         }
-        let decision = evaluated ?? .firstTrust
         switch decision {
         case .trusted:
             await DebugLog.shared.log(.connect, "hostkey: TRUSTED (\(info.keyType)) → accept, no prompt")

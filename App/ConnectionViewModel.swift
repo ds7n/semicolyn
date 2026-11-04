@@ -2738,10 +2738,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         DebugLog.shared.log(.connect, "connect(saved): START addr=\(addr) user=\(user)")
         Task {
+            let verifier = TofuHostKeyVerifier(
+                hostID: savedHost.id, trust: AppStores.shared.trust,
+                present: { [weak self] prompt in await self?.present(prompt) ?? false })
             do {
-                let verifier = TofuHostKeyVerifier(
-                    hostID: savedHost.id, trust: AppStores.shared.trust,
-                    present: { [weak self] prompt in await self?.present(prompt) ?? false })
                 let conn = try await SemicolynSSHCoreFFI.connect(
                     addr: addr, allowLegacy: false, allowDeprecated: false,
                     keepalive: keepaliveConfig(host: savedHost, defaults: defaults),
@@ -2787,7 +2787,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 state = .failed(refusal.errorDescription ?? "Authentication cancelled")
             } catch ConnectError.HostKeyRejected {
                 DebugLog.shared.log(.connect, "connect(saved): HostKeyRejected → .failed")
-                state = .failed("Host key not trusted")
+                state = .failed(verifier.refusedForStoreFailure
+                                ? TofuHostKeyVerifier.storeFailureMessage : "Host key not trusted")
             } catch ConnectError.Timeout {
                 DebugLog.shared.log(.connect, "connect(saved): Timeout → .failed")
                 state = .failed("Couldn't reach host, connection timed out")
@@ -2818,6 +2819,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         DebugLog.shared.log(.connect, "connect(adhoc): START addr=\(addr) user=\(user)")
         Task {
+            var adhocVerifier: TofuHostKeyVerifier?
             do {
                 let portNum = Int(port) ?? 22
                 let hostRecord = try findOrCreateHost(hostName: host, port: portNum, user: user)
@@ -2825,6 +2827,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 let verifier = TofuHostKeyVerifier(
                     hostID: hostRecord.id, trust: AppStores.shared.trust,
                     present: { [weak self] prompt in await self?.present(prompt) ?? false })
+                adhocVerifier = verifier
                 let conn = try await SemicolynSSHCoreFFI.connect(
                     addr: addr, allowLegacy: false, allowDeprecated: false,
                     keepalive: keepaliveConfig(host: hostRecord, defaults: defaults),
@@ -2870,7 +2873,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 state = .failed(refusal.errorDescription ?? "Authentication cancelled")
             } catch ConnectError.HostKeyRejected {
                 DebugLog.shared.log(.connect, "connect(adhoc): HostKeyRejected → .failed")
-                state = .failed("Host key not trusted")
+                state = .failed(adhocVerifier?.refusedForStoreFailure == true
+                                ? TofuHostKeyVerifier.storeFailureMessage : "Host key not trusted")
             } catch ConnectError.Timeout {
                 DebugLog.shared.log(.connect, "connect(adhoc): Timeout → .failed")
                 state = .failed("Couldn't reach host, connection timed out")

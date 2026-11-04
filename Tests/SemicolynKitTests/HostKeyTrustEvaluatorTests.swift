@@ -138,4 +138,34 @@ final class HostKeyTrustEvaluatorTests: XCTestCase {
         XCTAssertEqual(try ev.evaluate(hostID: h, algorithm: "ssh-ed25519", fingerprint: "SHA256:NEW"), .trusted)
         XCTAssertEqual(try store.entries(forHost: h).map(\.fingerprint), ["SHA256:NEW"])
     }
+
+    // Adversarial (security audit M2): an unreadable store must surface as an error the
+    // caller fails closed on, never as an empty store that reads as a first connection.
+    func testStoreReadErrorPropagatesInsteadOfFirstTrust() {
+        let ev = HostKeyTrustEvaluator(store: HostKeyStore(secrets: FailingSecretStore()))
+        XCTAssertThrowsError(try ev.evaluate(hostID: UUID(), algorithm: "ssh-ed25519",
+                                             fingerprint: "SHA256:AAA")) { error in
+            XCTAssertEqual(error as? FailingSecretStore.Failure, .readFailed)
+        }
+    }
+
+    // Adversarial (M2): corrupt stored data is an error too, not "nothing stored".
+    func testCorruptStoredKeysThrowInsteadOfFirstTrust() throws {
+        let secrets = InMemorySecretStore()
+        let h = UUID()
+        try secrets.setSecret(Data("not json".utf8), for: .hostKeys(hostID: h))
+        let ev = HostKeyTrustEvaluator(store: HostKeyStore(secrets: secrets))
+        XCTAssertThrowsError(try ev.evaluate(hostID: h, algorithm: "ssh-ed25519",
+                                             fingerprint: "SHA256:AAA")) { error in
+            XCTAssertTrue(error is DecodingError, "expected DecodingError, got \(error)")
+        }
+    }
+}
+
+/// A store whose every read fails, standing in for a Keychain error.
+private final class FailingSecretStore: SecretStore {
+    enum Failure: Error, Equatable { case readFailed }
+    func setSecret(_ data: Data, for ref: SecretRef) throws {}
+    func getSecret(_ ref: SecretRef) throws -> Data? { throw Failure.readFailed }
+    func deleteSecret(_ ref: SecretRef) throws {}
 }
