@@ -249,18 +249,22 @@ struct SessionView: View {
             }
         }
         .overlay(alignment: .top) {
-            if let notice = vm.notice {
-                Text(notice)
-                    .font(.footnote)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Color.black.opacity(0.75), in: Capsule())
-                    .padding(.top, 36)
-                    .transition(.opacity)
-                    .allowsHitTesting(false)
+            // The animation is scoped to this container so it can't animate unrelated
+            // layout changes (keyboard, resize) that land in the same transaction.
+            ZStack {
+                if let notice = vm.notice {
+                    Text(notice)
+                        .font(.footnote)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Color.black.opacity(0.75), in: Capsule())
+                        .padding(.top, 36)
+                        .transition(.opacity)
+                }
             }
+            .animation(.easeInOut, value: vm.notice)
+            .allowsHitTesting(false)
         }
-        .animation(.easeInOut, value: vm.notice)
         .overlay(alignment: .top) {
             if showDebugPanel {
                 DebugLogPanel(onClose: { showDebugPanel = false })

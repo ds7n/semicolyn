@@ -47,7 +47,6 @@ enum RemoteLogCertPins {
 /// asked about again until the app relaunches (the sink keeps retrying in the background).
 @MainActor
 enum RemoteLogCertPrompt {
-    private static var showing = false
     private static var declined: Set<String> = []
 
     /// Called from the sink's TLS queue.
@@ -56,8 +55,11 @@ enum RemoteLogCertPrompt {
     }
 
     private static func present(pinKey: String, pinned: String, presented: String) {
-        guard !showing, !declined.contains(presented), let top = topViewController() else { return }
-        showing = true
+        // No "showing" flag to get stuck: skip while any alert is up, or while the top
+        // controller can't present; the sink's next retry reports again.
+        guard !declined.contains(presented), let top = topViewController(),
+              !(top is UIAlertController), !top.isBeingDismissed,
+              top.viewIfLoaded?.window != nil else { return }
         let alert = UIAlertController(
             title: "Log server certificate changed",
             message: "The diagnostics server \(pinKey) presented a different certificate.\n\n"
@@ -67,11 +69,12 @@ enum RemoteLogCertPrompt {
             preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Don't Trust", style: .cancel) { _ in
             declined.insert(presented)
-            showing = false
         })
         alert.addAction(UIAlertAction(title: "Trust New Certificate", style: .destructive) { _ in
             RemoteLogCertPins.setPin(presented, for: pinKey)
-            showing = false
+            // Accepting a different server is a redirect: keystroke content logging goes
+            // off (re-enabling asks for Face ID). Security audit M3.
+            UserDefaults.standard.set(false, forKey: RemoteLogConfig.keystrokeContentKey)
             DebugLog.shared.restartRemote(reason: "cert-trusted")
         })
         top.present(alert, animated: true)

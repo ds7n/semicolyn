@@ -167,6 +167,9 @@ struct DiagnosticsContent: View {
                                     .textSelection(.enabled)
                             }
                             Button("Forget Certificate", role: .destructive) {
+                                // Accepting a different server is a redirect too: content
+                                // logging goes off (re-enabling asks for Face ID).
+                                keystrokeContent = false
                                 RemoteLogCertPins.forget(pinKey)
                                 self.pinnedCert = nil
                                 DebugLog.shared.restartRemote(reason: "cert-forgotten")
@@ -268,7 +271,7 @@ struct DiagnosticsContent: View {
     private func runTest() {
         guard !remoteHost.isEmpty else { testResult = .needsHost; return }
         testResult = .testing
-        let sink = RemoteLogSink(host: remoteHost, port: remotePort, transport: transport)
+        let sink = RemoteLogSink(host: remoteHost, port: remotePort, transport: transport, connect: false)
         sink.test { ok in
             DispatchQueue.main.async {
                 testResult = ok ? .connected : .failed

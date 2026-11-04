@@ -2689,8 +2689,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             guard let self else { return }
             let chips = await predictor.suggestions(line: line, lineOptedOut: optedOut)
             await MainActor.run {
-                DebugLog.shared.log(.predictor,
-                    "predictor:suggest seq=\(seq) prefix='\(prefix)' kind=\(kind) count=\(chips.count)")
+                // The prefix is typed text: only with keystroke content logging on (Face ID,
+                // indicator), and then private / TLS-only. Security audit M3.
+                let head = "predictor:suggest seq=\(seq)"
+                let tail = "kind=\(kind) count=\(chips.count)"
+                if UserDefaults.standard.bool(forKey: RemoteLogConfig.keystrokeContentKey) {
+                    DebugLog.shared.logSensitive(.predictor,
+                        content: "\(head) prefix='\(prefix)' \(tail)",
+                        redacted: "\(head) prefixLen=\(prefix.count) \(tail)")
+                } else {
+                    DebugLog.shared.log(.predictor, "\(head) prefixLen=\(prefix.count) \(tail)")
+                }
                 self.predictorVM.apply(chips, seq: seq)
             }
         }

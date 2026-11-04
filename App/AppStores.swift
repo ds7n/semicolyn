@@ -81,8 +81,9 @@ final class AppStores {
         // are `AfterFirstUnlock`; move them to `WhenUnlocked`. A failure (e.g. launched
         // while locked) leaves them as they were and the next launch retries.
         do {
-            let moved = try secrets.migrateAccessibility()
-            DebugLog.shared.log(.lifecycle, "keychain:accessibility migrated=\(moved)")
+            let result = try secrets.migrateAccessibility()
+            DebugLog.shared.log(.lifecycle,
+                "keychain:accessibility migrated=\(result.changed) failed=\(result.failed)")
         } catch {
             DebugLog.shared.log(.lifecycle, "keychain:accessibility migrate-failed error=\(error)")
         }

@@ -136,23 +136,28 @@ public final class KeychainSecretStore: SecretStore {
         }
     }
 
+    /// Result of `migrateAccessibility`: items re-classed, and items that could not be
+    /// (each with its status), which the next launch retries.
+    public struct AccessibilityMigration: Equatable, Sendable {
+        public var changed = 0
+        public var failed: [OSStatus] = []
+    }
+
     /// Moves every item in this store to the accessibility `secretAccessibility(forAccount:)`
     /// picks. Items written before security audit M4 were all `AfterFirstUnlock`.
-    /// Idempotent; call once at launch while the device is unlocked.
-    ///
-    /// - Returns: the number of items changed.
-    @discardableResult
-    public func migrateAccessibility() throws -> Int {
+    /// Idempotent; call at launch. A failing item is skipped (and reported) so it can't
+    /// block the others. Only the listing query failing throws.
+    public func migrateAccessibility() throws -> AccessibilityMigration {
         var query = serviceQuery()
         query[kSecReturnAttributes as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitAll
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound { return 0 }
+        var outcome = AccessibilityMigration()
+        if status == errSecItemNotFound { return outcome }
         guard status == errSecSuccess, let items = result as? [[String: Any]] else {
             throw KeychainError.unexpectedStatus(status)
         }
-        var changed = 0
         for item in items {
             guard let account = item[kSecAttrAccount as String] as? String else { continue }
             let want = Self.accessibleValue(secretAccessibility(forAccount: account))
@@ -161,10 +166,13 @@ public final class KeychainSecretStore: SecretStore {
             match[kSecAttrAccount as String] = account
             let update: [String: Any] = [kSecAttrAccessible as String: want]
             let updateStatus = SecItemUpdate(match as CFDictionary, update as CFDictionary)
-            guard updateStatus == errSecSuccess else { throw KeychainError.unexpectedStatus(updateStatus) }
-            changed += 1
+            if updateStatus == errSecSuccess {
+                outcome.changed += 1
+            } else {
+                outcome.failed.append(updateStatus)
+            }
         }
-        return changed
+        return outcome
     }
 
     // MARK: - Private helpers
