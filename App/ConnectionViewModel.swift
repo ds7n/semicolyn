@@ -1591,15 +1591,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         case let .mosh(port, key):
             DebugLog.shared.log(.connect, "mosh: bootstrap OK port=\(port) keyLen=\(key.count) → starting UDP session")
             // mosh-client's getaddrinfo uses AI_NUMERICHOST (numeric IP only, NO DNS),
-            // so it rejects a hostname. Resolve host.hostName to a numeric IP here
-            // (SSH already reached the host, so it resolves). If we can't resolve, don't
-            // hand mosh a name it will reject, fall back to SSH with a clear reason.
-            guard let moshIP = MoshHostResolver.numericAddress(for: host.hostName) else {
+            // so it needs a numeric IP. Use the address the SSH socket reached (the
+            // verified server, security audit L2); only without one (jump host) resolve
+            // host.hostName. If neither works, fall back to SSH with a clear reason.
+            let peerIP = conn.peerIp()
+            guard let moshIP = moshTargetAddress(peerIP: peerIP, hostName: host.hostName,
+                                                 resolve: MoshHostResolver.numericAddress) else {
                 DebugLog.shared.log(.connect, "mosh: could not resolve \(host.hostName) to an IP → SSH fallback")
                 moshFallback = "Mosh: couldn't resolve \(host.hostName), using SSH"
                 return false
             }
-            DebugLog.shared.log(.connect, "mosh: resolved \(host.hostName) → \(moshIP)")
+            DebugLog.shared.log(.connect, decisionLine(
+                "mosh:target",
+                inputs: [("host", host.hostName), ("peer", peerIP ?? "none")],
+                outputs: [("ip", moshIP)],
+                reason: moshIP == peerIP ? "ssh peer IP" : "DNS (no usable peer IP)"))
             let predict = cfg.predictionMode?.rawValue ?? "adaptive"
             // Seeded at 80×24: the terminal view hasn't laid out yet at connect time,
             // so the real grid isn't known here. The first debounced resize from
@@ -1697,13 +1703,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     self.startMoshPlainTmuxLaunch(sess: sess, typeInBandLaunch: !self.moshDirectLaunch)
                 }
                 // Connected edge: persist the resume record. Reattach endpoint is the
-                // Mosh server (host + UDP port); secret is the MOSH_KEY. Runs AFTER the
+                // Mosh server (the IP this session used + UDP port, so a cold reattach
+                // skips DNS too); secret is the MOSH_KEY. Runs AFTER the
                 // plain-tmux install above so `isTmuxSession` (reads `plainTmux != nil`)
                 // is true for a plain-tmux Mosh session, and the tmux session name RIDES
                 // the record so a cold reattach lands back in the tmux session rather
                 // than a raw shell (device bug 2026-09-04: Mosh resume captured tmux=false).
                 self.captureResume(host: host, transport: .mosh,
-                                   endpoint: (host: host.hostName, port: port),
+                                   endpoint: (host: moshIP, port: port),
                                    secret: Data(key.utf8))
             }
             // Stamp the start time BEFORE the onEnd closure literal so the closure can
