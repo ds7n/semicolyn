@@ -87,6 +87,9 @@ final class GestureIntentExecutor: NSObject {
             if showMenu { presentMenu(at: p, in: view) }
         case let .switchWindow(delta):
             onScreenTmux()?.onSwitchWindow(delta: delta)
+            // A different window is drawn; a selection would cover unrelated text.
+            view.selectNone()
+            selection = nil
         case let .scroll(lines, cell):
             scroll(lines, at: cell, in: view)
         }

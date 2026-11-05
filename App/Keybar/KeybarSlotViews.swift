@@ -345,21 +345,18 @@ struct PadView: View {
                 }
         )
         .confirmationDialog("Pane", isPresented: $showWindowMenu, titleVisibility: .visible) {
-            Button("Split Right") { vm.plainTmux?.onWindowAction(.splitHorizontal) }
-            Button("Split Down") { vm.plainTmux?.onWindowAction(.splitVertical) }
-            Button("New Window") { vm.plainTmux?.onWindowAction(.newWindow) }
+            Button("Split Right") { vm.windowAction(.splitHorizontal) }
+            Button("Split Down") { vm.windowAction(.splitVertical) }
+            Button("New Window") { vm.windowAction(.newWindow) }
             // tmux zoom is a toggle and the app does not track the zoom state, so the
             // label names both directions.
-            Button("Zoom / Unzoom Pane") {
-                vm.plainTmux?.onWindowAction(.zoom)
-                vm.clearTerminalSelection()
-            }
+            Button("Zoom / Unzoom Pane") { vm.windowAction(.zoom) }
             Button("Close Pane", role: .destructive) { confirmingClosePane = true }
             Button("Cancel", role: .cancel) { }
         }
         .confirmationDialog("Close this pane?", isPresented: $confirmingClosePane,
                             titleVisibility: .visible) {
-            Button("Close Pane", role: .destructive) { vm.plainTmux?.onWindowAction(.closePane) }
+            Button("Close Pane", role: .destructive) { vm.windowAction(.closePane) }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Anything running in it will stop.")

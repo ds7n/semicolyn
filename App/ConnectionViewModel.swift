@@ -549,7 +549,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 inputs: [("command", "\(command)"), ("plainTmux", "\(plainTmux != nil)")],
                 outputs: [("action", action.map { "\($0)" } ?? "none")],
                 reason: nil))
-            if let action { plainTmux?.onKeyboardShortcut(action) }
+            if let action {
+                plainTmux?.onKeyboardShortcut(action)
+                clearTerminalSelection()   // the panes redraw; a selection would be stale
+            }
         case .clearScreen:         sendTerminalInput([0x0c])              // Ctrl-L
         case .paste:               pasteFromClipboard()
         case .reconnect:           reconnect()
@@ -571,10 +574,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         clearTerminalSelection()
     }
 
-    /// Drop any terminal selection. Paste and Zoom Pane both do this, as the edit menu's
-    /// Paste does: a selection left behind after either points at stale text.
+    /// Drop any terminal selection. Paste and every tmux pane/window action do this, as the
+    /// edit menu's Paste does: a selection left behind points at stale text.
     func clearTerminalSelection() {
         mountedTerminalView?.selectNone()
+    }
+
+    /// Run a pane/window action from the keybar pane menu on tmux's active pane. Each one
+    /// redraws the panes, so the selection is cleared.
+    func windowAction(_ action: WindowMenuAction) {
+        plainTmux?.onWindowAction(action)
+        clearTerminalSelection()
     }
 
     /// Re-run the last saved-host connect (`⇧⌘R`, the Session menu, the session-ended
