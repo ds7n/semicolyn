@@ -2795,7 +2795,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         Task {
             let verifier = TofuHostKeyVerifier(
                 hostID: savedHost.id, trust: AppStores.shared.trust,
-                present: { [weak self] prompt in await self?.present(prompt) ?? false })
+                present: { [weak self] prompt in await self?.present(prompt) ?? false },
+                notify: { [weak self] text in self?.showNotice(text) })
             do {
                 let conn = try await SemicolynSSHCoreFFI.connect(
                     addr: addr, allowLegacy: false, allowDeprecated: false,
@@ -2881,7 +2882,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
                 let verifier = TofuHostKeyVerifier(
                     hostID: hostRecord.id, trust: AppStores.shared.trust,
-                    present: { [weak self] prompt in await self?.present(prompt) ?? false })
+                    present: { [weak self] prompt in await self?.present(prompt) ?? false },
+                    notify: { [weak self] text in self?.showNotice(text) })
                 adhocVerifier = verifier
                 let conn = try await SemicolynSSHCoreFFI.connect(
                     addr: addr, allowLegacy: false, allowDeprecated: false,

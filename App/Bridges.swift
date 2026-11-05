@@ -11,10 +11,29 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
     private let hostID: UUID
     private let trust: HostKeyTrustEvaluator
     private let present: @MainActor (HostKeyPrompt) async -> Bool
+    private let notify: @MainActor (String) -> Void
 
+    /// `notify` shows a non-blocking notice (used when an accepted key couldn't be saved).
     init(hostID: UUID, trust: HostKeyTrustEvaluator,
-         present: @escaping @MainActor (HostKeyPrompt) async -> Bool) {
-        self.hostID = hostID; self.trust = trust; self.present = present
+         present: @escaping @MainActor (HostKeyPrompt) async -> Bool,
+         notify: @escaping @MainActor (String) -> Void) {
+        self.hostID = hostID; self.trust = trust; self.present = present; self.notify = notify
+    }
+
+    /// Shown when the user accepted a host key but it couldn't be saved.
+    static let saveFailureMessage =
+        "Couldn't save this server's key. You'll be asked to confirm it again next time."
+
+    /// Saves an accepted key (security audit L4: a failed write is logged and shown, not
+    /// swallowed). The connection still goes ahead: the user approved this key, and an
+    /// unsaved key only means the same prompt appears on the next connect.
+    private func save(_ write: () throws -> Void) async {
+        do {
+            try write()
+        } catch {
+            await DebugLog.shared.log(.connect, "hostkey: saving accepted key FAILED (\(error)) → notice, prompt again next connect")
+            await notify(Self.saveFailureMessage)
+        }
     }
 
     /// Shown when the stored host keys couldn't be read and the connection was refused.
@@ -52,8 +71,10 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
             let ok = await present(.firstTrust(hostLabel: info.hostLabel, keyType: info.keyType,
                                                offered: info.fingerprint))
             await DebugLog.shared.log(.connect, "hostkey: firstTrust → user \(ok ? "ACCEPTED (storing trust)" : "REJECTED")")
-            if ok { try? trust.trust(hostID: hostID, algorithm: info.keyType,
-                                     fingerprint: info.fingerprint, at: Date()) }
+            if ok {
+                await save { try trust.trust(hostID: hostID, algorithm: info.keyType,
+                                             fingerprint: info.fingerprint, at: Date()) }
+            }
             return ok
         case .newKeyType(let known):
             // Security audit H3: a known host switching key type is warned, not treated as new.
@@ -62,8 +83,10 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
             let ok = await present(.newKeyType(hostLabel: info.hostLabel, keyType: info.keyType,
                                                offered: info.fingerprint, knownTypes: knownTypes))
             await DebugLog.shared.log(.connect, "hostkey: newKeyType → user \(ok ? "ACCEPTED (storing trust)" : "REJECTED")")
-            if ok { try? trust.trust(hostID: hostID, algorithm: info.keyType,
-                                     fingerprint: info.fingerprint, at: Date()) }
+            if ok {
+                await save { try trust.trust(hostID: hostID, algorithm: info.keyType,
+                                             fingerprint: info.fingerprint, at: Date()) }
+            }
             return ok
         case .mismatch(let stored):
             await DebugLog.shared.log(.connect, "hostkey: MISMATCH (\(info.keyType)), stored key differs → prompting user")
@@ -71,8 +94,10 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
                                              stored: stored.first?.fingerprint ?? "",
                                              offered: info.fingerprint))
             await DebugLog.shared.log(.connect, "hostkey: mismatch → user \(ok ? "ACCEPTED (replacing trust)" : "REJECTED")")
-            if ok { try? trust.replace(hostID: hostID, algorithm: info.keyType,
-                                       fingerprint: info.fingerprint, at: Date()) }
+            if ok {
+                await save { try trust.replace(hostID: hostID, algorithm: info.keyType,
+                                               fingerprint: info.fingerprint, at: Date()) }
+            }
             return ok
         }
     }
