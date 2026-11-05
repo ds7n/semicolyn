@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
+import Foundation
 
 /// Seconds a mosh-server waits with NO connected client before self-terminating,
 /// exported as `MOSH_SERVER_NETWORK_TMOUT`. mosh-server has NO default no-client
@@ -19,11 +20,15 @@ public let moshServerNetworkTimeoutSeconds = 604_800   // 7 days
 /// of the login shell. It is ONE already-quoted shell fragment (e.g. the
 /// `plainTmuxDirectLaunchCommand` `sh -c '...'` string), appended verbatim as the last
 /// element so the space-joined command hands it to the login shell unchanged; nil leaves
-/// the argv exactly as without it.
+/// the argv exactly as without it. A custom `serverPath` is passed through `shellWord` so
+/// spaces or shell metacharacters in it cannot split or inject (security audit L3); a
+/// blank one falls back to `mosh-server` on the PATH.
 public func moshServerCommand(_ config: MoshConfig, locale: String = "en_US.UTF-8",
                               sessionCommand: String? = nil) -> [String] {
+    let customPath = config.serverPath?.trimmingCharacters(in: .whitespaces) ?? ""
+    let server = customPath.isEmpty ? "mosh-server" : shellWord(customPath)
     var argv = ["MOSH_SERVER_NETWORK_TMOUT=\(moshServerNetworkTimeoutSeconds)",
-                config.serverPath ?? "mosh-server", "new", "-s", "-c", "256",
+                server, "new", "-s", "-c", "256",
                 "-l", "LANG=\(locale)"]
     if let range = config.udpPortRange, range.count == 2 {
         argv += ["-p", "\(range[0]):\(range[1])"]

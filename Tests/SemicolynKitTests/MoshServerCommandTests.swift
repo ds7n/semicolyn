@@ -23,6 +23,20 @@ final class MoshServerCommandTests: XCTestCase {
                        [tmout, "/opt/bin/mosh-server", "new", "-s", "-c", "256", "-l", "LANG=en_US.UTF-8"])
     }
 
+    // Adversarial (L3): metacharacters in a custom path cannot inject a second command.
+    func testCustomServerPathIsShellQuoted() {
+        let cfg = MoshConfig(enabled: true, serverPath: "/opt/x;touch /tmp/pwned")
+        XCTAssertEqual(moshServerCommand(cfg).joined(separator: " "),
+                       "\(tmout) '/opt/x;touch /tmp/pwned' new -s -c 256 -l LANG=en_US.UTF-8")
+    }
+
+    // BVA: an empty or blank custom path falls back to mosh-server on the PATH.
+    func testBlankServerPathUsesDefault() {
+        for blank in ["", "   "] {
+            XCTAssertEqual(moshServerCommand(MoshConfig(enabled: true, serverPath: blank))[1], "mosh-server")
+        }
+    }
+
     // Port range appends `-p lo:hi`.
     func testPortRangeAppended() {
         let cfg = MoshConfig(enabled: true, udpPortRange: [60000, 61000])
