@@ -26,6 +26,28 @@ public func keychainAccount(for ref: SecretRef) -> String {
     }
 }
 
+/// When a Keychain item can be read.
+public enum SecretAccessibility: Equatable, Sendable {
+    /// Only while the device is unlocked (`kSecAttrAccessibleWhenUnlocked`). Still syncs.
+    case whenUnlocked
+    /// Any time after the first unlock since boot (`kSecAttrAccessibleAfterFirstUnlock`).
+    case afterFirstUnlock
+}
+
+/// The accessibility for the Keychain item stored under `account` (a `keychainAccount`
+/// string).
+///
+/// Credentials (private keys, passwords, passphrases) are only readable while the device
+/// is unlocked (security audit M4). The record key, known hosts and resume secrets stay
+/// `afterFirstUnlock`: the record key is read at app launch, which iOS can do before the
+/// user unlocks (prewarming), and none of the three signs anyone in. Unknown accounts get
+/// the stricter class.
+public func secretAccessibility(forAccount account: String) -> SecretAccessibility {
+    if account == keychainAccount(for: .recordKey) { return .afterFirstUnlock }
+    if account.hasPrefix("hostKeys/") || account.hasPrefix("resumeSecret/") { return .afterFirstUnlock }
+    return .whenUnlocked
+}
+
 // MARK: - Keychain-backed store (Apple platforms only)
 
 #if canImport(Security)
@@ -39,9 +61,9 @@ public enum KeychainError: Error, Equatable {
 
 /// A `SecretStore` backed by the iOS/macOS Keychain with iCloud Keychain sync.
 ///
-/// All items are stored as `kSecClassGenericPassword` under the given `service`
-/// and are accessible after first device unlock (`kSecAttrAccessibleAfterFirstUnlock`).
-/// When `synchronizable` is `true` (the default) items ride iCloud Keychain (E2EE).
+/// All items are stored as `kSecClassGenericPassword` under the given `service`, with the
+/// accessibility `secretAccessibility(forAccount:)` picks per item. When `synchronizable`
+/// is `true` (the default) items ride iCloud Keychain (E2EE).
 public final class KeychainSecretStore: SecretStore {
     private let service: String
     private let synchronizable: Bool
@@ -65,7 +87,8 @@ public final class KeychainSecretStore: SecretStore {
         let status = SecItemCopyMatching(query as CFDictionary, nil)
         switch status {
         case errSecSuccess:
-            let update: [String: Any] = [kSecValueData as String: data]
+            let update: [String: Any] = [kSecValueData as String: data,
+                                         kSecAttrAccessible as String: accessibleValue(for: ref)]
             let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
             guard updateStatus == errSecSuccess else {
                 throw KeychainError.unexpectedStatus(updateStatus)
@@ -73,6 +96,7 @@ public final class KeychainSecretStore: SecretStore {
         case errSecItemNotFound:
             var addQuery = query
             addQuery[kSecValueData as String] = data
+            addQuery[kSecAttrAccessible as String] = accessibleValue(for: ref)
             let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
             guard addStatus == errSecSuccess else {
                 throw KeychainError.unexpectedStatus(addStatus)
@@ -112,17 +136,74 @@ public final class KeychainSecretStore: SecretStore {
         }
     }
 
+    /// Result of `migrateAccessibility`: items re-classed, and items that could not be
+    /// (each with its status), which the next launch retries.
+    public struct AccessibilityMigration: Equatable, Sendable {
+        public var changed = 0
+        public var failed: [OSStatus] = []
+    }
+
+    /// Moves every item in this store to the accessibility `secretAccessibility(forAccount:)`
+    /// picks. Items written before security audit M4 were all `AfterFirstUnlock`.
+    /// Idempotent; call at launch. A failing item is skipped (and reported) so it can't
+    /// block the others. Only the listing query failing throws.
+    public func migrateAccessibility() throws -> AccessibilityMigration {
+        var query = serviceQuery()
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        var outcome = AccessibilityMigration()
+        if status == errSecItemNotFound { return outcome }
+        guard status == errSecSuccess, let items = result as? [[String: Any]] else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+        for item in items {
+            guard let account = item[kSecAttrAccount as String] as? String else { continue }
+            let want = Self.accessibleValue(secretAccessibility(forAccount: account))
+            if let have = item[kSecAttrAccessible as String] as? String, have == want as String { continue }
+            var match = serviceQuery()
+            match[kSecAttrAccount as String] = account
+            let update: [String: Any] = [kSecAttrAccessible as String: want]
+            let updateStatus = SecItemUpdate(match as CFDictionary, update as CFDictionary)
+            if updateStatus == errSecSuccess {
+                outcome.changed += 1
+            } else {
+                outcome.failed.append(updateStatus)
+            }
+        }
+        return outcome
+    }
+
     // MARK: - Private helpers
 
-    /// Builds the base query dictionary shared by all Keychain operations for `ref`.
-    private func baseQuery(for ref: SecretRef) -> [String: Any] {
+    /// Matches every item of this store (any account, any accessibility).
+    private func serviceQuery() -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: keychainAccount(for: ref),
             kSecAttrSynchronizable as String: synchronizable ? kCFBooleanTrue! : kCFBooleanFalse!,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
         ]
+    }
+
+    /// Builds the base query dictionary shared by all Keychain operations for `ref`.
+    /// Accessibility is deliberately NOT part of the match, so an item written under an
+    /// older class is still found (and re-classed on its next write).
+    private func baseQuery(for ref: SecretRef) -> [String: Any] {
+        var query = serviceQuery()
+        query[kSecAttrAccount as String] = keychainAccount(for: ref)
+        return query
+    }
+
+    private func accessibleValue(for ref: SecretRef) -> CFString {
+        Self.accessibleValue(secretAccessibility(forAccount: keychainAccount(for: ref)))
+    }
+
+    private static func accessibleValue(_ accessibility: SecretAccessibility) -> CFString {
+        switch accessibility {
+        case .whenUnlocked: return kSecAttrAccessibleWhenUnlocked
+        case .afterFirstUnlock: return kSecAttrAccessibleAfterFirstUnlock
+        }
     }
 }
 #endif

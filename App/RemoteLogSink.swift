@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 import Network
+import Security
 import UIKit
 import SemicolynKit
 
@@ -44,13 +45,16 @@ enum BuildBanner {
 /// died while backgrounded stayed dead until relaunch (device 2026-10-05). This class
 /// must never log through `DebugLog` (it IS DebugLog's remote sink: recursion).
 ///
-/// TLS uses `NWProtocolTLS` with certificate verification DISABLED, this targets the
-/// developer's own diagnostics host (self-signed cert from `tools/syslog-sink/`), not a
-/// general secure channel. Documented and intentional.
+/// TLS pins the server's leaf certificate on first connect (the diagnostics host is
+/// usually self-signed, e.g. `tools/syslog-sink/`) and refuses a different one, asking the
+/// user whether to trust it (`RemoteLogCertPrompt`). Only TLS carries typed content
+/// (`DebugLog.logSensitive`).
 final class RemoteLogSink {
     private let host: NWEndpoint.Host
     private let port: NWEndpoint.Port
-    private let transport: LogTransport
+    /// `remoteLogPinKey(host:port:)` for this server.
+    let pinKey: String
+    let transport: LogTransport
     private let queue = DispatchQueue(label: "dev.truepositive.semicolyn.remotelog")
     private var connection: NWConnection?
     /// True once the connection reached `.ready`. Before that, sends are BUFFERED (see
@@ -85,10 +89,20 @@ final class RemoteLogSink {
     /// `init`, before any other access.
     private var lifecycleObservers: [NSObjectProtocol] = []
 
-    init(host: String, port: Int, transport: LogTransport) {
+    /// A first-seen certificate fingerprint accepted by the TLS verify block but not yet
+    /// pinned: it is pinned only once that connection reaches `.ready`, i.e. after the
+    /// handshake proved the server holds the certificate's key. Pinning in the verify
+    /// block would let a failed impostor handshake pin the impostor. All access on `queue`.
+    private var unpinnedCandidate: String?
+
+    /// - Parameter connect: `false` builds a sink only for `test(_:)` (the Diagnostics
+    ///   "Test connection" probe): no persistent connection, no lifecycle observers.
+    init(host: String, port: Int, transport: LogTransport, connect: Bool = true) {
         self.host = NWEndpoint.Host(host)
         self.port = NWEndpoint.Port(rawValue: UInt16(clamping: port)) ?? 6514
+        self.pinKey = remoteLogPinKey(host: host, port: port)
         self.transport = transport
+        guard connect else { return }
         start()
         // Belt-and-braces lifecycle triggers alongside the RootView `scenePhase` calls
         // (both paths are idempotent). willEnterForeground fires before any SwiftUI
@@ -117,14 +131,49 @@ final class RemoteLogSink {
         case .tcp:
             return NWParameters(tls: nil, tcp: Self.keepaliveTCPOptions())
         case .tls:
-            // TLS with verification disabled (developer's self-signed diagnostics host).
+            // Pin-on-first-use (security audit M3): the diagnostics host is usually
+            // self-signed, so the chain isn't validated; instead the leaf certificate's
+            // fingerprint is pinned the first time and must match afterwards. The TLS
+            // handshake itself still proves the server holds that certificate's key.
             let tls = NWProtocolTLS.Options()
             sec_protocol_options_set_verify_block(
                 tls.securityProtocolOptions,
-                { _, _, complete in complete(true) },   // accept any certificate
+                { [weak self] _, trust, complete in
+                    guard let self else { complete(false); return }
+                    self.verifyPinned(trust: trust, complete: complete)
+                },
                 queue)
             return NWParameters(tls: tls, tcp: Self.keepaliveTCPOptions())
         }
+    }
+
+    /// Accept the presented leaf certificate only if it matches this server's pin. With
+    /// no pin yet it is accepted as `unpinnedCandidate` (pinned on `.ready`). A mismatch
+    /// is refused and reported for the user to decide. Caller on `queue`.
+    private func verifyPinned(trust: sec_trust_t, complete: (Bool) -> Void) {
+        let secTrust = sec_trust_copy_ref(trust).takeRetainedValue()
+        guard let chain = SecTrustCopyCertificateChain(secTrust) as? [SecCertificate],
+              let leaf = chain.first else { complete(false); return }
+        let der = SecCertificateCopyData(leaf) as Data
+        let presented = certificateFingerprint(der: Array(der))
+        switch remoteLogCertDecision(pinned: RemoteLogCertPins.pin(for: pinKey), presented: presented) {
+        case .pinFirst:
+            unpinnedCandidate = presented
+            complete(true)
+        case .match:
+            complete(true)
+        case .mismatch(let pinned):
+            RemoteLogCertPrompt.report(pinKey: pinKey, pinned: pinned, presented: presented)
+            complete(false)
+        }
+    }
+
+    /// The handshake completed: pin the first-seen certificate, unless something was
+    /// pinned meanwhile (which then wins). Caller on `queue`.
+    private func commitFirstPin() {
+        defer { unpinnedCandidate = nil }
+        guard let candidate = unpinnedCandidate, RemoteLogCertPins.pin(for: pinKey) == nil else { return }
+        RemoteLogCertPins.setPin(candidate, for: pinKey)
     }
 
     /// TCP options with keepalive on (idle 15s, probe every 5s, 3 probes), so a dead peer
@@ -189,6 +238,7 @@ final class RemoteLogSink {
     /// the build/OS/device that produced the trace. Caller on `queue`.
     private func linkUp() {
         isReady = true
+        commitFirstPin()
         // A link that came up on its own (e.g. out of `.waiting`) supersedes any pending
         // backoff reconnect, which would otherwise tear down this good connection.
         reconnectWork?.cancel()
@@ -322,6 +372,7 @@ final class RemoteLogSink {
         probe.stateUpdateHandler = { state in
             switch state {
             case .ready:
+                self.commitFirstPin()
                 let framed = syslogFrame(message: "semicolyn diagnostics test, \(BuildBanner.line)",
                                          timestamp: Self.timestamp(), transport: self.transport)
                 probe.send(content: framed.data(using: .utf8), completion: .contentProcessed { _ in

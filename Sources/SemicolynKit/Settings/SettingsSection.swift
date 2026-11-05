@@ -63,6 +63,8 @@ public enum SettingsLayout {
         SettingsGroup(header: "Input", sections: [.keybar, .macros, .keyboard]),
         SettingsGroup(header: "Connections", sections: [.defaults, .sshKeys, .knownHosts]),
         SettingsGroup(header: "Privacy", sections: [.privacy]),
-        SettingsGroup(header: "Help", sections: [.tips, .diagnostics, .about]),
+        SettingsGroup(header: "Help", sections: [.tips, .about]),
+        // Last, under its own heading: logging and streaming are troubleshooting tools.
+        SettingsGroup(header: "Developer", sections: [.diagnostics]),
     ]
 }

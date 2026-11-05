@@ -100,6 +100,7 @@ final class PaneTerminalView: TerminalView {
     override func paste(_ sender: Any?) {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
         send(SemicolynKit.bracketedPasteBytes(text, bracketed: true))
+        selectNone()
     }
 
     // Single gesture engine (spec 2026-10-04): every touch goes through OUR

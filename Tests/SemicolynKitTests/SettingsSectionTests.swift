@@ -5,11 +5,11 @@ import XCTest
 @testable import SemicolynKit
 
 /// M-57: the Settings tree (un-headed Appearance/Terminal, then Input, Connections,
-/// Privacy, Help).
+/// Privacy, Help, Developer).
 final class SettingsSectionTests: XCTestCase {
     func testGroupHeadersInOrder() {
         XCTAssertEqual(SettingsLayout.groups.map(\.header),
-                       [nil, "Input", "Connections", "Privacy", "Help"])
+                       [nil, "Input", "Connections", "Privacy", "Help", "Developer"])
     }
 
     func testGroupRowsInOrder() {
@@ -18,7 +18,8 @@ final class SettingsSectionTests: XCTestCase {
             [.keybar, .macros, .keyboard],
             [.defaults, .sshKeys, .knownHosts],
             [.privacy],
-            [.tips, .diagnostics, .about],
+            [.tips, .about],
+            [.diagnostics],
         ])
     }
 
@@ -34,7 +35,8 @@ final class SettingsSectionTests: XCTestCase {
             "Keybar", "Macros", "Keyboard",
             "Connection Defaults", "SSH Keys", "Known Hosts",
             "Suggestions & Privacy",
-            "Tips & Gestures", "Diagnostics", "About",
+            "Tips & Gestures", "About",
+            "Diagnostics",
         ])
     }
 

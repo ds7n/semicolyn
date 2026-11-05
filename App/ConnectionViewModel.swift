@@ -101,6 +101,21 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Last OSC 0/2 title received from the remote (sanitized). Phase-4 Esc-pill
     /// Live row reads this to display the current window title.
     @Published var terminalTitle: String?
+    /// A brief notice shown over the session (e.g. a refused oversized clipboard copy);
+    /// cleared after a few seconds by `showNotice`.
+    @Published private(set) var notice: String?
+    private var noticeClear: Task<Void, Never>?
+
+    /// Show `text` as the session notice for 2.5 seconds (a newer notice replaces it).
+    func showNotice(_ text: String) {
+        notice = text
+        noticeClear?.cancel()
+        noticeClear = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            self?.notice = nil
+        }
+    }
     /// Whether OSC 52 clipboard writes are permitted for the active session.
     /// Resolved from `resolveOsc52Allow` at connect time; read by the terminal views.
     private(set) var osc52Allowed: Bool = true
@@ -217,6 +232,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Non-nil while a Mosh session is driving the terminal (mutually exclusive
     /// with `etSession`). Retained so teardown can shut the UDP loop down.
     private var moshSession: MoshSession?
+    /// When the current Mosh session's first frame arrived (nil until then). Mosh replays
+    /// its last clipboard write to each new client; `clipboardWriteIsMoshReplay` uses
+    /// this to drop that replay. Reset before every `sess.start()`.
+    private var moshFirstFrameAt: Date?
+
+    /// True when an OSC 52 write arriving now is Mosh replaying an old copy.
+    func clipboardWriteIsMoshReplay(now: Date = Date()) -> Bool {
+        osc52IsMoshReplay(isMosh: moshSession != nil,
+                          secondsSinceFirstFrame: moshFirstFrameAt.map { now.timeIntervalSince($0) })
+    }
     /// True once the current Mosh session has delivered its first output frame (the
     /// UDP handshake completed). Gates `onEnd`: a pre-first-frame exit falls back to
     /// SSH on the retained connection; a post-first-frame exit is a mid-session crash.
@@ -524,7 +549,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 inputs: [("command", "\(command)"), ("plainTmux", "\(plainTmux != nil)")],
                 outputs: [("action", action.map { "\($0)" } ?? "none")],
                 reason: nil))
-            if let action { plainTmux?.onKeyboardShortcut(action) }
+            if let action {
+                plainTmux?.onKeyboardShortcut(action)
+                clearTerminalSelection()   // the panes redraw; a selection would be stale
+            }
         case .clearScreen:         sendTerminalInput([0x0c])              // Ctrl-L
         case .paste:               pasteFromClipboard()
         case .reconnect:           reconnect()
@@ -543,6 +571,20 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private func pasteFromClipboard() {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
         sendTerminalInput(SemicolynKit.bracketedPasteBytes(text, bracketed: true))
+        clearTerminalSelection()
+    }
+
+    /// Drop any terminal selection. Paste and every tmux pane/window action do this, as the
+    /// edit menu's Paste does: a selection left behind points at stale text.
+    func clearTerminalSelection() {
+        mountedTerminalView?.selectNone()
+    }
+
+    /// Run a pane/window action from the keybar pane menu on tmux's active pane. Each one
+    /// redraws the panes, so the selection is cleared.
+    func windowAction(_ action: WindowMenuAction) {
+        plainTmux?.onWindowAction(action)
+        clearTerminalSelection()
     }
 
     /// Re-run the last saved-host connect (`⇧⌘R`, the Session menu, the session-ended
@@ -1033,6 +1075,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // Reattach succeeded: frames flowing. Refresh the record (new lastConnectedAt)
             // and drop the in-memory failure copy.
             DebugLog.shared.log(.connect, "resume:reattachMosh onFirstFrame → live")
+            self.moshFirstFrameAt = Date()
             self.resumeInMemory = nil
             if isStateResume {
                 // Clear the one-shot state blob on EVERY state-resume reattach, independent
@@ -1140,6 +1183,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                             reason: reason ?? "reattach ended")
         }
         moshSession = sess
+        moshFirstFrameAt = nil
         sess.start()
         state = .shell
     }
@@ -1634,6 +1678,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // the important effect, the loop signalled life, so don't SSH-fall-back.
                 DebugLog.shared.log(.connect, "mosh: onFirstFrame, UDP handshake up, frames flowing")
                 self.moshFirstFrameSeen = true
+                self.moshFirstFrameAt = Date()
                 self.moshWatchdog?.cancel(); self.moshWatchdog = nil
                 DebugLog.shared.log(.connect, "mosh: watchdog cancelled (onFirstFrame)")
                 // Start the plain-tmux launch (attach-or-create) now that frames are
@@ -1726,6 +1771,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 }
             }
             DebugLog.shared.log(.connect, "mosh: sess.start(), UDP session launching, state=.shell")
+            moshFirstFrameAt = nil
             sess.start()
             moshSession = sess
             connection = conn
@@ -2674,8 +2720,17 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             guard let self else { return }
             let chips = await predictor.suggestions(line: line, lineOptedOut: optedOut)
             await MainActor.run {
-                DebugLog.shared.log(.predictor,
-                    "predictor:suggest seq=\(seq) prefix='\(prefix)' kind=\(kind) count=\(chips.count)")
+                // The prefix is typed text: only with keystroke content logging on (Face ID,
+                // indicator), and then private / TLS-only. Security audit M3.
+                let head = "predictor:suggest seq=\(seq)"
+                let tail = "kind=\(kind) count=\(chips.count)"
+                if UserDefaults.standard.bool(forKey: RemoteLogConfig.keystrokeContentKey) {
+                    DebugLog.shared.logSensitive(.predictor,
+                        content: "\(head) prefix='\(prefix)' \(tail)",
+                        redacted: "\(head) prefixLen=\(prefix.count) \(tail)")
+                } else {
+                    DebugLog.shared.log(.predictor, "\(head) prefixLen=\(prefix.count) \(tail)")
+                }
                 self.predictorVM.apply(chips, seq: seq)
             }
         }
@@ -2738,10 +2793,10 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         DebugLog.shared.log(.connect, "connect(saved): START addr=\(addr) user=\(user)")
         Task {
+            let verifier = TofuHostKeyVerifier(
+                hostID: savedHost.id, trust: AppStores.shared.trust,
+                present: { [weak self] prompt in await self?.present(prompt) ?? false })
             do {
-                let verifier = TofuHostKeyVerifier(
-                    hostID: savedHost.id, trust: AppStores.shared.trust,
-                    present: { [weak self] prompt in await self?.present(prompt) ?? false })
                 let conn = try await SemicolynSSHCoreFFI.connect(
                     addr: addr, allowLegacy: false, allowDeprecated: false,
                     keepalive: keepaliveConfig(host: savedHost, defaults: defaults),
@@ -2787,7 +2842,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 state = .failed(refusal.errorDescription ?? "Authentication cancelled")
             } catch ConnectError.HostKeyRejected {
                 DebugLog.shared.log(.connect, "connect(saved): HostKeyRejected → .failed")
-                state = .failed("Host key not trusted")
+                state = .failed(verifier.refusedForStoreFailure
+                                ? TofuHostKeyVerifier.storeFailureMessage : "Host key not trusted")
             } catch ConnectError.Timeout {
                 DebugLog.shared.log(.connect, "connect(saved): Timeout → .failed")
                 state = .failed("Couldn't reach host, connection timed out")
@@ -2818,6 +2874,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         }
         DebugLog.shared.log(.connect, "connect(adhoc): START addr=\(addr) user=\(user)")
         Task {
+            var adhocVerifier: TofuHostKeyVerifier?
             do {
                 let portNum = Int(port) ?? 22
                 let hostRecord = try findOrCreateHost(hostName: host, port: portNum, user: user)
@@ -2825,6 +2882,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 let verifier = TofuHostKeyVerifier(
                     hostID: hostRecord.id, trust: AppStores.shared.trust,
                     present: { [weak self] prompt in await self?.present(prompt) ?? false })
+                adhocVerifier = verifier
                 let conn = try await SemicolynSSHCoreFFI.connect(
                     addr: addr, allowLegacy: false, allowDeprecated: false,
                     keepalive: keepaliveConfig(host: hostRecord, defaults: defaults),
@@ -2870,7 +2928,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 state = .failed(refusal.errorDescription ?? "Authentication cancelled")
             } catch ConnectError.HostKeyRejected {
                 DebugLog.shared.log(.connect, "connect(adhoc): HostKeyRejected → .failed")
-                state = .failed("Host key not trusted")
+                state = .failed(adhocVerifier?.refusedForStoreFailure == true
+                                ? TofuHostKeyVerifier.storeFailureMessage : "Host key not trusted")
             } catch ConnectError.Timeout {
                 DebugLog.shared.log(.connect, "connect(adhoc): Timeout → .failed")
                 state = .failed("Couldn't reach host, connection timed out")

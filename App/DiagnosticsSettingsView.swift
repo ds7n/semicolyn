@@ -57,7 +57,46 @@ struct DiagnosticsContent: View {
     /// to off and re-showed the dialog, the "popup re-pops after Turn On" bug).
     @State private var confirmedKeystroke = false
 
+    /// The pinned certificate of the configured server (re-read after Forget).
+    @State private var pinnedCert: String?
+
     private var transport: LogTransport { LogTransport(rawValue: transportRaw) ?? .tls }
+
+    private var destination: RemoteLogDestination {
+        RemoteLogDestination(enabled: remoteEnabled, host: remoteHost, port: remotePort, transport: transport)
+    }
+
+    private var pinKey: String { remoteLogPinKey(host: remoteHost, port: remotePort) }
+
+    /// The stream was redirected from `old`: keystroke content logging switches off (turning
+    /// it back on asks for Face ID), then the sink is rebuilt. Security audit M3.
+    private func destinationChanged(from old: RemoteLogDestination) {
+        if keystrokeContent,
+           !keystrokeContentAfterDestinationChange(contentOn: true, old: old, new: destination) {
+            keystrokeContent = false
+            DebugLog.shared.log(.lifecycle, "diagnostics: stream destination changed → keystroke content OFF")
+        }
+        pinnedCert = RemoteLogCertPins.pin(for: pinKey)
+        rebuildSink()
+    }
+
+    /// The warning's "Turn On": verify the owner, then enable.
+    private func confirmKeystrokeContent() {
+        Task {
+            do {
+                try await KeyAccessAuthorizer.shared.verifyOwner(
+                    identityName: "keystroke logging", reason: "Turn on keystroke logging")
+            } catch KeyAccessError.unavailable {
+                // No passcode on the device: nothing to verify against (same as the key
+                // policy screen). Proceed.
+            } catch {
+                DebugLog.shared.log(.lifecycle, "diagnostics: keystroke content enable refused (\(error))")
+                return
+            }
+            confirmedKeystroke = true      // let the resulting onChange pass through
+            keystrokeContent = true
+        }
+    }
 
     /// The sections only (no enclosing `List`): the parent supplies the `List`/`Form`
     /// (`DiagnosticsSettingsView`). The keystroke confirmation dialog + logging reapply ride
@@ -86,19 +125,28 @@ struct DiagnosticsContent: View {
 
             Section {
                 Toggle("Enable remote log stream", isOn: $remoteEnabled)
-                    .onChange(of: remoteEnabled) { _, _ in rebuildSink() }
+                    .onChange(of: remoteEnabled) { old, _ in
+                        var prior = destination; prior.enabled = old
+                        destinationChanged(from: prior)
+                    }
                 if remoteEnabled {
                     LabeledContent("Server") {
                         TextField("logs.example.com", text: $remoteHost)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                             .multilineTextAlignment(.trailing)
-                            .onChange(of: remoteHost) { _, _ in rebuildSink() }
+                            .onChange(of: remoteHost) { old, _ in
+                                var prior = destination; prior.host = old
+                                destinationChanged(from: prior)
+                            }
                     }
                     LabeledContent("Port") {
                         TextField("6514", value: $remotePort, format: .number.grouping(.never))
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
-                            .onChange(of: remotePort) { _, _ in rebuildSink() }
+                            .onChange(of: remotePort) { old, _ in
+                                var prior = destination; prior.port = old
+                                destinationChanged(from: prior)
+                            }
                     }
                     // "Protocol", not "Transport": avoids a clash with the connection type.
                     Picker("Protocol", selection: $transportRaw) {
@@ -106,7 +154,30 @@ struct DiagnosticsContent: View {
                         Text("TCP").tag(LogTransport.tcp.rawValue)
                         Text("UDP (may cut long lines)").tag(LogTransport.udp.rawValue)
                     }
-                    .onChange(of: transportRaw) { _, _ in rebuildSink() }
+                    .onChange(of: transportRaw) { old, _ in
+                        var prior = destination; prior.transport = LogTransport(rawValue: old) ?? .tls
+                        destinationChanged(from: prior)
+                    }
+                    if transport == .tls {
+                        if let pinnedCert {
+                            LabeledContent("Certificate") {
+                                Text(pinnedCert)
+                                    .font(.caption.monospaced())
+                                    .lineLimit(1).truncationMode(.middle)
+                                    .textSelection(.enabled)
+                            }
+                            Button("Forget Certificate", role: .destructive) {
+                                // Accepting a different server is a redirect too: content
+                                // logging goes off (re-enabling asks for Face ID).
+                                keystrokeContent = false
+                                RemoteLogCertPins.forget(pinKey)
+                                self.pinnedCert = nil
+                                DebugLog.shared.restartRemote(reason: "cert-forgotten")
+                            }
+                        } else {
+                            LabeledContent("Certificate", value: "Remembered on first connect")
+                        }
+                    }
                     Button("Test connection") { runTest() }
                     if let testResult {
                         Text(testResult.text)
@@ -117,8 +188,9 @@ struct DiagnosticsContent: View {
             } header: {
                 Text("Stream logs to a server")
             } footer: {
-                Text("Sends diagnostic logs to your own syslog server (RFC 5424). TLS encrypts "
-                     + "but doesn't verify the server certificate.")
+                Text("Sends diagnostic logs to your own syslog server (RFC 5424). TLS remembers "
+                     + "the server's certificate the first time and asks you if it changes. "
+                     + "TCP and UDP are unencrypted, so typed keys are never sent over them.")
             }
 
             Section {
@@ -140,8 +212,10 @@ struct DiagnosticsContent: View {
                     }
             } footer: {
                 Text("Off: only structural key events (lengths, backspace) are logged. On: the "
-                     + "actual keys are logged too; password/prompt lines are still redacted "
-                     + "(shown as REDACTED, never dropped). Off by default.")
+                     + "actual keys are logged too, shown in the debug panel and streamed over "
+                     + "TLS only; password prompts are redacted. Turning it on asks for Face ID, "
+                     + "a red \"Logging keys\" label shows in sessions while it's on, and "
+                     + "changing where logs stream turns it off. Off by default.")
             }
 
             Section {
@@ -166,17 +240,16 @@ struct DiagnosticsContent: View {
         }
         .onAppear {
             DebugLog.shared.configureFromDefaults(reason: "diagnostics")
+            pinnedCert = RemoteLogCertPins.pin(for: pinKey)
         }
         .confirmationDialog("Log keystroke content?", isPresented: $showKeystrokeNag, titleVisibility: .visible) {
-            Button("Turn On", role: .destructive) {
-                confirmedKeystroke = true      // let the resulting onChange pass through
-                keystrokeContent = true
-            }
+            Button("Turn On", role: .destructive) { confirmKeystrokeContent() }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Diagnostic traces will include the actual keys you type, including anything "
-                 + "sensitive, and stream to your configured host if remote logging is on. "
-                 + "Password/prompt lines are still redacted.")
+            Text("Records what you type, and streams it to your log server over TLS if remote "
+                 + "logging is on. Password prompts are hidden, but passwords or tokens typed "
+                 + "on a command line (like mysql -p…) are not. Only use this while "
+                 + "troubleshooting.")
         }
     }
 
@@ -198,9 +271,12 @@ struct DiagnosticsContent: View {
     private func runTest() {
         guard !remoteHost.isEmpty else { testResult = .needsHost; return }
         testResult = .testing
-        let sink = RemoteLogSink(host: remoteHost, port: remotePort, transport: transport)
+        let sink = RemoteLogSink(host: remoteHost, port: remotePort, transport: transport, connect: false)
         sink.test { ok in
-            DispatchQueue.main.async { testResult = ok ? .connected : .failed }
+            DispatchQueue.main.async {
+                testResult = ok ? .connected : .failed
+                pinnedCert = RemoteLogCertPins.pin(for: pinKey)   // a first connect pins it
+            }
         }
     }
 }
