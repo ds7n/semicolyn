@@ -231,7 +231,11 @@ extension GestureIntentExecutor: @preconcurrency UIEditMenuInteractionDelegate {
         // Custom command after the system ones (HIG). Acts on tmux's active pane.
         if onScreenTmux() != nil {
             items.append(UIAction(title: "Zoom Pane") { [weak self] _ in
-                self?.onScreenTmux()?.onZoomPane()
+                guard let self else { return }
+                self.onScreenTmux()?.onZoomPane()
+                // Zooming redraws the pane, so a selection would cover different text.
+                self.terminal?.selectNone()
+                self.selection = nil
             })
         }
         return UIMenu(children: items.isEmpty ? suggestedActions : items)

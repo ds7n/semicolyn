@@ -350,7 +350,10 @@ struct PadView: View {
             Button("New Window") { vm.plainTmux?.onWindowAction(.newWindow) }
             // tmux zoom is a toggle and the app does not track the zoom state, so the
             // label names both directions.
-            Button("Zoom / Unzoom Pane") { vm.plainTmux?.onWindowAction(.zoom) }
+            Button("Zoom / Unzoom Pane") {
+                vm.plainTmux?.onWindowAction(.zoom)
+                vm.clearTerminalSelection()
+            }
             Button("Close Pane", role: .destructive) { confirmingClosePane = true }
             Button("Cancel", role: .cancel) { }
         }

@@ -558,6 +558,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private func pasteFromClipboard() {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
         sendTerminalInput(SemicolynKit.bracketedPasteBytes(text, bracketed: true))
+        clearTerminalSelection()
+    }
+
+    /// Drop any terminal selection. Paste and Zoom Pane both do this, as the edit menu's
+    /// Paste does: a selection left behind after either points at stale text.
+    func clearTerminalSelection() {
+        mountedTerminalView?.selectNone()
     }
 
     /// Re-run the last saved-host connect (`⇧⌘R`, the Session menu, the session-ended
