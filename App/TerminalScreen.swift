@@ -538,13 +538,21 @@ struct TerminalScreen: UIViewRepresentable {
         }
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
         func clipboardCopy(source: TerminalView, content: Data) {
-            let action = osc52Action(allow: osc52Allowed, content: Array(content))
-            if case let .write(bytes) = action {
-                UIPasteboard.general.string = String(decoding: bytes, as: UTF8.self)
+            MainActor.assumeIsolated {
+                let replay = vm?.clipboardWriteIsMoshReplay() ?? false
+                let action = osc52Action(allow: osc52Allowed, content: Array(content), isMoshReplay: replay)
+                DebugLog.shared.log(.lifecycle, decisionLine(
+                    "clipboard:osc52",
+                    inputs: [("allow", "\(osc52Allowed)"), ("bytes", "\(content.count)"),
+                             ("moshReplay", "\(replay)")],
+                    outputs: [("action", action.logLabel)],
+                    reason: nil))
+                if case let .write(bytes) = action {
+                    UIPasteboard.general.string = String(decoding: bytes, as: UTF8.self)
+                }
+                // Only a refused oversized copy is announced (security audit M1).
+                if let notice = osc52Notice(action) { vm?.showNotice(notice) }
             }
-            // Never silent (security audit M1): say what the server did to the clipboard.
-            guard let notice = osc52Notice(action) else { return }
-            MainActor.assumeIsolated { vm?.showNotice(notice) }
         }
         func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
             guard let kind = classifyURL(link), let url = URL(string: link) else { return }

@@ -101,8 +101,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Last OSC 0/2 title received from the remote (sanitized). Phase-4 Esc-pill
     /// Live row reads this to display the current window title.
     @Published var terminalTitle: String?
-    /// A brief notice shown over the session (e.g. "Server copied 12 characters to the
-    /// clipboard"); cleared after a few seconds by `showNotice`.
+    /// A brief notice shown over the session (e.g. a refused oversized clipboard copy);
+    /// cleared after a few seconds by `showNotice`.
     @Published private(set) var notice: String?
     private var noticeClear: Task<Void, Never>?
 
@@ -232,6 +232,16 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Non-nil while a Mosh session is driving the terminal (mutually exclusive
     /// with `etSession`). Retained so teardown can shut the UDP loop down.
     private var moshSession: MoshSession?
+    /// When the current Mosh session's first frame arrived (nil until then). Mosh replays
+    /// its last clipboard write to each new client; `clipboardWriteIsMoshReplay` uses
+    /// this to drop that replay. Reset before every `sess.start()`.
+    private var moshFirstFrameAt: Date?
+
+    /// True when an OSC 52 write arriving now is Mosh replaying an old copy.
+    func clipboardWriteIsMoshReplay(now: Date = Date()) -> Bool {
+        osc52IsMoshReplay(isMosh: moshSession != nil,
+                          secondsSinceFirstFrame: moshFirstFrameAt.map { now.timeIntervalSince($0) })
+    }
     /// True once the current Mosh session has delivered its first output frame (the
     /// UDP handshake completed). Gates `onEnd`: a pre-first-frame exit falls back to
     /// SSH on the retained connection; a post-first-frame exit is a mid-session crash.
@@ -1055,6 +1065,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // Reattach succeeded: frames flowing. Refresh the record (new lastConnectedAt)
             // and drop the in-memory failure copy.
             DebugLog.shared.log(.connect, "resume:reattachMosh onFirstFrame → live")
+            self.moshFirstFrameAt = Date()
             self.resumeInMemory = nil
             if isStateResume {
                 // Clear the one-shot state blob on EVERY state-resume reattach, independent
@@ -1162,6 +1173,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                             reason: reason ?? "reattach ended")
         }
         moshSession = sess
+        moshFirstFrameAt = nil
         sess.start()
         state = .shell
     }
@@ -1656,6 +1668,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 // the important effect, the loop signalled life, so don't SSH-fall-back.
                 DebugLog.shared.log(.connect, "mosh: onFirstFrame, UDP handshake up, frames flowing")
                 self.moshFirstFrameSeen = true
+                self.moshFirstFrameAt = Date()
                 self.moshWatchdog?.cancel(); self.moshWatchdog = nil
                 DebugLog.shared.log(.connect, "mosh: watchdog cancelled (onFirstFrame)")
                 // Start the plain-tmux launch (attach-or-create) now that frames are
@@ -1748,6 +1761,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 }
             }
             DebugLog.shared.log(.connect, "mosh: sess.start(), UDP session launching, state=.shell")
+            moshFirstFrameAt = nil
             sess.start()
             moshSession = sess
             connection = conn
