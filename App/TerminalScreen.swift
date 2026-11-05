@@ -65,6 +65,8 @@ struct TerminalScreen: UIViewRepresentable {
         // Raw single-terminal path: `RawTerminalContainer` owns the child's frame height
         // (window-space `rawTerminalChildHeight`, PR #122), so the child must NOT self-inset.
         terminal.terminalDelegate = context.coordinator
+        // Security audit L5: cap the kitty image cache (SwiftTerm reads this on each insert).
+        terminal.getTerminal().options.kittyImageCacheLimitBytes = SemicolynKit.kittyImageCacheLimitBytes
         // Event-driven InteractionMode: recompute on every alt-screen / mouse-mode
         // transition, then refresh the dot immediately.
         terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] event, term in
@@ -169,9 +171,14 @@ struct TerminalScreen: UIViewRepresentable {
             DebugLog.shared.log(.seed, "scroll:init isScrollEnabled=\(terminal.isScrollEnabled) nativePan=\(terminal.panGestureRecognizer.isEnabled) contentSize=\(terminal.contentSize) offset=\(terminal.contentOffset)")
         }
 
-        // Render PTY output as it arrives (already hopped to main in the bridge).
+        // Render PTY output as it arrives (already hopped to main in the bridge). Every
+        // byte passes the kitty filter first so a server can't make the app read its own
+        // files (security audit L1); one filter per terminal keeps split commands caught.
+        var kittyFilter = KittyTransmissionFilter()
         output.onBytes = { [weak terminal] bytes in
-            terminal?.feed(byteArray: bytes[...])
+            var filtered = bytes
+            kittyFilter.filter(&filtered)
+            terminal?.feed(byteArray: filtered[...])
         }
         // Wrap the terminal in a plain-UIView container so IT (not the scroll view) is the
         // SwiftUI representable leaf. The container owns the child's frame from the correct
