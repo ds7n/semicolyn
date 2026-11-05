@@ -15,6 +15,10 @@ public enum KeyAlgorithm: String, Codable, Equatable, Sendable {
 
 public enum BiometricPolicy: String, Codable, Equatable, Sendable {
     case never, anyUse, afterUnlock
+
+    /// The policy a new or imported key starts with. The phone unlock is the gate; Face ID
+    /// is an opt-in extra per key (decision log, security posture).
+    public static let newKeyDefault: BiometricPolicy = .never
 }
 
 public struct Identity: Codable, Equatable, Sendable {

@@ -37,8 +37,8 @@ public struct KeyAccessGate: Equatable, Sendable {
         verifiedPeriod = started
     }
 
-    /// Background time after which a return to the foreground ends the period (5 min).
-    public static let backgroundGrace: Double = 300
+    /// Background time after which a return to the foreground ends the period (1 hour).
+    public static let backgroundGrace: Double = 3600
 
     /// The device locked: the next `afterUnlock` key use checks again.
     public mutating func endPeriod() {

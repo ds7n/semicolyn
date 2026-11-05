@@ -82,7 +82,12 @@ final class KeyAccessGateTests: XCTestCase {
         gate.recordVerified(period: gate.period)
         gate.returnedToForeground(awaySeconds: 86_400)
         XCTAssertTrue(gate.needsCheck(.afterUnlock))
-        XCTAssertEqual(KeyAccessGate.backgroundGrace, 300)
+        XCTAssertEqual(KeyAccessGate.backgroundGrace, 3600)
+    }
+
+    func testNewKeysDefaultToNoCheck() {
+        XCTAssertEqual(BiometricPolicy.newKeyDefault, .never)
+        XCTAssertFalse(KeyAccessGate().needsCheck(BiometricPolicy.newKeyDefault))
     }
 
     // Adversarial: a negative away time (clock set back) fails closed.

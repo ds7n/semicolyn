@@ -39,7 +39,7 @@ struct IdentityPickerSheet: View {
 
     // Shared form state
     @State private var newName = ""
-    @State private var biometricPolicy: BiometricPolicy = .afterUnlock
+    @State private var biometricPolicy: BiometricPolicy = .newKeyDefault
     @State private var importName = ""
     @State private var pastedKey = ""
     @State private var passphrase = ""
