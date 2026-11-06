@@ -224,6 +224,9 @@ pub struct Connection {
     /// references a hop, that hop's transport closes. Empty for a direct
     /// connection.
     parents: Vec<std::sync::Arc<tokio::sync::Mutex<client::Handle<ClientHandler>>>>,
+    /// The IP address the TCP connection reached, for a direct connection.
+    /// `None` through a jump host (the device never reached the target itself).
+    peer_ip: Option<std::net::IpAddr>,
 }
 
 impl std::fmt::Debug for Connection {
@@ -241,6 +244,14 @@ impl Connection {
     /// warning per ssh-algorithms-design §"Tier 3 warning UX".
     pub fn tier3_in_use(&self) -> Vec<String> {
         self.tier3_in_use.lock().unwrap().clone()
+    }
+
+    /// The numeric IP this connection's TCP socket reached (IPv6 without
+    /// brackets), or `None` when connected through a jump host. Mosh uses it so
+    /// its UDP session goes to the server SSH verified instead of a fresh DNS
+    /// lookup that could answer differently (security audit L2).
+    pub fn peer_ip(&self) -> Option<String> {
+        self.peer_ip.map(|ip| ip.to_string())
     }
 }
 
@@ -558,6 +569,7 @@ impl Connection {
             tier3_in_use,
             forwards,
             parents,
+            peer_ip: None,
         }))
     }
 }
@@ -860,9 +872,24 @@ async fn connect_core_with_timeout(
     // Bound the handshake so a host that accepts TCP but never speaks SSH fails
     // fast as `Timeout` instead of hanging until the session inactivity backstop.
     // Dropping the timed-out future tears down the half-open connection.
-    let connect_fut = client::connect(config, addr, handler);
-    let handle = match tokio::time::timeout(handshake_timeout, connect_fut).await {
-        Ok(result) => map_handshake(result, &rejected)?,
+    // The TCP connect is done here rather than by `client::connect` so the
+    // address actually reached is kept (see `Connection::peer_ip`).
+    let connect_fut = async {
+        let socket = tokio::net::TcpStream::connect(addr.as_str())
+            .await
+            .map_err(|e| ConnectError::from(russh::Error::from(e)))?;
+        if config.nodelay {
+            let _ = socket.set_nodelay(true);
+        }
+        let peer_ip = socket.peer_addr().ok().map(|a| a.ip());
+        let handle = map_handshake(
+            client::connect_stream(config, socket, handler).await,
+            &rejected,
+        )?;
+        Ok::<_, ConnectError>((handle, peer_ip))
+    };
+    let (handle, peer_ip) = match tokio::time::timeout(handshake_timeout, connect_fut).await {
+        Ok(result) => result?,
         Err(_elapsed) => return Err(ConnectError::Timeout),
     };
 
@@ -871,6 +898,7 @@ async fn connect_core_with_timeout(
         tier3_in_use,
         forwards,
         parents: Vec::new(),
+        peer_ip,
     })
 }
 
@@ -1042,5 +1070,33 @@ mod tests {
             "timeout should fire near the 300ms deadline, took {:?}",
             started.elapsed()
         );
+    }
+
+    /// The TCP connect now runs before `connect_stream` (to record the peer IP);
+    /// a refused port must still surface as a `Transport` error, not `Timeout`.
+    #[tokio::test]
+    async fn refused_tcp_connect_maps_to_transport_error() {
+        // Bind then drop: the port is free, so the connect is refused at once.
+        let addr = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap()
+        };
+        let err = connect_core_with_timeout(
+            addr.to_string(),
+            false,
+            false,
+            KeepaliveConfig::default(),
+            Duration::from_secs(5),
+            Arc::new(AlwaysTrust),
+        )
+        .await
+        .expect_err("nothing listens on the port");
+        match err {
+            ConnectError::Transport { message } => assert!(
+                message.to_lowercase().contains("refused"),
+                "expected a connection-refused message, got {message}"
+            ),
+            other => panic!("expected ConnectError::Transport, got {other:?}"),
+        }
     }
 }

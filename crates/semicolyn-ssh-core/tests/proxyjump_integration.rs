@@ -133,6 +133,14 @@ async fn two_hop_chain_runs_shell_on_target() {
         .expect("target auth call");
     assert_eq!(outcome, AuthOutcome::Success, "target auth must succeed");
 
+    // Security audit L2: the device never reached the target itself, so there is
+    // no peer IP to hand Mosh; the jump host still has its own.
+    assert_eq!(target.peer_ip(), None);
+    assert!(
+        jump.peer_ip().is_some(),
+        "direct jump hop must record its peer IP"
+    );
+
     // The negotiation at the target hop must reflect that hop's algorithms, not
     // the jump host's, the legacy target is Tier-3.
     assert!(

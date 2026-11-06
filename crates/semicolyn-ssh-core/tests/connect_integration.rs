@@ -49,6 +49,37 @@ async fn connect_presents_well_formed_host_key_then_trusts() {
     assert!(!seen.key_type.is_empty());
 }
 
+// Security audit L2: the connection reports the IP its socket actually reached,
+// so Mosh can use it instead of resolving the name again.
+#[tokio::test]
+async fn connect_records_the_peer_ip_it_reached() {
+    use std::net::ToSocketAddrs;
+    let Some(addr) = sshd_addr() else {
+        eprintln!("skipping: set SEMICOLYN_TEST_SSHD");
+        return;
+    };
+    let resolved: Vec<String> = addr
+        .to_socket_addrs()
+        .expect("fixture resolves")
+        .map(|a| a.ip().to_string())
+        .collect();
+    let v = Arc::new(RecordingVerifier {
+        trust: true,
+        seen: Mutex::new(None),
+    });
+    let conn = connect_core(addr, false, false, KeepaliveConfig::default(), v)
+        .await
+        .expect("trusted connection");
+    let ip = conn
+        .peer_ip()
+        .expect("direct connection records its peer IP");
+    assert!(resolved.contains(&ip), "peer {ip} not among {resolved:?}");
+    assert!(
+        ip.parse::<std::net::IpAddr>().is_ok(),
+        "peer IP must be numeric, got {ip}"
+    );
+}
+
 #[tokio::test]
 async fn connect_aborts_when_delegate_rejects() {
     let Some(addr) = sshd_addr() else {
