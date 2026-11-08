@@ -30,11 +30,19 @@ final class SealedSettingsTests: XCTestCase {
         super.tearDown()
     }
 
-    private func loadLogServer(_ store: EncryptedRecordStore? = nil) -> LogServerSettings? {
-        loadSealedSetting(id: SealedSettingID.logServer, as: LogServerSettings.self,
-                          records: store ?? records,
-                          legacy: { LogServerSettings.legacy(in: defaults) },
-                          removeLegacy: { LogServerSettings.removeLegacy(from: defaults) })
+    private enum Outcome: Equatable {
+        case found(LogServerSettings), absent, unreadable
+    }
+
+    private func loadLogServer(_ store: EncryptedRecordStore? = nil) -> Outcome {
+        switch loadSealedSetting(id: SealedSettingID.logServer, as: LogServerSettings.self,
+                                 records: store ?? records,
+                                 legacy: { LogServerSettings.legacy(in: defaults) },
+                                 removeLegacy: { LogServerSettings.removeLegacy(from: defaults) }) {
+        case let .found(value): return .found(value)
+        case .absent: return .absent
+        case .unreadable: return .unreadable
+        }
     }
 
     private func setLegacy() {
@@ -47,15 +55,15 @@ final class SealedSettingsTests: XCTestCase {
     private let expected = LogServerSettings(host: "logs.example.net", port: 1514, transport: .tcp,
                                              certPins: ["logs.example.net:6514": "AB:CD"])
 
-    // Nothing anywhere: nil, so the caller uses its default.
-    func testNothingStoredIsNil() {
-        XCTAssertNil(loadLogServer())
+    // Nothing anywhere: absent, so the caller uses (and may save) its default.
+    func testNothingStoredIsAbsent() {
+        XCTAssertEqual(loadLogServer(), .absent)
     }
 
     // First launch after the update: the legacy keys are sealed, then removed.
     func testLegacyMigratedSealedAndRemoved() throws {
         setLegacy()
-        XCTAssertEqual(loadLogServer(), expected)
+        XCTAssertEqual(loadLogServer(), .found(expected))
         XCTAssertEqual(try records.get(.settings, id: SealedSettingID.logServer, as: LogServerSettings.self),
                        expected)
         for key in [LogServerSettings.LegacyKey.host, LogServerSettings.LegacyKey.port,
@@ -77,7 +85,7 @@ final class SealedSettingsTests: XCTestCase {
         let current = LogServerSettings(host: "new.example.net")
         try records.put(current, type: .settings, id: SealedSettingID.logServer)
         setLegacy()
-        XCTAssertEqual(loadLogServer(), current)
+        XCTAssertEqual(loadLogServer(), .found(current))
         XCTAssertNil(defaults.object(forKey: LogServerSettings.LegacyKey.host))
     }
 
@@ -87,7 +95,7 @@ final class SealedSettingsTests: XCTestCase {
         let foreign = EncryptedRecordStore(backend: backend, key: SymmetricKey(size: .bits256))
         try foreign.put(LogServerSettings(host: "x"), type: .settings, id: SealedSettingID.logServer)
         setLegacy()
-        XCTAssertEqual(loadLogServer(), expected)
+        XCTAssertEqual(loadLogServer(), .found(expected))
         XCTAssertEqual(try records.get(.settings, id: SealedSettingID.logServer, as: LogServerSettings.self),
                        expected)
     }
@@ -103,7 +111,7 @@ final class SealedSettingsTests: XCTestCase {
         }
         setLegacy()
         let readOnly = EncryptedRecordStore(backend: ReadOnlyStore(), key: SymmetricKey(size: .bits256))
-        XCTAssertEqual(loadLogServer(readOnly), expected)
+        XCTAssertEqual(loadLogServer(readOnly), .found(expected))
         XCTAssertEqual(defaults.string(forKey: LogServerSettings.LegacyKey.host), "logs.example.net")
     }
 
@@ -115,19 +123,19 @@ final class SealedSettingsTests: XCTestCase {
                        LogServerSettings(host: "h.example", port: 6514, transport: .tls, certPins: [:]))
     }
 
-    // The keybar settings (with a macro) round-trip through the same path.
-    func testKeybarSettingsMigrate() throws {
-        var keybar = KeybarSettings.default
-        keybar.library.upsertMacro(Macro(id: MacroID("m1"), name: "deploy", body: [MacroEvent(key: .char("d"))]))
-        let legacyKey = "semicolyn.keybarSettings"
-        defaults.set(try JSONEncoder().encode(keybar), forKey: legacyKey)
+    // A record whose file can't be read (a locked device) is unreadable: nothing is
+    // migrated over it and the legacy copy stays. Simulated with a directory where the
+    // record file should be, which exists but can't be read as data.
+    func testUnreadableFileIsUnreadableAndKeepsLegacy() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sealed-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let recordFile = dir.appendingPathComponent("settings/\(SealedSettingID.logServer.uuidString).rec")
+        try FileManager.default.createDirectory(at: recordFile, withIntermediateDirectories: true)
+        let fileRecords = EncryptedRecordStore(backend: FileBlobStore(directory: dir), key: SymmetricKey(size: .bits256))
+        setLegacy()
 
-        let loaded = loadSealedSetting(
-            id: SealedSettingID.keybar, as: KeybarSettings.self, records: records,
-            legacy: { defaults.data(forKey: legacyKey).flatMap { try? JSONDecoder().decode(KeybarSettings.self, from: $0) } },
-            removeLegacy: { defaults.removeObject(forKey: legacyKey) })
-
-        XCTAssertEqual(loaded, keybar)
-        XCTAssertNil(defaults.object(forKey: legacyKey))
+        XCTAssertEqual(loadLogServer(fileRecords), .unreadable)
+        XCTAssertEqual(defaults.string(forKey: LogServerSettings.LegacyKey.host), "logs.example.net")
     }
 }

@@ -71,16 +71,42 @@ final class EraseAllDataTests: XCTestCase {
         XCTAssertNil(try device.getSecret(.resumeSecret(sessionID: session)))
     }
 
-    // A directory that doesn't exist (no fonts ever imported) is not a failure.
+    // A directory that doesn't exist (no fonts ever imported) is not a failure; the
+    // rest is still erased.
     func testMissingDirectoryIsFine() throws {
         try FileManager.default.removeItem(at: fonts)
-        XCTAssertNoThrow(try erase(alsoFromOtherDevices: false))
+        try erase(alsoFromOtherDevices: false)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("semicolyn").path))
+        XCTAssertNil(try device.getSecret(.resumeSecret(sessionID: session)))
+        XCTAssertNil(defaults.object(forKey: "semicolyn.keybarSettings"))
     }
 
-    // A second erase finds nothing and still succeeds.
+    // A second erase finds nothing, succeeds, and leaves the same end state.
     func testEraseIsIdempotent() throws {
         try erase(alsoFromOtherDevices: true)
-        XCTAssertNoThrow(try erase(alsoFromOtherDevices: true))
+        try erase(alsoFromOtherDevices: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fonts.path))
+        XCTAssertNil(try synced.getSecret(.password(id: host)))
+        XCTAssertEqual(try synced.getSecret(.recordKey), Data([2]))
+    }
+
+    // A directory that can't be removed is reported as `.files`; secrets and settings
+    // are still erased. (Its parent is made read-only, so the delete is refused.)
+    func testUndeletableDirectoryReportsFiles() throws {
+        let locked = root.appendingPathComponent("locked", isDirectory: true)
+        let stuck = locked.appendingPathComponent("stuck", isDirectory: true)
+        try FileManager.default.createDirectory(at: stuck, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: locked.path) }
+        try XCTSkipIf(getuid() == 0, "root ignores directory permissions")
+
+        XCTAssertThrowsError(try eraseAllAppData(
+            directories: [stuck], deviceSecrets: device, syncedSecrets: synced,
+            alsoFromOtherDevices: false, defaults: defaults, defaultsDomain: suite)) { error in
+            XCTAssertEqual(error as? EraseIncomplete, EraseIncomplete(failedSteps: [.files]))
+        }
+        XCTAssertNil(try device.getSecret(.resumeSecret(sessionID: session)))
+        XCTAssertNil(defaults.object(forKey: "semicolyn.keybarSettings"))
     }
 
     // A failing secret store is reported by name, and the other steps still run.

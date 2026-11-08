@@ -13,6 +13,10 @@ import SemicolynKit
     private static let legacyDefaultsKey = "semicolyn.keybarSettings"
 
     private let records: EncryptedRecordStore
+    /// False while the stored settings couldn't be read (the device was locked at
+    /// launch): edits stay in memory and nothing is saved, so the defaults shown
+    /// meanwhile can't overwrite the user's real layout and macros.
+    private var canSave = true
 
     @Published var settings: KeybarSettings {
         didSet { persist() }
@@ -23,23 +27,41 @@ import SemicolynKit
     /// safety, a malformed/old blob never bricks the keybar).
     init(records: EncryptedRecordStore) {
         self.records = records
-        self.settings = Self.load(records)
+        let (loaded, readable) = Self.load(records)
+        self.canSave = readable
+        self.settings = loaded
     }
 
     /// Re-reads the store (after Erase All Data deleted it: back to the defaults).
     func reload() {
-        settings = Self.load(records)
+        let (loaded, readable) = Self.load(records)
+        canSave = readable
+        settings = loaded
     }
 
-    private static func load(_ records: EncryptedRecordStore) -> KeybarSettings {
+    /// Retries a load that failed because the device was locked. Called when the app
+    /// becomes active (the device is unlocked then).
+    func reloadIfUnreadable() {
+        guard !canSave else { return }
+        reload()
+    }
+
+    private static func load(_ records: EncryptedRecordStore) -> (KeybarSettings, readable: Bool) {
         let defaults = UserDefaults.standard
-        return loadSealedSetting(
+        let result = loadSealedSetting(
             id: SealedSettingID.keybar, as: KeybarSettings.self, records: records,
             legacy: {
                 defaults.data(forKey: legacyDefaultsKey)
                     .flatMap { try? JSONDecoder().decode(KeybarSettings.self, from: $0) }
             },
-            removeLegacy: { defaults.removeObject(forKey: legacyDefaultsKey) }) ?? .default
+            removeLegacy: { defaults.removeObject(forKey: legacyDefaultsKey) })
+        switch result {
+        case let .found(stored): return (stored, true)
+        case .absent: return (.default, true)
+        case .unreadable:
+            DebugLog.shared.log(.keybar, "keybar:settings unreadable (device locked?), not saving until reloaded")
+            return (.default, false)
+        }
     }
 
     /// Settings > Keybar > "Reset Keybar…": layout, swipes and the hardware-keyboard
@@ -82,6 +104,7 @@ import SemicolynKit
     }
 
     private func persist() {
+        guard canSave else { return }
         do {
             try records.put(settings, type: .settings, id: SealedSettingID.keybar)
             DebugLog.shared.log(.keybar, "keybar:settingsApplied")

@@ -198,6 +198,10 @@ final class AppStores: ObservableObject {
             appearance.resetToDefault()
             pro.reload()
             LogServerStore.shared.reload()
+            TerminalFontProvider.shared.resetImported()
+            // The on-screen log buffer can name hosts (and hold keystrokes if that
+            // logging was on).
+            DebugLog.shared.clear()
             if let records = try? Self.recordsDirectory() {
                 Self.excludeSessionStateFromBackup(FileBlobStore(directory: records))
             }

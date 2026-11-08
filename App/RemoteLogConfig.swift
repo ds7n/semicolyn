@@ -19,18 +19,17 @@ enum RemoteLogConfig {
 final class LogServerStore: @unchecked Sendable {
     static let shared = LogServerStore()
 
-    private let records: EncryptedRecordStore?
     private let lock = NSLock()
-    private var current: LogServerSettings
+    /// Nil while the record key couldn't be read; `reloadIfUnreadable` retries.
+    private var records: EncryptedRecordStore?
+    private var current = LogServerSettings()
+    /// False while the stored settings couldn't be read (device locked at launch, or
+    /// no record key yet): changes stay in memory and nothing is saved, so the
+    /// defaults can't overwrite the real settings.
+    private var canSave = false
 
     private init() {
-        do {
-            records = EncryptedRecordStore(backend: FileBlobStore(directory: try AppStores.recordsDirectory()),
-                                           key: try recordKey(in: KeychainSecretStore()))
-        } catch {
-            records = nil
-        }
-        current = Self.load(records)
+        loadLocked()
     }
 
     /// The current settings.
@@ -40,22 +39,63 @@ final class LogServerStore: @unchecked Sendable {
     func update(_ change: (inout LogServerSettings) -> Void) {
         lock.withLock {
             change(&current)
+            guard canSave else { return }
             try? records?.put(current, type: .settings, id: SealedSettingID.logServer)
         }
     }
 
-    /// Re-reads the store (after Erase All Data deleted it: back to the defaults).
-    func reload() {
-        lock.withLock { current = Self.load(records) }
+    /// Pins `fingerprint` for `pinKey` unless something is pinned already, in one step
+    /// (the first certificate seen wins). Returns whether it pinned.
+    @discardableResult
+    func pinIfUnpinned(_ fingerprint: String, for pinKey: String) -> Bool {
+        var pinned = false
+        update {
+            guard $0.certPins[pinKey] == nil else { return }
+            $0.certPins[pinKey] = fingerprint
+            pinned = true
+        }
+        return pinned
     }
 
-    private static func load(_ records: EncryptedRecordStore?) -> LogServerSettings {
-        guard let records else { return LogServerSettings() }
+    /// Re-reads the store (after Erase All Data deleted it: back to the defaults).
+    func reload() {
+        lock.withLock { loadLocked() }
+    }
+
+    /// Retries a load that failed (device locked at launch). Called when the app
+    /// becomes active.
+    func reloadIfUnreadable() {
+        lock.withLock {
+            guard !canSave else { return }
+            loadLocked()
+        }
+    }
+
+    /// Loads into `current`. Caller holds `lock` (or is `init`).
+    private func loadLocked() {
+        if records == nil {
+            records = try? EncryptedRecordStore(
+                backend: FileBlobStore(directory: AppStores.recordsDirectory()),
+                key: recordKey(in: KeychainSecretStore()))
+        }
+        guard let records else {
+            canSave = false
+            return
+        }
         let defaults = UserDefaults.standard
-        return loadSealedSetting(id: SealedSettingID.logServer, as: LogServerSettings.self, records: records,
+        switch loadSealedSetting(id: SealedSettingID.logServer, as: LogServerSettings.self, records: records,
                                  legacy: { LogServerSettings.legacy(in: defaults) },
-                                 removeLegacy: { LogServerSettings.removeLegacy(from: defaults) })
-            ?? LogServerSettings()
+                                 removeLegacy: { LogServerSettings.removeLegacy(from: defaults) }) {
+        case let .found(stored):
+            current = stored
+            canSave = true
+        case .absent:
+            current = LogServerSettings()
+            canSave = true
+        case .unreadable:
+            current = LogServerSettings()
+            canSave = false
+        }
     }
 }
 

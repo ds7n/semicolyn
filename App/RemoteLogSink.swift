@@ -172,8 +172,8 @@ final class RemoteLogSink {
     /// pinned meanwhile (which then wins). Caller on `queue`.
     private func commitFirstPin() {
         defer { unpinnedCandidate = nil }
-        guard let candidate = unpinnedCandidate, RemoteLogCertPins.pin(for: pinKey) == nil else { return }
-        RemoteLogCertPins.setPin(candidate, for: pinKey)
+        guard let candidate = unpinnedCandidate else { return }
+        LogServerStore.shared.pinIfUnpinned(candidate, for: pinKey)
     }
 
     /// TCP options with keepalive on (idle 15s, probe every 5s, 3 probes), so a dead peer

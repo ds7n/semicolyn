@@ -62,24 +62,31 @@ public struct ResumableSessionStore {
     /// secret slot and Mosh state belonging to a pruned record (via `remove`), then
     /// sweeps Mosh state left with no session record at all (written by builds before
     /// `remove` cleared it, privacy audit P-M2).
+    ///
+    /// The sweep runs even when the pruning pass fails (a record that won't open, a
+    /// delete that throws): it then keeps every snapshot whose session record still
+    /// exists, opened or not, and the pruning error is rethrown afterwards.
     @discardableResult
     public func reconcile() throws -> [UUID] {
         var pruned: [UUID] = []
-        var kept: Set<UUID> = []
-        for record in try all() {
-            let deadHost = !hostExists(record.hostID)
-            let needsSecret = record.transport == .mosh || record.transport == .et
-            let missingSecret = needsSecret && !hasSecret(sessionID: record.sessionID)
-            guard deadHost || missingSecret else {
-                kept.insert(record.sessionID)
-                continue
+        var pruneError: Error?
+        do {
+            for record in try all() {
+                let deadHost = !hostExists(record.hostID)
+                let needsSecret = record.transport == .mosh || record.transport == .et
+                let missingSecret = needsSecret && !hasSecret(sessionID: record.sessionID)
+                guard deadHost || missingSecret else { continue }
+                try remove(sessionID: record.sessionID)
+                pruned.append(record.sessionID)
             }
-            try remove(sessionID: record.sessionID)
-            pruned.append(record.sessionID)
+        } catch {
+            pruneError = error
         }
-        for orphan in try records.ids(.moshState) where !kept.contains(orphan) {
+        let sessions = Set(try records.ids(.resumableSession))
+        for orphan in try records.ids(.moshState) where !sessions.contains(orphan) {
             try records.delete(.moshState, id: orphan)
         }
+        if let pruneError { throw pruneError }
         return pruned
     }
 }

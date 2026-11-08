@@ -27,7 +27,7 @@ struct EraseAllDataView: View {
     var body: some View {
         List {
             Section {
-                Text("Erases your hosts, connection defaults, SSH keys, learned suggestions, imported fonts and every setting on this device. The app goes back to how it was when first installed.")
+                Text("Erases your hosts, connection defaults, saved sessions, learned suggestions, imported fonts and every setting on this device. The app goes back to how it was when first installed.")
             }
 
             Section {

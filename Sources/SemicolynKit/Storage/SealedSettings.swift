@@ -11,6 +11,18 @@ public enum SealedSettingID {
     public static let logServer = UUID(uuidString: "5E1C0001-0000-4000-8000-000000000002")!
 }
 
+/// The outcome of `loadSealedSetting`.
+public enum SealedSettingLoad<T> {
+    /// The stored (or just migrated) value.
+    case found(T)
+    /// Nothing stored anywhere: use the default, and saving it is fine.
+    case absent
+    /// A record exists but its file can't be read right now (on iOS: the device is
+    /// locked). Use the default in memory but DON'T save until a later load succeeds,
+    /// or the default would overwrite the user's real settings.
+    case unreadable
+}
+
 /// Reads the setting `id` from the sealed store, moving it there from `UserDefaults`
 /// the first time (privacy audit P-L1).
 ///
@@ -18,21 +30,29 @@ public enum SealedSettingID {
 /// - Otherwise `legacy()` supplies the old `UserDefaults` value, which is sealed and
 ///   returned. Its keys are removed only after the sealed write succeeded, so a failed
 ///   write loses nothing and is retried on the next launch.
-/// - A record that can't be opened counts as missing, so the legacy value (if any)
-///   replaces it rather than the setting being stuck unreadable.
-///
-/// Returns nil when neither place has a value; the caller uses its default.
+/// - A record that opens but won't decrypt (another key, tampering) or decode counts as
+///   missing, so the legacy value (if any) replaces it rather than the setting being
+///   stuck unreadable forever.
+/// - A record whose file can't be read is `.unreadable`; nothing is migrated or removed.
 public func loadSealedSetting<T: Codable>(id: UUID, as: T.Type, records: EncryptedRecordStore,
-                                          legacy: () -> T?, removeLegacy: () -> Void) -> T? {
-    if let stored = (try? records.get(.settings, id: id, as: T.self)) ?? nil {
-        removeLegacy()
-        return stored
+                                          legacy: () -> T?, removeLegacy: () -> Void) -> SealedSettingLoad<T> {
+    do {
+        if let stored = try records.get(.settings, id: id, as: T.self) {
+            removeLegacy()
+            return .found(stored)
+        }
+    } catch is RecordEnvelopeError {
+        // Wrong key or tampered: replaced below.
+    } catch is DecodingError {
+        // An undecodable payload: replaced below.
+    } catch {
+        return .unreadable
     }
-    guard let old = legacy() else { return nil }
+    guard let old = legacy() else { return .absent }
     if (try? records.put(old, type: .settings, id: id)) != nil {
         removeLegacy()
     }
-    return old
+    return .found(old)
 }
 
 /// Where the diagnostics stream goes (Settings → Diagnostics → Stream logs to a

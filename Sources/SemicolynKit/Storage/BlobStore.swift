@@ -70,8 +70,13 @@ public struct FileBlobStore: BlobStore {
         #endif
     }
 
+    /// Nil only when no file exists. A file that exists but can't be read (on iOS: a
+    /// complete-protection file while the device is locked) throws, so a caller can't
+    /// mistake it for "never saved" and write defaults over it.
     public func getBlob(type: String, id: UUID) throws -> Data? {
-        try? Data(contentsOf: fileURL(type: type, id: id))
+        let url = fileURL(type: type, id: id)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try Data(contentsOf: url)
     }
 
     public func deleteBlob(type: String, id: UUID) throws {

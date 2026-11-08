@@ -86,9 +86,24 @@ final class MoshStateCleanupTests: XCTestCase {
         XCTAssertEqual(try records.ids(.moshState), [])
     }
 
-    // The two session-state types are kept out of backups; user data is not.
-    func testBackupExcludedTypes() {
-        XCTAssertEqual(backupExcludedRecordTypes, [.resumableSession, .moshState])
+    // Adversarial: a session record that can't be opened makes pruning fail, but the
+    // sweep still runs: the orphan goes, that session's own snapshot stays, and the
+    // pruning error still surfaces.
+    func testSweepRunsWhenPruningFails() throws {
+        let backend = InMemoryBlobStore()
+        records = EncryptedRecordStore(backend: backend, key: SymmetricKey(size: .bits256))
+        mosh = MoshStateBlobStore(records: records)
+        let foreign = EncryptedRecordStore(backend: backend, key: SymmetricKey(size: .bits256))
+        let unreadable = session(host: liveHost)
+        try foreign.put(unreadable, type: .resumableSession, id: unreadable.sessionID)
+        try mosh.put(Data([0x1]), sessionID: unreadable.sessionID)
+        let orphan = UUID()
+        try mosh.put(Data([0x2]), sessionID: orphan)
+
+        XCTAssertThrowsError(try makeStore().reconcile()) { error in
+            XCTAssertEqual(error as? RecordEnvelopeError, .decryptionFailed)
+        }
+        XCTAssertEqual(try records.ids(.moshState), [unreadable.sessionID])
     }
 
     // Excluding a type creates its directory (so files written later land inside it)
@@ -105,6 +120,11 @@ final class MoshStateCleanupTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("moshState").path,
                                                      isDirectory: &isDir))
         XCTAssertTrue(isDir.boolValue)
+        #if canImport(Darwin)
+        let flagged = try dir.appendingPathComponent("moshState")
+            .resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
+        XCTAssertEqual(flagged, true)
+        #endif
         let id = UUID()
         try blobs.putBlob(Data([7]), type: "moshState", id: id)
         XCTAssertEqual(try blobs.getBlob(type: "moshState", id: id), Data([7]))
