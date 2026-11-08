@@ -466,7 +466,7 @@ struct SessionView: View {
         // through the normal credential resolution below (key / stored-password / prompt)
         // rather than a direct reattach. `.none` also returns false and falls through.
         if let resume, resume != .none {
-            DebugLog.shared.log(.connect, "session:resume execute host=\(host.label)")
+            DebugLog.shared.log(.connect, "session:resume execute host=\(logHost(host.label))")
             if vm.executeResume(resume, host: host) { return }
             // Fell through: run the normal fresh-connect path (ET re-bootstrap). The
             // tmux session name resolves the same as any fresh connect, so `new-session
