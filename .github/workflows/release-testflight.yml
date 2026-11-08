@@ -95,10 +95,12 @@ jobs:
       # SDK), so the archive must carry the app's dSYM for TestFlight and Xcode
       # Organizer to symbolicate them. The Mosh, ET and Rust static libraries link into
       # the app binary, so its dSYM covers them too.
-      - name: Check dSYMs
+      # Also confirm the privacy manifest (P-M7) made it into the app bundle.
+      - name: Check dSYMs and privacy manifest
         run: |
           set -euo pipefail
           ls -d build/Semicolyn.xcarchive/dSYMs/*.app.dSYM
+          ls build/Semicolyn.xcarchive/Products/Applications/*.app/PrivacyInfo.xcprivacy
 
       - name: Export signed .ipa
         env:

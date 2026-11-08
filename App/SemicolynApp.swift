@@ -54,7 +54,6 @@ private struct RootView: View {
             // `fatalError`, and Settings is presented as a sheet/cover from sites that do
             // not propagate a root injection, which crashed the app. Direct singleton
             // access can never be missing, so no injection is needed here.
-            // The app-switcher cover (privacy audit P-H1) follows every phase change.
             // Re-apply persisted logging config on every foreground (not just cold
             // launch), so a settings change made and then backgrounded takes effect
             // without reopening Diagnostics. Root-level so it fires regardless of which
@@ -63,7 +62,8 @@ private struct RootView: View {
             // the remote log link: a suspended socket is often left half-dead but still
             // `.ready`, so lines logged now must buffer for the fresh connection.
             .onChange(of: scenePhase) { oldPhase, phase in
-                // App-switcher cover first, so it is up before anything else runs.
+                // App-switcher cover (privacy audit P-H1) first, so it is up before anything
+                // else runs.
                 PrivacyCover.shared.update(AppActivity(phase))
                 if oldPhase == .background {
                     DebugLog.shared.noteRemoteWillEnterForeground()
