@@ -18,9 +18,10 @@ struct DiagnosticsContent: View {
     @AppStorage(Self.showDebugPanelKey) private var showDebugPanel = false
 
     @AppStorage(RemoteLogConfig.enabledKey) private var remoteEnabled = false
-    @AppStorage(RemoteLogConfig.hostKey) private var remoteHost = ""
-    @AppStorage(RemoteLogConfig.portKey) private var remotePort = RemoteLogConfig.defaultPort
-    @AppStorage(RemoteLogConfig.transportKey) private var transportRaw = RemoteLogConfig.defaultTransport.rawValue
+    // Edited here, saved to the sealed `LogServerStore` by `destinationChanged`.
+    @State private var remoteHost = LogServerStore.shared.settings.host
+    @State private var remotePort = LogServerStore.shared.settings.port
+    @State private var transportRaw = LogServerStore.shared.settings.transport.rawValue
     @AppStorage(RemoteLogConfig.keystrokeContentKey) private var keystrokeContent = false
 
     /// Result of the last "Test connection", driving both the label text and its color.
@@ -71,6 +72,11 @@ struct DiagnosticsContent: View {
     /// The stream was redirected from `old`: keystroke content logging switches off (turning
     /// it back on asks for Face ID), then the sink is rebuilt. Security audit M3.
     private func destinationChanged(from old: RemoteLogDestination) {
+        LogServerStore.shared.update {
+            $0.host = remoteHost
+            $0.port = remotePort
+            $0.transport = transport
+        }
         if keystrokeContent,
            !keystrokeContentAfterDestinationChange(contentOn: true, old: old, new: destination) {
             keystrokeContent = false

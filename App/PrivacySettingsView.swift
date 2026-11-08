@@ -34,6 +34,9 @@ struct PrivacySettingsView: View {
     @AppStorage(PrivacyPreferences.Key.allowThirdPartyKeyboards)
     private var allowThirdPartyKeyboards = PrivacyPreferences.Default.allowThirdPartyKeyboards
 
+    /// For `openSessions`: Erase All Data is only offered with no session open.
+    @ObservedObject private var stores = AppStores.shared
+
     var body: some View {
         List {
             Section {
@@ -103,6 +106,20 @@ struct PrivacySettingsView: View {
                 }
             } footer: {
                 Text("Change it in Diagnostics.")
+            }
+
+            Section {
+                NavigationLink {
+                    EraseAllDataView()
+                } label: {
+                    Label("Erase All Data", systemImage: "trash")
+                        .foregroundStyle(stores.openSessions == 0 ? Color.red : Color.secondary)
+                }
+                .disabled(stores.openSessions > 0)
+            } footer: {
+                Text(stores.openSessions == 0
+                     ? "Removes everything Semicolyn stores on this device."
+                     : "Close your open sessions first.")
             }
         }
         .navigationTitle("Suggestions & Privacy")

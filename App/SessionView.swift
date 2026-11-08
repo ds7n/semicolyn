@@ -54,6 +54,10 @@ struct SessionView: View {
     @State private var quickConnectHost: IdentifiableHost?
     /// A tapped web link waiting for the user to confirm it (privacy audit P-L5).
     @State private var pendingWebLink: URL?
+    /// Whether this view is counted as an open session (app-switcher cover label, Erase
+    /// All Data gate). Guards the pairing: SwiftUI can call `onAppear` again without an
+    /// `onDisappear` in between (a cover on top being dismissed).
+    @State private var registeredOpen = false
     /// Master logging switch and the panel destination (Settings → Diagnostics; both off
     /// by default). The 🐞 panel needs BOTH: logging on (so there's anything to show) and
     /// the panel destination chosen.
@@ -353,11 +357,19 @@ struct SessionView: View {
             Text(url.absoluteString)
         }
         .onAppear {
-            PrivacyCover.shared.pushHost(host.label)
+            if !registeredOpen {
+                registeredOpen = true
+                PrivacyCover.shared.pushHost(host.label)
+                AppStores.shared.sessionOpened()
+            }
             resolveCredentials()
         }
         .onDisappear {
-            PrivacyCover.shared.popHost(host.label)
+            if registeredOpen {
+                registeredOpen = false
+                PrivacyCover.shared.popHost(host.label)
+                AppStores.shared.sessionClosed()
+            }
         }
         // Flush learned predictor state when the app backgrounds, so a session
         // that gets backgrounded and killed doesn't lose what it learned (only a

@@ -4,40 +4,114 @@ import Foundation
 import UIKit
 import SemicolynKit
 
-/// UserDefaults keys + defaults for the remote diagnostics stream. All developer-facing,
-/// off by default. `LogTransport` (SemicolynKit) is `RawRepresentable` by `String`, so it
-/// persists directly via `@AppStorage`.
+/// UserDefaults keys for the remote diagnostics stream's switches. All developer-facing,
+/// off by default. The server address and pinned certificates are in `LogServerStore`.
 enum RemoteLogConfig {
     static let enabledKey = "diagnostics.remoteLog.enabled"
-    static let hostKey = "diagnostics.remoteLog.host"
-    static let portKey = "diagnostics.remoteLog.port"
-    static let transportKey = "diagnostics.remoteLog.transport"
     static let keystrokeContentKey = "diagnostics.remoteLog.keystrokeContent"
+}
 
-    static let defaultPort = 6514
-    static let defaultTransport: LogTransport = .tls
+/// The diagnostics server address and pinned certificates (`LogServerSettings`), sealed in
+/// the encrypted record store rather than plain UserDefaults (privacy audit P-L1). The
+/// first load moves any values still in UserDefaults across. Thread-safe: the sink's TLS
+/// verify block reads and writes pins from its own queue, so it has its own record store
+/// over the app's records directory instead of going through the main-actor `AppStores`.
+final class LogServerStore: @unchecked Sendable {
+    static let shared = LogServerStore()
+
+    private let lock = NSLock()
+    /// Nil while the record key couldn't be read; `reloadIfUnreadable` retries.
+    private var records: EncryptedRecordStore?
+    private var current = LogServerSettings()
+    /// False while the stored settings couldn't be read (device locked at launch, or
+    /// no record key yet): changes stay in memory and nothing is saved, so the
+    /// defaults can't overwrite the real settings.
+    private var canSave = false
+
+    private init() {
+        loadLocked()
+    }
+
+    /// The current settings.
+    var settings: LogServerSettings { lock.withLock { current } }
+
+    /// Applies `change` and seals the result.
+    func update(_ change: (inout LogServerSettings) -> Void) {
+        lock.withLock {
+            change(&current)
+            guard canSave else { return }
+            try? records?.put(current, type: .settings, id: SealedSettingID.logServer)
+        }
+    }
+
+    /// Pins `fingerprint` for `pinKey` unless something is pinned already, in one step
+    /// (the first certificate seen wins). Returns whether it pinned.
+    @discardableResult
+    func pinIfUnpinned(_ fingerprint: String, for pinKey: String) -> Bool {
+        var pinned = false
+        update {
+            guard $0.certPins[pinKey] == nil else { return }
+            $0.certPins[pinKey] = fingerprint
+            pinned = true
+        }
+        return pinned
+    }
+
+    /// Re-reads the store (after Erase All Data deleted it: back to the defaults).
+    func reload() {
+        lock.withLock { loadLocked() }
+    }
+
+    /// Retries a load that failed (device locked at launch). Called when the app
+    /// becomes active.
+    func reloadIfUnreadable() {
+        lock.withLock {
+            guard !canSave else { return }
+            loadLocked()
+        }
+    }
+
+    /// Loads into `current`. Caller holds `lock` (or is `init`).
+    private func loadLocked() {
+        if records == nil {
+            records = try? EncryptedRecordStore(
+                backend: FileBlobStore(directory: AppStores.recordsDirectory()),
+                key: recordKey(in: KeychainSecretStore()))
+        }
+        guard let records else {
+            canSave = false
+            return
+        }
+        let defaults = UserDefaults.standard
+        switch loadSealedSetting(id: SealedSettingID.logServer, as: LogServerSettings.self, records: records,
+                                 legacy: { LogServerSettings.legacy(in: defaults) },
+                                 removeLegacy: { LogServerSettings.removeLegacy(from: defaults) }) {
+        case let .found(stored):
+            current = stored
+            canSave = true
+        case .absent:
+            current = LogServerSettings()
+            canSave = true
+        case .unreadable:
+            current = LogServerSettings()
+            canSave = false
+        }
+    }
 }
 
 /// Pinned TLS certificate fingerprints for diagnostics servers, keyed by
-/// `remoteLogPinKey(host:port:)` (security audit M3). UserDefaults is thread-safe, so the
-/// sink's TLS verify block (on its own queue) reads and writes it directly.
+/// `remoteLogPinKey(host:port:)` (security audit M3). Kept in `LogServerStore`.
 enum RemoteLogCertPins {
-    private static let key = "diagnostics.remoteLog.certPins"
-
     static func pin(for pinKey: String) -> String? {
-        (UserDefaults.standard.dictionary(forKey: key) as? [String: String])?[pinKey]
+        LogServerStore.shared.settings.certPins[pinKey]
     }
 
     static func setPin(_ fingerprint: String, for pinKey: String) {
-        var all = (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
-        all[pinKey] = fingerprint
-        UserDefaults.standard.set(all, forKey: key)
+        LogServerStore.shared.update { $0.certPins[pinKey] = fingerprint }
     }
 
     static func forget(_ pinKey: String) {
-        var all = (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
-        all[pinKey] = nil
-        UserDefaults.standard.set(all, forKey: key)
+        LogServerStore.shared.update { $0.certPins[pinKey] = nil }
     }
 }
 

@@ -4,13 +4,19 @@ import Foundation
 import SemicolynKit
 
 /// App-lifetime holder for the user's keybar customization (three-region slot
-/// layout + library). Persists as JSON in `UserDefaults`; the
-/// Settings→Keybar editor mutates `settings` and the live `KeybarView` reacts.
-///
-/// Mirrors `TerminalSettingsStore` but adds persistence, keybar layout must
-/// survive relaunch, whereas terminal prefs are still ephemeral.
+/// layout + library). Sealed in the encrypted record store, since macros can hold
+/// commands the user types (privacy audit P-L1); the first load moves a layout still
+/// in `UserDefaults` across. The Settings→Keybar editor mutates `settings` and the
+/// live `KeybarView` reacts.
 @MainActor final class KeybarSettingsStore: ObservableObject {
-    private static let defaultsKey = "semicolyn.keybarSettings"
+    /// Where the settings lived before P-L1; read once to move them.
+    private static let legacyDefaultsKey = "semicolyn.keybarSettings"
+
+    private let records: EncryptedRecordStore
+    /// False while the stored settings couldn't be read (the device was locked at
+    /// launch): edits stay in memory and nothing is saved, so the defaults shown
+    /// meanwhile can't overwrite the user's real layout and macros.
+    private var canSave = true
 
     @Published var settings: KeybarSettings {
         didSet { persist() }
@@ -19,12 +25,42 @@ import SemicolynKit
     /// Loads the persisted layout, falling back to `KeybarSettings.default` when
     /// nothing is stored or the stored payload fails to decode (forward-compat
     /// safety, a malformed/old blob never bricks the keybar).
-    init() {
-        if let data = UserDefaults.standard.data(forKey: Self.defaultsKey),
-           let decoded = try? JSONDecoder().decode(KeybarSettings.self, from: data) {
-            self.settings = decoded
-        } else {
-            self.settings = .default
+    init(records: EncryptedRecordStore) {
+        self.records = records
+        let (loaded, readable) = Self.load(records)
+        self.canSave = readable
+        self.settings = loaded
+    }
+
+    /// Re-reads the store (after Erase All Data deleted it: back to the defaults).
+    func reload() {
+        let (loaded, readable) = Self.load(records)
+        canSave = readable
+        settings = loaded
+    }
+
+    /// Retries a load that failed because the device was locked. Called when the app
+    /// becomes active (the device is unlocked then).
+    func reloadIfUnreadable() {
+        guard !canSave else { return }
+        reload()
+    }
+
+    private static func load(_ records: EncryptedRecordStore) -> (KeybarSettings, readable: Bool) {
+        let defaults = UserDefaults.standard
+        let result = loadSealedSetting(
+            id: SealedSettingID.keybar, as: KeybarSettings.self, records: records,
+            legacy: {
+                defaults.data(forKey: legacyDefaultsKey)
+                    .flatMap { try? JSONDecoder().decode(KeybarSettings.self, from: $0) }
+            },
+            removeLegacy: { defaults.removeObject(forKey: legacyDefaultsKey) })
+        switch result {
+        case let .found(stored): return (stored, true)
+        case .absent: return (.default, true)
+        case .unreadable:
+            DebugLog.shared.log(.keybar, "keybar:settings unreadable (device locked?), not saving until reloaded")
+            return (.default, false)
         }
     }
 
@@ -68,8 +104,12 @@ import SemicolynKit
     }
 
     private func persist() {
-        guard let data = try? JSONEncoder().encode(settings) else { return }
-        UserDefaults.standard.set(data, forKey: Self.defaultsKey)
-        DebugLog.shared.log(.keybar, "keybar:settingsApplied bytes=\(data.count)")
+        guard canSave else { return }
+        do {
+            try records.put(settings, type: .settings, id: SealedSettingID.keybar)
+            DebugLog.shared.log(.keybar, "keybar:settingsApplied")
+        } catch {
+            DebugLog.shared.log(.keybar, "keybar:settings save failed error=\(error)")
+        }
     }
 }

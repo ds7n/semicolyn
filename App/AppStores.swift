@@ -18,7 +18,7 @@ protocol PredictorPurgeable: AnyObject {
 /// (encrypted records on disk), host keys via `HostKeyStore` (Keychain), and
 /// trust decisions via `HostKeyTrustEvaluator`. Singleton lifetime matches the app.
 @MainActor
-final class AppStores {
+final class AppStores: ObservableObject {
     /// Shared instance, initialized once at app startup via `try!`.
     static let shared = try! AppStores()
 
@@ -41,8 +41,9 @@ final class AppStores {
     private let encryptedRecords: EncryptedRecordStore
     /// Terminal rendering preferences (font, cursor, scrollback).
     let terminalSettings = TerminalSettingsStore()
-    /// User keybar customization (three-region slot layout + library), persisted.
-    let keybarSettings = KeybarSettingsStore()
+    /// User keybar customization (three-region slot layout + library), sealed in the
+    /// record store (privacy audit P-L1).
+    let keybarSettings: KeybarSettingsStore
     /// User-selected theme id (Appearance), persisted. The root view resolves it
     /// through the Pro-gate and injects the result into `\.theme`.
     let appearance = ThemeSettingsStore()
@@ -65,13 +66,7 @@ final class AppStores {
     /// - Throws: `KeychainError` if Keychain operations fail, or `FileBlobStore`
     ///   errors if the Application Support directory cannot be created.
     init() throws {
-        // Application Support directory: ~/.../Library/Application Support/semicolyn/
-        let dir = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ).appendingPathComponent("semicolyn", isDirectory: true)
+        let dir = try Self.baseDirectoryURL()
         self.baseDirectory = dir
 
         // Keychain-backed secrets (iCloud Keychain synced).
@@ -92,7 +87,8 @@ final class AppStores {
         let key = try recordKey(in: secrets)
 
         // File-backed blob store for encrypted host records.
-        let blobs = FileBlobStore(directory: dir.appendingPathComponent("records"))
+        let blobs = FileBlobStore(directory: try Self.recordsDirectory())
+        Self.excludeSessionStateFromBackup(blobs)
 
         // Encrypted record store wraps the blob store with AES-GCM sealing.
         self.hosts = HostStore(records: EncryptedRecordStore(backend: blobs, key: key))
@@ -131,6 +127,7 @@ final class AppStores {
         // (sync vs non-sync are separate query domains), so there is no collision.
         let resumeSecrets = KeychainSecretStore(synchronizable: false)
         self.encryptedRecords = EncryptedRecordStore(backend: blobs, key: key)
+        self.keybarSettings = KeybarSettingsStore(records: encryptedRecords)
         self.resumableSessions = ResumableSessionStore(
             records: encryptedRecords,
             secrets: resumeSecrets,
@@ -144,6 +141,91 @@ final class AppStores {
         // bundle (`englishDictionary()` / `commandTree()`), so the copies the old seeds
         // installed under Application Support are dead weight: delete them.
         removeLegacySeedInstalls()
+    }
+
+    // MARK: - Locations
+
+    /// `Application Support/semicolyn/`, created if needed. Nonisolated so the
+    /// thread-safe `LogServerStore` can find the records without the main actor.
+    nonisolated static func baseDirectoryURL() throws -> URL {
+        try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                    appropriateFor: nil, create: true)
+            .appendingPathComponent("semicolyn", isDirectory: true)
+    }
+
+    /// `Application Support/semicolyn/records/`: the encrypted record files.
+    nonisolated static func recordsDirectory() throws -> URL {
+        try baseDirectoryURL().appendingPathComponent("records", isDirectory: true)
+    }
+
+    // MARK: - Host deletion
+
+    /// Deletes a host with everything kept for it: the record, its trusted host keys
+    /// and saved password (Keychain), and any resume record with its secret and Mosh
+    /// snapshot. The one path both the Hosts list and the host editor use.
+    ///
+    /// - Throws: `StoreError.jumpHostInUse` when another host uses it as a jump host
+    ///   (nothing is deleted), or a store/Keychain error.
+    func deleteHost(id: UUID) throws {
+        try deleteHostAndSecrets(id: id, hosts: hosts, secrets: secrets)
+        resume.clear(hostID: id)
+    }
+
+    // MARK: - Erase All Data
+
+    /// Live sessions on screen. Erase All Data is only offered at zero, so no session
+    /// can write its state back after the erase.
+    @Published private(set) var openSessions = 0
+    func sessionOpened() { openSessions += 1 }
+    func sessionClosed() { openSessions = max(0, openSessions - 1) }
+
+    /// Erases the app's data on this device and returns the app to its first-launch
+    /// state (privacy audit P-M2): every record, learned word, imported font, setting
+    /// and device-only Keychain item. With `alsoFromOtherDevices`, also the iCloud
+    /// Keychain passwords, keys and host keys, which removes them from the user's
+    /// other devices. The in-memory stores are reset to match.
+    ///
+    /// - Throws: `EraseIncomplete` naming what couldn't be removed; everything else
+    ///   was still erased.
+    func eraseAllData(alsoFromOtherDevices: Bool) throws {
+        activePredictorSession?.purgeLearnedEngine()
+        var directories = [baseDirectory]
+        if let fonts = TerminalFontProvider.importedFontsDirectory { directories.append(fonts) }
+        defer {
+            // Whatever happened, bring the in-memory state in line with the disk.
+            keybarSettings.reload()
+            terminalSettings.resetToDefaults()
+            appearance.resetToDefault()
+            pro.reload()
+            LogServerStore.shared.reload()
+            TerminalFontProvider.shared.resetImported()
+            // The on-screen log buffer can name hosts (and hold keystrokes if that
+            // logging was on).
+            DebugLog.shared.clear()
+            if let records = try? Self.recordsDirectory() {
+                Self.excludeSessionStateFromBackup(FileBlobStore(directory: records))
+            }
+            DebugLog.shared.configureFromDefaults(reason: "erase-all")
+        }
+        try eraseAllAppData(directories: directories,
+                            deviceSecrets: KeychainSecretStore(synchronizable: false),
+                            syncedSecrets: secrets as? BulkErasableSecretStore ?? KeychainSecretStore(),
+                            alsoFromOtherDevices: alsoFromOtherDevices,
+                            defaults: .standard,
+                            defaultsDomain: Bundle.main.bundleIdentifier ?? "com.truepositive.semicolyn")
+    }
+
+    /// Keeps session state (resume records, Mosh screen snapshots) out of iCloud and
+    /// computer backups (privacy audit P-M1). Run every launch: idempotent, and it
+    /// re-applies after Erase All Data removed the directories.
+    private static func excludeSessionStateFromBackup(_ blobs: FileBlobStore) {
+        for type in backupExcludedRecordTypes {
+            do {
+                try blobs.excludeFromBackup(type: type.rawValue)
+            } catch {
+                DebugLog.shared.log(.lifecycle, "storage:backup-exclude failed type=\(type.rawValue) error=\(error)")
+            }
+        }
     }
 
     // MARK: - Predictor stores

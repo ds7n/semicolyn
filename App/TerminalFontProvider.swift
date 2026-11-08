@@ -100,6 +100,16 @@ import SemicolynKit
         }
     }
 
+    /// Forget every imported font (Erase All Data already deleted the files):
+    /// unregister them so the picker and the resolver no longer offer them.
+    func resetImported() {
+        for file in importedFiles {
+            CTFontManagerUnregisterFontsForURL(file.url as CFURL, .process, nil)
+        }
+        importedFiles.removeAll()
+        registeredImportedNames.removeAll()
+    }
+
     /// Resolve a face to a concrete UIFont. Never returns a tofu font.
     func font(for face: TerminalFont, size: CGFloat) -> UIFont {
         guard let name = FontCatalog.resolvePostScriptName(

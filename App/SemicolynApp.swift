@@ -73,6 +73,9 @@ private struct RootView: View {
                     return
                 }
                 guard phase == .active else { return }
+                // Settings that couldn't be read at a locked launch can be read now.
+                AppStores.shared.keybarSettings.reloadIfUnreadable()
+                LogServerStore.shared.reloadIfUnreadable()
                 DebugLog.shared.configureFromDefaults()
             }
     }

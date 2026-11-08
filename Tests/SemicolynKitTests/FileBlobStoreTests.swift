@@ -40,4 +40,18 @@ final class FileBlobStoreTests: XCTestCase {
         try Data([0]).write(to: stray)
         XCTAssertEqual(try s.listBlobs(type: "host").map(\.id), [a])
     }
+
+    // A record path that exists but can't be read throws instead of reading as absent,
+    // so a caller can't save defaults over it (P-L1 review).
+    func testUnreadableBlobThrowsMissingIsNil() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("unreadable-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let id = UUID()
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("host/\(id.uuidString).rec"),
+                                                withIntermediateDirectories: true)
+        let store = FileBlobStore(directory: dir)
+        XCTAssertThrowsError(try store.getBlob(type: "host", id: id))
+        XCTAssertNil(try store.getBlob(type: "host", id: UUID()))
+    }
 }

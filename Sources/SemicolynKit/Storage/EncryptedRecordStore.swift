@@ -16,7 +16,14 @@ public enum RecordType: String, Codable, Sendable, CaseIterable {
     case identity
     case resumableSession
     case moshState
+    /// Single-record app settings with fixed ids (`SealedSettingID`).
+    case settings
 }
+
+/// Record types kept out of iCloud and computer backups (privacy audit P-M1): the
+/// resume metadata and Mosh screen snapshots are short-lived, device-local session
+/// state, useless on another device. Hosts, identities and defaults stay backed up.
+public let backupExcludedRecordTypes: Set<RecordType> = [.resumableSession, .moshState]
 
 /// Seals `Codable` records with `RecordEnvelope` (AES-256-GCM) over any
 /// `BlobStore`. `put` encrypts before storing; `get`/`list` decrypt on read. A
@@ -47,6 +54,12 @@ public struct EncryptedRecordStore {
 
     public func delete(_ type: RecordType, id: UUID) throws {
         try backend.deleteBlob(type: type.rawValue, id: id)
+    }
+
+    /// The ids of every record of `type`, without decrypting them, so a cleanup can
+    /// find (and delete) records even when one can't be opened.
+    public func ids(_ type: RecordType) throws -> [UUID] {
+        try backend.listBlobs(type: type.rawValue).map(\.id)
     }
 
     /// Every decrypted record of `type`. **Fail-closed:** if any one blob cannot

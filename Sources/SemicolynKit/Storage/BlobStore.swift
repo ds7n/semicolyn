@@ -70,8 +70,13 @@ public struct FileBlobStore: BlobStore {
         #endif
     }
 
+    /// Nil only when no file exists. A file that exists but can't be read (on iOS: a
+    /// complete-protection file while the device is locked) throws, so a caller can't
+    /// mistake it for "never saved" and write defaults over it.
     public func getBlob(type: String, id: UUID) throws -> Data? {
-        try? Data(contentsOf: fileURL(type: type, id: id))
+        let url = fileURL(type: type, id: id)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try Data(contentsOf: url)
     }
 
     public func deleteBlob(type: String, id: UUID) throws {
@@ -79,6 +84,20 @@ public struct FileBlobStore: BlobStore {
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
+    }
+
+    /// Marks `type`'s directory (creating it if needed) as excluded from iCloud and
+    /// computer backups. iOS applies the flag to everything inside the directory,
+    /// including files written later. A no-op where the platform has no backup flag.
+    public func excludeFromBackup(type: String) throws {
+        let dir = typeDir(type)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        #if canImport(Darwin)
+        var flagged = dir
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try flagged.setResourceValues(values)
+        #endif
     }
 
     public func listBlobs(type: String) throws -> [(id: UUID, data: Data)] {
