@@ -23,13 +23,15 @@ public let moshServerNetworkTimeoutSeconds = 604_800   // 7 days
 /// the argv exactly as without it. A custom `serverPath` is passed through `shellWord` so
 /// spaces or shell metacharacters in it cannot split or inject (security audit L3); a
 /// blank one falls back to `mosh-server` on the PATH.
-public func moshServerCommand(_ config: MoshConfig, locale: String = "en_US.UTF-8",
+/// The locale comes from `moshLocaleCandidates` and is shell-quoted as well, so even an
+/// unexpected value stays one word.
+public func moshServerCommand(_ config: MoshConfig, locale: String = moshFallbackLocale,
                               sessionCommand: String? = nil) -> [String] {
     let customPath = config.serverPath?.trimmingCharacters(in: .whitespaces) ?? ""
     let server = customPath.isEmpty ? "mosh-server" : shellWord(customPath)
     var argv = ["MOSH_SERVER_NETWORK_TMOUT=\(moshServerNetworkTimeoutSeconds)",
                 server, "new", "-s", "-c", "256",
-                "-l", "LANG=\(locale)"]
+                "-l", shellWord("LANG=\(locale)")]
     if let range = config.udpPortRange, range.count == 2 {
         argv += ["-p", "\(range[0]):\(range[1])"]
     }

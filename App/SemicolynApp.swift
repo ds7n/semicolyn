@@ -5,6 +5,8 @@ import SemicolynKit
 
 @main
 struct SemicolynApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     init() {
         // Register bundled + previously-imported Nerd Fonts with CoreText before any
         // TerminalView resolves its face, so `UIFont(name:)` finds them. `UIAppFonts`
@@ -60,6 +62,9 @@ private struct RootView: View {
             // the remote log link: a suspended socket is often left half-dead but still
             // `.ready`, so lines logged now must buffer for the fresh connection.
             .onChange(of: scenePhase) { oldPhase, phase in
+                // App-switcher cover (privacy audit P-H1) first, so it is up before anything
+                // else runs.
+                PrivacyCover.shared.update(AppActivity(phase))
                 if oldPhase == .background {
                     DebugLog.shared.noteRemoteWillEnterForeground()
                 }
@@ -70,5 +75,17 @@ private struct RootView: View {
                 guard phase == .active else { return }
                 DebugLog.shared.configureFromDefaults()
             }
+    }
+}
+
+/// UIKit app delegate, for the one hook SwiftUI has no equivalent of.
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    /// Refuses third-party keyboards unless the user allowed them (privacy audit P-M5):
+    /// a third-party keyboard can see every key typed, passwords included. iOS asks once
+    /// and keeps the answer, so a change applies after the app restarts.
+    func application(_ application: UIApplication,
+                     shouldAllowExtensionPointIdentifier extensionPointIdentifier: UIApplication.ExtensionPointIdentifier) -> Bool {
+        guard extensionPointIdentifier == .keyboard else { return true }
+        return PrivacyPreferences(defaults: .standard).allowThirdPartyKeyboards
     }
 }

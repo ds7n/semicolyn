@@ -103,6 +103,15 @@ final class PaneTerminalView: TerminalView {
         selectNone()
     }
 
+    // SwiftTerm's own `copy:` (the edit menu's Copy and ⌘C) writes the plain clipboard,
+    // which Universal Clipboard sends to the user's other devices. Copy through the
+    // privacy settings instead (privacy audit P-M4).
+    override func copy(_ sender: Any?) {
+        guard let text = getSelection(), !text.isEmpty else { return }
+        copyToClipboard(text, source: .app)
+        selectNone()
+    }
+
     // Single gesture engine (spec 2026-10-04): every touch goes through OUR
     // `TerminalTouchRecognizer` (plus the stock pinch). Every other tap, long-press and pan
     // recognizer, SwiftTerm's own (including the selection / mouse pans it re-creates each

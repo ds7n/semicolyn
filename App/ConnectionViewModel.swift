@@ -1584,8 +1584,19 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // Effective config for the argv (port range, server path, prediction mode).
         // resolveOptional honors Inherited three-state (NOT host.mosh.value).
         let cfg = resolveOptional(host.mosh, defaults.mosh) ?? MoshConfig(enabled: true)
-        let command = moshServerCommand(cfg, sessionCommand: directLaunchCommand).joined(separator: " ")
-        let stdout = await captureMoshBootstrap(conn: conn, command: command)
+        // Offer the user's own locale first (privacy audit P-L3). mosh-server only uses it
+        // when its login locale isn't UTF-8, and then refuses one that isn't installed, so
+        // fall back to the next candidate while it says so.
+        let locales = moshLocaleCandidates(languageCode: Locale.current.language.languageCode?.identifier,
+                                           regionCode: Locale.current.region?.identifier)
+        var stdout = ""
+        for locale in locales {
+            let command = moshServerCommand(cfg, locale: locale, sessionCommand: directLaunchCommand)
+                .joined(separator: " ")
+            stdout = await captureMoshBootstrap(conn: conn, command: command)
+            guard moshNeedsLocaleRetry(stdout) else { break }
+            DebugLog.shared.log(.connect, "mosh: server refused locale \(locale), trying the next one")
+        }
         DebugLog.shared.log(.connect, "mosh: bootstrap captured \(stdout.count)B")
         switch moshBranchOutcome(stdout: stdout, enabled: true) {
         case let .mosh(port, key):

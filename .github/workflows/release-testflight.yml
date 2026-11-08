@@ -91,6 +91,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
 
+      # Crash reports come only from Apple (privacy audit P-M7: no third-party crash
+      # SDK), so the archive must carry the app's dSYM for TestFlight and Xcode
+      # Organizer to symbolicate them. The Mosh, ET and Rust static libraries link into
+      # the app binary, so its dSYM covers them too.
+      # Also confirm the privacy manifest (P-M7) made it into the app bundle.
+      - name: Check dSYMs and privacy manifest
+        run: |
+          set -euo pipefail
+          ls -d build/Semicolyn.xcarchive/dSYMs/*.app.dSYM
+          ls build/Semicolyn.xcarchive/Products/Applications/*.app/PrivacyInfo.xcprivacy
+
       - name: Export signed .ipa
         env:
           TEAM: ${{ secrets.APPLE_TEAM_ID }}
@@ -106,6 +117,7 @@ jobs:
             <key>destination</key><string>export</string>
             <key>teamID</key><string>${TEAM}</string>
             <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
           </dict>
           </plist>
           PLIST

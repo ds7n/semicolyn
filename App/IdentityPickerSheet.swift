@@ -107,7 +107,7 @@ struct IdentityPickerSheet: View {
                 Button(copied ? "Copied" : "Copy") {
                     InputClickFeedback.play()
                     guard let text = publicKeyShareText(identity) else { return }
-                    UIPasteboard.general.string = text
+                    copyToClipboard(text, source: .app)
                     copied = true
                 }
             } header: {
