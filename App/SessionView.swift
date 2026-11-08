@@ -52,6 +52,8 @@ struct SessionView: View {
     @State private var resolving = true
     /// Set when the user confirms an ssh:// link tap; drives a nested session cover.
     @State private var quickConnectHost: IdentifiableHost?
+    /// A tapped web link waiting for the user to confirm it (privacy audit P-L5).
+    @State private var pendingWebLink: URL?
     /// Master logging switch and the panel destination (Settings → Diagnostics; both off
     /// by default). The 🐞 panel needs BOTH: logging on (so there's anything to show) and
     /// the panel destination chosen.
@@ -95,6 +97,7 @@ struct SessionView: View {
                                    osc52Allowed: vm.osc52Allowed,
                                    onTitle: { [weak vm] t in vm?.terminalTitle = t },
                                    onSSHLink: { [weak vm] url in vm?.presentSSHLink(url) },
+                                   onWebLink: { url in pendingWebLink = url },
                                    vm: vm,
                                    keybarSettings: AppStores.shared.keybarSettings,
                                    hardwareKeyboardConnected: hardwareKeyboard.isConnected,
@@ -335,8 +338,26 @@ struct SessionView: View {
         .fullScreenCover(item: $quickConnectHost) { wrapper in
             SessionView(host: wrapper.host)
         }
+        // A web link opens only after the user has seen its full address, so text on
+        // the screen can't send them somewhere other than where it appears to point.
+        .alert("Open this link?", isPresented: Binding(
+            get: { pendingWebLink != nil },
+            set: { if !$0 { pendingWebLink = nil } }
+        ), presenting: pendingWebLink) { url in
+            Button("Open") {
+                InputClickFeedback.play()
+                UIApplication.shared.open(url)
+            }
+            Button("Cancel", role: .cancel) { InputClickFeedback.play() }
+        } message: { url in
+            Text(url.absoluteString)
+        }
         .onAppear {
+            PrivacyCover.shared.pushHost(host.label)
             resolveCredentials()
+        }
+        .onDisappear {
+            PrivacyCover.shared.popHost(host.label)
         }
         // Flush learned predictor state when the app backgrounds, so a session
         // that gets backgrounded and killed doesn't lose what it learned (only a

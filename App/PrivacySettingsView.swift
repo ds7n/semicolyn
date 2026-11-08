@@ -6,7 +6,9 @@ import SemicolynKit
 /// Settings → Suggestions & Privacy: the all-hosts "Don't learn from my typing"
 /// default (the same Connection Defaults value; a host can still override it in its
 /// editor), the predictor panic-purge ("Clear Learned Suggestions…"), and a read-only
-/// "Keystroke logging" row that links to Diagnostics, where it is changed.
+/// "Keystroke logging" row that links to Diagnostics, where it is changed. Below those,
+/// the device-only privacy settings (`PrivacyPreferences`): the app-switcher cover,
+/// clipboard sharing and expiry, and third-party keyboards.
 ///
 /// Purge wiring: `AppStores.shared.purgePredictorLearned()` resets the live
 /// session's in-memory engine (via the `activePredictorSession` registration) BEFORE
@@ -22,6 +24,15 @@ struct PrivacySettingsView: View {
     @AppStorage(DiagnosticsContent.loggingEnabledKey) private var loggingEnabled = false
     @AppStorage(LogCategory.input.storageKey) private var inputCategoryOn = LogCategory.input.defaultOn
     @AppStorage(RemoteLogConfig.keystrokeContentKey) private var keystrokeContent = false
+
+    @AppStorage(PrivacyPreferences.Key.hideInAppSwitcher)
+    private var hideInAppSwitcher = PrivacyPreferences.Default.hideInAppSwitcher
+    @AppStorage(PrivacyPreferences.Key.shareCopiesAcrossDevices)
+    private var shareCopies = PrivacyPreferences.Default.shareCopiesAcrossDevices
+    @AppStorage(PrivacyPreferences.Key.clearCopiedAfter)
+    private var clearCopiedAfter = PrivacyPreferences.Default.clearCopiedAfter.rawValue
+    @AppStorage(PrivacyPreferences.Key.allowThirdPartyKeyboards)
+    private var allowThirdPartyKeyboards = PrivacyPreferences.Default.allowThirdPartyKeyboards
 
     var body: some View {
         List {
@@ -50,6 +61,35 @@ struct PrivacySettingsView: View {
                 }
             } footer: {
                 Text("Removes words learned from your typing. Built-in suggestions stay.")
+            }
+
+            Section {
+                Toggle("Hide screen in app switcher", isOn: $hideInAppSwitcher)
+            } header: {
+                Text("Screen")
+            } footer: {
+                Text("When you leave the app, the terminal is covered so the app switcher doesn't show it.")
+            }
+
+            Section {
+                Toggle("Share copies with my other devices", isOn: $shareCopies)
+                Picker("Clear copied text after", selection: $clearCopiedAfter) {
+                    ForEach(ClipboardClearAfter.allCases, id: \.rawValue) { choice in
+                        Text(choice.label).tag(choice.rawValue)
+                    }
+                }
+            } header: {
+                Text("Clipboard")
+            } footer: {
+                Text("When sharing is off, text you copy stays on this device instead of going to your other devices through Universal Clipboard. Text a server copies always stays on this device.")
+            }
+
+            Section {
+                Toggle("Allow third-party keyboards", isOn: $allowThirdPartyKeyboards)
+            } header: {
+                Text("Keyboard")
+            } footer: {
+                Text("A third-party keyboard can see everything you type, including passwords. A change takes effect after the app restarts.")
             }
 
             Section {

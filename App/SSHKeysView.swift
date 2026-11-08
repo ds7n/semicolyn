@@ -142,7 +142,7 @@ final class SSHKeysModel: ObservableObject {
             errorText = "This key's public key couldn't be read."
             return
         }
-        UIPasteboard.general.string = text
+        copyToClipboard(text, source: .app)
     }
 }
 

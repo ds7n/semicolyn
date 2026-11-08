@@ -33,6 +33,8 @@ struct TerminalScreen: UIViewRepresentable {
     var onTitle: ((String) -> Void)? = nil
     /// Called when the user taps an ssh:// link; routes to the confirm-connect sheet.
     var onSSHLink: ((URL) -> Void)? = nil
+    /// Called when the user taps an http(s) link; routes to the open-link confirmation.
+    var onWebLink: ((URL) -> Void)? = nil
     /// The connection view model, passed to the inputAccessory-hosted keybar/predictor.
     var vm: ConnectionViewModel
     /// Keybar customization store, passed to the inputAccessory-hosted keybar.
@@ -48,6 +50,7 @@ struct TerminalScreen: UIViewRepresentable {
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(send: send, session: session, settings: settings, theme: theme, osc52Allowed: osc52Allowed, onTitle: onTitle)
         c.onSSHLink = onSSHLink
+        c.onWebLink = onWebLink
         c.onResize = onResize
         c.vm = vm
         // Only a focus request made AFTER this terminal mounted should act (a remount
@@ -262,6 +265,8 @@ struct TerminalScreen: UIViewRepresentable {
         private let onTitle: ((String) -> Void)?
         /// Called when the user taps an ssh:// link; set by the connect view to prefill the connect form.
         var onSSHLink: ((URL) -> Void)?
+        /// Called when the user taps an http(s) link, to confirm it before it opens.
+        var onWebLink: ((URL) -> Void)?
         /// Explicit resize sink (set by `makeCoordinator`). When non-nil it owns
         /// resize delivery; when nil, `sizeChanged` falls back to `session?.resize`.
         var onResize: ((Int, Int) -> Void)?
@@ -555,7 +560,8 @@ struct TerminalScreen: UIViewRepresentable {
                     outputs: [("action", action.logLabel)],
                     reason: nil))
                 if case let .write(bytes) = action {
-                    UIPasteboard.general.string = String(decoding: bytes, as: UTF8.self)
+                    // A server's copy never leaves this device (privacy audit P-M4).
+                    copyToClipboard(String(decoding: bytes, as: UTF8.self), source: .server)
                 }
                 // Only a refused oversized copy is announced (security audit M1).
                 if let notice = osc52Notice(action) { vm?.showNotice(notice) }
@@ -565,7 +571,7 @@ struct TerminalScreen: UIViewRepresentable {
             guard let kind = classifyURL(link), let url = URL(string: link) else { return }
             switch kind {
             case .http, .https:
-                UIApplication.shared.open(url)
+                onWebLink?(url)
             case .ssh:
                 onSSHLink?(url)
             }
