@@ -42,12 +42,8 @@ final class HostListViewModel: ObservableObject {
     /// refusal message from the spec; any other error is also surfaced.
     func delete(_ host: Host) {
         do {
-            // Also drops the host's trusted host keys and saved password (Keychain).
-            try deleteHostAndSecrets(id: host.id, hosts: AppStores.shared.hosts,
-                                     secrets: AppStores.shared.secrets)
-            // Cleanup (spec): a deleted host has no resume target, so drop any resume
-            // record for it now (not just on the next-launch reconcile sweep).
-            AppStores.shared.resume.clear(hostID: host.id)
+            // Also drops the host's trusted host keys, saved password and resume state.
+            try AppStores.shared.deleteHost(id: host.id)
             hosts.removeAll { $0.id == host.id }
         } catch StoreError.jumpHostInUse(let referrers) {
             let labels = referrers.map(\.label).joined(separator: ", ")

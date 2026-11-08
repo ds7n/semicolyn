@@ -522,7 +522,8 @@ struct HostEditorView: View {
     /// alert is presented by the `.alert` modifier above.
     func performDelete() {
         do {
-            try AppStores.shared.hosts.deleteHost(id: vm.host.id)
+            // The full delete (host keys, password, resume state), same as the Hosts list.
+            try AppStores.shared.deleteHost(id: vm.host.id)
             dismiss()
         } catch StoreError.jumpHostInUse(let referrers) {
             deleteRefusalReferrers = referrers
@@ -629,4 +630,9 @@ struct IssueBanner: View {
 }
 
 /// The host delete confirmation message, shared by the editor and the Hosts list swipe.
-let hostDeleteMessage = "This host will be removed from your library. This can't be undone."
+/// Learned suggestions are shared by every host, so deleting one leaves them (privacy
+/// audit P-M2); the message says where to clear them.
+let hostDeleteMessage = "This host will be removed from your library. This can't be undone.\n\n"
+    + "Suggestions learned from your typing are shared by all hosts and are kept. "
+    + "To remove them, go to Settings > Suggestions & Privacy."
+

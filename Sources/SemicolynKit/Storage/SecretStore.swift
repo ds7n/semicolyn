@@ -36,8 +36,14 @@ public protocol SecretStore {
     func deleteSecret(_ ref: SecretRef) throws
 }
 
+/// A `SecretStore` that can delete everything it holds at once (Erase All Data).
+public protocol BulkErasableSecretStore: SecretStore {
+    /// Delete every secret in this store except those in `kept`. Idempotent.
+    func deleteAllSecrets(except kept: Set<SecretRef>) throws
+}
+
 /// In-memory `SecretStore` for tests and previews. Not thread-safe.
-public final class InMemorySecretStore: SecretStore {
+public final class InMemorySecretStore: BulkErasableSecretStore {
     private var store: [SecretRef: Data] = [:]
 
     public init() {}
@@ -45,6 +51,9 @@ public final class InMemorySecretStore: SecretStore {
     public func setSecret(_ data: Data, for ref: SecretRef) throws { store[ref] = data }
     public func getSecret(_ ref: SecretRef) throws -> Data? { store[ref] }
     public func deleteSecret(_ ref: SecretRef) throws { store[ref] = nil }
+    public func deleteAllSecrets(except kept: Set<SecretRef>) throws {
+        store = store.filter { kept.contains($0.key) }
+    }
 }
 
 /// The AES-256 record key from `store`, generating and persisting one on first

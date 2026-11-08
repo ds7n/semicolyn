@@ -27,10 +27,13 @@ public struct ResumableSessionStore {
         }
     }
 
-    /// Remove a record and its secret slot. Idempotent.
+    /// Remove a record, its secret slot and its saved Mosh state (the encrypted screen
+    /// snapshot `MoshStateBlobStore` keeps under the same id, privacy audit P-M2), so no
+    /// snapshot outlives the session it belongs to. Idempotent.
     public func remove(sessionID: UUID) throws {
         try records.delete(.resumableSession, id: sessionID)
         try secrets.deleteSecret(.resumeSecret(sessionID: sessionID))
+        try records.delete(.moshState, id: sessionID)
     }
 
     /// All records, most-recent first (by `lastConnectedAt`).
@@ -56,17 +59,26 @@ public struct ResumableSessionStore {
 
     /// Prune orphans: a record whose transport needs a secret but has none, OR whose
     /// hostID no longer resolves. Returns the pruned sessionIDs. Also deletes any
-    /// secret slot belonging to a pruned record (via `remove`).
+    /// secret slot and Mosh state belonging to a pruned record (via `remove`), then
+    /// sweeps Mosh state left with no session record at all (written by builds before
+    /// `remove` cleared it, privacy audit P-M2).
     @discardableResult
     public func reconcile() throws -> [UUID] {
         var pruned: [UUID] = []
+        var kept: Set<UUID> = []
         for record in try all() {
             let deadHost = !hostExists(record.hostID)
             let needsSecret = record.transport == .mosh || record.transport == .et
             let missingSecret = needsSecret && !hasSecret(sessionID: record.sessionID)
-            guard deadHost || missingSecret else { continue }
+            guard deadHost || missingSecret else {
+                kept.insert(record.sessionID)
+                continue
+            }
             try remove(sessionID: record.sessionID)
             pruned.append(record.sessionID)
+        }
+        for orphan in try records.ids(.moshState) where !kept.contains(orphan) {
+            try records.delete(.moshState, id: orphan)
         }
         return pruned
     }

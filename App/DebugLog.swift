@@ -148,11 +148,11 @@ final class DebugLog: ObservableObject {
         refreshEnabledCategories()
 
         let remoteOn = d.bool(forKey: RemoteLogConfig.enabledKey)
-        let host = d.string(forKey: RemoteLogConfig.hostKey) ?? ""
+        let server = LogServerStore.shared.settings
+        let host = server.host
         if remoteOn, !host.isEmpty {
-            let port = d.object(forKey: RemoteLogConfig.portKey) as? Int ?? RemoteLogConfig.defaultPort
-            let transport = (d.string(forKey: RemoteLogConfig.transportKey))
-                .flatMap(LogTransport.init(rawValue:)) ?? RemoteLogConfig.defaultTransport
+            let port = server.port
+            let transport = server.transport
             let signature = "\(host):\(port):\(transport.rawValue)"
             // Only tear down + rebuild the sink when the config actually changed, so a
             // foreground with unchanged settings doesn't needlessly reconnect (and

@@ -81,6 +81,20 @@ public struct FileBlobStore: BlobStore {
         }
     }
 
+    /// Marks `type`'s directory (creating it if needed) as excluded from iCloud and
+    /// computer backups. iOS applies the flag to everything inside the directory,
+    /// including files written later. A no-op where the platform has no backup flag.
+    public func excludeFromBackup(type: String) throws {
+        let dir = typeDir(type)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        #if canImport(Darwin)
+        var flagged = dir
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try flagged.setResourceValues(values)
+        #endif
+    }
+
     public func listBlobs(type: String) throws -> [(id: UUID, data: Data)] {
         let dir = typeDir(type)
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [] }

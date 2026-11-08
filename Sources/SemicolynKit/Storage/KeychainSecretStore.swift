@@ -64,7 +64,7 @@ public enum KeychainError: Error, Equatable {
 /// All items are stored as `kSecClassGenericPassword` under the given `service`, with the
 /// accessibility `secretAccessibility(forAccount:)` picks per item. When `synchronizable`
 /// is `true` (the default) items ride iCloud Keychain (E2EE).
-public final class KeychainSecretStore: SecretStore {
+public final class KeychainSecretStore: BulkErasableSecretStore {
     private let service: String
     private let synchronizable: Bool
 
@@ -173,6 +173,35 @@ public final class KeychainSecretStore: SecretStore {
             }
         }
         return outcome
+    }
+
+    /// Deletes every item in this store (this service and sync domain) except the
+    /// accounts of `kept`. Deleting a synchronizable item also deletes it from the user's
+    /// other devices through iCloud Keychain. Every item is attempted; the first failure
+    /// is thrown afterwards.
+    public func deleteAllSecrets(except kept: Set<SecretRef>) throws {
+        var query = serviceQuery()
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return }
+        guard status == errSecSuccess, let items = result as? [[String: Any]] else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+        let keptAccounts = Set(kept.map(keychainAccount(for:)))
+        var firstFailure: OSStatus?
+        for item in items {
+            guard let account = item[kSecAttrAccount as String] as? String,
+                  !keptAccounts.contains(account) else { continue }
+            var match = serviceQuery()
+            match[kSecAttrAccount as String] = account
+            let deleteStatus = SecItemDelete(match as CFDictionary)
+            if deleteStatus != errSecSuccess, deleteStatus != errSecItemNotFound, firstFailure == nil {
+                firstFailure = deleteStatus
+            }
+        }
+        if let firstFailure { throw KeychainError.unexpectedStatus(firstFailure) }
     }
 
     // MARK: - Private helpers

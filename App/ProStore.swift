@@ -16,6 +16,11 @@ import Foundation
         self.isPro = UserDefaults.standard.bool(forKey: Self.defaultsKey)
     }
 
+    /// Re-reads the stored state (after Erase All Data cleared it).
+    func reload() {
+        isPro = UserDefaults.standard.bool(forKey: Self.defaultsKey)
+    }
+
     #if DEBUG
     /// Debug-only: flip Pro state to test the gate end-to-end. Removed when real
     /// StoreKit lands.
