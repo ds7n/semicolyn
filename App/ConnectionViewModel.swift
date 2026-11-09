@@ -2458,21 +2458,9 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             outputs: [("learns", incognito ? "0" : "1")],
             reason: incognito ? "private" : "learning"))
         guard !incognito else {
-            // Private mode ("Don't learn from my typing"): suggestions still come from
-            // the built-in dictionaries, but the engine starts with nothing learned,
-            // records and harvests nothing (`learns: false`), and has no learned store
-            // to flush, so the on-disk vocabulary is never read or written.
-            learnedStore = nil
-            predictor = PredictorActor(engine: PredictorEngine(
-                learned: .empty,
-                english: AppStores.shared.englishDictionary(),
-                commands: AppStores.shared.commandTree(),
-                filter: AppStores.shared.predictorTokenFilter(),
-                learns: false))
-            // Nothing learned to reset, so don't claim the active-purge slot.
-            if AppStores.shared.activePredictorSession === self {
-                AppStores.shared.activePredictorSession = nil
-            }
+            // Private mode ("Don't learn from my typing"): the on-disk vocabulary is
+            // never read or written.
+            startNonLearningPredictor()
             return
         }
         let store = AppStores.shared.predictorLearnedStore()
@@ -2484,22 +2472,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             learned = .empty
         case .unreadable:
             // The sealed file exists but can't be read (device locked). Run this
-            // session like private mode: dictionaries only, nothing learned, and no
-            // learned store attached, so `flushPredictor` can't overwrite the real
-            // file with an empty one.
+            // session like private mode, so `flushPredictor` can't overwrite the real
+            // file with an empty one, and Settings reads the file (and shows it as
+            // unavailable) rather than this empty engine.
             DebugLog.shared.log(.predictor, "predictor:learned load=unreadable → learning off this session")
-            learnedStore = nil
-            predictor = PredictorActor(engine: PredictorEngine(
-                learned: .empty,
-                english: AppStores.shared.englishDictionary(),
-                commands: AppStores.shared.commandTree(),
-                filter: AppStores.shared.predictorTokenFilter(),
-                learns: false))
-            // Nothing learned to reset, and Settings should read the file (and show
-            // it as unavailable), not this empty engine.
-            if AppStores.shared.activePredictorSession === self {
-                AppStores.shared.activePredictorSession = nil
-            }
+            startNonLearningPredictor()
             return
         }
         learnedStore = store
@@ -2510,6 +2487,24 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             filter: AppStores.shared.predictorTokenFilter()))
         // Register as the session a Settings-triggered panic-purge should reset.
         AppStores.shared.activePredictorSession = self
+    }
+
+    /// Build a non-learning predictor (private mode, or a learned store that can't be
+    /// read): suggestions still come from the built-in dictionaries, but the engine
+    /// starts with nothing learned, records and harvests nothing (`learns: false`), and
+    /// has no learned store to flush. Nothing learned to reset, so it doesn't claim the
+    /// active-purge slot.
+    private func startNonLearningPredictor() {
+        learnedStore = nil
+        predictor = PredictorActor(engine: PredictorEngine(
+            learned: .empty,
+            english: AppStores.shared.englishDictionary(),
+            commands: AppStores.shared.commandTree(),
+            filter: AppStores.shared.predictorTokenFilter(),
+            learns: false))
+        if AppStores.shared.activePredictorSession === self {
+            AppStores.shared.activePredictorSession = nil
+        }
     }
 
     /// The one remote-output tap, installed on every attach path (raw SSH, plain
