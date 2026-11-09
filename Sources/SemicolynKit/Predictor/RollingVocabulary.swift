@@ -23,7 +23,7 @@ struct IndexedSketch: CandidateSource {
     let index: PrefixIndex
     let counts: CountMinSketch
     func candidates(forPrefix prefix: String) -> [TokenCount] {
-        index.matching(prefix: prefix).map { TokenCount(token: $0, count: counts.estimate($0)) }
+        index.matching(prefix: prefix).map { TokenCount(token: $0, count: roundedUpCount(counts.estimate($0))) }
     }
 }
 
@@ -67,7 +67,7 @@ public struct RollingVocabulary: Equatable, Sendable {
     public mutating func record(_ token: String, count: UInt32 = 1, storeLiteral: Bool = true) {
         guard !token.isEmpty, count > 0 else { return }
         if storeLiteral { index.insert(token) }
-        today.add(token, count: count)
+        today.add(token, count: Float(count))
     }
 
     /// True when `token` is stored as a literal (exact UTF-8 byte match). A token
@@ -127,7 +127,7 @@ public struct RollingVocabulary: Equatable, Sendable {
         case .days30: rolling = rolling30
         case .days90: rolling = rolling90
         }
-        let estimates = tokens.map { today.estimate($0) + rolling.estimate($0) }.sorted()
+        let estimates = tokens.map { roundedUpCount(today.estimate($0) + rolling.estimate($0)) }.sorted()
         let idx = min(estimates.count - 1, Int((Double(estimates.count) * 0.9).rounded(.down)))
         return estimates[idx]
     }
@@ -207,6 +207,12 @@ public struct RollingVocabulary: Equatable, Sendable {
 func appendSubBlob(_ out: inout [UInt8], _ blob: [UInt8]) {
     appendLE32(&out, UInt32(blob.count))
     out.append(contentsOf: blob)
+}
+
+/// A Float estimate as a `UInt32` count, rounded up and clamped.
+private func roundedUpCount(_ estimate: Float) -> UInt32 {
+    // Float(UInt32.max) rounds up to 2^32, which would trap in UInt32(_:).
+    estimate >= Float(UInt32.max) ? .max : UInt32(estimate.rounded(.up))
 }
 
 /// Read a length-prefixed ``CountMinSketch`` sub-blob at `p`, advancing it; `nil`
