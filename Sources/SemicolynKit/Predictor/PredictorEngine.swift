@@ -102,8 +102,13 @@ public struct PredictorEngine: Sendable {
                 learned.bigram.record(previous: prev, next: occ.token, count: occ.count,
                                       storeLiteral: storeLiteral)
             }
+            learned.noteLearned(words: Int(occ.count))
         }
+        if learned.exceedsCap { learned.enforceCap() }
     }
+
+    /// Number of learned words currently stored as suggestable literals.
+    public var learnedWordCount: Int { learned.unigram.literalCount }
 
     /// Distinct contexts a word needs before it graduates: 1 when the user tapped it
     /// or it was already learned in an earlier session, 2 for a dictionary word or

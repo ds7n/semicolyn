@@ -5,18 +5,61 @@ import Foundation
 /// The user's learned vocabulary: the unigram and next-token bigram stores. A value type the app records into, flushes via ``LearnedStore``,
 /// and restores at launch.
 public struct LearnedState: Equatable, Sendable {
+    /// Learned words between fade steps.
+    public static let fadeStepWords = 1000
+    /// Per-step multiplier on every sketch cell: a 25-step (25,000 word) half-life.
+    public static let fadeFactor: Float = pow(2, -1.0 / 25)
+    /// Literals whose estimate falls below this after a fade step are dropped.
+    public static let pruneThreshold: Float = 0.1
+    /// Maximum literals per store (unigram and bigram separately).
+    public static let literalCap = 20_000
+    /// Literal count a store is pruned down to when it exceeds ``literalCap``.
+    public static let literalCapTarget = 18_000
+
     public var unigram: LearnedVocabulary
     public var bigram: LearnedBigramVocabulary
+    /// Learned words since the last fade step (always below ``fadeStepWords``).
+    public var wordsSinceFade: Int
 
-    public init(unigram: LearnedVocabulary, bigram: LearnedBigramVocabulary) {
+    public init(unigram: LearnedVocabulary, bigram: LearnedBigramVocabulary, wordsSinceFade: Int = 0) {
         self.unigram = unigram
         self.bigram = bigram
+        self.wordsSinceFade = wordsSinceFade
     }
 
     /// A fresh, empty state at the spec's default dimensions, the first-launch
     /// (and fail-soft) value.
     public static var empty: LearnedState {
         LearnedState(unigram: LearnedVocabulary(), bigram: LearnedBigramVocabulary())
+    }
+
+    /// Advance the fade clock by `words` learned words. Each whole
+    /// ``fadeStepWords`` applies one fade step: both stores are scaled by
+    /// ``fadeFactor`` and literals below ``pruneThreshold`` are dropped. The
+    /// remainder carries over. Non-positive `words` is a no-op.
+    public mutating func noteLearned(words: Int) {
+        guard words > 0 else { return }
+        wordsSinceFade += words
+        let steps = wordsSinceFade / Self.fadeStepWords
+        wordsSinceFade %= Self.fadeStepWords
+        for _ in 0..<steps {
+            unigram.scale(by: Self.fadeFactor)
+            bigram.scale(by: Self.fadeFactor)
+            unigram.pruneLiterals(below: Self.pruneThreshold)
+            bigram.pruneLiterals(below: Self.pruneThreshold)
+        }
+    }
+
+    /// Prune each store that exceeds ``literalCap`` literals down to
+    /// ``literalCapTarget``, dropping the lowest estimates first.
+    public mutating func enforceCap() {
+        unigram.capLiterals(max: Self.literalCap, target: Self.literalCapTarget)
+        bigram.capLiterals(max: Self.literalCap, target: Self.literalCapTarget)
+    }
+
+    /// True when either store holds more than ``literalCap`` literals (O(1)).
+    var exceedsCap: Bool {
+        unigram.literalCount > Self.literalCap || bigram.literalCount > Self.literalCap
     }
 }
 
