@@ -3,15 +3,18 @@
 import Foundation
 import SemicolynKit
 
-/// A live session whose in-memory predictor engine can be reset by a panic-purge.
-/// Kept minimal (one method) so `AppStores` holds only a weak, narrow reference to
-/// the active session rather than the whole view-model. `ConnectionViewModel`
+/// A live session whose in-memory predictor engine can be reset by a panic-purge
+/// (and whose learned word count Settings shows). Kept minimal so `AppStores` holds
+/// only a weak, narrow reference to the active session rather than the whole view-model. `ConnectionViewModel`
 /// conforms; `AppStores.purgePredictorLearned()` calls it before the disk delete.
 @MainActor
 protocol PredictorPurgeable: AnyObject {
     /// Reset the running predictor engine to empty (seed preserved) so no stale
     /// learned state can be flushed back to disk after a purge.
     func purgeLearnedEngine()
+    /// The running engine's learned word count (unigram literals), for the Settings
+    /// "Learned words" row while this session is open.
+    func learnedWordCount() async -> Int
 }
 
 /// The app's composition root for the live storage stack: hosts via `HostStore`
@@ -59,6 +62,9 @@ final class AppStores: ObservableObject {
     /// Base Application Support directory (`…/semicolyn/`). Retained so store
     /// factory methods can build sub-paths without repeating the FileManager call.
     private let baseDirectory: URL
+    /// The sealed learned-vocabulary store (`predictor/learned.sealed`), built in
+    /// `init` with the record key so the key itself isn't kept on the instance.
+    private let learnedStore: LearnedStore
 
     /// Initializes the storage stack: Application Support directory, Keychain
     /// secrets, AES record key, file-backed blob store, and trust evaluator.
@@ -85,6 +91,8 @@ final class AppStores: ObservableObject {
 
         // Generate or retrieve the AES-256 record encryption key.
         let key = try recordKey(in: secrets)
+        self.learnedStore = LearnedStore(
+            directory: dir.appendingPathComponent("predictor", isDirectory: true), key: key)
 
         // File-backed blob store for encrypted host records.
         let blobs = FileBlobStore(directory: try Self.recordsDirectory())
@@ -230,10 +238,9 @@ final class AppStores: ObservableObject {
 
     // MARK: - Predictor stores
 
-    /// The on-device predictor learned-state store (per the predictor spec path).
-    func predictorLearnedStore() -> LearnedStore {
-        LearnedStore(directory: baseDirectory.appendingPathComponent("predictor", isDirectory: true))
-    }
+    /// The on-device predictor learned-state store: `predictor/learned.sealed`,
+    /// sealed with the record key (privacy P-H2).
+    func predictorLearnedStore() -> LearnedStore { learnedStore }
 
     /// The live session whose in-memory predictor engine must also be reset by a
     /// panic-purge. Weak so a torn-down session deregisters itself simply by

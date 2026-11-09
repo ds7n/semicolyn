@@ -40,6 +40,8 @@ actor PredictorActor {
     func harvest(_ chunk: HarvestChunk) { engine.harvest(chunk) }
 
     func snapshotState() -> LearnedState { engine.state }
+    /// The engine's learned word count. See `PredictorEngine.learnedWordCount`.
+    func learnedWordCount() -> Int { self.engine.learnedWordCount }
     func purgeLearned() { engine.purgeLearned() }
     func forgetLastLine() { engine.forgetLastLine() }
 }

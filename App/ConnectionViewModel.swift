@@ -2404,6 +2404,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         Task { [predictor] in await predictor?.purgeLearned() }
     }
 
+    /// `PredictorPurgeable`: the running engine's learned word count, for the
+    /// Settings "Learned words" row. 0 when the predictor is off.
+    func learnedWordCount() async -> Int {
+        guard let predictor else { return 0 }
+        return await predictor.learnedWordCount()
+    }
+
     /// Panic-purge: wipe all user-derived predictor state now (live engine + disk).
     /// Delegates to the store, which resets this session's engine (via the
     /// `activePredictorSession` registration) before deleting the file, so there is
@@ -2469,9 +2476,35 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             return
         }
         let store = AppStores.shared.predictorLearnedStore()
+        let learned: LearnedState
+        switch store.load() {
+        case let .found(state):
+            learned = state
+        case .absent:
+            learned = .empty
+        case .unreadable:
+            // The sealed file exists but can't be read (device locked). Run this
+            // session like private mode: dictionaries only, nothing learned, and no
+            // learned store attached, so `flushPredictor` can't overwrite the real
+            // file with an empty one.
+            DebugLog.shared.log(.predictor, "predictor:learned load=unreadable → learning off this session")
+            learnedStore = nil
+            predictor = PredictorActor(engine: PredictorEngine(
+                learned: .empty,
+                english: AppStores.shared.englishDictionary(),
+                commands: AppStores.shared.commandTree(),
+                filter: AppStores.shared.predictorTokenFilter(),
+                learns: false))
+            // Nothing learned to reset, and Settings should read the file (and show
+            // it as unavailable), not this empty engine.
+            if AppStores.shared.activePredictorSession === self {
+                AppStores.shared.activePredictorSession = nil
+            }
+            return
+        }
         learnedStore = store
         predictor = PredictorActor(engine: PredictorEngine(
-            learned: store.load(),
+            learned: learned,
             english: AppStores.shared.englishDictionary(),
             commands: AppStores.shared.commandTree(),
             filter: AppStores.shared.predictorTokenFilter()))
