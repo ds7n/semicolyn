@@ -572,7 +572,9 @@ public struct InputTokenTracker: Equatable, Sendable {
         // `secretCheckPrev`, a dropped secret is never a flag/header, so nil
         // prevents the cascade without retaining the secret string in memory.
         if isSecretValueToken(current, precededBy: secretCheckPrev) {
-            secretCheckPrev = nil
+            // Exception: a dropped auth scheme word (`Bearer` after `Authorization:`)
+            // stays the predecessor so the credential after it is dropped too.
+            secretCheckPrev = isAuthScheme(current) ? current : nil
             current = ""
             droppedAsSecret += 1   // privacy-safe tally (count, not text) for the App drop-gate log
             return

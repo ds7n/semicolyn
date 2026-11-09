@@ -20,6 +20,60 @@ private let secretHeaders: Set<String> = [
     "authorization:", "x-api-key:",
 ]
 
+/// Auth scheme words that sit between a header name and its credential
+/// (`Authorization: Bearer <token>`). Compared case-insensitively.
+private let authSchemes: Set<String> = [
+    "bearer", "basic", "digest", "token", "negotiate", "apikey",
+]
+
+/// Variable-name fragments marking `NAME=value` as a secret assignment (the name is
+/// uppercased first). `PWD` also matches the shell's working-directory variable:
+/// that over-suppression is accepted.
+private let secretNameFragments = ["PASS", "PWD", "KEY", "AUTH", "CRED", "TOKEN", "SECRET"]
+
+/// `s` without one leading `'` or `"` (a quoted `-H 'Authorization: ...'` header
+/// tokenizes with the quote glued to its first word).
+private func strippingLeadingQuote(_ s: String) -> String {
+    guard let first = s.first, first == "'" || first == "\"" else { return s }
+    return String(s.dropFirst())
+}
+
+/// True if `token` is a header-name token (`Authorization:`, `x-api-key:`), allowing
+/// one leading quote.
+private func isSecretHeader(_ token: String) -> Bool {
+    secretHeaders.contains(strippingLeadingQuote(token).lowercased())
+}
+
+/// True for `-pSECRET` (mysql style): `-p` plus more text. Case-sensitive, so
+/// `-P3306` (a port) is not matched; bare `-p` is handled by `secretFlags`.
+private func isJoinedShortPassword(_ token: String) -> Bool {
+    token.count > 2 && token.hasPrefix("-p")
+}
+
+/// True for `-u user:pass`'s VALUE or the joined forms `-uuser:pass`, `--user=a:b`.
+private func isUserCredentialValue(_ token: String, precededBy previous: String?) -> Bool {
+    if let prev = previous?.lowercased(), (prev == "-u" || prev == "--user"), token.contains(":") {
+        return true
+    }
+    if token.hasPrefix("--") {
+        guard let eq = token.firstIndex(of: "=") else { return false }
+        let flagPart = token[token.startIndex..<eq].lowercased()
+        return flagPart == "--user" && token[token.index(after: eq)...].contains(":")
+    }
+    return token.hasPrefix("-u") && token.count > 2 && token.contains(":")
+}
+
+/// True for a shell assignment `NAME=value` whose NAME looks secret-bearing.
+private func isSecretAssignment(_ token: String) -> Bool {
+    guard let eq = token.firstIndex(of: "=") else { return false }
+    let name = token[token.startIndex..<eq]
+    guard let first = name.first, first == "_" || first.isLetter,
+          name.allSatisfy({ $0 == "_" || ($0.isASCII && ($0.isLetter || $0.isNumber)) })
+    else { return false }
+    let upper = name.uppercased()
+    return secretNameFragments.contains { upper.contains($0) }
+}
+
 /// Indexes of tokens to drop as secret values.
 public func secretValueIndexes(in tokens: [String]) -> Set<Int> {
     var drop: Set<Int> = []
@@ -30,14 +84,27 @@ public func secretValueIndexes(in tokens: [String]) -> Set<Int> {
             let flagPart = String(token[token.startIndex..<eq]).lowercased()
             if secretFlags.contains(flagPart) { drop.insert(i); continue }
         }
+        // `-psecret`, `-u user:pass`, `--user=a:b`, `NAME_TOKEN=value`.
+        if isJoinedShortPassword(token) || isSecretAssignment(token) {
+            drop.insert(i)
+            continue
+        }
+        if isUserCredentialValue(token, precededBy: i > 0 ? tokens[i - 1] : nil) {
+            drop.insert(i)
+            continue
+        }
         // bare `--flag` / `-p` → drop the NEXT token (the value), if any.
         if secretFlags.contains(lower), i + 1 < tokens.count {
             drop.insert(i + 1)
             continue
         }
-        // header token → drop the single following token.
-        if secretHeaders.contains(lower), i + 1 < tokens.count {
+        // header token (optionally quote-prefixed) → drop the following token, and
+        // the one after it when that follows an auth scheme (`Bearer <cred>`).
+        if isSecretHeader(token), i + 1 < tokens.count {
             drop.insert(i + 1)
+            if authSchemes.contains(tokens[i + 1].lowercased()), i + 2 < tokens.count {
+                drop.insert(i + 2)
+            }
             continue
         }
         // `user:pass@host` connection string → drop the whole token.
@@ -49,6 +116,10 @@ public func secretValueIndexes(in tokens: [String]) -> Set<Int> {
 /// Incremental (per-token) view of the denylist, for the streaming tracker: is
 /// `token` a secret VALUE given the token immediately before it? Same rule set as
 /// `secretValueIndexes`, sliced to one token + its predecessor.
+///
+/// The credential after an auth scheme (`Authorization: Bearer abc`) is the one
+/// two-token reach: it is caught here as "preceded by a scheme word". The tracker
+/// keeps a dropped scheme word as that predecessor (see `isAuthScheme`).
 public func isSecretValueToken(_ token: String, precededBy previous: String?) -> Bool {
     // (b) `--flag=value` token embeds a secret.
     if let eq = token.firstIndex(of: "=") {
@@ -57,12 +128,22 @@ public func isSecretValueToken(_ token: String, precededBy previous: String?) ->
     }
     // (c) `user:pass@host` connection string.
     if isUserPassAtHost(token) { return true }
+    // `-psecret`, `-u`-style credentials, `NAME_TOKEN=value`.
+    if isJoinedShortPassword(token) || isSecretAssignment(token) { return true }
+    if isUserCredentialValue(token, precededBy: previous) { return true }
     // (a)/(d) previous token is a secret flag or header → this token is the value.
-    if let prev = previous?.lowercased(),
-       secretFlags.contains(prev) || secretHeaders.contains(prev) {
-        return true
+    if let prev = previous {
+        if secretFlags.contains(prev.lowercased()) || isSecretHeader(prev) { return true }
+        // credential after the scheme word of an auth header.
+        if authSchemes.contains(prev.lowercased()) { return true }
     }
     return false
+}
+
+/// True if `token` is an auth scheme word (`Bearer`, `Basic`, ...). The tracker uses
+/// it to keep a dropped scheme word as the predecessor of the credential after it.
+public func isAuthScheme(_ token: String) -> Bool {
+    authSchemes.contains(token.lowercased())
 }
 
 /// True if `token` is a `user:pass@host` credential form (non-empty user, pass,
