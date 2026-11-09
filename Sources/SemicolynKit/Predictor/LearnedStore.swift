@@ -90,6 +90,9 @@ public enum LearnedLoad: Equatable, Sendable {
 public struct LearnedStore {
     private let directory: URL
     private let key: SymmetricKey
+    /// Atomic file write, injectable so tests can fail the sealed write while the
+    /// directory stays writable.
+    private let write: (Data, URL) throws -> Void
 
     private var sealedURL: URL { directory.appendingPathComponent("learned.sealed") }
     private var legacyURL: URL { directory.appendingPathComponent("learned.sketch") }
@@ -100,8 +103,22 @@ public struct LearnedStore {
 
     /// A store under `directory`, sealed with `key` (the record key).
     public init(directory: URL, key: SymmetricKey) {
+        self.init(directory: directory, key: key, write: Self.atomicWrite)
+    }
+
+    /// As ``init(directory:key:)`` with the atomic-write step replaced (test seam).
+    init(directory: URL, key: SymmetricKey, write: @escaping (Data, URL) throws -> Void) {
         self.directory = directory
         self.key = key
+        self.write = write
+    }
+
+    private static func atomicWrite(_ data: Data, to url: URL) throws {
+        #if os(iOS)
+        try data.write(to: url, options: [.atomic, .completeFileProtection])
+        #else
+        try data.write(to: url, options: [.atomic])
+        #endif
     }
 
     /// Seal and persist `state` atomically, overwriting any prior save and creating
@@ -112,16 +129,16 @@ public struct LearnedStore {
         // always uses the default 12-byte nonce, so this cannot fail.
         let sealed = box.combined!
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        #if os(iOS)
-        try sealed.write(to: sealedURL, options: [.atomic, .completeFileProtection])
-        #else
-        try sealed.write(to: sealedURL, options: [.atomic])
-        #endif
+        try write(sealed, sealedURL)
+        // The sealed copy is durable: no plaintext may outlive it (a failed earlier
+        // removal, or a malformed legacy file that never migrated).
+        try? FileManager.default.removeItem(at: legacyURL)
     }
 
     /// The persisted learned state. Never throws:
     /// - `learned.sealed` present: a read error is ``LearnedLoad/unreadable``; a file
-    ///   that won't open or parse is ``LearnedLoad/absent``.
+    ///   that won't open or parse is ``LearnedLoad/absent``. Any leftover
+    ///   `learned.sketch` is removed (best effort).
     /// - Otherwise an old `learned.sketch`: a read error is `.unreadable`, a parse
     ///   failure `.absent`; a parsed one is sealed and the old file deleted only if
     ///   that save succeeded (a failed save retries next session). `.found` either way.
@@ -133,14 +150,14 @@ public struct LearnedStore {
             guard let box = try? AES.GCM.SealedBox(combined: data),
                   let plain = try? AES.GCM.open(box, using: key),
                   let state = Self.deserialize([UInt8](plain)) else { return .absent }
+            try? files.removeItem(at: legacyURL)   // leftover plaintext from a failed removal
             return .found(state)
         }
         guard files.fileExists(atPath: legacyURL.path) else { return .absent }
         guard let data = try? Data(contentsOf: legacyURL) else { return .unreadable }
         guard let migrated = legacyLearnedState([UInt8](data)) else { return .absent }
-        if (try? save(migrated)) != nil {
-            try? files.removeItem(at: legacyURL)
-        }
+        // `save` removes the legacy file only after the sealed write succeeds.
+        try? save(migrated)
         return .found(migrated)
     }
 
@@ -161,11 +178,13 @@ public struct LearnedStore {
     }
 
     /// The sealed plaintext: `magic | version | wordsSinceFade | unigram | bigram`.
+    /// The fade clock is normalized below ``LearnedState/fadeStepWords`` so a valid
+    /// state never writes a value ``deserialize(_:)`` rejects.
     private static func serialize(_ state: LearnedState) -> [UInt8] {
         var out: [UInt8] = []
         out.append(contentsOf: magic)
         out.append(formatVersion)
-        appendLE32(&out, UInt32(clamping: state.wordsSinceFade))
+        appendLE32(&out, UInt32(clamping: state.wordsSinceFade % LearnedState.fadeStepWords))
         appendSubBlob(&out, state.unigram.serialize())
         appendSubBlob(&out, state.bigram.serialize())
         return out

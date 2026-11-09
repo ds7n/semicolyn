@@ -343,6 +343,45 @@ final class LearnedStoreTests: XCTestCase {
         try store().save(state)
         try writeLegacy(legacyFile())
         XCTAssertEqual(store().load(), .found(state))
+        XCTAssertFalse(exists(legacyURL), "a sealed load removes a leftover plaintext file (legacy removal failed earlier)")
+    }
+
+    private struct InjectedWriteFailure: Error {}
+
+    /// Scenario A: the migration's sealed write fails (directory stays writable, so
+    /// a delete-first migration would succeed in unlinking), then a later save works.
+    func testFailedMigrationWriteKeepsLegacyBytesThenLaterSaveRemovesIt() throws {
+        let legacyBytes = legacyFile()
+        try writeLegacy(legacyBytes)
+        let failing = LearnedStore(directory: dir, key: key, write: { _, _ in throw InjectedWriteFailure() })
+
+        let state = try XCTUnwrap(found(failing.load()))
+        XCTAssertEqual(state.unigram.estimate("alpha"), 3)
+        XCTAssertEqual(try Data(contentsOf: legacyURL), Data(legacyBytes), "legacy must survive a failed sealed write, byte for byte")
+        XCTAssertFalse(exists(sealedURL))
+
+        try store().save(state)
+        XCTAssertTrue(exists(sealedURL))
+        XCTAssertFalse(exists(legacyURL), "a later successful save removes the plaintext")
+    }
+
+    /// Scenario C: a malformed legacy file (load is `.absent`), then the first flush
+    /// writes the sealed file; the unparseable plaintext must not be orphaned.
+    func testSaveRemovesMalformedLegacyFile() throws {
+        try writeLegacy(Array(legacyFile().dropLast()))
+        XCTAssertEqual(store().load(), .absent)
+        try store().save(sampleState())
+        XCTAssertFalse(exists(legacyURL))
+        XCTAssertTrue(exists(sealedURL))
+    }
+
+    func testFadeClockAtOrPastStepIsNormalizedOnSave() throws {
+        var state = sampleState()
+        state.wordsSinceFade = 1437
+        try store().save(state)
+        var expected = state
+        expected.wordsSinceFade = 437
+        XCTAssertEqual(store().load(), .found(expected))
     }
 
     // MARK: - delete

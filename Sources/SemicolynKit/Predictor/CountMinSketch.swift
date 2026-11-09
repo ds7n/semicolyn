@@ -71,7 +71,7 @@ public struct CountMinSketch: Equatable, Sendable {
     /// Pointwise subtract `other` from self (eviction), clamping each cell at
     /// zero. Returns false and does nothing if dimensions differ. A subtracted
     /// sketch may then under-estimate; that is the spec's accepted, tolerable
-    /// noise for rollover eviction.
+    /// noise for eviction.
     @discardableResult
     public mutating func subtract(_ other: CountMinSketch) -> Bool {
         guard depth == other.depth, width == other.width else { return false }
