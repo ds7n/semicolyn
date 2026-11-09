@@ -16,6 +16,10 @@ public struct PredictorEngine: Sendable {
     /// trailing token (UTF-8) joined with the start of the next chunk.
     private var harvestFilter = ANSIByteFilter()
     private var harvestPrevious: String?
+    /// The previous harvested token was an auth scheme dropped as a secret header's
+    /// value (`Authorization: Bearer`): the next token is the credential. Mirrors
+    /// `InputTokenTracker.credentialFollowsScheme`.
+    private var harvestCredentialPending = false
     private var harvestPartial: [UInt8] = []
     /// Exclusion rules: applied at write time by `record` and `harvest`, and
     /// re-applied at read time by every suggestion query as a safety net.
@@ -199,9 +203,18 @@ public struct PredictorEngine: Sendable {
         var kept: [String] = []
         for raw in tokens {
             let token = String(decoding: raw, as: UTF8.self)
-            defer { harvestPrevious = token }
-            guard isScreenWordShaped(token), !filter.excludes(token),
-                  !isSecretValueToken(token, precededBy: harvestPrevious) else { continue }
+            let credentialPending = harvestCredentialPending
+            harvestCredentialPending = false
+            let previous = harvestPrevious
+            harvestPrevious = token
+            // The secret checks run on every token (even non-word-shaped ones such as
+            // the `Authorization:` header) so the credential reach is never skipped.
+            if credentialPending { continue }
+            if isSecretValueToken(token, precededBy: previous) {
+                harvestCredentialPending = isAuthScheme(token) && (previous.map(isSecretHeaderToken) ?? false)
+                continue
+            }
+            guard isScreenWordShaped(token), !filter.excludes(token) else { continue }
             kept.append(token)
         }
         self.output.harvest(kept)
@@ -215,6 +228,7 @@ public struct PredictorEngine: Sendable {
     private mutating func resetHarvestContext() {
         harvestFilter = ANSIByteFilter()
         harvestPrevious = nil
+        harvestCredentialPending = false
         harvestPartial = []
     }
 
