@@ -226,11 +226,11 @@ final class NextWordRankingTests: XCTestCase {
         var e = try RankFixture.engine()
         graduate(&e, "think", after: ["(I", "We,", "\"You"])
         let bigram = e.state.bigram
-        XCTAssertEqual(bigram.candidates(after: "i", window: .days30).map(\.token), ["think"])
-        XCTAssertEqual(bigram.candidates(after: "we", window: .days30).map(\.token), ["think"])
-        XCTAssertEqual(bigram.candidates(after: "you", window: .days30).map(\.token), ["think"])
-        XCTAssertEqual(bigram.candidates(after: "(I", window: .days30), [])
-        XCTAssertEqual(bigram.candidates(after: "I", window: .days30), [])
+        XCTAssertEqual(bigram.candidates(after: "i").map(\.token), ["think"])
+        XCTAssertEqual(bigram.candidates(after: "we").map(\.token), ["think"])
+        XCTAssertEqual(bigram.candidates(after: "you").map(\.token), ["think"])
+        XCTAssertEqual(bigram.candidates(after: "(I"), [])
+        XCTAssertEqual(bigram.candidates(after: "I"), [])
     }
 
     func testRecordStoresTrimmedWordNotRawToken() throws {
@@ -255,15 +255,15 @@ final class NextWordRankingTests: XCTestCase {
         XCTAssertFalse(e.state.unigram.containsLiteral("(("))
         XCTAssertFalse(e.state.unigram.containsLiteral(""))
         XCTAssertFalse(e.state.unigram.containsLiteral("..."))
-        XCTAssertEqual(e.state.unigram.learnedSource(window: .days30).candidates(forPrefix: ""), [])
+        XCTAssertEqual(e.state.unigram.learnedSource().candidates(forPrefix: ""), [])
     }
 
     func testPunctuationOnlyPreviousRecordsNoBigram() throws {
         var e = try RankFixture.engine()
         for _ in 0..<3 { e.record("zebra", after: "((") }
         XCTAssertTrue(e.state.unigram.containsLiteral("zebra"))   // treated as start of line
-        XCTAssertEqual(e.state.bigram.candidates(after: "", window: .days30), [])
-        XCTAssertEqual(e.state.bigram.candidates(after: "((", window: .days30), [])
+        XCTAssertEqual(e.state.bigram.candidates(after: ""), [])
+        XCTAssertEqual(e.state.bigram.candidates(after: "(("), [])
     }
 
     func testExcludedPreviousStillSuppressesAdjacencyAfterTrimming() throws {
@@ -273,9 +273,9 @@ final class NextWordRankingTests: XCTestCase {
                                 commands: RankFixture.commands(), filter: f)
         graduate(&e, "zebra", after: ["(damn", "b", "c"])
         XCTAssertTrue(e.state.unigram.containsLiteral("zebra"))
-        XCTAssertEqual(e.state.bigram.candidates(after: "damn", window: .days30), [])
-        XCTAssertEqual(e.state.bigram.candidates(after: "(damn", window: .days30), [])
-        XCTAssertEqual(e.state.bigram.candidates(after: "b", window: .days30).map(\.token), ["zebra"])
+        XCTAssertEqual(e.state.bigram.candidates(after: "damn"), [])
+        XCTAssertEqual(e.state.bigram.candidates(after: "(damn"), [])
+        XCTAssertEqual(e.state.bigram.candidates(after: "b").map(\.token), ["zebra"])
     }
 
     func testExcludedTrimmedTokenNotRecorded() throws {
@@ -284,6 +284,6 @@ final class NextWordRankingTests: XCTestCase {
         graduate(&e, "damn,", after: ["a", "b", "c"])
         XCTAssertFalse(e.state.unigram.containsLiteral("damn"))
         XCTAssertFalse(e.state.unigram.containsLiteral("damn,"))
-        XCTAssertEqual(e.state.unigram.learnedSource(window: .days30).candidates(forPrefix: "d"), [])
+        XCTAssertEqual(e.state.unigram.learnedSource().candidates(forPrefix: "d"), [])
     }
 }

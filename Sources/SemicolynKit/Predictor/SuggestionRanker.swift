@@ -60,7 +60,6 @@ struct RankingSources {
     let screen: OutputHarvest
     let filter: TokenFilter
     let weights: RankingWeights
-    let window: RollingWindow
 }
 
 /// `min(1, log2(1 + count) / log2(1 + saturation))`: the learned-count term, rising
@@ -151,7 +150,7 @@ private func nextWordSuggestions(ctx: LineContext, weight: Double, sources: Rank
         }
         // `record` keys bigrams on the folded previous word; read the same key.
         var best: [String: UInt32] = [:]
-        for entry in sources.learned.bigram.candidates(after: previous.lowercased(), window: sources.window)
+        for entry in sources.learned.bigram.candidates(after: previous.lowercased())
         where entry.count > 0 {
             best[entry.token] = max(best[entry.token] ?? 0, entry.count)
         }
@@ -200,7 +199,7 @@ private func completionScores(typed: String, ctx: LineContext, sources: RankingS
             scores[word.text, default: 0] += Double(word.score) / 255 * w.commands
         }
     }
-    let learnedSource = sources.learned.unigram.learnedSource(window: sources.window)
+    let learnedSource = sources.learned.unigram.learnedSource()
     for (text, count) in learnedMatches(typed: typed, source: learnedSource) {
         scores[text, default: 0] += learnedTerm(count: count, saturation: w.learnedSaturation)
     }
@@ -217,8 +216,8 @@ private func completionScores(typed: String, ctx: LineContext, sources: RankingS
 /// wins when two stored forms display alike). The prefix index is byte-exact, so it
 /// is probed with the first typed character in each case and then narrowed with
 /// ``caseMatchedForm(typed:candidate:)``; probing the whole typed prefix would miss
-/// mixed-case words such as `GitHub` for `gith`. Tokens with a zero count in the
-/// window (aged out) are skipped.
+/// mixed-case words such as `GitHub` for `gith`. Tokens with a zero count (faded
+/// to nothing) are skipped.
 private func learnedMatches(typed: String, source: any CandidateSource) -> [String: UInt32] {
     guard let first = typed.first else { return [:] }
     let lead = String(first)
@@ -228,7 +227,7 @@ private func learnedMatches(typed: String, source: any CandidateSource) -> [Stri
     }
     var out: [String: UInt32] = [:]
     for probe in probes {
-        // An indexed token outside the window estimates 0: it is not a learned word now.
+        // An indexed token whose estimate faded to 0 is not a learned word now.
         for entry in source.candidates(forPrefix: probe) where entry.count > 0 {
             guard let display = caseMatchedForm(typed: typed, candidate: entry.token) else { continue }
             out[display] = max(out[display] ?? 0, entry.count)
@@ -264,7 +263,7 @@ private func addContext(previous: String, typed: String, sources: RankingSources
             scores[display, default: 0] += w.context * Double(next.score) / 255
         }
     }
-    let learnedNext = sources.learned.bigram.candidates(after: previous.lowercased(), window: sources.window)
+    let learnedNext = sources.learned.bigram.candidates(after: previous.lowercased())
     var best: [String: UInt32] = [:]
     for entry in learnedNext where entry.count > 0 {
         guard let display = caseMatchedForm(typed: typed, candidate: entry.token), scores[display] != nil else {

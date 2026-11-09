@@ -18,7 +18,7 @@ final class PredictorEngineTests: XCTestCase {
 
     /// The learned successors of `previous` in the persisted state, with their counts.
     private func learnedSuccessors(_ e: PredictorEngine, after previous: String) -> [String: UInt32] {
-        Dictionary(uniqueKeysWithValues: e.state.bigram.candidates(after: previous, window: .days30)
+        Dictionary(uniqueKeysWithValues: e.state.bigram.candidates(after: previous)
             .map { ($0.token, $0.count) })
     }
 
@@ -97,13 +97,6 @@ final class PredictorEngineTests: XCTestCase {
     }
 
     // MARK: lifecycle
-
-    func testRolloverPreservesInWindowSuggestions() {
-        var e = engine()
-        for _ in 0..<3 { e.record("deploy") }
-        e.rollover()
-        XCTAssertEqual(texts(e, "de"), ["deploy"], "sealed-day learning still suggests within the window")
-    }
 
     func testStateExposesLearnedForPersistence() {
         var e = engine()

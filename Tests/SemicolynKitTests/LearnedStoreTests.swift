@@ -3,7 +3,7 @@
 import XCTest
 @testable import SemicolynKit
 
-/// LearnedStore, Critical tier. Persists/restores the user's windowed learned
+/// LearnedStore, Critical tier. Persists/restores the user's learned
 /// vocabulary; fail-soft to empty on first run or corruption. Exercised against
 /// real temp directories. See `2026-06-21-predictor-learned-store-design`.
 final class LearnedStoreTests: XCTestCase {
@@ -20,22 +20,22 @@ final class LearnedStoreTests: XCTestCase {
 
     /// A state with `git` (unigram) and `git → status` (bigram) recorded.
     private func sampleState() -> LearnedState {
-        var uni = RollingVocabulary()
+        var uni = LearnedVocabulary()
         uni.record("git", count: 4)
-        var bi = RollingBigramVocabulary()
+        var bi = LearnedBigramVocabulary()
         bi.record(previous: "git", next: "status", count: 3)
         return LearnedState(unigram: uni, bigram: bi)
     }
 
     private func uniCount(_ s: LearnedState, _ token: String) -> UInt32? {
-        s.unigram.learnedSource(window: .days7).candidates(forPrefix: token)
+        s.unigram.learnedSource().candidates(forPrefix: token)
             .first { $0.token == token }?.count
     }
 
     func testFirstRunLoadsEmptyState() {
         let state = LearnedStore(directory: dir).load()
         XCTAssertNil(uniCount(state, "git"), "first run must yield an empty unigram store")
-        XCTAssertEqual(state.bigram.candidates(after: "git", window: .days7), [],
+        XCTAssertEqual(state.bigram.candidates(after: "git"), [],
                        "first run must yield an empty bigram store")
     }
 
@@ -44,16 +44,16 @@ final class LearnedStoreTests: XCTestCase {
         try store.save(sampleState())
         let loaded = store.load()
         XCTAssertEqual(uniCount(loaded, "git"), 4)
-        XCTAssertEqual(loaded.bigram.candidates(after: "git", window: .days7),
+        XCTAssertEqual(loaded.bigram.candidates(after: "git"),
                        [TokenCount(token: "status", count: 3)])
     }
 
     func testSaveOverwrites() throws {
         let store = LearnedStore(directory: dir)
         try store.save(sampleState())
-        var uni = RollingVocabulary()
+        var uni = LearnedVocabulary()
         uni.record("docker", count: 9)
-        try store.save(LearnedState(unigram: uni, bigram: RollingBigramVocabulary()))
+        try store.save(LearnedState(unigram: uni, bigram: LearnedBigramVocabulary()))
         let loaded = store.load()
         XCTAssertEqual(uniCount(loaded, "docker"), 9)
         XCTAssertNil(uniCount(loaded, "git"), "the overwritten save must not retain old state")
@@ -65,20 +65,6 @@ final class LearnedStoreTests: XCTestCase {
         try LearnedStore(directory: dir).save(sampleState())
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: dir.appendingPathComponent("learned.sketch").path))
-    }
-
-    func testRolloverStateSurvivesRoundTrip() throws {
-        // A post-rollover state must restore with its dailies intact so windows
-        // and eviction stay correct after load.
-        var uni = RollingVocabulary()
-        uni.record("deploy", count: 2)
-        uni.rollover()
-        uni.record("git", count: 5)
-        let store = LearnedStore(directory: dir)
-        try store.save(LearnedState(unigram: uni, bigram: RollingBigramVocabulary()))
-        let loaded = store.load()
-        XCTAssertEqual(uniCount(loaded, "deploy"), 2, "sealed daily must survive")
-        XCTAssertEqual(uniCount(loaded, "git"), 5, "today must survive")
     }
 
     func testCorruptFileFallsBackToEmpty() throws {
@@ -102,15 +88,13 @@ final class LearnedStoreTests: XCTestCase {
         XCTAssertNil(uniCount(store.load(), "git"), "a truncated file must fail soft to empty")
     }
 
-    func testLoadedStateIsMutableAndStillRollsOver() throws {
-        // The restored state must be a fully-functional rolling store.
+    func testLoadedStateIsMutable() throws {
+        // The restored state must be a fully-functional store.
         let store = LearnedStore(directory: dir)
         try store.save(sampleState())
         var loaded = store.load()
-        loaded.unigram.record("git", count: 1)   // 4 + 1 in today
+        loaded.unigram.record("git", count: 1)   // 4 + 1
         XCTAssertEqual(uniCount(loaded, "git"), 5)
-        loaded.unigram.rollover()                  // still works post-load
-        XCTAssertEqual(uniCount(loaded, "git"), 5, "rollover must preserve in-window counts")
     }
 
     // MARK: - Task 6: delete
@@ -122,10 +106,10 @@ final class LearnedStoreTests: XCTestCase {
         var state = LearnedState.empty
         state.unigram.record("persisted", count: 3)
         try store.save(state)
-        XCTAssertFalse(store.load().unigram.learnedSource(window: .days30)
+        XCTAssertFalse(store.load().unigram.learnedSource()
             .candidates(forPrefix: "persist").isEmpty)  // precondition: saved
         try store.delete()
-        XCTAssertTrue(store.load().unigram.learnedSource(window: .days30)
+        XCTAssertTrue(store.load().unigram.learnedSource()
             .candidates(forPrefix: "persist").isEmpty, "delete removes the persisted store")
     }
 

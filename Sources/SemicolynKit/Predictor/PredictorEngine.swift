@@ -3,7 +3,7 @@
 import Foundation
 
 /// The runtime facade: one type the app records into and queries for suggestions,
-/// composing the write-time privacy filter, the learned windowed stores, the shipped
+/// composing the write-time privacy filter, the learned stores, the shipped
 /// English dictionary and command tree, and the single ranker. Holds no I/O: the app
 /// loads its inputs (``LearnedStore``, the bundled dictionaries) and flushes `state`
 /// back. See `2026-06-21-predictor-engine-design`.
@@ -20,8 +20,6 @@ public struct PredictorEngine: Sendable {
     /// Exclusion rules: applied at write time by `record` and `harvest`, and
     /// re-applied at read time by every suggestion query as a safety net.
     public var filter: TokenFilter
-    /// Which rolling pre-aggregate suggestions read.
-    public var window: RollingWindow
     /// Shipped English dictionary; `nil` adds nothing.
     private let english: WordDictionary?
     /// Shipped command tree; `nil` adds nothing.
@@ -40,12 +38,11 @@ public struct PredictorEngine: Sendable {
     /// (see ``learns``).
     public init(learned: LearnedState, english: WordDictionary?, commands: CommandTree?,
                 filter: TokenFilter = .init(), weights: RankingWeights = .init(),
-                window: RollingWindow = .days30, learns: Bool = true) {
+                learns: Bool = true) {
         self.learns = learns
         self.learned = learned
         self.output = OutputHarvest(capacity: 512)
         self.filter = filter
-        self.window = window
         self.english = english
         self.commands = commands
         self.weights = weights
@@ -233,14 +230,7 @@ public struct PredictorEngine: Sendable {
     public func suggestions(line: String, lineOptedOut: Bool, limit: Int = 12) -> [Suggestion] {
         let sources = RankingSources(
             english: english, commands: commands, learned: learned, screen: output,
-            filter: filter, weights: weights, window: window)
+            filter: filter, weights: weights)
         return rankSuggestions(line: line, lineOptedOut: lineOptedOut, sources: sources, limit: limit)
-    }
-
-    /// Seal the day for both learned axes, the app calls this at user-local
-    /// midnight.
-    public mutating func rollover() {
-        learned.unigram.rollover()
-        learned.bigram.rollover()
     }
 }

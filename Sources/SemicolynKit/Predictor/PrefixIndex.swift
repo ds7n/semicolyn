@@ -32,6 +32,23 @@ public struct PrefixIndex: Equatable, Sendable {
         tokens.insert(token, at: i)
     }
 
+    /// Remove `token` (same UTF-8 bytes), preserving the sorted-unique invariant.
+    /// Removing an absent token is a no-op.
+    public mutating func remove(_ token: String) {
+        let i = lowerBound(token)
+        guard i < tokens.count, tokens[i].utf8.elementsEqual(token.utf8) else { return }
+        tokens.remove(at: i)
+    }
+
+    /// Remove every token for which `shouldRemove` is true, in one O(n) pass
+    /// (filtering keeps the sorted-unique invariant). Returns the number removed.
+    @discardableResult
+    mutating func removeAll(where shouldRemove: (String) -> Bool) -> Int {
+        let before = tokens.count
+        tokens.removeAll(where: shouldRemove)
+        return before - tokens.count
+    }
+
     /// True when exactly `token` (same UTF-8 bytes) is held. O(log n).
     public func contains(_ token: String) -> Bool {
         let i = lowerBound(token)

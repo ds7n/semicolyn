@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
-/// The user's learned windowed vocabulary: the unigram and next-token bigram
-/// rolling stores. A value type the app records into, flushes via ``LearnedStore``,
+/// The user's learned vocabulary: the unigram and next-token bigram stores. A value type the app records into, flushes via ``LearnedStore``,
 /// and restores at launch.
 public struct LearnedState: Equatable, Sendable {
-    public var unigram: RollingVocabulary
-    public var bigram: RollingBigramVocabulary
+    public var unigram: LearnedVocabulary
+    public var bigram: LearnedBigramVocabulary
 
-    public init(unigram: RollingVocabulary, bigram: RollingBigramVocabulary) {
+    public init(unigram: LearnedVocabulary, bigram: LearnedBigramVocabulary) {
         self.unigram = unigram
         self.bigram = bigram
     }
@@ -17,13 +16,13 @@ public struct LearnedState: Equatable, Sendable {
     /// A fresh, empty state at the spec's default dimensions, the first-launch
     /// (and fail-soft) value.
     public static var empty: LearnedState {
-        LearnedState(unigram: RollingVocabulary(), bigram: RollingBigramVocabulary())
+        LearnedState(unigram: LearnedVocabulary(), bigram: LearnedBigramVocabulary())
     }
 }
 
 /// Persists the learned state to disk under a caller-provided `directory` (the app
 /// passes the predictor dir; tests pass a temp dir). `save` overwrites atomically,
-/// `load` is fail-soft to an empty state. Both rolling states live in one
+/// `load` is fail-soft to an empty state. Both stores live in one
 /// atomically-written `learned.sketch`, so a thrown/interrupted save never pairs a
 /// fresh unigram state with a stale bigram one. See `2026-06-21-predictor-learned-store-design`.
 public struct LearnedStore {
@@ -76,8 +75,8 @@ public struct LearnedStore {
         guard let unigramBlob = readLengthPrefixed(bytes, &p),
               let bigramBlob = readLengthPrefixed(bytes, &p),
               p == bytes.count,                                   // no trailing slack
-              let unigram = RollingVocabulary(deserializing: unigramBlob),
-              let bigram = RollingBigramVocabulary(deserializing: bigramBlob) else { return .empty }
+              let unigram = LearnedVocabulary(deserializing: unigramBlob),
+              let bigram = LearnedBigramVocabulary(deserializing: bigramBlob) else { return .empty }
         return LearnedState(unigram: unigram, bigram: bigram)
     }
 

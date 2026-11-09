@@ -204,12 +204,12 @@ final class TokenFilterTests: XCTestCase {
     // MARK: integration, gates recording into a real store
 
     func testGatesRecordingIntoStore() {
-        var store = RollingVocabulary()
+        var store = LearnedVocabulary()
         let typed = ["git", "ghp_secrettoken12345", "deploy", "my_password_x"]
         for token in typed where !filter.excludes(token) { store.record(token) }
 
         func learned(_ token: String) -> Bool {
-            store.learnedSource(window: .days7)
+            store.learnedSource()
                 .candidates(forPrefix: token)
                 .contains { $0.token == token }
         }
