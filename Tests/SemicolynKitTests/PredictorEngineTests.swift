@@ -260,4 +260,71 @@ final class PredictorEngineTests: XCTestCase {
         e.record("hunter2pass", count: 1, after: "y", echoConfirmed: true)
         XCTAssertEqual(texts(e, "hunter"), [])
     }
+
+    // MARK: learning pause (privacy P-M6)
+
+    func testEngineIsNotPausedByDefault() {
+        XCTAssertFalse(engine().learningPaused)
+    }
+
+    /// While paused nothing is recorded; unpausing resumes learning at once.
+    func testPausedEngineRecordsNothingThenResumes() {
+        var e = engine()
+        e.learningPaused = true
+        e.record("alpha", accepted: true)
+        XCTAssertEqual(e.learnedWordCount, 0)
+        XCTAssertEqual(e.state, .empty)
+        e.learningPaused = false
+        e.record("alpha", accepted: true)
+        XCTAssertEqual(e.learnedWordCount, 1)
+        XCTAssertEqual(texts(e, "alp"), ["alpha"])
+    }
+
+    /// Paused records do not count toward graduation either: two contexts seen while
+    /// paused plus one after leave the word one context short of three.
+    func testPausedRecordsDoNotCountTowardGraduation() {
+        var e = engine()
+        e.learningPaused = true
+        e.record("zymurgy", after: "a")
+        e.record("zymurgy", after: "b")
+        e.learningPaused = false
+        e.record("zymurgy", after: "c")
+        XCTAssertEqual(texts(e, "zym"), [])
+        // Control: two more distinct contexts while unpaused graduate it.
+        e.record("zymurgy", after: "d")
+        e.record("zymurgy", after: "e")
+        XCTAssertEqual(texts(e, "zym"), ["zymurgy"])
+    }
+
+    func testPausedEngineHarvestsNothingThenResumes() {
+        var e = engine()
+        e.learningPaused = true
+        e.harvest(output: "deploy.yaml\n")
+        XCTAssertEqual(texts(e, "dep"), [])
+        e.learningPaused = false
+        e.harvest(output: "deploy.yaml\n")
+        XCTAssertEqual(texts(e, "dep"), ["deploy.yaml"])
+    }
+
+    /// A word cut by the pause never fuses across it: the fragment before the pause
+    /// and the output after it are not joined into one token.
+    func testPauseDropsThePartialTokenCarriedAcrossIt() {
+        var e = engine()
+        e.harvest(output: "deplo")
+        e.learningPaused = true
+        e.harvest(output: "hidden-fullscreen-text")
+        e.learningPaused = false
+        e.harvest(output: "y.yaml done\n")
+        XCTAssertEqual(texts(e, "dep"), [])
+        XCTAssertEqual(texts(e, "hid"), [])
+        XCTAssertEqual(texts(e, "don"), ["done"])
+    }
+
+    /// Suggestions keep working while paused (only learning stops).
+    func testPausedEngineStillSuggests() {
+        var e = engine()
+        e.record("alpha", accepted: true)
+        e.learningPaused = true
+        XCTAssertEqual(texts(e, "alp"), ["alpha"])
+    }
 }

@@ -127,6 +127,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private var predictor: PredictorActor?
     /// Whether `predictor:inactive` was already logged for this session.
     private var predictorMissingLogged = false
+    /// The learning pause the latest tmux title asks for (privacy P-M6, see
+    /// `noteTitleLearningPause`). Reset at teardown; the next attach sends a fresh title.
+    private var titleLearningPause: LearningPause?
+    /// The learning pause last sent to the current `predictor` (a new predictor starts
+    /// unpaused, so this is reset whenever the predictor is replaced or dropped).
+    private var appliedLearningPause: LearningPause?
     private var tracker = InputTokenTracker()
     /// Coalesces remote output for the screen-word harvest: capped at 8 KiB (newest
     /// bytes win) with at most one harvest in flight, so a big `cat` costs bounded
@@ -781,6 +787,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         output.onHarvestBytes = nil
         output.onExit = nil
         predictor = nil
+        titleLearningPause = nil
+        appliedLearningPause = nil
         harvestBuffer.reset()
         harvestGeneration += 1
         // Deregister from the active-purge slot (the VM may be reused on reconnect
@@ -2195,6 +2203,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // and gestures would be silently dropped (device bug 2026-09-06).
             sendInput: { [weak self] bytes in self?.sendTerminalInput(bytes) })
         DebugLog.shared.log(.tmux, "plainTmux: controller installed session=\(name)")
+        updateLearningPause()   // tmux now decides the pause from its title
     }
 
     /// Reactive tmux-missing detector for Mosh/ET (see `attachMoshIfPossible`/
@@ -2217,6 +2226,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             connectOverlayTmuxMissing = true   // this launch's verdict (see the overlay)
             plainTmuxSessionNamePendingInstall = nil
             plainTmux = nil
+            updateLearningPause()   // raw shell: back to the alternate-screen rule
         case .tmuxStarted:
             plainTmuxProbeResolved = true
             plainTmuxProbeWatchdog?.cancel(); plainTmuxProbeWatchdog = nil
@@ -2269,6 +2279,33 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             }
         }
         evaluateConnectReveal()
+    }
+
+    // MARK: - Learning pause (privacy P-M6)
+
+    /// A terminal title arrived; `pause` is what it asks for (`learningPause(forTitle:)`).
+    /// Only counts while plain tmux is attached (see `resolvedLearningPause`).
+    func noteTitleLearningPause(_ pause: LearningPause?) {
+        titleLearningPause = pause
+        updateLearningPause()
+    }
+
+    /// The mounted terminal entered or left its alternate screen (checked after each
+    /// output feed). Only counts without tmux (see `resolvedLearningPause`).
+    func noteTerminalAlternateScreenChanged() {
+        updateLearningPause()
+    }
+
+    /// Resolve the pause for this session (tmux title, or the terminal's own alternate
+    /// screen without tmux) and send it to the predictor when it changed.
+    private func updateLearningPause() {
+        let alternate = mountedTerminalView?.getTerminal().isCurrentBufferAlternate ?? false
+        let pause = resolvedLearningPause(tmuxAttached: plainTmux != nil,
+                                          titlePause: titleLearningPause,
+                                          alternateScreen: alternate)
+        guard let predictor, pause != appliedLearningPause else { return }
+        appliedLearningPause = pause
+        Task { await predictor.setLearningPause(pause) }
     }
 
     /// The mounted terminal's mouse reporting changed (`TerminalScreen`'s mode hook). Only
@@ -2451,6 +2488,12 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// private mode ("Don't learn from my typing") is on for this host.
     private func startPredictor(host: Host, defaults: Defaults, entry: String) {
         predictorMissingLogged = false
+        // Whichever predictor this builds starts unpaused: bring it to the current pause
+        // (e.g. a resume that lands inside a full-screen program).
+        defer {
+            appliedLearningPause = nil
+            updateLearningPause()
+        }
         let incognito = resolvePredictorIncognito(host: host, defaults: defaults)
         DebugLog.shared.log(.predictor, decisionLine(
             "predictor:start",

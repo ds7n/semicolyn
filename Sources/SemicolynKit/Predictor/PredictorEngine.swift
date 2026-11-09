@@ -35,6 +35,11 @@ public struct PredictorEngine: Sendable {
     /// ``suggestions(line:lineOptedOut:limit:)`` still ranks the shipped dictionaries
     /// (and whatever `learned` the engine was built with).
     public let learns: Bool
+    /// Set while the foreground program is full screen or a REPL (privacy P-M6, see
+    /// ``LearningPause``): like `learns: false`, ``record`` and ``harvest(_:)`` do
+    /// nothing, and the harvest context resets so no token spans the pause. Suggestions
+    /// keep working. Defaults to `false`.
+    public var learningPaused = false
 
     /// An engine for the single ranker (``suggestions(line:lineOptedOut:limit:)``),
     /// reading the shipped English dictionary and command tree. Either may be `nil`
@@ -81,7 +86,7 @@ public struct PredictorEngine: Sendable {
     public mutating func record(_ token: String, count: UInt32 = 1, after previous: String? = nil,
                                 echoConfirmed: Bool = true, optedOut: Bool = false,
                                 accepted: Bool = false) {
-        guard learns else { return }
+        guard learns, !learningPaused else { return }
         // Normalize: learn the lookup word (surrounding punctuation trimmed; paths and
         // flags whole). Both the raw token and the word must pass the filter, so
         // trimming can never let an excluded form through.
@@ -180,6 +185,9 @@ public struct PredictorEngine: Sendable {
     /// may be the tail of a cut word or escape sequence) is not harvested.
     public mutating func harvest(_ chunk: HarvestChunk) {
         guard learns else { return }
+        // Paused: drop the chunk and any carried context, so the fragment before the
+        // pause never joins the output after it.
+        if learningPaused { resetHarvestContext(); return }
         if chunk.droppedBefore { resetHarvestContext() }
         var clean = harvestFilter.filter(chunk.bytes)
         if chunk.droppedBefore {
