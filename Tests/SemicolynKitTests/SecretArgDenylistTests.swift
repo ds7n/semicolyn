@@ -63,15 +63,19 @@ final class SecretArgDenylistTests: XCTestCase {
 
     // MARK: P-M6 part 1 gaps. Each case runs through BOTH public APIs.
 
-    /// Indexes dropped by the streaming predicate, folding the tracker's rule that a
-    /// dropped auth scheme word stays the predecessor of the credential after it.
+    /// Indexes dropped by the streaming predicate, folding the tracker's rule that the
+    /// token after a scheme word dropped as a header's value is the credential.
     private func streamingDropped(_ tokens: [String]) -> Set<Int> {
         var drop: Set<Int> = []
         var prev: String?
+        var credentialPending = false
         for (i, t) in tokens.enumerated() {
-            if isSecretValueToken(t, precededBy: prev) {
+            let pending = credentialPending
+            credentialPending = false
+            if pending || isSecretValueToken(t, precededBy: prev) {
                 drop.insert(i)
-                prev = isAuthScheme(t) ? t : nil
+                credentialPending = !pending && isAuthScheme(t) && (prev.map(isSecretHeaderToken) ?? false)
+                prev = nil
             } else {
                 prev = t
             }
@@ -149,5 +153,27 @@ final class SecretArgDenylistTests: XCTestCase {
         let committed = t.observe(Array("curl -H 'Authorization: Bearer abc' https://x ".utf8))
         XCTAssertEqual(committed.map(\.token), ["curl", "-H", "'Authorization:", "https://x"])
         XCTAssertEqual(t.droppedAsSecret, 2)
+    }
+
+    func testSchemeLookingWordWithoutHeaderDropsNothing() {
+        assertDrops(["vault", "token", "lookup"], [])
+        assertDrops(["man", "basic", "usage"], [])
+    }
+
+    func testHeaderValueThatIsNotASchemeDropsOnlyThatToken() {
+        assertDrops(["curl", "-H", "Authorization:", "abc", "https://x"], [3])
+    }
+
+    func testSuggestionAfterSchemeWordIsNotSuppressed() {
+        XCTAssertFalse(isSecretValueToken("", precededBy: "basic"))
+        XCTAssertFalse(isSecretValueToken("usage", precededBy: "basic"))
+        XCTAssertFalse(isSecretValueToken("lookup", precededBy: "token"))
+    }
+
+    func testTrackerKeepsWordsAfterSchemeWordWithoutHeader() {
+        var t = InputTokenTracker()
+        let committed = t.observe(Array("vault token lookup man basic usage ".utf8))
+        XCTAssertEqual(committed.map(\.token), ["vault", "token", "lookup", "man", "basic", "usage"])
+        XCTAssertEqual(t.droppedAsSecret, 0)
     }
 }

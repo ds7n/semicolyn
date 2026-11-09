@@ -37,6 +37,10 @@ public struct InputTokenTracker: Equatable, Sendable {
     /// L3-paste drops (paste content is wholesale suppressed, reaching back over
     /// the preceding real token is the desired behaviour there).
     private var secretCheckPrev: String?
+    /// Set when a dropped token was the auth scheme of a secret header's value
+    /// (`Authorization: Bearer`): the NEXT token is the credential and is dropped.
+    /// Never set by a scheme-looking word outside that context (`vault token lookup`).
+    private var credentialFollowsScheme = false
     /// True while inside a bracketed paste (`ESC[200~`…`ESC[201~`): tokens are
     /// tracked for prefix context but never emitted/learned (L3).
     public private(set) var withinPaste = false
@@ -571,10 +575,14 @@ public struct InputTokenTracker: Equatable, Sendable {
         // real token reaches back over the secret to `previous` for bigrams). Clear
         // `secretCheckPrev`, a dropped secret is never a flag/header, so nil
         // prevents the cascade without retaining the secret string in memory.
-        if isSecretValueToken(current, precededBy: secretCheckPrev) {
-            // Exception: a dropped auth scheme word (`Bearer` after `Authorization:`)
-            // stays the predecessor so the credential after it is dropped too.
-            secretCheckPrev = isAuthScheme(current) ? current : nil
+        let credentialPending = credentialFollowsScheme
+        credentialFollowsScheme = false
+        if credentialPending || isSecretValueToken(current, precededBy: secretCheckPrev) {
+            // A scheme word dropped as a header's value (`Authorization: Bearer`)
+            // makes the token after it the credential: drop that too.
+            credentialFollowsScheme = !credentialPending && isAuthScheme(current)
+                && (secretCheckPrev.map(isSecretHeaderToken) ?? false)
+            secretCheckPrev = nil
             current = ""
             droppedAsSecret += 1   // privacy-safe tally (count, not text) for the App drop-gate log
             return
@@ -650,7 +658,7 @@ public struct InputTokenTracker: Equatable, Sendable {
 
     /// Clear all context (e.g. a context/host switch).
     public mutating func reset() {
-        current = ""; line = ""; previous = nil; secretCheckPrev = nil
+        current = ""; line = ""; previous = nil; secretCheckPrev = nil; credentialFollowsScheme = false
         withinPaste = false
         parseState = .ground
         sequenceLength = 0

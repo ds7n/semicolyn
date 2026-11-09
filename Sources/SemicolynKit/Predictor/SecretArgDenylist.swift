@@ -117,9 +117,12 @@ public func secretValueIndexes(in tokens: [String]) -> Set<Int> {
 /// `token` a secret VALUE given the token immediately before it? Same rule set as
 /// `secretValueIndexes`, sliced to one token + its predecessor.
 ///
-/// The credential after an auth scheme (`Authorization: Bearer abc`) is the one
-/// two-token reach: it is caught here as "preceded by a scheme word". The tracker
-/// keeps a dropped scheme word as that predecessor (see `isAuthScheme`).
+/// One rule is inherently two tokens deep: the credential after an auth scheme
+/// (`Authorization: Bearer abc`). This predicate flags only the scheme word (it
+/// follows the header); a stateful caller (the tracker) then drops the token after
+/// a scheme that was itself dropped as a header's value, using `isAuthScheme` and
+/// `isSecretHeaderToken`. A scheme-looking word elsewhere (`vault token lookup`)
+/// never makes its successor secret.
 public func isSecretValueToken(_ token: String, precededBy previous: String?) -> Bool {
     // (b) `--flag=value` token embeds a secret.
     if let eq = token.firstIndex(of: "=") {
@@ -134,14 +137,16 @@ public func isSecretValueToken(_ token: String, precededBy previous: String?) ->
     // (a)/(d) previous token is a secret flag or header → this token is the value.
     if let prev = previous {
         if secretFlags.contains(prev.lowercased()) || isSecretHeader(prev) { return true }
-        // credential after the scheme word of an auth header.
-        if authSchemes.contains(prev.lowercased()) { return true }
     }
     return false
 }
 
-/// True if `token` is an auth scheme word (`Bearer`, `Basic`, ...). The tracker uses
-/// it to keep a dropped scheme word as the predecessor of the credential after it.
+/// True if `token` is a secret header-name token (`Authorization:`, optionally
+/// quote-prefixed). For callers that track the two-token header reach.
+public func isSecretHeaderToken(_ token: String) -> Bool { isSecretHeader(token) }
+
+/// True if `token` is an auth scheme word (`Bearer`, `Basic`, ...). Only meaningful
+/// directly after a secret header; see `isSecretValueToken`.
 public func isAuthScheme(_ token: String) -> Bool {
     authSchemes.contains(token.lowercased())
 }
