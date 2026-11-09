@@ -29,6 +29,12 @@ public struct LearnedVocabulary: Equatable, Sendable {
         sketch = CountMinSketch(depth: depth, width: width)
     }
 
+    /// A vocabulary over an existing index and sketch (the legacy-file migration).
+    init(index: PrefixIndex, sketch: CountMinSketch) {
+        self.index = index
+        self.sketch = sketch
+    }
+
     /// Learn `count` occurrences of `token`. When `storeLiteral` is false (L7
     /// low-confidence) the literal is withheld from the prefix index: the count
     /// still contributes to frequency, but the token can never be surfaced as a

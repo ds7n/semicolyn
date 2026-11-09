@@ -18,6 +18,12 @@ public struct LearnedBigramVocabulary: Equatable, Sendable {
         vocabulary = LearnedVocabulary(depth: depth, width: width)
     }
 
+    /// A bigram store over an existing composite-key vocabulary (the legacy-file
+    /// migration).
+    init(vocabulary: LearnedVocabulary) {
+        self.vocabulary = vocabulary
+    }
+
     /// Learn `count` occurrences of `next` following `previous`. Ignored when the
     /// pair is unrecordable (see ``BigramKey/compositeKey(previous:next:)``) or
     /// `count` is zero.
