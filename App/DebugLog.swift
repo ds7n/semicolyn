@@ -30,7 +30,7 @@ final class DebugLog: ObservableObject {
 
     /// Newest-last rolling buffer; capped so it can't grow unbounded. Plain (not
     /// `@Published`) so appends never invalidate SwiftUI. The panel reads it on refresh.
-    private(set) var lines: [String] = []
+    private(set) var lines: [LogEntry] = []
     /// Bumped by `refresh()` (panel-driven, throttled) so the view redraws without a
     /// per-append publish.
     @Published private(set) var revision = 0
@@ -45,6 +45,9 @@ final class DebugLog: ObservableObject {
     /// or nil when no sink. Lets `configureFromDefaults` skip a needless teardown/rebuild
     /// (and its banner re-send) on a foreground when the settings are unchanged.
     private var remoteSignature: String?
+    /// Salt for the host/user tags in shareable renderings (privacy audit P-M3); re-read
+    /// in `configureFromDefaults`, so an Erase All Data picks up the new one.
+    private var tagSalt = logTagSalt(in: .standard)
 
     private init() {}
 
@@ -83,32 +86,39 @@ final class DebugLog: ObservableObject {
 
     func log(_ category: LogCategory = .lifecycle, _ message: @autoclosure () -> String) {
         guard enabled, enabledCategories.contains(category) else { return }
-        let now = Date().timeIntervalSinceReferenceDate
-        if start == nil { start = now }
-        let t = now - (start ?? now)
-        let line = String(format: "%7.2f  %@", t, message())
-        lines.append(line)
-        if lines.count > cap { lines.removeFirst(lines.count - cap) }
-        logger.debug("\(line, privacy: .public)")
-        remote?.send(line)
+        record(message())
     }
 
     /// Record a line that carries typed content (security audit M3). The in-app buffer
-    /// gets `content`; the device log gets it marked private (hidden from Console.app and
-    /// sysdiagnose); the remote stream gets it only over pinned TLS, else `redacted`.
+    /// keeps `content` (and `redacted` for the shareable copy); the remote stream gets
+    /// `content` only over pinned TLS, else `redacted`.
     func logSensitive(_ category: LogCategory, content: @autoclosure () -> String,
                       redacted: @autoclosure () -> String) {
         guard enabled, enabledCategories.contains(category) else { return }
+        record(content(), withoutTypedKeys: redacted())
+    }
+
+    /// Stamp `message`, add it to the buffer, and send it to the device log and the remote
+    /// stream. Marked values (`logHost`/`logUser`/`logServerText`, privacy audit P-M3) are
+    /// shown in full in the buffer and the device log (where every line is private: hidden
+    /// from Console.app and sysdiagnose), and over the remote stream only over pinned TLS;
+    /// over TCP/UDP they're replaced by tags and lengths, as are typed keys.
+    private func record(_ message: String, withoutTypedKeys: String? = nil) {
         let now = Date().timeIntervalSinceReferenceDate
         if start == nil { start = now }
-        let t = now - (start ?? now)
-        let line = String(format: "%7.2f  %@", t, content())
-        lines.append(line)
+        let stamp = String(format: "%7.2f  ", now - (start ?? now))
+        let entry = LogEntry(line: stamp + message, withoutTypedKeys: withoutTypedKeys.map { stamp + $0 })
+        lines.append(entry)
         if lines.count > cap { lines.removeFirst(lines.count - cap) }
-        logger.debug("\(line, privacy: .private)")
+        let full = renderLogLine(entry.line, .full)
+        logger.debug("\(full, privacy: .private)")
         guard let remote else { return }
-        remote.send(remoteLogMaySendContent(transport: remote.transport)
-                    ? line : String(format: "%7.2f  %@", t, redacted()))
+        let rendering = remoteLogRendering(transport: remote.transport, salt: tagSalt)
+        if case .full = rendering {
+            remote.send(full)
+        } else {
+            remote.send(renderLogLine(entry.withoutTypedKeys ?? entry.line, rendering))
+        }
     }
 
     /// Rebuild the remote sink even if its settings are unchanged (e.g. after the user
@@ -145,6 +155,7 @@ final class DebugLog: ObservableObject {
     func configureFromDefaults(reason: String = "launch") {
         let d = UserDefaults.standard
         enabled = d.bool(forKey: DiagnosticsContent.loggingEnabledKey)
+        tagSalt = logTagSalt(in: d)
         refreshEnabledCategories()
 
         let remoteOn = d.bool(forKey: RemoteLogConfig.enabledKey)
@@ -182,21 +193,19 @@ final class DebugLog: ObservableObject {
         let line = "logConfig(\(reason)): logging=\(enabled ? "ON" : "OFF") "
             + "remote=\(remote != nil ? "ON" : "off") categories=[\(cats)]"
         // Record to the on-screen buffer AND the remote stream directly, ungated.
-        let now = Date().timeIntervalSinceReferenceDate
-        if start == nil { start = now }
-        let stamped = String(format: "%7.2f  %@", now - (start ?? now), line)
-        lines.append(stamped)
-        if lines.count > cap { lines.removeFirst(lines.count - cap) }
-        logger.debug("\(stamped, privacy: .public)")
-        remote?.send(stamped)
+        record(line)
     }
 
     /// Panel-driven refresh: publish a redraw for the current buffer. Called on a
     /// timer by the panel, so recording never publishes per-append.
     func refresh() { revision &+= 1 }
 
-    /// The whole buffer as one string, for copy-to-clipboard.
-    var joined: String { lines.joined(separator: "\n") }
+    /// The whole buffer as one string, everything shown (the panel's "Copy full").
+    var fullText: String { fullLogText(lines) }
+
+    /// The whole buffer for sharing (privacy audit P-M4 D): typed keys replaced by their
+    /// length, hosts and users as tags, server text as its length.
+    var shareableText: String { shareableLogText(lines, salt: tagSalt) }
 
     func clear() { lines.removeAll(); start = nil; revision &+= 1 }
 }

@@ -187,7 +187,7 @@ struct HostListView: View {
                 DebugLog.shared.log(.connect, "resume:launch host \(record.hostID) unresolved → host list")
                 return
             }
-            DebugLog.shared.log(.connect, "resume:launch present host=\(host.label)")
+            DebugLog.shared.log(.connect, "resume:launch present host=\(logHost(host.label))")
             resumeTarget = ResumeTarget(host: host, action: action)
         case .reforeground, .none:
             // Nothing to reforeground on a cold launch; normal host-list landing.

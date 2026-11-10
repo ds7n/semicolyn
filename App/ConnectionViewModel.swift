@@ -437,7 +437,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// in flight per handshake; if a stale continuation somehow remains, resolve
     /// it as rejected (the safe direction) rather than leaking its task.
     func present(_ prompt: HostKeyPrompt) async -> Bool {
-        DebugLog.shared.log(.connect, "hostkey: prompt shown (\(String(describing: prompt).prefix(60)))")
+        DebugLog.shared.log(.connect, "hostkey: prompt shown (\(logServerText(String(String(describing: prompt).prefix(60)))))")
         return await withCheckedContinuation { cont in
             promptContinuation?.resume(returning: false)
             promptContinuation = cont
@@ -606,7 +606,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         case .password(let password): performReconnect(host: host, password: password)
         case .keysOnly:               performReconnect(host: host, password: "")
         case .askForPassword:
-            DebugLog.shared.log(.connect, "reconnect: no key or password for \(host.hostName) → ask, session kept")
+            DebugLog.shared.log(.connect, "reconnect: no key or password for \(logHost(host.hostName)) → ask, session kept")
             reconnectNeedsPassword = true
         }
     }
@@ -629,7 +629,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// it, the same hand-off the Mosh reattach watchdogs use.
     private func performReconnect(host: Host, password: String) {
         let wasLive = state == .shell || state == .connecting
-        DebugLog.shared.log(.connect, "reconnect: triggered for \(host.hostName) wasLive=\(wasLive)")
+        DebugLog.shared.log(.connect, "reconnect: triggered for \(logHost(host.hostName)) wasLive=\(wasLive)")
         if wasLive {
             etUserDisconnecting = true   // the old ET session's async onEnd stays silent
             teardown()
@@ -879,7 +879,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             resumeColdReattach(host: host, record: record)
             return true
         case .promptRaw(let record):
-            DebugLog.shared.log(.connect, "resume:execute promptRaw host=\(host.label)")
+            DebugLog.shared.log(.connect, "resume:execute promptRaw host=\(logHost(host.label))")
             resumeRawRecord = record
             resumeRawPrompt = host.label
             return true
@@ -935,7 +935,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         lastSavedHost = host
         state = .connecting
         DebugLog.shared.log(.connect,
-            "resume:coldReattach transport=\(record.transport.rawValue) endpoint=\(record.host):\(record.port)")
+            "resume:coldReattach transport=\(record.transport.rawValue) endpoint=\(logHost(record.host)):\(record.port)")
         // A reattach never runs `connect(savedHost:)`, so apply the host's session
         // policies here too (teardown on suspend cleared the predictor).
         applySessionPolicies(host: host,
@@ -979,7 +979,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             return false
         }
         guard let host = (try? AppStores.shared.hosts.host(id: record.hostID)) ?? nil else { return false }
-        DebugLog.shared.log(.connect, "resume:foreground re-home host=\(host.label)")
+        DebugLog.shared.log(.connect, "resume:foreground re-home host=\(logHost(host.label))")
         resumeColdReattach(host: host, record: record)
         return true
     }
@@ -989,7 +989,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private func reattachMosh(host: Host, record: ResumableSession, key: Data) {
         let keyStr = String(decoding: key, as: UTF8.self)
         guard let ip = MoshHostResolver.numericAddress(for: record.host) else {
-            DebugLog.shared.log(.connect, "resume:reattachMosh could not resolve \(record.host) → banner")
+            DebugLog.shared.log(.connect, "resume:reattachMosh could not resolve \(logHost(record.host)) → banner")
             failResume(host: host, record: record, secret: key, reason: "couldn't resolve host")
             return
         }
@@ -1177,7 +1177,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             // explicit contract.
             if self.moshResolved { return }
             self.moshResolved = true
-            DebugLog.shared.log(.connect, "resume:reattachMosh onEnd reason=\(reason ?? "nil") → banner")
+            DebugLog.shared.log(.connect, "resume:reattachMosh onEnd reason=\(reason.map(logServerText) ?? "nil") → banner")
             self.moshSession?.stop(); self.moshSession = nil
             self.failResume(host: host, record: record, secret: key,
                             reason: reason ?? "reattach ended")
@@ -1283,7 +1283,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         // armed first or the cover would dismiss before the user can act.
         resumeFailure = host.label
         state = .idle   // no live shell; the banner drives the next action
-        DebugLog.shared.log(.connect, "resume:fail host=\(host.label) reason=\(reason) → banner (record cleared, in-mem kept)")
+        DebugLog.shared.log(.connect, "resume:fail host=\(logHost(host.label)) reason=\(logServerText(reason)) → banner (record cleared, in-mem kept)")
     }
 
     // MARK: - Resume banner + raw-prompt actions
@@ -1291,7 +1291,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Banner Retry: re-attempt the cold reattach from the in-memory copy.
     func resumeRetry() {
         guard let mem = resumeInMemory else { return }
-        DebugLog.shared.log(.connect, "resume:retry host=\(mem.host.label)")
+        DebugLog.shared.log(.connect, "resume:retry host=\(logHost(mem.host.label))")
         resumeFailure = nil
         // Re-persist the in-memory secret so the reattach path can read it, then re-run.
         AppStores.shared.resume.captureConnected(
@@ -1304,7 +1304,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Banner Start fresh: a NEW connection to the same host (explicit new session).
     func resumeStartFresh() {
         guard let mem = resumeInMemory else { return }
-        DebugLog.shared.log(.connect, "resume:startFresh host=\(mem.host.label)")
+        DebugLog.shared.log(.connect, "resume:startFresh host=\(logHost(mem.host.label))")
         resumeFailure = nil
         resumeInMemory = nil
         connect(savedHost: mem.host, password: freshConnectPassword(for: mem.host))
@@ -1321,7 +1321,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Raw-SSH prompt Reconnect: a fresh SSH connect to the same host. `connect`
     /// clears the old record (teardown) and mints a fresh session id.
     func resumeRawReconnect(host: Host) {
-        DebugLog.shared.log(.connect, "resume:rawReconnect host=\(host.label)")
+        DebugLog.shared.log(.connect, "resume:rawReconnect host=\(logHost(host.label))")
         resumeRawPrompt = nil
         resumeRawRecord = nil
         connect(savedHost: host, password: freshConnectPassword(for: host))
@@ -1329,7 +1329,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
 
     /// Raw-SSH prompt Not now: clear the resumed record and dismiss to the host list.
     func resumeRawDecline(host: Host) {
-        DebugLog.shared.log(.connect, "resume:rawDecline host=\(host.label)")
+        DebugLog.shared.log(.connect, "resume:rawDecline host=\(logHost(host.label))")
         resumeRawPrompt = nil
         if let rec = resumeRawRecord {
             AppStores.shared.resume.clear(sessionID: rec.sessionID)
@@ -1377,7 +1377,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 return AuthAttemptResult(outcome)
             },
             onKeyError: { identityID, error in
-                DebugLog.shared.log(.connect, "authenticate: key \(identityID) skipped, error \(String(describing: error))")
+                DebugLog.shared.log(.connect, "authenticate: key \(identityID) skipped, error \(logServerText(String(describing: error)))")
             })
         DebugLog.shared.log(.connect, decisionLine(
             "authenticate",
@@ -1462,7 +1462,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             group.cancelAll()
         }
         let text = String(decoding: captured, as: UTF8.self)
-        DebugLog.shared.log(.tmux, "probeTmuxVersion: got \(text.isEmpty ? "EMPTY (nil)" : text.trimmingCharacters(in: .whitespacesAndNewlines))")
+        DebugLog.shared.log(.tmux, "probeTmuxVersion: got \(text.isEmpty ? "EMPTY (nil)" : logServerText(text.trimmingCharacters(in: .whitespacesAndNewlines)))")
         return text.isEmpty ? nil : text
     }
 
@@ -1608,14 +1608,14 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
             let peerIP = conn.peerIp()
             guard let moshIP = moshTargetAddress(peerIP: peerIP, hostName: host.hostName,
                                                  resolve: MoshHostResolver.numericAddress) else {
-                DebugLog.shared.log(.connect, "mosh: could not resolve \(host.hostName) to an IP → SSH fallback")
+                DebugLog.shared.log(.connect, "mosh: could not resolve \(logHost(host.hostName)) to an IP → SSH fallback")
                 moshFallback = "Mosh: couldn't resolve \(host.hostName), using SSH"
                 return false
             }
             DebugLog.shared.log(.connect, decisionLine(
                 "mosh:target",
-                inputs: [("host", host.hostName), ("peer", peerIP ?? "none")],
-                outputs: [("ip", moshIP)],
+                inputs: [("host", logHost(host.hostName)), ("peer", peerIP.map(logHost) ?? "none")],
+                outputs: [("ip", logHost(moshIP))],
                 reason: moshIP == peerIP ? "ssh peer IP" : "DNS (no usable peer IP)"))
             let predict = cfg.predictionMode?.rawValue ?? "adaptive"
             // Seeded at 80×24: the terminal view hasn't laid out yet at connect time,
@@ -1743,7 +1743,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     return
                 }
                 self.moshResolved = true
-                DebugLog.shared.log(.connect, "mosh: onEnd firstFrameSeen=\(self.moshFirstFrameSeen) reason=\(reason ?? "nil")")
+                DebugLog.shared.log(.connect, "mosh: onEnd firstFrameSeen=\(self.moshFirstFrameSeen) reason=\(reason.map(logServerText) ?? "nil")")
                 let elapsed = ProcessInfo.processInfo.systemUptime - moshStartedAt
                 switch moshExitDecision(reason: reason, elapsed: elapsed) {
                 case .crashBanner:
@@ -1782,7 +1782,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                         do {
                             try await self.attachSSHShell(conn: conn, host: host, defaults: defaults)
                         } catch {
-                            DebugLog.shared.log(.connect, "mosh: SSH fallback THREW \(String(describing: error)) → .failed")
+                            DebugLog.shared.log(.connect, "mosh: SSH fallback THREW \(logServerText(String(describing: error))) → .failed")
                             self.state = .failed(String(describing: error))
                         }
                     }
@@ -1810,7 +1810,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 do {
                     try await self.attachSSHShell(conn: conn, host: host, defaults: defaults)
                 } catch {
-                    DebugLog.shared.log(.connect, "mosh: watchdog SSH fallback THREW \(String(describing: error)) → .failed")
+                    DebugLog.shared.log(.connect, "mosh: watchdog SSH fallback THREW \(logServerText(String(describing: error))) → .failed")
                     self.state = .failed(String(describing: error))
                 }
             }
@@ -1919,13 +1919,13 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         guard let stdout = await captureETBootstrap(conn: conn, command: command) else {
             return .failure(.execFailed)
         }
-        DebugLog.shared.log(.transport, "et: parse input " + maskBootstrapPayload(stdout))
+        DebugLog.shared.log(.transport, "et: parse input " + logServerText(maskBootstrapPayload(stdout)))
         let serverCred: ETCredential
         switch parseETIDPASSKEY(stdout) {
         case .success(let cred):
             serverCred = cred
         case .failure(let e):
-            DebugLog.shared.log(.connect, "et: IDPASSKEY parse FAILED (\(String(describing: e)))")
+            DebugLog.shared.log(.connect, "et: IDPASSKEY parse FAILED (\(logServerText(String(describing: e))))")
             return .failure(e)
         }
         DebugLog.shared.log(.connect, "et: IDPASSKEY parsed ok")
@@ -2081,7 +2081,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                     return
                 }
                 self.etResolved = true
-                DebugLog.shared.log(.transport, "et: session ended pre-first-frame (\(safe)) → .failed")
+                DebugLog.shared.log(.transport, "et: session ended pre-first-frame (\(logServerText(safe))) → .failed")
                 self.etSession?.close()   // release the retained ctx + tear down
                 self.etSession = nil
                 self.state = .failed(etFailureMessage(.handshakeFailed(reason: safe)))
@@ -2805,11 +2805,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         let port = resolvePort(host: savedHost, defaults: defaults)
         let addr = "\(savedHost.hostName):\(port)"
         output.onExit = { [weak self] exit in
-            DebugLog.shared.log(.connect, "connect(saved): output.onExit → .failed(\(exit.error ?? "Session closed"))")
+            DebugLog.shared.log(.connect, "connect(saved): output.onExit → .failed(\(exit.error.map(logServerText) ?? "Session closed"))")
             self?.clearResume()   // raw/session exit is an observable end: clear the record
             self?.state = .failed(exit.error ?? "Session closed")
         }
-        DebugLog.shared.log(.connect, "connect(saved): START addr=\(addr) user=\(user)")
+        DebugLog.shared.log(.connect, "connect(saved): START addr=\(logHost(savedHost.hostName)):\(port) user=\(logUser(user))")
         Task {
             let verifier = TofuHostKeyVerifier(
                 hostID: savedHost.id, trust: AppStores.shared.trust,
@@ -2867,7 +2867,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 DebugLog.shared.log(.connect, "connect(saved): Timeout → .failed")
                 state = .failed("Couldn't reach host, connection timed out")
             } catch {
-                DebugLog.shared.log(.connect, "connect(saved): THREW \(String(describing: error)) → .failed")
+                DebugLog.shared.log(.connect, "connect(saved): THREW \(logServerText(String(describing: error))) → .failed")
                 state = .failed(String(describing: error))
             }
         }
@@ -2887,11 +2887,11 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         degraded = nil
         let addr = "\(host):\(port.isEmpty ? "22" : port)"
         output.onExit = { [weak self] exit in
-            DebugLog.shared.log(.connect, "connect(adhoc): output.onExit → .failed(\(exit.error ?? "Session closed"))")
+            DebugLog.shared.log(.connect, "connect(adhoc): output.onExit → .failed(\(exit.error.map(logServerText) ?? "Session closed"))")
             self?.clearResume()   // raw/session exit is an observable end: clear the record
             self?.state = .failed(exit.error ?? "Session closed")
         }
-        DebugLog.shared.log(.connect, "connect(adhoc): START addr=\(addr) user=\(user)")
+        DebugLog.shared.log(.connect, "connect(adhoc): START addr=\(logHost(host)):\(port.isEmpty ? "22" : port) user=\(logUser(user))")
         Task {
             var adhocVerifier: TofuHostKeyVerifier?
             do {
@@ -2954,7 +2954,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
                 DebugLog.shared.log(.connect, "connect(adhoc): Timeout → .failed")
                 state = .failed("Couldn't reach host, connection timed out")
             } catch {
-                DebugLog.shared.log(.connect, "connect(adhoc): THREW \(String(describing: error)) → .failed")
+                DebugLog.shared.log(.connect, "connect(adhoc): THREW \(logServerText(String(describing: error))) → .failed")
                 state = .failed(String(describing: error))
             }
         }

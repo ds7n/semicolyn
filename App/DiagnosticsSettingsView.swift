@@ -126,7 +126,9 @@ struct DiagnosticsContent: View {
                 Toggle("Show debug log panel", isOn: $showDebugPanel)
             } footer: {
                 Text("A destination for logs (requires \"Enable logging\"). Adds a 🐞 button in "
-                     + "a connected session that opens a scrollable log with a Copy button.")
+                     + "a connected session that opens a scrollable log. Copy gives a shareable "
+                     + "version (typed keys, hosts, users and server messages replaced); hold it "
+                     + "for Copy Full, which asks for Face ID.")
             }
 
             Section {
@@ -196,7 +198,9 @@ struct DiagnosticsContent: View {
             } footer: {
                 Text("Sends diagnostic logs to your own syslog server (RFC 5424). TLS remembers "
                      + "the server's certificate the first time and asks you if it changes. "
-                     + "TCP and UDP are unencrypted, so typed keys are never sent over them.")
+                     + "TCP and UDP are unencrypted, so typed keys are never sent over them, and "
+                     + "host names, user names and server messages are replaced by short tags "
+                     + "(host#a3f2) or their length.")
             }
 
             Section {
