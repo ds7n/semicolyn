@@ -3,7 +3,7 @@
 import Foundation
 
 /// The runtime facade: one type the app records into and queries for suggestions,
-/// composing the write-time privacy filter, the learned windowed stores, the shipped
+/// composing the write-time privacy filter, the learned stores, the shipped
 /// English dictionary and command tree, and the single ranker. Holds no I/O: the app
 /// loads its inputs (``LearnedStore``, the bundled dictionaries) and flushes `state`
 /// back. See `2026-06-21-predictor-engine-design`.
@@ -16,12 +16,14 @@ public struct PredictorEngine: Sendable {
     /// trailing token (UTF-8) joined with the start of the next chunk.
     private var harvestFilter = ANSIByteFilter()
     private var harvestPrevious: String?
+    /// The previous harvested token was an auth scheme dropped as a secret header's
+    /// value (`Authorization: Bearer`): the next token is the credential. Mirrors
+    /// `InputTokenTracker.credentialFollowsScheme`.
+    private var harvestCredentialPending = false
     private var harvestPartial: [UInt8] = []
     /// Exclusion rules: applied at write time by `record` and `harvest`, and
     /// re-applied at read time by every suggestion query as a safety net.
     public var filter: TokenFilter
-    /// Which rolling pre-aggregate suggestions read.
-    public var window: RollingWindow
     /// Shipped English dictionary; `nil` adds nothing.
     private let english: WordDictionary?
     /// Shipped command tree; `nil` adds nothing.
@@ -33,6 +35,11 @@ public struct PredictorEngine: Sendable {
     /// ``suggestions(line:lineOptedOut:limit:)`` still ranks the shipped dictionaries
     /// (and whatever `learned` the engine was built with).
     public let learns: Bool
+    /// Set while the foreground program is full screen or a REPL (privacy P-M6, see
+    /// ``LearningPause``): like `learns: false`, ``record`` and ``harvest(_:)`` do
+    /// nothing, and the harvest context resets so no token spans the pause. Suggestions
+    /// keep working. Defaults to `false`.
+    public var learningPaused = false
 
     /// An engine for the single ranker (``suggestions(line:lineOptedOut:limit:)``),
     /// reading the shipped English dictionary and command tree. Either may be `nil`
@@ -40,12 +47,11 @@ public struct PredictorEngine: Sendable {
     /// (see ``learns``).
     public init(learned: LearnedState, english: WordDictionary?, commands: CommandTree?,
                 filter: TokenFilter = .init(), weights: RankingWeights = .init(),
-                window: RollingWindow = .days30, learns: Bool = true) {
+                learns: Bool = true) {
         self.learns = learns
         self.learned = learned
         self.output = OutputHarvest(capacity: 512)
         self.filter = filter
-        self.window = window
         self.english = english
         self.commands = commands
         self.weights = weights
@@ -80,7 +86,7 @@ public struct PredictorEngine: Sendable {
     public mutating func record(_ token: String, count: UInt32 = 1, after previous: String? = nil,
                                 echoConfirmed: Bool = true, optedOut: Bool = false,
                                 accepted: Bool = false) {
-        guard learns else { return }
+        guard learns, !learningPaused else { return }
         // Normalize: learn the lookup word (surrounding punctuation trimmed; paths and
         // flags whole). Both the raw token and the word must pass the filter, so
         // trimming can never let an excluded form through.
@@ -105,8 +111,13 @@ public struct PredictorEngine: Sendable {
                 learned.bigram.record(previous: prev, next: occ.token, count: occ.count,
                                       storeLiteral: storeLiteral)
             }
+            learned.noteLearned(words: Int(occ.count))
         }
+        if learned.exceedsCap { learned.enforceCap() }
     }
+
+    /// Number of learned words currently stored as suggestable literals.
+    public var learnedWordCount: Int { learned.unigram.literalCount }
 
     /// Distinct contexts a word needs before it graduates: 1 when the user tapped it
     /// or it was already learned in an earlier session, 2 for a dictionary word or
@@ -174,6 +185,9 @@ public struct PredictorEngine: Sendable {
     /// may be the tail of a cut word or escape sequence) is not harvested.
     public mutating func harvest(_ chunk: HarvestChunk) {
         guard learns else { return }
+        // Paused: drop the chunk and any carried context, so the fragment before the
+        // pause never joins the output after it.
+        if learningPaused { resetHarvestContext(); return }
         if chunk.droppedBefore { resetHarvestContext() }
         var clean = harvestFilter.filter(chunk.bytes)
         if chunk.droppedBefore {
@@ -197,9 +211,18 @@ public struct PredictorEngine: Sendable {
         var kept: [String] = []
         for raw in tokens {
             let token = String(decoding: raw, as: UTF8.self)
-            defer { harvestPrevious = token }
-            guard isScreenWordShaped(token), !filter.excludes(token),
-                  !isSecretValueToken(token, precededBy: harvestPrevious) else { continue }
+            let credentialPending = harvestCredentialPending
+            harvestCredentialPending = false
+            let previous = harvestPrevious
+            harvestPrevious = token
+            // The secret checks run on every token (even non-word-shaped ones such as
+            // the `Authorization:` header) so the credential reach is never skipped.
+            if credentialPending { continue }
+            if isSecretValueToken(token, precededBy: previous) {
+                harvestCredentialPending = isAuthScheme(token) && (previous.map(isSecretHeaderToken) ?? false)
+                continue
+            }
+            guard isScreenWordShaped(token), !filter.excludes(token) else { continue }
             kept.append(token)
         }
         self.output.harvest(kept)
@@ -213,6 +236,7 @@ public struct PredictorEngine: Sendable {
     private mutating func resetHarvestContext() {
         harvestFilter = ANSIByteFilter()
         harvestPrevious = nil
+        harvestCredentialPending = false
         harvestPartial = []
     }
 
@@ -233,14 +257,7 @@ public struct PredictorEngine: Sendable {
     public func suggestions(line: String, lineOptedOut: Bool, limit: Int = 12) -> [Suggestion] {
         let sources = RankingSources(
             english: english, commands: commands, learned: learned, screen: output,
-            filter: filter, weights: weights, window: window)
+            filter: filter, weights: weights)
         return rankSuggestions(line: line, lineOptedOut: lineOptedOut, sources: sources, limit: limit)
-    }
-
-    /// Seal the day for both learned axes, the app calls this at user-local
-    /// midnight.
-    public mutating func rollover() {
-        learned.unigram.rollover()
-        learned.bigram.rollover()
     }
 }

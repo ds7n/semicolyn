@@ -163,4 +163,33 @@ final class HarvestBufferTests: XCTestCase {
         XCTAssertEqual(texts(e, "red"), [])
         XCTAssertEqual(texts(e, "clean"), ["clean.log"])
     }
+
+    /// Screen output `Authorization: Bearer <cred>`: neither the scheme nor the
+    /// word-shaped credential is harvested.
+    func testHarvestDropsSchemeAndCredentialAfterAuthHeader() {
+        var e = engine()
+        e.harvest(output: "Authorization: Bearer abcdefgh\n")
+        XCTAssertEqual(texts(e, "Bear"), [])
+        XCTAssertEqual(texts(e, "abcd"), [])
+    }
+
+    func testHarvestKeepsWordAfterSchemeLookingWordWithoutHeader() {
+        var e = engine()
+        e.harvest(output: "basic usage notes\n")
+        XCTAssertEqual(texts(e, "usa"), ["usage"])
+    }
+
+    func testHarvestKeepsWordAfterTokenWithoutHeader() {
+        var e = engine()
+        e.harvest(output: "vault token lookup\n")
+        XCTAssertEqual(texts(e, "look"), ["lookup"])
+    }
+
+    /// The pending credential does not survive a dropped-output gap.
+    func testHarvestCredentialPendingClearsAcrossGap() {
+        var e = engine()
+        e.harvest(output: "Authorization: Bearer ")
+        e.harvest(HarvestChunk(bytes: Array("x abcdefgh\n".utf8), droppedBefore: true))
+        XCTAssertEqual(texts(e, "abcd"), ["abcdefgh"])
+    }
 }

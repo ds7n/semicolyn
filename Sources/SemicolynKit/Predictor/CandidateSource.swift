@@ -23,10 +23,11 @@ public protocol CandidateSource {
 
 /// Sums several candidate sources: unions their prefix matches and adds each
 /// token's count across sources (saturating). This realizes the predictor's
-/// `today ⊕ rolling_<window>` query on the read side, estimating each token in
-/// each source and adding, rather than materializing a merged sketch per
-/// keystroke. Both are pointwise sums; this preserves the one-sided error (each
-/// estimate `≥` its true count, so the sum `≥` the true combined count).
+/// multi-source query on the read side (for example the learned store plus the
+/// bundled dictionary), estimating each token in each source and adding, rather
+/// than materializing a merged sketch per keystroke. Both are pointwise sums;
+/// this preserves the one-sided error (each estimate `≥` its true count, so the
+/// sum `≥` the true combined count).
 public struct AggregateCandidateSource: CandidateSource {
     private let sources: [any CandidateSource]
 

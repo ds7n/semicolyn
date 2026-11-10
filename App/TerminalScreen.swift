@@ -29,7 +29,8 @@ struct TerminalScreen: UIViewRepresentable {
     var theme: Theme = Theme.neonMidnight
     /// Whether OSC 52 clipboard writes are allowed for this session (resolved at connect time).
     var osc52Allowed: Bool = true
-    /// Called with the sanitized OSC 0/2 title; routes to `vm.terminalTitle`.
+    /// Called with the sanitized OSC 0/2 title (tmux's full-screen suffix stripped);
+    /// routes to `vm.terminalTitle`.
     var onTitle: ((String) -> Void)? = nil
     /// Called when the user taps an ssh:// link; routes to the confirm-connect sheet.
     var onSSHLink: ((URL) -> Void)? = nil
@@ -178,10 +179,21 @@ struct TerminalScreen: UIViewRepresentable {
         // byte passes the kitty filter first so a server can't make the app read its own
         // files (security audit L1); one filter per terminal keeps split commands caught.
         var kittyFilter = KittyTransmissionFilter()
-        output.onBytes = { [weak terminal] bytes in
+        // Learning pause (privacy P-M6), for sessions without tmux: after each feed, tell
+        // the VM when the terminal entered or left its alternate screen. Checked per feed
+        // rather than on `bufferActivated`, which a full reset (RIS) skips.
+        var lastAlternate = false
+        output.onBytes = { [weak terminal, weak coordinator] bytes in
             var filtered = bytes
             kittyFilter.filter(&filtered)
             terminal?.feed(byteArray: filtered[...])
+            let alternate = terminal?.getTerminal().isCurrentBufferAlternate ?? false
+            guard alternate != lastAlternate else { return }
+            lastAlternate = alternate
+            let vm = coordinator?.vm
+            MainActor.assumeIsolated {
+                vm?.noteTerminalAlternateScreenChanged()
+            }
         }
         // Wrap the terminal in a plain-UIView container so IT (not the scroll view) is the
         // SwiftUI representable leaf. The container owns the child's frame from the correct
@@ -546,7 +558,15 @@ struct TerminalScreen: UIViewRepresentable {
         // Delegate methods.
         func scrolled(source: TerminalView, position: Double) {}
         func setTerminalTitle(source: TerminalView, title: String) {
-            if let t = sanitizeTerminalTitle(title) { onTitle?(t) }
+            // Learning pause (privacy P-M6): under plain tmux the title is our
+            // `tmuxTitlesFormat`; the VM decides whether it counts. Every title updates
+            // the pause, even one too malformed to display.
+            let pause = learningPause(forTitle: title)
+            let vm = self.vm
+            MainActor.assumeIsolated {
+                vm?.noteTitleLearningPause(pause)
+            }
+            if let t = sanitizeTerminalTitle(title) { onTitle?(displayTitle(fromTmuxTitle: t)) }
         }
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
         func clipboardCopy(source: TerminalView, content: Data) {

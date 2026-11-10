@@ -28,19 +28,45 @@ final class TmuxGestureBindingsTests: XCTestCase {
     }
 
     func testLaunchCommandExactForDefaultSession() {
-        let expected = #"sh -c 'S=semicolyn;printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in "split-window -h" "split-window -v" kill-pane new-window "resize-pane -Z" next-window previous-window "select-pane -t +";do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null;exec tmux attach-session -t "=$S"'"#
+        let expected = ##"sh -c 'S=semicolyn;printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||exec tmux;tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set -- set -t "$S" set-titles on \; set -t "$S" set-titles-string "#{pane_current_command}#{?alternate_on, (full screen),}" \;;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in "split-window -h" "split-window -v" kill-pane new-window "resize-pane -Z" next-window previous-window "select-pane -t +";do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null;exec tmux attach-session -t "=$S"'"##
         XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "semicolyn"), expected)
     }
 
     /// The command is TYPED into an interactive shell on Mosh/ET; macOS canonical-mode
-    /// lines cap at 1024 bytes (MAX_CANON). Length is 739 + name, so the built-in name
-    /// gives 748 and a 1-char name gives 740.
+    /// lines cap at 1024 bytes (MAX_CANON). Length is 859 + name, so the built-in name
+    /// gives 868 and a 1-char name gives 860.
     func testLaunchCommandLengthIsFixedOverheadPlusName() {
         let builtIn = plainTmuxLaunchCommand(sessionName: "semicolyn")
-        XCTAssertEqual(builtIn.count, 748)
-        XCTAssertEqual(builtIn.utf8.count, 748)
+        XCTAssertEqual(builtIn.count, 868)
+        XCTAssertEqual(builtIn.utf8.count, 868)
         XCTAssertLessThan(builtIn.utf8.count, 1024)
-        XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "a").count, 740)
+        XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "a").count, 860)
+    }
+
+    /// `isValidTmuxSessionName` has no length cap, so the MAX_CANON budget is the
+    /// binding limit: a 164-character name is the longest whose typed launch still fits
+    /// (1023 bytes); one more character reaches 1024.
+    func testLongestNameThatFitsMaxCanon() {
+        let longest = String(repeating: "n", count: 164)
+        XCTAssertTrue(isValidTmuxSessionName(longest))
+        XCTAssertEqual(plainTmuxLaunchCommand(sessionName: longest).utf8.count, 1023)
+        XCTAssertLessThan(plainTmuxLaunchCommand(sessionName: longest).utf8.count, 1024)
+        XCTAssertEqual(plainTmuxLaunchCommand(sessionName: longest + "n").utf8.count, 1024)
+    }
+
+    /// Learning pause (privacy P-M6): the launch turns on tmux titles for THIS session
+    /// (`set -t "$S"`, never `-g`) with `tmuxTitlesFormat`, inside the single batched
+    /// set/bind call (`set --` seeds it, so the call always runs even with no slot to
+    /// bind), before the per-action loop.
+    func testLaunchSetsSessionScopedTitlesInTheBatchedCall() throws {
+        let cmd = plainTmuxLaunchCommand(sessionName: "semicolyn")
+        XCTAssertEqual(tmuxTitlesFormat, "#{pane_current_command}#{?alternate_on, (full screen),}")
+        let seed = #"set -- set -t "$S" set-titles on \; set -t "$S" set-titles-string "\#(tmuxTitlesFormat)" \;;i=0;"#
+        let seedRange = try XCTUnwrap(cmd.range(of: seed))
+        let loop = try XCTUnwrap(cmd.range(of: "for c in "))
+        XCTAssertLessThan(seedRange.lowerBound, loop.lowerBound)
+        XCTAssertFalse(cmd.contains("set -g"))
+        XCTAssertEqual(cmd.components(separatedBy: "set-titles").count, 3)   // exactly two options
     }
 
     /// Every tmux client spawn costs a round trip before tmux paints, so the launch is
@@ -120,17 +146,17 @@ final class TmuxGestureBindingsTests: XCTestCase {
 
     private let nonce = "Xy7Qk2Ma"
 
-    private let directExpected = #"sh -c 'S=semicolyn;printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||{ printf "SEMICOLYN_%s_%s\n" NOTMUX Xy7Qk2Ma;exec "${SHELL:-sh}" -l;};tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in "split-window -h" "split-window -v" kill-pane new-window "resize-pane -Z" next-window previous-window "select-pane -t +";do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null;tmux attach-session -t "=$S";exec "${SHELL:-sh}" -l'"#
+    private let directExpected = ##"sh -c 'S=semicolyn;printf "SEMICOLYN_%s\r" LAUNCH;command -v tmux >/dev/null||{ printf "SEMICOLYN_%s_%s\n" NOTMUX Xy7Qk2Ma;exec "${SHELL:-sh}" -l;};tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set -- set -t "$S" set-titles on \; set -t "$S" set-titles-string "#{pane_current_command}#{?alternate_on, (full screen),}" \;;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in "split-window -h" "split-window -v" kill-pane new-window "resize-pane -Z" next-window previous-window "select-pane -t +";do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null;tmux attach-session -t "=$S";exec "${SHELL:-sh}" -l'"##
 
     func testDirectLaunchCommandExactForDefaultSession() {
         XCTAssertEqual(plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: nonce), directExpected)
     }
 
     /// Not typed (it rides the SSH exec as mosh-server's command), but pinned so any
-    /// change to the script is deliberate: 809 + name length + nonce length.
+    /// change to the script is deliberate: 929 + name length + nonce length.
     func testDirectLaunchCommandLengthIsFixedOverheadPlusName() {
-        XCTAssertEqual(plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: nonce).utf8.count, 826)
-        XCTAssertEqual(plainTmuxDirectLaunchCommand(sessionName: "a", nonce: nonce).utf8.count, 818)
+        XCTAssertEqual(plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: nonce).utf8.count, 946)
+        XCTAssertEqual(plainTmuxDirectLaunchCommand(sessionName: "a", nonce: nonce).utf8.count, 938)
     }
 
     func testDirectLaunchCommandEmbedsSessionName() {
@@ -219,7 +245,7 @@ final class TmuxGestureBindingsTests: XCTestCase {
         let other = plainTmuxDirectLaunchCommand(sessionName: "semicolyn", nonce: "Q")
         XCTAssertTrue(other.contains(#"printf "SEMICOLYN_%s_%s\n" NOTMUX Q;"#))
         XCTAssertEqual(other.filter { $0 == "'" }.count, 2)
-        XCTAssertEqual(other.utf8.count, 819)   // 809 + 9 + 1
+        XCTAssertEqual(other.utf8.count, 939)   // 929 + 9 + 1
     }
 
     /// The text from `tmux has-session` up to and including the set/bind call.

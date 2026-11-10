@@ -5,10 +5,11 @@ import SemicolynKit
 
 /// Settings → Suggestions & Privacy: the all-hosts "Don't learn from my typing"
 /// default (the same Connection Defaults value; a host can still override it in its
-/// editor), the predictor panic-purge ("Clear Learned Suggestions…"), and a read-only
-/// "Keystroke logging" row that links to Diagnostics, where it is changed. Below those,
-/// the device-only privacy settings (`PrivacyPreferences`): the app-switcher cover,
-/// clipboard sharing and expiry, and third-party keyboards.
+/// editor), the "Learned words" count and the predictor panic-purge ("Clear Learned
+/// Suggestions…"), and a read-only "Keystroke logging" row that links to Diagnostics,
+/// where it is changed. Below those, the device-only privacy settings
+/// (`PrivacyPreferences`): the app-switcher cover, clipboard sharing and expiry, and
+/// third-party keyboards.
 ///
 /// Purge wiring: `AppStores.shared.purgePredictorLearned()` resets the live
 /// session's in-memory engine (via the `activePredictorSession` registration) BEFORE
@@ -20,6 +21,8 @@ struct PrivacySettingsView: View {
     @StateObject private var defaultsVM = DefaultsEditorViewModel()
     @State private var confirming = false
     @State private var purged = false
+    /// The "Learned words" row: nil until the first read finishes.
+    @State private var learnedWords: LearnedWordsValue?
 
     @AppStorage(DiagnosticsContent.loggingEnabledKey) private var loggingEnabled = false
     @AppStorage(LogCategory.input.storageKey) private var inputCategoryOn = LogCategory.input.defaultOn
@@ -59,6 +62,7 @@ struct PrivacySettingsView: View {
             }
 
             Section {
+                LabeledContent("Learned words", value: learnedWordsText)
                 Button(role: .destructive) { InputClickFeedback.play(); confirming = true } label: {
                     Label("Clear Learned Suggestions…", systemImage: "trash")
                 }
@@ -123,11 +127,19 @@ struct PrivacySettingsView: View {
             }
         }
         .navigationTitle("Suggestions & Privacy")
+        .task { await refreshLearnedWords() }
         .confirmationDialog("Clear learned suggestions?",
                             isPresented: $confirming, titleVisibility: .visible) {
             Button("Clear", role: .destructive) {
                 InputClickFeedback.play()
-                try? AppStores.shared.purgePredictorLearned()
+                do {
+                    try AppStores.shared.purgePredictorLearned()
+                    // The live engine's reset is queued on its actor, so reading it
+                    // back now could race; a successful purge leaves nothing learned.
+                    learnedWords = .count(0)
+                } catch {
+                    Task { await refreshLearnedWords() }
+                }
                 purged = true
             }
             Button("Cancel", role: .cancel) {}
@@ -144,6 +156,40 @@ struct PrivacySettingsView: View {
             Button("OK", role: .cancel) { InputClickFeedback.play(); defaultsVM.saveError = nil }
         } message: {
             Text(defaultsVM.saveError ?? "")
+        }
+    }
+
+    /// What the "Learned words" row shows.
+    private enum LearnedWordsValue {
+        case count(Int)
+        /// The sealed file exists but can't be read (device locked).
+        case unavailable
+    }
+
+    private var learnedWordsText: String {
+        switch learnedWords {
+        case nil: return ""
+        case .count(0)?: return "None"
+        case let .count(n)?: return n.formatted()
+        case .unavailable?: return "Unavailable while locked"
+        }
+    }
+
+    /// Reads the learned word count: from the live session's engine when one is
+    /// learning, otherwise from the sealed file (off the main actor; it decrypts
+    /// about a megabyte).
+    private func refreshLearnedWords() async {
+        if let session = stores.activePredictorSession {
+            let count = await session.learnedWordCount()
+            learnedWords = .count(count)
+            return
+        }
+        let store = stores.predictorLearnedStore()
+        let load = await Task.detached(priority: .userInitiated) { store.load() }.value
+        switch load {
+        case let .found(state): learnedWords = .count(state.unigram.literalCount)
+        case .absent: learnedWords = .count(0)
+        case .unreadable: learnedWords = .unavailable
         }
     }
 }

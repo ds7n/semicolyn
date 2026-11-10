@@ -79,7 +79,8 @@ public func containsPlainTmuxNoTmuxMarker(_ output: String, nonce: String) -> Bo
 /// The one-line command that launches plain tmux with the private gesture bindings.
 ///
 /// Wrapped in `sh -c '...'` so it behaves the same under any login shell (bash/zsh/fish),
-/// and kept on one short line (739 + name length, under the 1024-byte MAX_CANON) because
+/// and kept on one short line (859 + name length, under the 1024-byte MAX_CANON for names
+/// up to 164 characters) because
 /// Mosh/ET type it into an interactive shell. Every tmux client spawn delays the first
 /// paint, so it starts at most FIVE: `has-session`, `new-session` (only if absent), one
 /// `show -s user-keys` that reads every slot, one call carrying all the `set`/`bind`
@@ -102,7 +103,9 @@ public func containsPlainTmuxNoTmuxMarker(_ output: String, nonce: String) -> Bo
 ///    line could make a user-occupied slot look like ours. An explicitly empty slot
 ///    (shown as `''`) counts as empty, and our value counts as ours whether `show`
 ///    prints it bare (tmux 3.4) or wrapped in double quotes (`[<9900+i>~"` suffix). If the `show` fails, no bindings are attempted;
-/// 5. runs the collected `set`/`bind` commands in ONE tmux call (only if there are any),
+/// 5. runs the collected `set`/`bind` commands in ONE tmux call (seeded with the
+///    session-scoped `set-titles on` and `set-titles-string` = `tmuxTitlesFormat`, which
+///    the app reads to pause predictor learning, privacy P-M6),
 ///    ignoring its failure, then ALWAYS `exec`s a standalone `attach-session`. tmux stops
 ///    a `\;` chain at the first failing command, so attach must never ride in that chain:
 ///    a failed bind costs gestures, never the session.
@@ -148,11 +151,12 @@ public func plainTmuxDirectLaunchCommand(sessionName: String, nonce: String) -> 
 
 /// The launch body shared by both launch variants: create the session `$S` if absent,
 /// then claim a slot and bind each action in ONE ignored-failure tmux call (steps 3 to 5
-/// of `plainTmuxLaunchCommand`, up to but excluding the attach). Expects `S` set and
+/// of `plainTmuxLaunchCommand`, up to but excluding the attach), always including the
+/// session-scoped title options (`set -t "$S"`, never `-g`). Expects `S` set and
 /// tmux on `PATH`; contains no single quote.
 private func plainTmuxBindingsScript() -> String {
     let commands = TmuxAction.allCases
         .map { $0.command.contains(" ") ? "\"\($0.command)\"" : $0.command }
         .joined(separator: " ")
-    return #"tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set --;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in \#(commands);do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null"#
+    return #"tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set -- set -t "$S" set-titles on \; set -t "$S" set-titles-string "\#(tmuxTitlesFormat)" \;;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in \#(commands);do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null"#
 }

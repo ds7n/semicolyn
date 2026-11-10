@@ -12,8 +12,25 @@ import SemicolynKit
 /// the per-line commit/record ordering the L1/L4a invariants require.
 actor PredictorActor {
     private var engine: PredictorEngine
+    /// Why learning is paused right now (privacy P-M6), nil while learning.
+    private var currentPause: LearningPause?
 
     init(engine: PredictorEngine) { self.engine = engine }
+
+    /// Pause learning while the foreground program is full screen or a REPL, or resume
+    /// it (`nil`). Sets `PredictorEngine.learningPaused` and logs transitions only; a
+    /// repeat of the current state is a no-op.
+    func setLearningPause(_ pause: LearningPause?) async {
+        guard pause != currentPause else { return }
+        currentPause = pause
+        engine.learningPaused = pause != nil
+        let line = decisionLine(
+            "predictor:learn",
+            inputs: [("pause", pause?.logKind ?? "none"), ("cmd", pause?.command ?? "-")],
+            outputs: [("learning", pause == nil ? "on" : "paused")],
+            reason: nil)
+        await MainActor.run { DebugLog.shared.log(.predictor, line) }
+    }
 
     func beginLine() { engine.beginLine() }
 
@@ -40,6 +57,8 @@ actor PredictorActor {
     func harvest(_ chunk: HarvestChunk) { engine.harvest(chunk) }
 
     func snapshotState() -> LearnedState { engine.state }
+    /// The engine's learned word count. See `PredictorEngine.learnedWordCount`.
+    func learnedWordCount() -> Int { self.engine.learnedWordCount }
     func purgeLearned() { engine.purgeLearned() }
     func forgetLastLine() { engine.forgetLastLine() }
 }

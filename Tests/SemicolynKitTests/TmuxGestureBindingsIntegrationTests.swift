@@ -108,6 +108,22 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         try waitUntil("split in reused session") { try self.paneCount() == 2 }
     }
 
+    /// Learning pause (privacy P-M6): the launch turns titles on for ITS session only,
+    /// with the exact `tmuxTitlesFormat`. The global values and another session on the
+    /// same server (no session-local value, `show` prints nothing) stay untouched.
+    func testLaunchSetsSessionScopedTitleOptions() throws {
+        try sh("tmux -f /dev/null new-session -d -s other")
+        let globalFormat = try sh("tmux show -g -v set-titles-string")
+        try launchInner()
+        XCTAssertEqual(try sh("tmux show -t semicolyn -v set-titles"), "on")
+        XCTAssertEqual(try sh("tmux show -t semicolyn -v set-titles-string"), tmuxTitlesFormat)
+        XCTAssertEqual(try sh("tmux show -t other -v set-titles"), "")
+        XCTAssertEqual(try sh("tmux show -t other -v set-titles-string"), "")
+        XCTAssertEqual(try sh("tmux show -g -v set-titles"), "off")
+        XCTAssertEqual(try sh("tmux show -g -v set-titles-string"), globalFormat)
+        XCTAssertNotEqual(globalFormat, tmuxTitlesFormat)
+    }
+
     /// A preferred slot the user already uses is left untouched; the gesture claims its
     /// fallback slot instead, so it still works and its bytes never reach the pane.
     func testUserOccupiedSlotIsLeftAloneAndGestureUsesFallbackSlot() throws {
