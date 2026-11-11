@@ -45,19 +45,21 @@ public func keystrokesSaved(_ edit: AcceptanceEdit) -> Int {
     edit.backspaces + edit.text.count - 1
 }
 
-/// How many chips fit in `available` width (chips separated by `spacing`). The first chip
-/// always shows (the App truncates it); 0 only when there are no chips.
-public func chipsThatFit(widths: [Double], available: Double, spacing: Double) -> Int {
-    guard !widths.isEmpty else { return 0 }
-    var used = 0.0
-    var count = 0
-    for width in widths {
-        let next = count == 0 ? width : used + spacing + width
-        if next > available { break }
-        used = next
-        count += 1
-    }
-    return max(count, 1)
+/// Minimum width (pt) of one suggestion slot; below it the strip drops to 3 slots.
+public let suggestionSlotMinWidth: Double = 90
+
+/// How many equal-width suggestion slots fit in `width` (the space left for slots, after
+/// padding and the eraser): 4 when each of four slots gets at least `suggestionSlotMinWidth`,
+/// else 3. Pure.
+public func suggestionSlotCount(width: Double) -> Int {
+    width / 4 >= suggestionSlotMinWidth ? 4 : 3
+}
+
+/// The slot index a tap should accept, or nil when the touched slot no longer holds the
+/// word that was pressed (the strip refreshed between touch-down and release). Pure.
+public func acceptedSuggestionIndex(pressed: String, index: Int, current: [String]) -> Int? {
+    guard current.indices.contains(index), current[index] == pressed else { return nil }
+    return index
 }
 
 /// True when a refresh result is newer than the last one applied (seq 0 means unsequenced).
