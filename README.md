@@ -73,6 +73,11 @@ read this README, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 quickstart above, start there. Please open an issue before a large PR so it can be
 checked against the locked design.
 
+## Privacy
+
+Semicolyn collects no data: no accounts, analytics or tracking. See the
+[privacy policy](PRIVACY.md).
+
 ## License
 
 [GPL-3.0-only](LICENSE), copyright **True Positive LLC**, plus an
