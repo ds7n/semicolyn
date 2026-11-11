@@ -38,3 +38,11 @@ public func keySwipePreview(dx: Double, dy: Double, hasUp: Bool, hasDown: Bool,
     case nil:    return nil
     }
 }
+
+/// Whether a touch on a keybar key that ends after travelling `(dx, dy)` counts as a
+/// tap. Only travel matters, not how long the finger was down, so a long press sends
+/// the key's tap action too. Past `slop` points the touch was a scroll or a flick
+/// (the flick threshold, 12, is beyond the default slop) and sends nothing as a tap.
+public func keyPressIsTap(dx: Double, dy: Double, slop: Double = 10) -> Bool {
+    (dx * dx + dy * dy).squareRoot() <= slop
+}

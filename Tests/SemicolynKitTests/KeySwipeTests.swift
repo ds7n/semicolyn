@@ -104,4 +104,26 @@ final class KeySwipeTests: XCTestCase {
         XCTAssertNil(keySwipePreview(dx: 0, dy: -50, hasUp: false, hasDown: false))
         XCTAssertNil(keySwipePreview(dx: 0, dy: 50, hasUp: false, hasDown: false))
     }
+
+    // MARK: keyPressIsTap (a touch that ends inside the slop is a tap, however long it was held)
+
+    func testStillTouchIsTap() {
+        XCTAssertTrue(keyPressIsTap(dx: 0, dy: 0))
+    }
+
+    func testTravelAtSlopIsTap() {
+        XCTAssertTrue(keyPressIsTap(dx: 10, dy: 0))
+        XCTAssertTrue(keyPressIsTap(dx: 6, dy: -8))   // hypot = 10
+    }
+
+    func testTravelPastSlopIsNotTap() {
+        XCTAssertFalse(keyPressIsTap(dx: 10.01, dy: 0))
+        XCTAssertFalse(keyPressIsTap(dx: 0, dy: -12))   // a flick at its threshold is never a tap
+        XCTAssertFalse(keyPressIsTap(dx: -40, dy: 3))   // a scroll
+    }
+
+    func testCustomSlop() {
+        XCTAssertTrue(keyPressIsTap(dx: 4, dy: 0, slop: 4))
+        XCTAssertFalse(keyPressIsTap(dx: 4.5, dy: 0, slop: 4))
+    }
 }

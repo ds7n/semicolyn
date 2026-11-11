@@ -70,7 +70,9 @@ struct PredictorStripView: View {
         return HStack(spacing: 0) {
             HStack(spacing: 0) {
                 ForEach(0..<count, id: \.self) { index in
-                    if index > 0 {
+                    // A divider only between two filled slots: none on an empty strip,
+                    // none trailing after the last suggestion.
+                    if index > 0 && index < words.count {
                         Rectangle()
                             .fill(Color(theme.text.secondary).opacity(0.25))
                             .frame(width: 1)

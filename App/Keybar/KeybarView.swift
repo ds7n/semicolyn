@@ -121,22 +121,15 @@ struct KeybarView: View {
 
     @ViewBuilder private func scrollItemView(_ item: KeybarScrollItem) -> some View {
         switch item {
-        case .fkey(let n):    FkeySlotView(n: n, vm: vm, keybarSettings: keybarSettings).keyPressFeedback()
+        case .fkey(let n):    FkeySlotView(n: n, vm: vm, keybarSettings: keybarSettings)
         case .slot(let slot): slotView(slot)
         }
     }
 
-    /// A slot with its pressed look, tracked OUTSIDE the slot's own gestures so it runs
-    /// alongside the tap and never delays it. The pad and Esc pill have no pressed look
-    /// (they do not use `SlotChrome`), so they get no extra recognizer.
+    /// One slot. Each key view owns its press tracking (`keyTap`, or `keyPressFeedback`
+    /// for a key with its own long press), so the tap and the pressed look share one
+    /// recognizer.
     @ViewBuilder private func slotView(_ slot: KeybarSlot) -> some View {
-        switch slot {
-        case .pad, .escPill: slotContent(slot)
-        default:             slotContent(slot).keyPressFeedback()
-        }
-    }
-
-    @ViewBuilder private func slotContent(_ slot: KeybarSlot) -> some View {
         switch slot {
         case .escPill:        EscPillView(vm: vm, onOpenSettings: { showingSettings = true })
         case .pad:            PadView(vm: vm)

@@ -14,7 +14,7 @@ struct SlotChrome<Label: View>: View {
     var up: String? = nil
     var down: String? = nil
     @Environment(\.theme) private var theme
-    /// Set by `keyPressFeedback()` while the key is touched.
+    /// Set by `keyTap` / `keyPressFeedback()` while the key is touched.
     @Environment(\.keyPressed) private var pressed
     @ViewBuilder var label: () -> Label
 
@@ -64,8 +64,8 @@ struct SymbolSlotView: View {
         SlotChrome(bg: Color(theme.keybar.slotBg), up: g.up, down: g.down) {
             Text(symbol).font(.system(.body, design: .monospaced)).foregroundStyle(Color(theme.text.primary))
         }
-        .onInputClickTap { if let c = symbol.first { vm.keybar.tapSymbol(c) } }
         .fixedKeySwipes(secondaries) { v in vm.keybar.emitSecondary(v) }
+        .keyTap { if let c = symbol.first { vm.keybar.tapSymbol(c) } }
     }
 }
 
@@ -81,8 +81,8 @@ struct TabSlotView: View {
         SlotChrome(bg: Color(theme.keybar.slotBg), up: g.up, down: g.down) {
             Text("⇥").foregroundStyle(Color(theme.text.primary))
         }
-        .onInputClickTap { vm.keybar.tapTab() }
         .fixedKeySwipes(secondaries) { v in vm.keybar.emitSecondary(v) }
+        .keyTap { vm.keybar.tapTab() }
     }
 }
 
@@ -330,45 +330,76 @@ extension EnvironmentValues {
     }
 }
 
-/// How far (pt) a touch may travel and still read as a press; past it the middle
-/// region is scrolling (or the key is being flicked, which has its own bubble).
-private let keyPressSlop: CGFloat = 10
-
 extension View {
     /// Shows the pressed look on a keybar key while it is touched, from touch-down
-    /// with no delay. Apply it OUTSIDE the key's own gestures (`KeybarView` does, per
-    /// slot) so it can only ever run alongside the tap, never ahead of it.
+    /// with no delay, for a key whose tap is handled elsewhere (a key with its own
+    /// long-press action). Apply it OUTSIDE the key's own gestures so it can only ever
+    /// run alongside the tap, never ahead of it.
     func keyPressFeedback() -> some View {
-        modifier(KeyPressModifier())
+        modifier(KeyPressModifier(onTap: nil))
+    }
+
+    /// The key's tap: the pressed look from touch-down, then the keyboard click and
+    /// `action` when the finger lifts, however long it was held, as long as it stayed
+    /// put (Kit `keyPressIsTap`; a scroll or flick sends nothing). A key with no
+    /// long-press action of its own uses this, so a long press acts as a tap. Apply it
+    /// as the key's LAST modifier, outside its flick gesture, like `keyPressFeedback`.
+    func keyTap(perform action: @escaping () -> Void) -> some View {
+        modifier(KeyPressModifier(onTap: action))
+            .accessibilityAction { InputClickFeedback.play(); action() }
     }
 }
 
 private struct KeyPressModifier: ViewModifier {
+    /// Sent on release when the touch stayed inside the slop; nil = pressed look only.
+    let onTap: (() -> Void)?
     /// iOS 18+: set by the UIKit press recognizer.
     @State private var pressed = false
     /// Before iOS 18: the simultaneous drag; resets on end and on cancel.
     @GestureState private var pressing = false
+    /// Before iOS 18: the touch has left the slop at some point (no tap on release).
+    /// Reset at touch-down, since a drag the scroll view takes over never ends.
+    @State private var leftSlop = false
 
     func body(content: Content) -> some View {
         let tracked = content.environment(\.keyPressed, pressed || pressing)
         if #available(iOS 18.0, *) {
-            tracked.gesture(KeyPressRecognizer { pressed = $0 })
+            tracked.gesture(KeyPressRecognizer(onPress: { pressed = $0 }, onRelease: fire))
         } else {
             tracked.simultaneousGesture(DragGesture(minimumDistance: 0)
                 .updating($pressing) { g, state, _ in
-                    state = hypot(g.translation.width, g.translation.height) <= keyPressSlop
+                    state = keyPressIsTap(dx: g.translation.width, dy: g.translation.height)
+                }
+                .onChanged { g in
+                    if g.translation == .zero { leftSlop = false }
+                    if !keyPressIsTap(dx: g.translation.width, dy: g.translation.height) { leftSlop = true }
+                }
+                .onEnded { g in
+                    let tap = !leftSlop && keyPressIsTap(dx: g.translation.width, dy: g.translation.height)
+                    leftSlop = false
+                    if tap { fire() }
                 })
         }
+    }
+
+    private func fire() {
+        guard let onTap else { return }
+        InputClickFeedback.play()
+        onTap()
     }
 }
 
 /// The iOS 18+ press tracker: a zero-duration long press that begins at touch-down,
-/// recognizes alongside everything (the tap, the swipe pan, the scroll view's pan),
-/// and never cancels or delays the view's touches. A SwiftUI drag is not used here
-/// because on iOS 18 it blocked the middle region's scrolling (device build 188).
+/// recognizes alongside everything (the swipe pan, the scroll view's pan), and never
+/// cancels or delays the view's touches. It ends when the finger lifts, so it also
+/// reports the release of a touch that never left the slop, however long it was held.
+/// A SwiftUI drag is not used here because on iOS 18 it blocked the middle region's
+/// scrolling (device build 188).
 @available(iOS 18.0, *)
 private struct KeyPressRecognizer: UIGestureRecognizerRepresentable {
     let onPress: (Bool) -> Void
+    /// The finger lifted while still pressed (it never left the slop).
+    let onRelease: () -> Void
 
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
 
@@ -391,8 +422,11 @@ private struct KeyPressRecognizer: UIGestureRecognizerRepresentable {
             c.start = at
             now = true
         case .changed:
-            now = c.isPressed && hypot(at.x - c.start.x, at.y - c.start.y) <= keyPressSlop
-        default:   // ended / cancelled / failed
+            now = c.isPressed && keyPressIsTap(dx: at.x - c.start.x, dy: at.y - c.start.y)
+        case .ended:
+            if c.isPressed && keyPressIsTap(dx: at.x - c.start.x, dy: at.y - c.start.y) { onRelease() }
+            now = false
+        default:   // cancelled / failed
             now = false
         }
         guard now != c.isPressed else { return }
@@ -427,13 +461,13 @@ struct ModifierSlotView: View {
         SlotChrome(bg: bg) {
             Text("⌃").foregroundStyle(Color(theme.text.primary))
         }
-        .onInputClickTap { vm.keybar.tapCtrl() }
         .flickKey("modifier", up: "Alt", down: "Shift") { dir in
             switch dir {
             case .up:   vm.keybar.armAlt()
             case .down: vm.keybar.armShift()
             }
         }
+        .keyTap { vm.keybar.tapCtrl() }
     }
 }
 
@@ -472,7 +506,7 @@ struct PinnedMacroSlotView: View {
             Text(macro.name).font(.caption).lineLimit(1)
                 .foregroundStyle(Color(theme.text.primary))
         }
-        .onInputClickTap {
+        .keyTap {
             DebugLog.shared.log(.keybar, "keybar:macroResolved events=\(macro.body.count)")
             vm.keybar.fireMacro(macro.body)
         }
@@ -502,6 +536,25 @@ struct CustomSlotView: View {
     }
 
     var body: some View {
+        // A bound long press keeps its own action; otherwise a long press is a tap.
+        if slot.longPress != nil {
+            key
+                .onInputClickTap { fire(.tap) }
+                .onLongPressGesture { fire(.longPress) }
+                .flickKey("gestureKey", up: flickLabel(.swipeUp), down: flickLabel(.swipeDown), onSwipe: swipe)
+                .keyPressFeedback()
+        } else {
+            key
+                .flickKey("gestureKey", up: flickLabel(.swipeUp), down: flickLabel(.swipeDown), onSwipe: swipe)
+                .keyTap { fire(.tap) }
+        }
+    }
+
+    private func swipe(_ dir: KeySwipeDirection) {
+        fire(dir == .up ? .swipeUp : .swipeDown)
+    }
+
+    private var key: some View {
         SlotChrome(bg: Color(theme.keybar.slotBg)) {
             Text(label).font(.system(.body, design: .monospaced)).lineLimit(1)
                 .foregroundStyle(Color(theme.text.primary))
@@ -514,11 +567,6 @@ struct CustomSlotView: View {
         }
         .overlay(alignment: .topTrailing) {
             if slot.longPress != nil { hintGlyph("≡").offset(x: -2, y: 2) }
-        }
-        .onInputClickTap { fire(.tap) }
-        .onLongPressGesture { fire(.longPress) }
-        .flickKey("gestureKey", up: flickLabel(.swipeUp), down: flickLabel(.swipeDown)) { dir in
-            fire(dir == .up ? .swipeUp : .swipeDown)
         }
     }
 
