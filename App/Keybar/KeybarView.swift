@@ -121,12 +121,18 @@ struct KeybarView: View {
 
     @ViewBuilder private func scrollItemView(_ item: KeybarScrollItem) -> some View {
         switch item {
-        case .fkey(let n):    FkeySlotView(n: n, vm: vm, keybarSettings: keybarSettings)
+        case .fkey(let n):    FkeySlotView(n: n, vm: vm, keybarSettings: keybarSettings).keyPressFeedback()
         case .slot(let slot): slotView(slot)
         }
     }
 
-    @ViewBuilder private func slotView(_ slot: KeybarSlot) -> some View {
+    /// A slot with its pressed look, tracked OUTSIDE the slot's own gestures so it runs
+    /// alongside the tap and never delays it.
+    private func slotView(_ slot: KeybarSlot) -> some View {
+        slotContent(slot).keyPressFeedback()
+    }
+
+    @ViewBuilder private func slotContent(_ slot: KeybarSlot) -> some View {
         switch slot {
         case .escPill:        EscPillView(vm: vm, onOpenSettings: { showingSettings = true })
         case .pad:            PadView(vm: vm)

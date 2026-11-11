@@ -14,6 +14,8 @@ struct SlotChrome<Label: View>: View {
     var up: String? = nil
     var down: String? = nil
     @Environment(\.theme) private var theme
+    /// Set by `keyPressFeedback()` while the key is touched.
+    @Environment(\.keyPressed) private var pressed
     @ViewBuilder var label: () -> Label
 
     private var hasHints: Bool { up != nil || down != nil }
@@ -30,7 +32,12 @@ struct SlotChrome<Label: View>: View {
         }
         .frame(minWidth: 24, minHeight: 31)   // 27→31 (2026-10-17): bar felt short once Fn stopped setting its height
         .padding(.horizontal, 4)               // narrower keys (2026-10-12): 48→32pt wide, default middle fits
-        .background(bg)
+        .background {
+            ZStack {
+                bg
+                Color.white.opacity(pressed ? 0.12 : 0)   // pressed: slightly brighter, behind the label
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
@@ -82,17 +89,30 @@ struct TabSlotView: View {
 // MARK: - Fixed-key swipe secondaries
 
 extension View {
-    /// The swipe-up / swipe-down gesture that emits a fixed key's secondaries. The hint
-    /// GLYPHS are rendered by SlotChrome's column (fed hintGlyphs(for:)); this modifier is
-    /// now gesture-only (device #2 removed the edge-pinned overlay glyphs).
+    /// The swipe-up / swipe-down gesture that emits a fixed key's secondaries, with the
+    /// live flick bubble showing each secondary's hint glyph. The hint GLYPHS on the key
+    /// are rendered by SlotChrome's column (fed hintGlyphs(for:)); this modifier is
+    /// gesture + bubble only (device #2 removed the edge-pinned overlay glyphs).
     func fixedKeySwipes(_ secondaries: SwipeSecondaries,
                         emit: @escaping (SecondaryValue) -> Void) -> some View {
-        keySwipe("fixed") { dir in
+        let g = hintGlyphs(for: secondaries)
+        return flickKey("fixed", up: g.up, down: g.down) { dir in
             switch dir {
-            case .up:   if let up = secondaries.up { InputClickFeedback.play(); emit(up) }
-            case .down: if let down = secondaries.down { InputClickFeedback.play(); emit(down) }
+            case .up:   if let up = secondaries.up { emit(up) }
+            case .down: if let down = secondaries.down { emit(down) }
             }
         }
+    }
+
+    /// A key flick with the live preview: while the finger is past the flick
+    /// threshold in a bound direction, the accessory root shows a bubble with that
+    /// direction's label (`up`/`down`; nil = unbound, no bubble, no click, nothing
+    /// sent), and the keyboard click plays each time the bubble appears or switches
+    /// direction (not on release). On release `onSwipe` fires for a bound direction
+    /// and the bubble lingers briefly, then fades.
+    func flickKey(_ key: String, up: String?, down: String?,
+                  onSwipe: @escaping (KeySwipeDirection) -> Void) -> some View {
+        modifier(FlickKeyModifier(key: key, upLabel: up, downLabel: down, onSwipe: onSwipe))
     }
 
     /// A vertical swipe on a keybar key that never steals a sideways drag from the
@@ -100,8 +120,80 @@ extension View {
     /// when the drag started on a key (device build 188), so on iOS 18+ the swipe is a
     /// UIKit pan that refuses to begin unless Kit `keySwipeShouldClaim` says the drag
     /// started vertically; a sideways start fails at once and the scroll view moves.
-    func keySwipe(_ key: String, onSwipe: @escaping (KeySwipeDirection) -> Void) -> some View {
-        modifier(KeySwipeModifier(key: key, onSwipe: onSwipe))
+    /// `onPreview` gets Kit `keySwipePreview` (for the bound `hasUp`/`hasDown`) on every
+    /// drag change, then nil once the drag ends or is cancelled (after `onSwipe`).
+    func keySwipe(_ key: String, hasUp: Bool, hasDown: Bool,
+                  onPreview: @escaping (KeySwipeDirection?) -> Void,
+                  onSwipe: @escaping (KeySwipeDirection) -> Void) -> some View {
+        modifier(KeySwipeModifier(key: key, hasUp: hasUp, hasDown: hasDown,
+                                  onPreview: onPreview, onSwipe: onSwipe))
+    }
+}
+
+/// Owns a flicked key's preview state: which direction is showing, the label the
+/// bubble shows (kept briefly after release), and the publishing of that label to
+/// `KeybarAccessoryRoot` through `KeyFlickPreferenceKey`.
+private struct FlickKeyModifier: ViewModifier {
+    let key: String
+    let upLabel: String?
+    let downLabel: String?
+    let onSwipe: (KeySwipeDirection) -> Void
+
+    /// How long the bubble stays after a release that sent a secondary, before fading.
+    private static let linger: TimeInterval = 0.1
+
+    /// The direction the live drag would send right now (nil = none).
+    @State private var preview: KeySwipeDirection?
+    /// The label the bubble shows; outlives `preview` by `linger` after a send.
+    @State private var bubbleLabel: String?
+    /// Set when a release sent a secondary, so the closing nil lingers instead of
+    /// clearing at once (a return inside the threshold clears at once).
+    @State private var sentOnRelease = false
+    /// Bumped on every bubble change so a stale linger timer does nothing.
+    @State private var bubbleGeneration = 0
+
+    private func label(_ dir: KeySwipeDirection) -> String? {
+        dir == .up ? upLabel : downLabel
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .keySwipe(key, hasUp: upLabel != nil, hasDown: downLabel != nil,
+                      onPreview: update, onSwipe: send)
+            .anchorPreference(key: KeyFlickPreferenceKey.self, value: .bounds) { anchor in
+                bubbleLabel.map { KeyFlickPreview(label: $0, anchor: anchor) }
+            }
+    }
+
+    private func update(_ next: KeySwipeDirection?) {
+        if let next, let text = label(next) {
+            if next != preview { InputClickFeedback.play() }   // appear or switch: one click
+            bubbleGeneration += 1
+            sentOnRelease = false
+            preview = next
+            bubbleLabel = text
+            return
+        }
+        // Already clear: a repeated end/cancel nil must not cut a lingering bubble short.
+        guard preview != nil else { return }
+        preview = nil
+        bubbleGeneration += 1
+        guard sentOnRelease else {
+            bubbleLabel = nil   // back inside the threshold (or cancelled): gone at once
+            return
+        }
+        sentOnRelease = false
+        let generation = bubbleGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.linger) {
+            guard bubbleGeneration == generation else { return }   // a new flick took over
+            withAnimation(.easeOut(duration: 0.15)) { bubbleLabel = nil }
+        }
+    }
+
+    private func send(_ dir: KeySwipeDirection) {
+        guard label(dir) != nil else { return }   // unbound direction: nothing sent
+        sentOnRelease = true
+        onSwipe(dir)
     }
 }
 
@@ -116,16 +208,35 @@ extension View {
 
 private struct KeySwipeModifier: ViewModifier {
     let key: String
+    let hasUp: Bool
+    let hasDown: Bool
+    let onPreview: (KeySwipeDirection?) -> Void
     let onSwipe: (KeySwipeDirection) -> Void
+
+    /// True while the pre-iOS 18 drag is live; resets on end AND on cancel (the
+    /// DragGesture's onEnded does not run when the gesture is cancelled).
+    @GestureState private var dragging = false
 
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
-            content.gesture(KeySwipeRecognizer(key: key, onSwipe: onSwipe))
+            content.gesture(KeySwipeRecognizer(key: key, hasUp: hasUp, hasDown: hasDown,
+                                               onPreview: onPreview, onSwipe: onSwipe))
         } else {
-            content.simultaneousGesture(DragGesture(minimumDistance: 12).onEnded { g in
-                finishKeySwipe(key, dx: Double(g.translation.width), dy: Double(g.translation.height),
-                               onSwipe: onSwipe)
-            })
+            content.simultaneousGesture(DragGesture(minimumDistance: 12)
+                .updating($dragging) { _, state, _ in state = true }
+                .onChanged { g in
+                    onPreview(keySwipePreview(dx: Double(g.translation.width),
+                                              dy: Double(g.translation.height),
+                                              hasUp: hasUp, hasDown: hasDown))
+                }
+                .onEnded { g in
+                    finishKeySwipe(key, dx: Double(g.translation.width), dy: Double(g.translation.height),
+                                   onSwipe: onSwipe)
+                    onPreview(nil)
+                })
+            .onChange(of: dragging) { _, live in
+                if !live { onPreview(nil) }
+            }
         }
     }
 }
@@ -135,6 +246,9 @@ private struct KeySwipeModifier: ViewModifier {
 @available(iOS 18.0, *)
 private struct KeySwipeRecognizer: UIGestureRecognizerRepresentable {
     let key: String
+    let hasUp: Bool
+    let hasDown: Bool
+    let onPreview: (KeySwipeDirection?) -> Void
     let onSwipe: (KeySwipeDirection) -> Void
 
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator(key: key) }
@@ -146,9 +260,16 @@ private struct KeySwipeRecognizer: UIGestureRecognizerRepresentable {
     }
 
     func handleUIGestureRecognizerAction(_ pan: UIPanGestureRecognizer, context: Context) {
-        guard pan.state == .ended else { return }
         let t = pan.translation(in: pan.view)
-        finishKeySwipe(key, dx: Double(t.x), dy: Double(t.y), onSwipe: onSwipe)
+        switch pan.state {
+        case .began, .changed:
+            onPreview(keySwipePreview(dx: Double(t.x), dy: Double(t.y), hasUp: hasUp, hasDown: hasDown))
+        case .ended:
+            finishKeySwipe(key, dx: Double(t.x), dy: Double(t.y), onSwipe: onSwipe)
+            onPreview(nil)
+        default:   // cancelled / failed: nothing sent, clear the preview
+            onPreview(nil)
+        }
     }
 
     @MainActor final class Coordinator: NSObject, UIGestureRecognizerDelegate {
@@ -164,6 +285,100 @@ private struct KeySwipeRecognizer: UIGestureRecognizerRepresentable {
                 "keybar:swipeStart key=\(key) dx=\(Int(move.x)) dy=\(Int(move.y)) -> \(claim ? "claim" : "scroll")")
             return claim
         }
+
+        func gestureRecognizer(_ g: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    }
+}
+
+// MARK: - Pressed key state
+
+private struct KeyPressedKey: EnvironmentKey {
+    static var defaultValue: Bool { false }
+}
+
+extension EnvironmentValues {
+    /// True while a finger is down on the enclosing keybar key (and has not moved off
+    /// into a scroll or flick); `SlotChrome` brightens its background for it.
+    var keyPressed: Bool {
+        get { self[KeyPressedKey.self] }
+        set { self[KeyPressedKey.self] = newValue }
+    }
+}
+
+/// How far (pt) a touch may travel and still read as a press; past it the middle
+/// region is scrolling (or the key is being flicked, which has its own bubble).
+private let keyPressSlop: CGFloat = 10
+
+extension View {
+    /// Shows the pressed look on a keybar key while it is touched, from touch-down
+    /// with no delay. Apply it OUTSIDE the key's own gestures (`KeybarView` does, per
+    /// slot) so it can only ever run alongside the tap, never ahead of it.
+    func keyPressFeedback() -> some View {
+        modifier(KeyPressModifier())
+    }
+}
+
+private struct KeyPressModifier: ViewModifier {
+    /// iOS 18+: set by the UIKit press recognizer.
+    @State private var pressed = false
+    /// Before iOS 18: the simultaneous drag; resets on end and on cancel.
+    @GestureState private var pressing = false
+
+    func body(content: Content) -> some View {
+        let tracked = content.environment(\.keyPressed, pressed || pressing)
+        if #available(iOS 18.0, *) {
+            tracked.gesture(KeyPressRecognizer { pressed = $0 })
+        } else {
+            tracked.simultaneousGesture(DragGesture(minimumDistance: 0)
+                .updating($pressing) { g, state, _ in
+                    state = hypot(g.translation.width, g.translation.height) <= keyPressSlop
+                })
+        }
+    }
+}
+
+/// The iOS 18+ press tracker: a zero-duration long press that begins at touch-down,
+/// recognizes alongside everything (the tap, the swipe pan, the scroll view's pan),
+/// and never cancels or delays the view's touches. A SwiftUI drag is not used here
+/// because on iOS 18 it blocked the middle region's scrolling (device build 188).
+@available(iOS 18.0, *)
+private struct KeyPressRecognizer: UIGestureRecognizerRepresentable {
+    let onPress: (Bool) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let press = UILongPressGestureRecognizer()
+        press.minimumPressDuration = 0
+        press.allowableMovement = .greatestFiniteMagnitude   // movement is judged below
+        press.cancelsTouchesInView = false
+        press.delaysTouchesEnded = false
+        press.delegate = context.coordinator
+        return press
+    }
+
+    func handleUIGestureRecognizerAction(_ press: UILongPressGestureRecognizer, context: Context) {
+        let c = context.coordinator
+        let at = press.location(in: press.view)
+        let now: Bool
+        switch press.state {
+        case .began:
+            c.start = at
+            now = true
+        case .changed:
+            now = c.isPressed && hypot(at.x - c.start.x, at.y - c.start.y) <= keyPressSlop
+        default:   // ended / cancelled / failed
+            now = false
+        }
+        guard now != c.isPressed else { return }
+        c.isPressed = now
+        onPress(now)
+    }
+
+    @MainActor final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var start: CGPoint = .zero
+        var isPressed = false
 
         func gestureRecognizer(_ g: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
@@ -189,8 +404,7 @@ struct ModifierSlotView: View {
             Text("⌃").foregroundStyle(Color(theme.text.primary))
         }
         .onInputClickTap { vm.keybar.tapCtrl() }
-        .keySwipe("modifier") { dir in
-            InputClickFeedback.play()
+        .flickKey("modifier", up: "Alt", down: "Shift") { dir in
             switch dir {
             case .up:   vm.keybar.armAlt()
             case .down: vm.keybar.armShift()
@@ -279,11 +493,17 @@ struct CustomSlotView: View {
         }
         .onInputClickTap { fire(.tap) }
         .onLongPressGesture { fire(.longPress) }
-        .keySwipe("gestureKey") { dir in
-            let gesture: CustomSlotGesture = dir == .up ? .swipeUp : .swipeDown
-            if slot.binding(for: gesture) != nil { InputClickFeedback.play() }   // click only if bound
-            fire(gesture)
+        .flickKey("gestureKey", up: flickLabel(.swipeUp), down: flickLabel(.swipeDown)) { dir in
+            fire(dir == .up ? .swipeUp : .swipeDown)
         }
+    }
+
+    /// The flick bubble's label for a swipe gesture: the binding's override label, else
+    /// its macro's name; nil when unbound or orphaned (no bubble, no click).
+    private func flickLabel(_ gesture: CustomSlotGesture) -> String? {
+        guard let binding = slot.binding(for: gesture) else { return nil }
+        if let override = binding.overrideLabel, !override.isEmpty { return override }
+        return library.macro(binding.macro)?.name
     }
 
     private func hintGlyph(_ s: String) -> some View {

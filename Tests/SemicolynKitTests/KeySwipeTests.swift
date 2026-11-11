@@ -75,4 +75,33 @@ final class KeySwipeTests: XCTestCase {
     func testJustMoreVerticalThanHorizontalIsClaimed() {
         XCTAssertTrue(keySwipeShouldClaim(dx: 8, dy: 8.5))
     }
+
+    // MARK: - Live preview (which secondary would fire right now)
+
+    func testPreviewBoundDirections() {
+        XCTAssertEqual(keySwipePreview(dx: 0, dy: -13, hasUp: true, hasDown: true), .up)
+        XCTAssertEqual(keySwipePreview(dx: 0, dy: 13, hasUp: true, hasDown: true), .down)
+        XCTAssertNil(keySwipePreview(dx: 0, dy: -12, hasUp: true, hasDown: true))   // at threshold
+        XCTAssertNil(keySwipePreview(dx: 0, dy: 12, hasUp: true, hasDown: true))
+    }
+
+    func testUnboundDirectionNoPreview() {
+        XCTAssertNil(keySwipePreview(dx: 0, dy: -50, hasUp: false, hasDown: true))
+        XCTAssertNil(keySwipePreview(dx: 0, dy: 50, hasUp: true, hasDown: false))
+        // The bound direction on the same key still previews.
+        XCTAssertEqual(keySwipePreview(dx: 0, dy: 50, hasUp: false, hasDown: true), .down)
+        XCTAssertEqual(keySwipePreview(dx: 0, dy: -50, hasUp: true, hasDown: false), .up)
+    }
+
+    func testDiagonalClearsPreview() {
+        XCTAssertNil(keySwipePreview(dx: 20, dy: -20, hasUp: true, hasDown: true))
+        XCTAssertEqual(keySwipePreview(dx: 0, dy: -20, hasUp: true, hasDown: true), .up)
+        // The finger reverses past the key: the preview switches to the other secondary.
+        XCTAssertEqual(keySwipePreview(dx: 0, dy: 20, hasUp: true, hasDown: true), .down)
+    }
+
+    func testNoBindingsNeverPreviews() {
+        XCTAssertNil(keySwipePreview(dx: 0, dy: -50, hasUp: false, hasDown: false))
+        XCTAssertNil(keySwipePreview(dx: 0, dy: 50, hasUp: false, hasDown: false))
+    }
 }

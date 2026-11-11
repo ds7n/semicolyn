@@ -24,3 +24,17 @@ public func keySwipeDirection(dx: Double, dy: Double, threshold: Double = 12) ->
 public func keySwipeShouldClaim(dx: Double, dy: Double) -> Bool {
     abs(dy) > abs(dx)
 }
+
+/// The swipe a keybar key would fire if the finger lifted right now, for the live
+/// flick preview: the direction `keySwipeDirection` returns, or nil when the drag is
+/// not (yet) a swipe or that direction has no binding on this key. Re-evaluated on
+/// every drag change, so reversing past the key switches the preview and returning
+/// inside the threshold clears it.
+public func keySwipePreview(dx: Double, dy: Double, hasUp: Bool, hasDown: Bool,
+                            threshold: Double = 12) -> KeySwipeDirection? {
+    switch keySwipeDirection(dx: dx, dy: dy, threshold: threshold) {
+    case .up?:   return hasUp ? .up : nil
+    case .down?: return hasDown ? .down : nil
+    case nil:    return nil
+    }
+}
