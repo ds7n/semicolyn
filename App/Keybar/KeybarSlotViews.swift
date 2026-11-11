@@ -35,7 +35,7 @@ struct SlotChrome<Label: View>: View {
         .background {
             ZStack {
                 bg
-                Color.white.opacity(pressed ? 0.12 : 0)   // pressed: slightly brighter, behind the label
+                Color(theme.text.primary).opacity(pressed ? 0.12 : 0)   // pressed: tinted with the text colour so it shows on dark and light themes
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -213,29 +213,53 @@ private struct KeySwipeModifier: ViewModifier {
     let onPreview: (KeySwipeDirection?) -> Void
     let onSwipe: (KeySwipeDirection) -> Void
 
-    /// True while the pre-iOS 18 drag is live; resets on end AND on cancel (the
-    /// DragGesture's onEnded does not run when the gesture is cancelled).
-    @GestureState private var dragging = false
-
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
             content.gesture(KeySwipeRecognizer(key: key, hasUp: hasUp, hasDown: hasDown,
                                                onPreview: onPreview, onSwipe: onSwipe))
         } else {
-            content.simultaneousGesture(DragGesture(minimumDistance: 12)
-                .updating($dragging) { _, state, _ in state = true }
-                .onChanged { g in
-                    onPreview(keySwipePreview(dx: Double(g.translation.width),
-                                              dy: Double(g.translation.height),
-                                              hasUp: hasUp, hasDown: hasDown))
-                }
-                .onEnded { g in
-                    finishKeySwipe(key, dx: Double(g.translation.width), dy: Double(g.translation.height),
-                                   onSwipe: onSwipe)
-                    onPreview(nil)
-                })
-            .onChange(of: dragging) { _, live in
-                if !live { onPreview(nil) }
+            content.modifier(LegacyKeySwipeModifier(key: key, hasUp: hasUp, hasDown: hasDown,
+                                                    onPreview: onPreview, onSwipe: onSwipe))
+        }
+    }
+}
+
+/// The pre-iOS 18 key swipe: a simultaneous drag. Its release is handled only in
+/// `onEnded`; the `GestureState` reset is used just to catch a cancelled drag (where
+/// `onEnded` never runs), and defers one run-loop turn so it cannot clear the preview
+/// ahead of a normal release (which would skip the bubble's linger).
+private struct LegacyKeySwipeModifier: ViewModifier {
+    let key: String
+    let hasUp: Bool
+    let hasDown: Bool
+    let onPreview: (KeySwipeDirection?) -> Void
+    let onSwipe: (KeySwipeDirection) -> Void
+
+    /// True while the drag is live; resets on end AND on cancel.
+    @GestureState private var dragging = false
+    /// Set by `onEnded`, cleared by the next change: tells the cancel path the release
+    /// was already handled.
+    @State private var endedNormally = false
+
+    func body(content: Content) -> some View {
+        content.simultaneousGesture(DragGesture(minimumDistance: 12)
+            .updating($dragging) { _, state, _ in state = true }
+            .onChanged { g in
+                endedNormally = false
+                onPreview(keySwipePreview(dx: Double(g.translation.width),
+                                          dy: Double(g.translation.height),
+                                          hasUp: hasUp, hasDown: hasDown))
+            }
+            .onEnded { g in
+                endedNormally = true
+                finishKeySwipe(key, dx: Double(g.translation.width), dy: Double(g.translation.height),
+                               onSwipe: onSwipe)
+                onPreview(nil)
+            })
+        .onChange(of: dragging) { _, live in
+            guard !live else { return }
+            DispatchQueue.main.async {
+                if !endedNormally { onPreview(nil) }   // cancelled: no onEnded ran
             }
         }
     }

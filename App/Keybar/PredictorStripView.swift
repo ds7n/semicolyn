@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import SemicolynKit
 import SwiftUI
-import UIKit
 
 /// The predictive-input row: a **constant-height** strip of equal-width, full-height
 /// suggestion slots above the keybar (predictor spec §"Suggestion surface"). The row is
@@ -24,7 +23,7 @@ struct PredictorStripView: View {
     private static let eraserWidth: CGFloat = 27
     private static let slotFontSize: CGFloat = 15
 
-    /// Actions (accept a chip, forget the last line) still route through the VM;
+    /// Actions (accept a slot, forget the last line) still route through the VM;
     /// only the observed *suggestion state* comes from the split-out slice, so a
     /// suggestion tick re-renders this strip alone (Plan B §B1).
     let vm: ConnectionViewModel
@@ -40,7 +39,7 @@ struct PredictorStripView: View {
     var body: some View {
         GeometryReader { geo in
             strip(width: geo.size.width)
-                // GeometryReader places its child top-leading; keep the chips vertically centred.
+                // GeometryReader places its child top-leading; keep the slots vertically centred.
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
         }
         .frame(height: Self.rowHeight)                 // CONSTANT, reserved even when empty
@@ -58,7 +57,7 @@ struct PredictorStripView: View {
                     .transition(.opacity)
             }
         }
-        // Fade chips in/out WITHIN the fixed row, no height change, so the keybar and
+        // Fade slots in/out WITHIN the fixed row, no height change, so the keybar and
         // terminal never reflow. (The old `.move(edge:.bottom)` transition combined with
         // a collapsing row was the reflow source.)
         .animation(.easeInOut(duration: 0.12), value: predictorVM.suggestions)

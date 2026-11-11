@@ -127,9 +127,13 @@ struct KeybarView: View {
     }
 
     /// A slot with its pressed look, tracked OUTSIDE the slot's own gestures so it runs
-    /// alongside the tap and never delays it.
-    private func slotView(_ slot: KeybarSlot) -> some View {
-        slotContent(slot).keyPressFeedback()
+    /// alongside the tap and never delays it. The pad and Esc pill have no pressed look
+    /// (they do not use `SlotChrome`), so they get no extra recognizer.
+    @ViewBuilder private func slotView(_ slot: KeybarSlot) -> some View {
+        switch slot {
+        case .pad, .escPill: slotContent(slot)
+        default:             slotContent(slot).keyPressFeedback()
+        }
     }
 
     @ViewBuilder private func slotContent(_ slot: KeybarSlot) -> some View {

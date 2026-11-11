@@ -45,6 +45,6 @@ public func privacyCoverContent(_ session: CoverSession?) -> PrivacyCoverContent
     let label = session.label.trimmingCharacters(in: .whitespacesAndNewlines)
     let host = session.hostName.trimmingCharacters(in: .whitespacesAndNewlines)
     let isQuickConnect = label.isEmpty || label.caseInsensitiveCompare(host) == .orderedSame
-    return PrivacyCoverContent(title: isQuickConnect ? "Quick connect" : session.label,
+    return PrivacyCoverContent(title: isQuickConnect ? "Quick connect" : label,
                                subtitle: session.transport.coverLabel)
 }

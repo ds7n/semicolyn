@@ -20,6 +20,11 @@ final class PrivacyCoverContentTests: XCTestCase {
         XCTAssertEqual(content(label: "work box", hostName: "10.0.0.5", .et).subtitle, "ET")
     }
 
+    func testSavedHostLabelIsTrimmed() {
+        XCTAssertEqual(content(label: "  work box ", hostName: "10.0.0.5", .ssh),
+                       PrivacyCoverContent(title: "work box", subtitle: "SSH"))
+    }
+
     func testLabelMatchingAddressIsHidden() {
         let cases: [(label: String, hostName: String)] = [
             (" Example.COM ", "example.com"),
