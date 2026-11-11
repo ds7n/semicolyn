@@ -6,7 +6,7 @@ import SemicolynKit
 
 /// Hides the screen in the app switcher (privacy audit P-H1). When the app stops being
 /// active and "Hide screen in app switcher" is on, a window showing only the app's
-/// background, its name and the current host's name goes up above everything else
+/// background, and the current session's label and transport goes up above everything else
 /// (sheets, full-screen sessions, the keybar), so the switcher card and the background
 /// snapshot never show terminal content. It comes down when the app is active again.
 @MainActor
@@ -16,21 +16,21 @@ final class PrivacyCover {
     /// Above the keyboard and its accessory window, which sit far above `.alert`.
     private static let windowLevel = UIWindow.Level(rawValue: 10_000_010)
 
-    /// Labels of the sessions on screen, innermost last (a quick-connect session can
-    /// open on top of another).
-    private var hostLabels: [String] = []
+    /// The sessions on screen, innermost last (a quick-connect session can open on top
+    /// of another).
+    private var sessions: [CoverSession] = []
     private var window: UIWindow?
 
     private init() {}
 
-    /// A session showing `label` came on screen.
-    func pushHost(_ label: String) {
-        hostLabels.append(label)
+    /// A session came on screen.
+    func push(_ session: CoverSession) {
+        sessions.append(session)
     }
 
-    /// The session showing `label` left the screen.
-    func popHost(_ label: String) {
-        if let index = hostLabels.lastIndex(of: label) { hostLabels.remove(at: index) }
+    /// The session left the screen.
+    func pop(_ session: CoverSession) {
+        if let index = sessions.lastIndex(of: session) { sessions.remove(at: index) }
     }
 
     /// Show or hide the cover for the scene's new activity.
@@ -49,7 +49,7 @@ final class PrivacyCover {
         let cover = UIWindow(windowScene: scene)
         cover.windowLevel = Self.windowLevel
         cover.rootViewController = UIHostingController(
-            rootView: PrivacyCoverView(hostLabel: hostLabels.last, theme: theme))
+            rootView: PrivacyCoverView(content: privacyCoverContent(sessions.last), theme: theme))
         // Shown without becoming key, so the terminal keeps first responder and the
         // keyboard is still up when the cover comes down.
         cover.isHidden = false
@@ -62,24 +62,24 @@ final class PrivacyCover {
     }
 }
 
-/// The cover's content: the theme background with the app name and, in a session, the
-/// host's name.
+/// The cover's content: the theme background with the session's label (if any) and
+/// transport. No app name and no address.
 private struct PrivacyCoverView: View {
-    let hostLabel: String?
+    let content: PrivacyCoverContent
     let theme: Theme
 
     var body: some View {
         ZStack {
             Color(theme.surface.bg).ignoresSafeArea()
             VStack(spacing: 8) {
-                Text("Semicolyn")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(Color(theme.text.primary))
-                if let hostLabel {
-                    Text(hostLabel)
-                        .font(.body)
-                        .foregroundStyle(Color(theme.text.secondary))
+                if let title = content.title {
+                    Text(title)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(Color(theme.text.primary))
                 }
+                Text(content.subtitle)
+                    .font(.body)
+                    .foregroundStyle(Color(theme.text.secondary))
             }
         }
     }
