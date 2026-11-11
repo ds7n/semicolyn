@@ -32,6 +32,8 @@ struct PredictorStripView: View {
     @Environment(\.theme) private var theme
 
     @State private var showForgetToast = false
+    /// The word under the finger since touch-down; a re-render mid-press cannot change it.
+    @State private var pressedWord: String?
 
     private var hasSuggestions: Bool { !predictorVM.suggestions.isEmpty }
 
@@ -103,13 +105,15 @@ struct PredictorStripView: View {
     }
 
     /// One equal-width, full-height slot. An empty slot is blank and not a button. The tap
-    /// accepts only if the slot still holds the pressed word (Kit `acceptedSuggestionIndex`).
+    /// accepts only if the slot still holds the word captured at touch-down (Kit `acceptedSuggestionIndex`).
     @ViewBuilder
     private func slot(index: Int, word: String?) -> some View {
         if let word {
             Button {
                 let current = predictorVM.suggestions.map(\.text)
-                guard let accepted = acceptedSuggestionIndex(pressed: word, index: index, current: current)
+                let pressed = pressedWord ?? word
+                pressedWord = nil
+                guard let accepted = acceptedSuggestionIndex(pressed: pressed, index: index, current: current)
                 else { return }
                 InputClickFeedback.play()
                 vm.acceptSuggestion(index: accepted)
@@ -123,7 +127,9 @@ struct PredictorStripView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(SuggestionSlotButtonStyle(pressedBackground: Color(theme.predictor.suggestionBg)))
+            .buttonStyle(SuggestionSlotButtonStyle(
+                pressedBackground: Color(theme.predictor.suggestionBg),
+                onPressStart: { pressedWord = word }))
         } else {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -133,9 +139,14 @@ struct PredictorStripView: View {
 /// Transparent on the strip until touched, then the suggestion background while pressed.
 private struct SuggestionSlotButtonStyle: ButtonStyle {
     let pressedBackground: Color
+    /// Called when the touch lands (isPressed turns true).
+    let onPressStart: () -> Void
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(configuration.isPressed ? pressedBackground : Color.clear)
+            .onChange(of: configuration.isPressed) { _, pressed in
+                if pressed { onPressStart() }
+            }
     }
 }
