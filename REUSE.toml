@@ -12,6 +12,7 @@ path = [
     "Package.swift",
     "Package.resolved",
     "README.md",
+    "PRIVACY.md",
     "crates/semicolyn-ssh-core/Cargo.toml",
     "scripts/build-xcframework.sh",
     "docker/sshd-legacy.conf",
