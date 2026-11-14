@@ -432,7 +432,8 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     private(set) lazy var keybar: KeybarInputRouter = {
         let r = KeybarInputRouter(
             applicationCursorKeys: { [weak self] in self?.activePaneApplicationCursor() ?? false },
-            send: { [weak self] bytes in self?.sendTerminalInput(bytes) })
+            send: { [weak self] bytes in self?.sendTerminalInput(bytes) },
+            typeText: { [weak self] text in self?.typeIntoTerminal(text) ?? false })
         r.onModifierChange = { [weak self] in self?.objectWillChange.send() }
         return r
     }()
@@ -2838,7 +2839,25 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
         DebugLog.shared.log(.predictor,
             "predictor:accept slot=\(index) kind=\(chip.kind) saved=\(keystrokesSaved(edit))")
         clearPredictorChips()   // clear immediately; the echo round-trip repopulates
+        // Typed through the terminal's keyboard path so the iOS keyboard's record of
+        // the line matches it and a held Backspace keeps repeating (device TF 213).
+        // With a keybar modifier armed, a one-letter word would pick it up there, so
+        // that case (and no mounted terminal) sends the bytes directly.
+        if !keybar.modifiers.hasArmedModifier, let tv = mountedTerminalView {
+            for _ in 0..<max(0, edit.backspaces) { tv.deleteBackward() }
+            if !edit.text.isEmpty { tv.insertText(edit.text) }
+            return
+        }
         sendTerminalInput(Array(repeating: 0x7f, count: edit.backspaces) + Array(edit.text.utf8))
+    }
+
+    /// Types `text` through the mounted terminal's keyboard path (as if typed on the
+    /// iOS keyboard), keeping the keyboard's record of the line in step. False when no
+    /// terminal is mounted; the caller then sends the bytes itself.
+    private func typeIntoTerminal(_ text: String) -> Bool {
+        guard let tv = mountedTerminalView else { return false }
+        tv.insertText(text)
+        return true
     }
 
     // MARK: - Connect (saved host)

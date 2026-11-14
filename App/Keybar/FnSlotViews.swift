@@ -16,8 +16,8 @@ struct FkeySlotView: View {
         SlotChrome(bg: Color(theme.keybar.slotBg), up: g.up, down: g.down) {
             Text("F\(n)").font(.caption).foregroundStyle(Color(theme.text.primary))
         }
-        .onInputClickTap { vm.fnTapFKey(n) }   // sends F-key + consumes one-shot Fn (Task 5)
         .fixedKeySwipes(secondaries) { v in vm.keybar.emitSecondary(v) }
+        .keyTap { vm.fnTapFKey(n) }   // sends F-key + consumes one-shot Fn (Task 5)
     }
 }
 
@@ -57,6 +57,6 @@ struct FnSlotView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(fnAccessibilityLabel)
-        .onInputClickTap { vm.fnTap() }
+        .keyTap { vm.fnTap() }
     }
 }

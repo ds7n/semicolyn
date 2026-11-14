@@ -58,6 +58,8 @@ struct SessionView: View {
     /// All Data gate). Guards the pairing: SwiftUI can call `onAppear` again without an
     /// `onDisappear` in between (a cover on top being dismissed).
     @State private var registeredOpen = false
+    /// What this session pushed onto the privacy cover, so the pop matches it exactly.
+    @State private var coverSession: CoverSession?
     /// Master logging switch and the panel destination (Settings → Diagnostics; both off
     /// by default). The 🐞 panel needs BOTH: logging on (so there's anything to show) and
     /// the panel destination chosen.
@@ -359,7 +361,12 @@ struct SessionView: View {
         .onAppear {
             if !registeredOpen {
                 registeredOpen = true
-                PrivacyCover.shared.pushHost(host.label)
+                let defaults = (try? AppStores.shared.hosts.defaults()) ?? Defaults()
+                let session = CoverSession(
+                    label: host.label, hostName: host.hostName,
+                    transport: resolveTransport(host: host, defaults: defaults))
+                coverSession = session
+                PrivacyCover.shared.push(session)
                 AppStores.shared.sessionOpened()
             }
             resolveCredentials()
@@ -367,7 +374,8 @@ struct SessionView: View {
         .onDisappear {
             if registeredOpen {
                 registeredOpen = false
-                PrivacyCover.shared.popHost(host.label)
+                if let session = coverSession { PrivacyCover.shared.pop(session) }
+                coverSession = nil
                 AppStores.shared.sessionClosed()
             }
         }

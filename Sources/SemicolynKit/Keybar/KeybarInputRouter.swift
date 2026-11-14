@@ -9,10 +9,18 @@ public final class KeybarInputRouter {
     private var state = ModifierState()
     private let applicationCursorKeys: () -> Bool
     private let send: ([UInt8]) -> Void
+    private let typeText: ((String) -> Bool)?
 
-    public init(applicationCursorKeys: @escaping () -> Bool, send: @escaping ([UInt8]) -> Void) {
+    /// `typeText` types plain text through the terminal's own keyboard path, so the
+    /// iOS keyboard's record of the line stays in step with it (a held Backspace stops
+    /// repeating once that record runs out). It returns false when no terminal can
+    /// take it, and the text then goes out through `send`. Nil = always `send`.
+    public init(applicationCursorKeys: @escaping () -> Bool,
+                send: @escaping ([UInt8]) -> Void,
+                typeText: ((String) -> Bool)? = nil) {
         self.applicationCursorKeys = applicationCursorKeys
         self.send = send
+        self.typeText = typeText
     }
 
     /// Current arming state, for the UI to render armed/locked slot visuals.
@@ -28,7 +36,11 @@ public final class KeybarInputRouter {
     public func armShift() { state.armShift(); onModifierChange?() }
 
     // Keystroke gestures.
-    public func tapSymbol(_ c: Character) { fire(.char(c)) }
+    /// A plain symbol is typed (see `typeText`); with a modifier armed it is encoded.
+    public func tapSymbol(_ c: Character) {
+        if !state.hasArmedModifier, typeText?(String(c)) == true { return }
+        fire(.char(c))
+    }
     public func tapEscape()               { fire(.escape) }
     public func tapTab()                  { fire(.tab) }
     public func arrow(_ d: ArrowDirection) { fire(.arrow(d)) }
@@ -50,8 +62,9 @@ public final class KeybarInputRouter {
     public func emitSecondary(_ value: SecondaryValue) {
         switch value {
         case .literal(let s):
-            let bytes = Array(s.utf8)
-            if !bytes.isEmpty { send(bytes) }
+            guard !s.isEmpty else { return }
+            if typeText?(s) == true { return }
+            send(Array(s.utf8))
         case .key(let input, let mods):
             let bytes = encodeKey(input, modifiers: mods, applicationCursorKeys: applicationCursorKeys())
             if !bytes.isEmpty { send(bytes) }

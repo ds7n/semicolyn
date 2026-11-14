@@ -8,7 +8,7 @@ import SemicolynKit
 /// `@ObservedObject`s directly (rather than being erased to `AnyView` at the
 /// `UIHostingController` boundary), so a change to `keybarSettings.settings`, e.g. the
 /// user adding a swipe secondary in the editor, re-evaluates the graph and updates the
-/// keybar live, without an app restart.
+/// keybar live, without an app restart. It also draws the flick preview bubble.
 struct KeybarAccessoryRoot: View {
     @ObservedObject var vm: ConnectionViewModel
     @ObservedObject var keybarSettings: KeybarSettingsStore
@@ -20,6 +20,19 @@ struct KeybarAccessoryRoot: View {
             PredictorStripView(vm: vm, predictorVM: vm.predictorVM)
             KeybarView(keybarSettings: keybarSettings, vm: vm,
                        hardwareKeyboardConnected: hardwareKeyboardConnected)
+        }
+        // The flick preview bubble of whichever key is being flicked, drawn once here
+        // from the key's published bounds so it can rise over the predictor strip
+        // without the middle region's ScrollView clipping it (it stays inside the
+        // accessory: see `KeyFlickBubble`).
+        .overlayPreferenceValue(KeyFlickPreferenceKey.self) { preview in
+            GeometryReader { geo in
+                if let preview {
+                    KeyFlickBubble(label: preview.label, keyRect: geo[preview.anchor],
+                                   containerWidth: geo.size.width)
+                        .transition(.opacity)
+                }
+            }
         }
         .environment(\.theme, theme)
         .background(Color(theme.surface.panel))
