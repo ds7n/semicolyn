@@ -102,7 +102,7 @@ final class AcknowledgementsTests: XCTestCase {
         XCTAssertTrue(try text("GPL-3.0.txt").hasPrefix("                    GNU GENERAL PUBLIC LICENSE\n                       Version 3, 29 June 2007"))
         XCTAssertTrue(try text("Mosh-COPYING.iOS.txt").contains("we will\nnot object to your distribution of Mosh through the App Store."))
         let rust = try text("Rust-libraries.txt")
-        XCTAssertTrue(rust.contains("\nrussh 0.61.2: Apache-2.0\n"), "russh missing from the Rust crate list")
+        XCTAssertTrue(rust.contains("\nrussh 0.65.1: Apache-2.0\n"), "russh missing from the Rust crate list")
         XCTAssertTrue(rust.contains("\nbytes 1.12.0: MIT\n"), "MIT-only crate missing from the Rust crate list")
         XCTAssertFalse(rust.contains("semicolyn-ssh-core 0.1.0:"), "our own crate is credited as semicolyn, not here")
     }
