@@ -99,6 +99,9 @@ pub(crate) fn build_preferred(allow_legacy: bool, allow_deprecated: bool) -> Pre
         cipher: Cow::Owned(cipher_algs),
         mac: Cow::Owned(mac_algs),
         compression: Cow::Borrowed(&[compression::NONE]),
+        // Host certificates are not offered: trust is TOFU on the bare host key,
+        // so `check_server_key` refuses any certificate it is shown.
+        host_key_certificates: Cow::Borrowed(&[]),
     }
 }
 
