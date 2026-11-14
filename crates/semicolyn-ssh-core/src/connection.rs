@@ -141,17 +141,34 @@ pub(crate) struct ClientHandler {
     forwards: ForwardMap,
 }
 
+/// What the trust delegate is shown for the host key a server presented, or None
+/// for a host certificate. Semicolyn never offers certificate host-key algorithms
+/// (`host_key_certificates` is empty), so a certificate here is unexpected and is
+/// refused without asking the user: trusting it would pin a key no CA check backs.
+pub(crate) fn host_key_info(
+    host_label: &str,
+    presented: &russh::keys::PublicKeyOrCertificate,
+) -> Option<HostKeyInfo> {
+    match presented {
+        russh::keys::PublicKeyOrCertificate::PublicKey { key, .. } => Some(HostKeyInfo {
+            host_label: host_label.to_string(),
+            key_type: key.algorithm().as_str().to_string(),
+            fingerprint: key.fingerprint(HashAlg::Sha256).to_string(),
+        }),
+        russh::keys::PublicKeyOrCertificate::Certificate(_) => None,
+    }
+}
+
 impl client::Handler for ClientHandler {
     type Error = ConnectError;
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh::keys::ssh_key::PublicKey,
+        server_public_key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
-        let info = HostKeyInfo {
-            host_label: self.host_label.clone(),
-            key_type: server_public_key.algorithm().as_str().to_string(),
-            fingerprint: server_public_key.fingerprint(HashAlg::Sha256).to_string(),
+        let Some(info) = host_key_info(&self.host_label, server_public_key) else {
+            self.rejected.store(true, Ordering::SeqCst);
+            return Ok(false);
         };
         let trusted = self.verifier.verify(info).await;
         if !trusted {
@@ -167,21 +184,30 @@ impl client::Handler for ClientHandler {
         connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: russh::client::ChannelOpenHandle,
         _session: &mut russh::client::Session,
     ) -> Result<(), Self::Error> {
         // Route an inbound (server-initiated) forwarded connection to the
-        // device-local target registered for this server listen port.
+        // device-local target registered for this server listen port. The open is
+        // confirmed only once the local target is reachable; an unregistered port
+        // or an unreachable target is refused.
         let target = self.forwards.lock().unwrap().get(&connected_port).cloned();
-        if let Some((host, port)) = target {
-            tokio::spawn(async move {
-                if let Ok(sock) = tokio::net::TcpStream::connect((host.as_str(), port)).await {
-                    let mut sock = sock;
+        let Some((host, port)) = target else {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        };
+        tokio::spawn(async move {
+            match tokio::net::TcpStream::connect((host.as_str(), port)).await {
+                Ok(mut sock) => {
+                    reply.accept().await;
                     let mut stream = channel.into_stream();
                     let _ = tokio::io::copy_bidirectional(&mut sock, &mut stream).await;
                 }
-            });
-        }
-        // No registered target → channel is dropped (closed).
+                Err(_) => reply.reject(russh::ChannelOpenFailure::ConnectFailed).await,
+            }
+        });
         Ok(())
     }
 
@@ -608,6 +634,10 @@ impl ShellSession {
     }
 }
 
+/// How long a closing shell waits for each further buffered message after it has
+/// sent its own close (see the close arm of `pump`).
+const CLOSE_DRAIN: std::time::Duration = std::time::Duration::from_millis(200);
+
 /// Sole owner of the russh channel for a shell session. Multiplexes channel
 /// reads and `ShellSession` commands; pushes output to `output` and fires
 /// `on_closed` exactly once on exit.
@@ -674,7 +704,12 @@ async fn pump(
                 Some(ShellCommand::Close) | None => {
                     let _ = channel.eof().await;
                     let _ = channel.close().await;
-                    while let Some(msg) = channel.wait().await {
+                    // russh (0.65) forgets a channel as soon as we send its close, so
+                    // the server's reply is dropped and no Close/None ever reaches
+                    // `wait()`. Drain only what is already buffered, then finish.
+                    while let Ok(Some(msg)) =
+                        tokio::time::timeout(CLOSE_DRAIN, channel.wait()).await
+                    {
                         match msg {
                             M::Data { data } | M::ExtendedData { data, .. } => {
                                 output.on_output(data.to_vec());
@@ -929,6 +964,58 @@ mod tests {
     /// test that asserted only this fake's hardcoded `true` was removed as a
     /// mock-only tautology per the testing standard.)
     struct AlwaysTrust;
+
+    // --- host_key_info: what the trust delegate sees (Critical tier) -----------
+
+    fn ed25519_key() -> russh::keys::ssh_key::PrivateKey {
+        use getrandom::SysRng;
+        use rand_core::UnwrapErr;
+        russh::keys::ssh_key::PrivateKey::random(
+            &mut UnwrapErr(SysRng),
+            russh::keys::ssh_key::Algorithm::Ed25519,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn bare_host_key_is_shown_with_its_type_and_fingerprint() {
+        let key = ed25519_key().public_key().clone();
+        let presented = russh::keys::PublicKeyOrCertificate::PublicKey {
+            key: key.clone(),
+            hash_alg: None,
+        };
+        let info = host_key_info("prod", &presented).expect("a bare key goes to the delegate");
+        assert_eq!(info.host_label, "prod");
+        assert_eq!(info.key_type, "ssh-ed25519");
+        assert_eq!(
+            info.fingerprint,
+            key.fingerprint(HashAlg::Sha256).to_string()
+        );
+        assert!(info.fingerprint.starts_with("SHA256:"));
+    }
+
+    #[test]
+    fn host_certificate_is_refused_without_reaching_the_delegate() {
+        // Adversarial: a server presents a host certificate (signed by a CA we have
+        // never seen) although none was offered. It must not reach the TOFU prompt.
+        use getrandom::SysRng;
+        use rand_core::UnwrapErr;
+        use russh::keys::ssh_key::certificate::{Builder, CertType};
+        let host = ed25519_key();
+        let ca = ed25519_key();
+        let mut builder = Builder::new_with_random_nonce(
+            &mut UnwrapErr(SysRng),
+            host.public_key().key_data().clone(),
+            0,
+            u64::MAX - 1,
+        )
+        .unwrap();
+        builder.cert_type(CertType::Host).unwrap();
+        builder.valid_principal("prod").unwrap();
+        let cert = builder.sign(&ca).unwrap();
+        let presented = russh::keys::PublicKeyOrCertificate::Certificate(cert);
+        assert!(host_key_info("prod", &presented).is_none());
+    }
     #[async_trait::async_trait]
     impl HostKeyVerifier for AlwaysTrust {
         async fn verify(&self, _info: HostKeyInfo) -> bool {
