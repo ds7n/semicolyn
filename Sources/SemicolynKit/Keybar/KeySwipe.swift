@@ -24,3 +24,25 @@ public func keySwipeDirection(dx: Double, dy: Double, threshold: Double = 12) ->
 public func keySwipeShouldClaim(dx: Double, dy: Double) -> Bool {
     abs(dy) > abs(dx)
 }
+
+/// The swipe a keybar key would fire if the finger lifted right now, for the live
+/// flick preview: the direction `keySwipeDirection` returns, or nil when the drag is
+/// not (yet) a swipe or that direction has no binding on this key. Re-evaluated on
+/// every drag change, so reversing past the key switches the preview and returning
+/// inside the threshold clears it.
+public func keySwipePreview(dx: Double, dy: Double, hasUp: Bool, hasDown: Bool,
+                            threshold: Double = 12) -> KeySwipeDirection? {
+    switch keySwipeDirection(dx: dx, dy: dy, threshold: threshold) {
+    case .up?:   return hasUp ? .up : nil
+    case .down?: return hasDown ? .down : nil
+    case nil:    return nil
+    }
+}
+
+/// Whether a touch on a keybar key that ends after travelling `(dx, dy)` counts as a
+/// tap. Only travel matters, not how long the finger was down, so a long press sends
+/// the key's tap action too. Past `slop` points the touch was a scroll or a flick
+/// (the flick threshold, 12, is beyond the default slop) and sends nothing as a tap.
+public func keyPressIsTap(dx: Double, dy: Double, slop: Double = 10) -> Bool {
+    (dx * dx + dy * dy).squareRoot() <= slop
+}

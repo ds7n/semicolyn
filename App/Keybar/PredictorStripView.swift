@@ -2,33 +2,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import SemicolynKit
 import SwiftUI
-import UIKit
 
-/// The predictive-input row: a **constant-height** strip of accent chips above the
-/// keybar (predictor spec §"Suggestion surface"). The row is ALWAYS present at a fixed
-/// 26pt, empty when there are no suggestions, otherwise as many one-line chips as the
-/// width allows (Kit `chipsThatFit`; no scrolling). This is what "never reflows the keybar" requires: the earlier design
-/// collapsed the row to zero when empty, so a suggestion tick grew the whole input
-/// accessory (40→74pt) and jumped the terminal (device 2026-07-24). A fixed height
-/// keeps the terminal grid constant in every prediction state; chips fade in/out
-/// WITHIN the reserved row, never resizing it.
+/// The predictive-input row: a **constant-height** strip of equal-width, full-height
+/// suggestion slots above the keybar (predictor spec §"Suggestion surface"). The row is
+/// ALWAYS present at a fixed height, empty when there are no suggestions, otherwise 3 or
+/// 4 slots by width (Kit `suggestionSlotCount`; no scrolling). This is what "never reflows
+/// the keybar" requires: the earlier design collapsed the row to zero when empty, so a
+/// suggestion tick grew the whole input accessory (40→74pt) and jumped the terminal
+/// (device 2026-07-24). A fixed height keeps the terminal grid constant in every
+/// prediction state; words fade in/out WITHIN the reserved row, never resizing it.
 struct PredictorStripView: View {
     /// Fixed row height (pt). Reserved whether or not suggestions are present, so the
-    /// input-accessory height, and thus the terminal grid, never changes. Tuned with
-    /// the predictor rework (taller chips, easier to hit).
-    static let rowHeight: CGFloat = 26
+    /// input-accessory height, and thus the terminal grid, never changes. Each slot is the
+    /// full row height, so the whole strip is the touch target.
+    static let rowHeight: CGFloat = 34
 
-    /// Horizontal gap between chips.
-    private static let chipSpacing: CGFloat = 5
-    /// Outer horizontal padding of the chip group (8 each side).
+    /// Outer horizontal padding of the slot group (8 each side).
     private static let outerPadding: CGFloat = 16
     /// Width reserved for the trailing eraser button.
     private static let eraserWidth: CGFloat = 27
-    /// Chip horizontal padding total (8 each side).
-    private static let chipPadding: CGFloat = 16
-    private static let chipFontSize: CGFloat = 13
+    private static let slotFontSize: CGFloat = 15
 
-    /// Actions (accept a chip, forget the last line) still route through the VM;
+    /// Actions (accept a slot, forget the last line) still route through the VM;
     /// only the observed *suggestion state* comes from the split-out slice, so a
     /// suggestion tick re-renders this strip alone (Plan B §B1).
     let vm: ConnectionViewModel
@@ -36,21 +31,15 @@ struct PredictorStripView: View {
     @Environment(\.theme) private var theme
 
     @State private var showForgetToast = false
+    /// The word under the finger since touch-down; a re-render mid-press cannot change it.
+    @State private var pressedWord: String?
 
     private var hasSuggestions: Bool { !predictorVM.suggestions.isEmpty }
-
-    /// Measured chip widths (text width + horizontal padding) in suggestion order.
-    private func chipWidths() -> [Double] {
-        let font = UIFont.monospacedSystemFont(ofSize: Self.chipFontSize, weight: .regular)
-        return predictorVM.suggestions.map { s in
-            Double((s.text as NSString).size(withAttributes: [.font: font]).width + Self.chipPadding)
-        }
-    }
 
     var body: some View {
         GeometryReader { geo in
             strip(width: geo.size.width)
-                // GeometryReader places its child top-leading; keep the chips vertically centred.
+                // GeometryReader places its child top-leading; keep the slots vertically centred.
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
         }
         .frame(height: Self.rowHeight)                 // CONSTANT, reserved even when empty
@@ -68,7 +57,7 @@ struct PredictorStripView: View {
                     .transition(.opacity)
             }
         }
-        // Fade chips in/out WITHIN the fixed row, no height change, so the keybar and
+        // Fade slots in/out WITHIN the fixed row, no height change, so the keybar and
         // terminal never reflow. (The old `.move(edge:.bottom)` transition combined with
         // a collapsing row was the reflow source.)
         .animation(.easeInOut(duration: 0.12), value: predictorVM.suggestions)
@@ -76,25 +65,24 @@ struct PredictorStripView: View {
 
     private func strip(width: CGFloat) -> some View {
         let available = width - Self.outerPadding - (hasSuggestions ? Self.eraserWidth : 0)
-        let shown = chipsThatFit(widths: chipWidths(), available: Double(available),
-                                 spacing: Double(Self.chipSpacing))
-        let visible = Array(predictorVM.suggestions.prefix(shown).enumerated())
+        let count = suggestionSlotCount(width: Double(available))
+        let words = predictorVM.suggestions.map(\.text)
         return HStack(spacing: 0) {
-            HStack(spacing: Self.chipSpacing) {
-                ForEach(visible, id: \.offset) { index, s in
-                    Text(s.text)
-                        .font(.system(size: Self.chipFontSize, design: .monospaced))
-                        .lineLimit(1)                                   // one line, always
-                        .truncationMode(index == 0 ? .middle : .tail)   // only a lone-too-wide first chip truncates
-                        .foregroundStyle(Color(theme.predictor.suggestionText))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color(theme.predictor.suggestionBg))
-                        .clipShape(Capsule())
-                        .onInputClickTap { vm.acceptSuggestion(index: index) }
+            HStack(spacing: 0) {
+                ForEach(0..<count, id: \.self) { index in
+                    // A divider only between two filled slots: none on an empty strip,
+                    // none trailing after the last suggestion.
+                    if index > 0 && index < words.count {
+                        Rectangle()
+                            .fill(Color(theme.text.secondary).opacity(0.25))
+                            .frame(width: 1)
+                            .padding(.vertical, 6)
+                    }
+                    slot(index: index, word: words.indices.contains(index) ? words[index] : nil)
                 }
             }
             .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             // Trailing forget-last-line affordance (L7 surgical forget). Only tappable
             // when there is something learned to forget (i.e. suggestions present).
@@ -115,5 +103,51 @@ struct PredictorStripView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    /// One equal-width, full-height slot. An empty slot is blank and not a button. The tap
+    /// accepts only if the slot still holds the word captured at touch-down (Kit `acceptedSuggestionIndex`).
+    @ViewBuilder
+    private func slot(index: Int, word: String?) -> some View {
+        if let word {
+            Button {
+                let current = predictorVM.suggestions.map(\.text)
+                let pressed = pressedWord ?? word
+                pressedWord = nil
+                guard let accepted = acceptedSuggestionIndex(pressed: pressed, index: index, current: current)
+                else { return }
+                InputClickFeedback.play()
+                vm.acceptSuggestion(index: accepted)
+            } label: {
+                Text(word)
+                    .font(.system(size: Self.slotFontSize, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(Color(theme.predictor.suggestionText))
+                    .padding(.horizontal, 6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(SuggestionSlotButtonStyle(
+                pressedBackground: Color(theme.predictor.suggestionBg),
+                onPressStart: { pressedWord = word }))
+        } else {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+/// Transparent on the strip until touched, then the suggestion background while pressed.
+private struct SuggestionSlotButtonStyle: ButtonStyle {
+    let pressedBackground: Color
+    /// Called when the touch lands (isPressed turns true).
+    let onPressStart: () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? pressedBackground : Color.clear)
+            .onChange(of: configuration.isPressed) { _, pressed in
+                if pressed { onPressStart() }
+            }
     }
 }

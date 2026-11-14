@@ -126,6 +126,9 @@ struct KeybarView: View {
         }
     }
 
+    /// One slot. Each key view owns its press tracking (`keyTap`, or `keyPressFeedback`
+    /// for a key with its own long press), so the tap and the pressed look share one
+    /// recognizer.
     @ViewBuilder private func slotView(_ slot: KeybarSlot) -> some View {
         switch slot {
         case .escPill:        EscPillView(vm: vm, onOpenSettings: { showingSettings = true })

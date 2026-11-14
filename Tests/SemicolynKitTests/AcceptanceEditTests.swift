@@ -32,14 +32,6 @@ final class AcceptanceEditTests: XCTestCase {
         XCTAssertEqual(keystrokesSaved(AcceptanceEdit(backspaces: 0, text: "tus ")), 3)
         XCTAssertEqual(keystrokesSaved(AcceptanceEdit(backspaces: 3, text: "Linux ")), 8)
     }
-    func testChipsThatFit() {
-        XCTAssertEqual(chipsThatFit(widths: [50, 40, 30], available: 100, spacing: 5), 2)
-        XCTAssertEqual(chipsThatFit(widths: [50, 40, 30], available: 95, spacing: 5), 2)   // exact fit
-        XCTAssertEqual(chipsThatFit(widths: [50, 40, 30], available: 94, spacing: 5), 1)
-        XCTAssertEqual(chipsThatFit(widths: [50, 40, 30], available: 130, spacing: 5), 3)
-        XCTAssertEqual(chipsThatFit(widths: [200], available: 100, spacing: 5), 1)
-        XCTAssertEqual(chipsThatFit(widths: [], available: 100, spacing: 5), 0)
-    }
     func testStaleGuard() {
         XCTAssertTrue(shouldApplyRefresh(seq: 0, lastApplied: 5))
         XCTAssertTrue(shouldApplyRefresh(seq: 6, lastApplied: 5))
