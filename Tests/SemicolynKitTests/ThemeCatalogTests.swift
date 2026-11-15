@@ -8,16 +8,16 @@ final class ThemeCatalogTests: XCTestCase {
         XCTAssertEqual(Theme.catalog.count, 4)
         XCTAssertEqual(Theme.catalog[0].id, ThemeID("neonMidnight"))
         XCTAssertFalse(Theme.catalog[0].isPro)
-        XCTAssertEqual(Theme.catalog[0].theme, .neonMidnight)
+        XCTAssertEqual(Theme.catalog[0].dark, .neonMidnight)
         XCTAssertEqual(Theme.catalog[1].id, ThemeID("bellBronze"))
         XCTAssertTrue(Theme.catalog[1].isPro)
-        XCTAssertEqual(Theme.catalog[1].theme, .bellBronze)
+        XCTAssertEqual(Theme.catalog[1].dark, .bellBronze)
         XCTAssertEqual(Theme.catalog[2].id, ThemeID("neonCobalt"))
         XCTAssertTrue(Theme.catalog[2].isPro)
-        XCTAssertEqual(Theme.catalog[2].theme, .neonCobalt)
+        XCTAssertEqual(Theme.catalog[2].dark, .neonCobalt)
         XCTAssertEqual(Theme.catalog[3].id, ThemeID("glacier"))
         XCTAssertTrue(Theme.catalog[3].isPro)
-        XCTAssertEqual(Theme.catalog[3].theme, .glacier)
+        XCTAssertEqual(Theme.catalog[3].dark, .glacier)
     }
 
     // Gate: the new blue Pro themes unlock with Pro, fall back to default without.
@@ -42,7 +42,7 @@ final class ThemeCatalogTests: XCTestCase {
     }
 
     func testAllDerivesFromCatalog() {
-        XCTAssertEqual(Theme.all, Theme.catalog.map(\.theme))
+        XCTAssertEqual(Theme.all, Theme.catalog.map(\.dark))
     }
 
     // Gate: free theme always applies.
@@ -76,9 +76,9 @@ final class ThemeCatalogTests: XCTestCase {
     func testResolveDescriptorInjectedCatalogFallbackHonored() {
         let customCatalog: [ThemeDescriptor] = [
             ThemeDescriptor(id: ThemeID("customFree"), displayName: "Custom Free",
-                            isPro: false, theme: .bellBronze),
+                            isPro: false, dark: .bellBronze, light: .bellBronzeLight),
             ThemeDescriptor(id: ThemeID("customPro"), displayName: "Custom Pro",
-                            isPro: true, theme: .neonMidnight),
+                            isPro: true, dark: .neonMidnight, light: .neonMidnightLight),
         ]
         let result = resolveDescriptor(selectedID: ThemeID("unknown"), isPro: false, catalog: customCatalog)
         XCTAssertEqual(result.id, ThemeID("customFree"))

@@ -9,19 +9,29 @@ public struct ThemeID: Hashable, Sendable, Codable {
     public init(_ raw: String) { self.raw = raw }
 }
 
-/// A `Theme` plus the catalog metadata the picker and Pro-gate need. Keeps
-/// presentation/commerce concerns off the pure `Theme` token set.
+/// A theme family (its dark and light variants) plus the catalog metadata the picker
+/// and Pro-gate need. Keeps presentation/commerce concerns off the pure `Theme` token set.
 public struct ThemeDescriptor: Equatable, Sendable {
     public let id: ThemeID
     public let displayName: String
     public let isPro: Bool
-    public let theme: Theme
+    public let dark: Theme
+    public let light: Theme
 
-    public init(id: ThemeID, displayName: String, isPro: Bool, theme: Theme) {
+    public init(id: ThemeID, displayName: String, isPro: Bool, dark: Theme, light: Theme) {
         self.id = id
         self.displayName = displayName
         self.isPro = isPro
-        self.theme = theme
+        self.dark = dark
+        self.light = light
+    }
+
+    /// The variant of this family to render.
+    public func theme(for variant: ThemeVariant) -> Theme {
+        switch variant {
+        case .dark: return dark
+        case .light: return light
+        }
     }
 }
 
@@ -30,13 +40,13 @@ extension Theme {
     /// both the picker's order and `Theme.all`.
     public static let catalog: [ThemeDescriptor] = [
         ThemeDescriptor(id: ThemeID("neonMidnight"), displayName: "Neon Midnight",
-                        isPro: false, theme: .neonMidnight),
+                        isPro: false, dark: .neonMidnight, light: .neonMidnightLight),
         ThemeDescriptor(id: ThemeID("bellBronze"), displayName: "Bell Bronze",
-                        isPro: true, theme: .bellBronze),
+                        isPro: true, dark: .bellBronze, light: .bellBronzeLight),
         ThemeDescriptor(id: ThemeID("neonCobalt"), displayName: "Neon Cobalt",
-                        isPro: true, theme: .neonCobalt),
+                        isPro: true, dark: .neonCobalt, light: .neonCobaltLight),
         ThemeDescriptor(id: ThemeID("glacier"), displayName: "Glacier",
-                        isPro: true, theme: .glacier),
+                        isPro: true, dark: .glacier, light: .glacierLight),
     ]
 
     /// The free default descriptor (first in the catalog).
@@ -77,11 +87,12 @@ public func displayedDescriptor(
     return resolveDescriptor(selectedID: selectedID, isPro: isPro, catalog: catalog)
 }
 
-/// Convenience: the resolved `Theme` to apply (see `resolveDescriptor`).
+/// Convenience: the resolved `Theme` to apply in `variant` (see `resolveDescriptor`).
 public func resolveTheme(
     selectedID: ThemeID,
     isPro: Bool,
+    variant: ThemeVariant = .dark,
     catalog: [ThemeDescriptor] = Theme.catalog
 ) -> Theme {
-    resolveDescriptor(selectedID: selectedID, isPro: isPro, catalog: catalog).theme
+    resolveDescriptor(selectedID: selectedID, isPro: isPro, catalog: catalog).theme(for: variant)
 }

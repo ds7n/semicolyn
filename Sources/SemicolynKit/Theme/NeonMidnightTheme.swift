@@ -57,3 +57,29 @@ extension Theme {
                         cursor: coral500, cursorText: nightTerm, selection: coral500.alpha(0.30))
     )
 }
+
+// Light variant (light-theme-variants spec): anchored to the light app icon's bg and
+// text, every ANSI color darkened to >= 4.5:1 on the light terminal bg (red darker than
+// green for red/green color blindness). Values from the approved light palette mockup.
+private let neonMidnightLightANSI = ANSIPalette([
+    ThemeColor("#1C2230"), ThemeColor("#9F162B"), ThemeColor("#3B786D"), ThemeColor("#82540B"),
+    ThemeColor("#1251E2"), ThemeColor("#7628EE"), ThemeColor("#1A6872"), ThemeColor("#5A5E67"),
+    ThemeColor("#83848B"), ThemeColor("#C52A18"), ThemeColor("#1E7E63"), ThemeColor("#97670C"),
+    ThemeColor("#3964EF"), ThemeColor("#8B47F0"), ThemeColor("#0B7D89"), ThemeColor("#6F7179"),
+])
+
+extension Theme {
+    public static let neonMidnightLight = Theme.fromANSI(
+        ansi: neonMidnightLightANSI,
+        roles: ANSIRoleMap(accentPrimary: .brightRed, success: .green,
+                           degraded: .yellow, broken: .red, warning: .yellow),
+        highlight: ThemeColor("#E3A399"),
+        surface: .init(bg: ThemeColor("#F7F3EF"), panel: ThemeColor("#EFE8E0"),
+                       panelHigh: ThemeColor("#FDFCFB"), line: ThemeColor("#E1D2C3")),
+        text: .init(primary: ThemeColor("#1C2230"), secondary: ThemeColor("#64656C"),
+                    muted: ThemeColor("#64656C"), inverse: ThemeColor("#FBF8F6")),
+        terminal: .init(bg: ThemeColor("#FBF8F6"), fg: ThemeColor("#393E4A"),
+                        cursor: ThemeColor("#C52A18"), cursorText: ThemeColor("#FBF8F6"),
+                        selection: ThemeColor("#C52A18").alpha(0.30))
+    )
+}
