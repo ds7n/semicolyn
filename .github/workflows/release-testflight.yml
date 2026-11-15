@@ -13,6 +13,14 @@ name: Release to TestFlight
 
 on:
   workflow_dispatch:   # manual only, never runs on push / PR
+    inputs:
+      supporter_preview:
+        # Compiles in SUPPORTER_PREVIEW (BuildChannelDetector → .testFlight): the
+        # Supporter preview toggle and all Supporter themes/icons show. NEVER submit a
+        # build made with this on for App Review; the log prints SUPPORTER_PREVIEW=on|off.
+        description: "TestFlight-only Supporter preview toggle (never for App Store submissions)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -82,14 +90,23 @@ jobs:
         # (SwiftTermBuildInfoPlugin) that headless xcodebuild will not run without
         # explicit trust. Reviewed (read-only git build-info stamper, no network) and
         # consciously trusted; version pinned exact in project.yml. Mirrors ci.yml.
+        env:
+          SUPPORTER_PREVIEW: ${{ inputs.supporter_preview && 'on' || 'off' }}
         run: |
+          set -euo pipefail
+          echo "SUPPORTER_PREVIEW=${SUPPORTER_PREVIEW}"
+          extra=()
+          if [ "${SUPPORTER_PREVIEW}" = "on" ]; then
+            extra+=('SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) SUPPORTER_PREVIEW')
+          fi
           xcodebuild archive \
             -project Semicolyn.xcodeproj -scheme Semicolyn \
             -destination 'generic/platform=iOS' \
             -archivePath build/Semicolyn.xcarchive \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
-            CURRENT_PROJECT_VERSION=${{ github.run_number }}
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            ${extra[@]+"${extra[@]}"}   # bash 3.2-safe empty-array expansion under set -u
 
       # Crash reports come only from Apple (privacy audit P-M7: no third-party crash
       # SDK), so the archive must carry the app's dSYM for TestFlight and Xcode
