@@ -3,12 +3,12 @@
 import SwiftUI
 import SemicolynKit
 
-/// The Theme section of Settings → Appearance (plus a DEBUG unlock section). Lists
-/// the theme catalog with a palette swatch + a checkmark on the theme in use.
-/// Supporter (Pro) themes show a "Supporter" badge while Pro is inactive; tapping one
-/// previews it live (`previewThemeID`, never persisted) and leaving the Appearance
-/// screen reverts to the saved theme (`AppearanceSettingsView`). There is no purchase
-/// screen yet (the `ProStore` stub stays). Tapping a free theme applies and saves it.
+/// The Theme section of Settings → Appearance, plus the TestFlight-only "Supporter
+/// preview" section. Lists the visible themes (`visibleThemes`: free only on App Store
+/// builds) with a palette swatch + a checkmark on the theme in use. Supporter themes
+/// show a "Supporter" badge while locked; tapping one previews it live
+/// (`previewThemeID`, never persisted) and leaving the Appearance screen reverts to the
+/// saved theme (`AppearanceSettingsView`). Tapping an unlocked theme applies and saves it.
 struct ThemeSection: View {
     @ObservedObject private var appearance = AppStores.shared.appearance
     @ObservedObject private var pro = AppStores.shared.pro
@@ -23,26 +23,28 @@ struct ThemeSection: View {
     /// Sections only (no `List`): the Appearance screen supplies the list.
     var body: some View {
         Group {
-            Section {
-                ForEach(Theme.catalog, id: \.id.raw) { descriptor in
+            Section("Theme") {
+                ForEach(visibleThemes(channel: pro.channel), id: \.id.raw) { descriptor in
                     row(for: descriptor)
                 }
-            } header: {
-                Text("Theme")
-            } footer: {
-                if Theme.catalog.contains(where: { $0.isPro }) && !pro.isPro {
-                    Text("Supporter themes are a thank-you for backing semicolyn. Coming soon.")
+            }
+            if supporterItemsVisible(pro.channel) {
+                Section {
+                    Toggle("Supporter preview", isOn: previewBinding)
+                } footer: {
+                    Text("TestFlight only. Unlocks Supporter themes and icons so you can try them. App Store builds don't show these yet.")
                 }
             }
-            #if DEBUG
-            Section("Debug") {
-                Button(pro.isPro ? "Lock Supporter themes (debug)" : "Unlock Supporter themes (debug)") {
-                    InputClickFeedback.play()
-                    pro.setProForDebug(!pro.isPro)
-                }
-            }
-            #endif
         }
+    }
+
+    /// The preview toggle. Turning it off also ends any live Supporter-theme preview.
+    private var previewBinding: Binding<Bool> {
+        Binding(get: { pro.previewOn }, set: { on in
+            InputClickFeedback.play()
+            if !on { appearance.previewThemeID = nil }
+            pro.setPreview(on)
+        })
     }
 
     @ViewBuilder
