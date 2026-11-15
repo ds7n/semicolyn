@@ -110,6 +110,12 @@ jobs:
         run: |
           bash scripts/check-app-view-only.sh --selftest
           bash scripts/check-app-view-only.sh App
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.13"
+      - name: App icons match the render table
+        run: uv run scripts/render-app-icons.py --check
       - name: REUSE compliance (every file has copyright + licence info)
         uses: fsfe/reuse-action@v5
 
