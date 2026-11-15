@@ -204,7 +204,7 @@ final class AppStores: ObservableObject {
             keybarSettings.reload()
             terminalSettings.resetToDefaults()
             appearance.resetToDefault()
-            pro.reload()
+            pro.resetToDefault()
             LogServerStore.shared.reload()
             TerminalFontProvider.shared.resetImported()
             // The on-screen log buffer can name hosts (and hold keystrokes if that

@@ -16,6 +16,7 @@ struct AppearanceSettingsView: View {
     var body: some View {
         List {
             ThemeSection()
+            AppIconSection()
             fontSection
             cursorSection
         }
