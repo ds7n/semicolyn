@@ -8,7 +8,7 @@ import SemicolynKit
 /// do nothing but a light tap when chosen; unlocked ones switch the home-screen icon.
 struct AppIconSection: View {
     @ObservedObject private var pro = AppStores.shared.pro
-    @State private var currentID = AppIconVariant.defaultIcon.id
+    @ObservedObject private var switcher = AppIconSwitcher.shared
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
 
@@ -28,26 +28,18 @@ struct AppIconSection: View {
                 Text("Supporter icons unlock with Supporter preview.")
             }
         }
-        .onAppear { currentID = AppIconSwitcher.current.id }
-        .onChange(of: pro.isPro) { _, _ in
-            // Locking may have put the primary icon back.
-            Task { @MainActor in currentID = AppIconSwitcher.current.id }
-        }
     }
 
     private func tile(_ icon: AppIconVariant) -> some View {
         let locked = icon.isSupporter && !pro.isPro
-        let selected = icon.id == currentID
+        let selected = icon.id == switcher.currentID
         return Button {
             if locked {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 return
             }
             InputClickFeedback.play()
-            Task { @MainActor in
-                await AppIconSwitcher.select(icon)
-                currentID = AppIconSwitcher.current.id
-            }
+            Task { @MainActor in await switcher.select(icon) }
         } label: {
             VStack(spacing: 6) {
                 Image(icon.previewAssetName)

@@ -3,7 +3,9 @@
 #
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["resvg-py", "pillow", "typer", "loguru"]
+# # Pinned exactly: --check compares pixels, so a renderer or resampler upgrade must be a
+# # deliberate rerender, never a surprise CI failure.
+# dependencies = ["resvg-py==0.5.0", "pillow==13.0.0", "typer==0.29.1", "loguru==0.8.0"]
 # ///
 """Render the alternate app icons and picker thumbnails from the flat vector mark.
 

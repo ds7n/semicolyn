@@ -47,6 +47,6 @@ import SemicolynKit
 
     private func enforceIcon() {
         let unlocked = isPro
-        Task { @MainActor in AppIconSwitcher.enforce(unlocked: unlocked) }
+        Task { @MainActor in await AppIconSwitcher.shared.enforce(unlocked: unlocked) }
     }
 }

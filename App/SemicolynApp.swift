@@ -50,7 +50,7 @@ private struct RootView: View {
                                              isPro: pro.isPro).theme)
             // A Supporter icon left over from a preview-flagged build must not outlive
             // the unlock (e.g. after installing an App Store build over TestFlight).
-            .task { AppIconSwitcher.enforce(unlocked: pro.isPro) }
+            .task { await AppIconSwitcher.shared.enforce(unlocked: pro.isPro) }
             // NOTE: the Terminal settings screen and font picker read
             // `AppStores.shared.terminalSettings` DIRECTLY (via `@ObservedObject`), not
             // through an injected `@EnvironmentObject`. A missing env-object is a
