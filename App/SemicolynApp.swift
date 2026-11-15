@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
+import UIKit
 import SemicolynKit
 
 @main
@@ -43,11 +44,17 @@ private struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        let theme = displayedDescriptor(selectedID: appearance.selectedThemeID,
+                                        previewID: appearance.previewThemeID,
+                                        isPro: pro.isPro).theme
         HostListView()
-            .environment(\.theme,
-                         displayedDescriptor(selectedID: appearance.selectedThemeID,
-                                             previewID: appearance.previewThemeID,
-                                             isPro: pro.isPro).theme)
+            .environment(\.theme, theme)
+            // Controls without an explicit tint (toggles, links, pickers, sheet buttons)
+            // take the theme accent instead of the system blue; the window tint covers
+            // UIKit-presented chrome such as alerts.
+            .tint(Color(theme.accent.primary))
+            .onAppear { applyWindowTint(theme) }
+            .onChange(of: theme) { _, newTheme in applyWindowTint(newTheme) }
             // A Supporter icon left over from a preview-flagged build must not outlive
             // the unlock (e.g. after installing an App Store build over TestFlight).
             .task { await AppIconSwitcher.shared.enforce(unlocked: pro.isPro) }
@@ -93,5 +100,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                      shouldAllowExtensionPointIdentifier extensionPointIdentifier: UIApplication.ExtensionPointIdentifier) -> Bool {
         guard extensionPointIdentifier == .keyboard else { return true }
         return PrivacyPreferences(defaults: .standard).allowThirdPartyKeyboards
+    }
+}
+
+/// Sets every window's UIKit tint to the theme accent, so alerts and other
+/// UIKit-presented controls match the SwiftUI `.tint`.
+@MainActor
+private func applyWindowTint(_ theme: Theme) {
+    let color = UIColor(Color(theme.accent.primary))
+    for scene in UIApplication.shared.connectedScenes {
+        guard let windowScene = scene as? UIWindowScene else { continue }
+        for window in windowScene.windows { window.tintColor = color }
     }
 }

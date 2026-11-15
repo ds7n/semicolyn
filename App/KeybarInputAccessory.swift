@@ -35,6 +35,7 @@ struct KeybarAccessoryRoot: View {
             }
         }
         .environment(\.theme, theme)
+        .tint(Color(theme.accent.primary))
         .background(Color(theme.surface.panel))
     }
 }
@@ -64,6 +65,8 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     /// measure the true content height stably, so we sum strip + keybar from these instead.
     private let stripMeasureHost: UIHostingController<AnyView>
     private let barMeasureHost: UIHostingController<AnyView>
+    private let keybarSettings: KeybarSettingsStore
+    private let hardwareKeyboardConnected: Bool
 
     /// Seed height for the initial frame before self-sizing corrects it (tightened
     /// keybar row ~33pt + the always-reserved predictor strip 18pt ≈ 51pt; 2026-07-24
@@ -84,6 +87,8 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
                                        hardwareKeyboardConnected: hardwareKeyboardConnected)
         self.host = UIHostingController(rootView: root)
         self.vm = vm
+        self.keybarSettings = keybarSettings
+        self.hardwareKeyboardConnected = hardwareKeyboardConnected
         // The hosting controller computes its own intrinsic size from the live SwiftUI
         // content; the input view then hugs it (see `intrinsicContentSize`).
         host.sizingOptions = .intrinsicContentSize
@@ -93,12 +98,10 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
         // the live host's frame-feedback (see property doc). Same env/theme as the live
         // graph so the measurement matches what renders.
         self.stripMeasureHost = UIHostingController(
-            rootView: AnyView(PredictorStripView(vm: vm, predictorVM: vm.predictorVM)
-                .environment(\.theme, theme)))
+            rootView: Self.stripMeasureRoot(vm: vm, theme: theme))
         self.barMeasureHost = UIHostingController(
-            rootView: AnyView(KeybarView(keybarSettings: keybarSettings, vm: vm,
-                                         hardwareKeyboardConnected: hardwareKeyboardConnected)
-                .environment(\.theme, theme)))
+            rootView: Self.barMeasureRoot(vm: vm, keybarSettings: keybarSettings, theme: theme,
+                                          hardwareKeyboardConnected: hardwareKeyboardConnected))
         stripMeasureHost.view.backgroundColor = .clear
         barMeasureHost.view.backgroundColor = .clear
 
@@ -127,6 +130,32 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Recolors the keybar, predictor strip and flick bubble for a new theme. The
+    /// accessory is built once per terminal (in `makeCoordinator`), so without this a
+    /// theme picked mid-session left the keybar on the theme it was opened with.
+    func apply(theme: Theme) {
+        guard theme != host.rootView.theme, let vm else { return }
+        host.rootView = KeybarAccessoryRoot(vm: vm, keybarSettings: keybarSettings,
+                                            theme: theme,
+                                            hardwareKeyboardConnected: hardwareKeyboardConnected)
+        stripMeasureHost.rootView = Self.stripMeasureRoot(vm: vm, theme: theme)
+        barMeasureHost.rootView = Self.barMeasureRoot(vm: vm, keybarSettings: keybarSettings,
+                                                      theme: theme,
+                                                      hardwareKeyboardConnected: hardwareKeyboardConnected)
+    }
+
+    private static func stripMeasureRoot(vm: ConnectionViewModel, theme: Theme) -> AnyView {
+        AnyView(PredictorStripView(vm: vm, predictorVM: vm.predictorVM)
+            .environment(\.theme, theme))
+    }
+
+    private static func barMeasureRoot(vm: ConnectionViewModel, keybarSettings: KeybarSettingsStore,
+                                       theme: Theme, hardwareKeyboardConnected: Bool) -> AnyView {
+        AnyView(KeybarView(keybarSettings: keybarSettings, vm: vm,
+                           hardwareKeyboardConnected: hardwareKeyboardConnected)
+            .environment(\.theme, theme))
+    }
 
     /// The SwiftUI content's own ideal height at the current width. Uses
     /// `UIHostingController.sizeThatFits(in:)`, which asks SwiftUI directly "how tall
