@@ -12,6 +12,12 @@ import SemicolynKit
 struct ThemeSection: View {
     @ObservedObject private var appearance = AppStores.shared.appearance
     @ObservedObject private var pro = AppStores.shared.pro
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The variant in effect, so swatches show what each theme looks like right now.
+    private var variant: ThemeVariant {
+        resolveVariant(mode: appearance.appearanceMode, systemIsDark: colorScheme == .dark)
+    }
 
     /// The saved descriptor actually rendered without a preview (gate-resolved): the
     /// checkmark follows this, not the raw selection, so a locked-but-selected theme
@@ -23,6 +29,18 @@ struct ThemeSection: View {
     /// Sections only (no `List`): the Appearance screen supplies the list.
     var body: some View {
         Group {
+            Section {
+                Picker("Appearance", selection: modeBinding) {
+                    ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("System follows your iPhone's light or dark setting.")
+            }
             Section("Theme") {
                 ForEach(visibleThemes(channel: pro.channel), id: \.id.raw) { descriptor in
                     row(for: descriptor)
@@ -36,6 +54,14 @@ struct ThemeSection: View {
                 }
             }
         }
+    }
+
+    /// The Appearance picker, with the keyboard click on change.
+    private var modeBinding: Binding<AppearanceMode> {
+        Binding(get: { appearance.appearanceMode }, set: { mode in
+            InputClickFeedback.play()
+            appearance.appearanceMode = mode
+        })
     }
 
     /// The preview toggle. Turning it off also ends any live Supporter-theme preview.
@@ -62,7 +88,7 @@ struct ThemeSection: View {
             }
         } label: {
             HStack(spacing: 12) {
-                ThemeSwatch(theme: descriptor.theme)
+                ThemeSwatch(theme: descriptor.theme(for: variant))
                 Text(descriptor.displayName)
                 Spacer()
                 if locked {

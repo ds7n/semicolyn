@@ -42,19 +42,24 @@ private struct RootView: View {
     @ObservedObject private var appearance = AppStores.shared.appearance
     @ObservedObject private var pro = AppStores.shared.pro
     @Environment(\.scenePhase) private var scenePhase
+    /// The window's appearance: the phone's in System mode, the forced one otherwise
+    /// (the window override below sets it).
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        let variant = resolveVariant(mode: appearance.appearanceMode, systemIsDark: colorScheme == .dark)
         let theme = displayedDescriptor(selectedID: appearance.selectedThemeID,
                                         previewID: appearance.previewThemeID,
-                                        isPro: pro.isPro).theme
+                                        isPro: pro.isPro).theme(for: variant)
         HostListView()
             .environment(\.theme, theme)
             // Controls without an explicit tint (toggles, links, pickers, sheet buttons)
             // take the theme accent instead of the system blue; the window tint covers
             // UIKit-presented chrome such as alerts.
             .tint(Color(theme.accent.primary))
-            .onAppear { applyWindowTint(theme) }
-            .onChange(of: theme) { _, newTheme in applyWindowTint(newTheme) }
+            .onAppear { applyWindowAppearance(theme, mode: appearance.appearanceMode) }
+            .onChange(of: theme) { _, newTheme in applyWindowAppearance(newTheme, mode: appearance.appearanceMode) }
+            .onChange(of: appearance.appearanceMode) { _, mode in applyWindowAppearance(theme, mode: mode) }
             // A Supporter icon left over from a preview-flagged build must not outlive
             // the unlock (e.g. after installing an App Store build over TestFlight).
             .task { await AppIconSwitcher.shared.enforce(unlocked: pro.isPro) }
@@ -103,13 +108,28 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 }
 
-/// Sets every window's UIKit tint to the theme accent, so alerts and other
-/// UIKit-presented controls match the SwiftUI `.tint`.
+/// Sets every window's UIKit tint to the theme accent (alerts and other UIKit chrome
+/// match the SwiftUI `.tint`) and its interface style to the Appearance mode, so the
+/// keyboard, sheets, menus and alerts are light or dark together with the theme.
 @MainActor
-private func applyWindowTint(_ theme: Theme) {
+private func applyWindowAppearance(_ theme: Theme, mode: AppearanceMode) {
     let color = UIColor(Color(theme.accent.primary))
     for scene in UIApplication.shared.connectedScenes {
         guard let windowScene = scene as? UIWindowScene else { continue }
-        for window in windowScene.windows { window.tintColor = color }
+        for window in windowScene.windows {
+            window.tintColor = color
+            window.overrideUserInterfaceStyle = mode.interfaceStyle
+        }
+    }
+}
+
+extension AppearanceMode {
+    /// The UIKit override for this mode: none in System, so the phone's setting applies.
+    var interfaceStyle: UIUserInterfaceStyle {
+        switch self {
+        case .system: return .unspecified
+        case .light: return .light
+        case .dark: return .dark
+        }
     }
 }
