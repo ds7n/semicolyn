@@ -60,6 +60,11 @@ private struct RootView: View {
             .onAppear { applyWindowAppearance(theme, mode: appearance.appearanceMode) }
             .onChange(of: theme) { _, newTheme in applyWindowAppearance(newTheme, mode: appearance.appearanceMode) }
             .onChange(of: appearance.appearanceMode) { _, mode in applyWindowAppearance(theme, mode: mode) }
+            // Windows created later (the keyboard's, which hosts the keybar and its Settings
+            // sheet) get the same tint and interface style as soon as they appear.
+            .onReceive(NotificationCenter.default.publisher(for: UIWindow.didBecomeVisibleNotification)) { _ in
+                applyWindowAppearance(theme, mode: appearance.appearanceMode)
+            }
             // A Supporter icon left over from a preview-flagged build must not outlive
             // the unlock (e.g. after installing an App Store build over TestFlight).
             .task { await AppIconSwitcher.shared.enforce(unlocked: pro.isPro) }
