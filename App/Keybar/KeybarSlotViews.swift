@@ -461,6 +461,14 @@ struct ModifierSlotView: View {
         SlotChrome(bg: bg) {
             Text("⌃").foregroundStyle(Color(theme.text.primary))
         }
+        // The armed tint alone is ~1.3:1 against an idle key, too faint to read; the
+        // accent outline makes the state visible (WCAG non-text contrast).
+        .overlay {
+            if ctrl == .armed {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color(theme.accent.primary), lineWidth: 1.5)
+            }
+        }
         .flickKey("modifier", up: "Alt", down: "Shift") { dir in
             switch dir {
             case .up:   vm.keybar.armAlt()
