@@ -134,7 +134,11 @@ final class KeybarInputAccessory: UIInputView, UIInputViewAudioFeedback {
     /// Recolors the keybar, predictor strip and flick bubble for a new theme. The
     /// accessory is built once per terminal (in `makeCoordinator`), so without this a
     /// theme picked mid-session left the keybar on the theme it was opened with.
-    func apply(theme: Theme) {
+    func apply(theme: Theme, interfaceStyle: UIUserInterfaceStyle) {
+        // The keyboard window can appear after the app window's override was set, so the
+        // accessory (and any sheet its host presents) carries the Appearance mode itself.
+        overrideUserInterfaceStyle = interfaceStyle
+        host.overrideUserInterfaceStyle = interfaceStyle
         guard theme != host.rootView.theme, let vm else { return }
         host.rootView = KeybarAccessoryRoot(vm: vm, keybarSettings: keybarSettings,
                                             theme: theme,

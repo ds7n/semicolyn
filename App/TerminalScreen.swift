@@ -229,7 +229,8 @@ struct TerminalScreen: UIViewRepresentable {
         context.coordinator.halo.configure(color: UIColor(Color(theme.bell.edge)))
         // Recolor the live terminal and its keybar when the theme changes.
         applyPalette(theme.terminalPalette(), to: terminal)
-        context.coordinator.keybarAccessory?.apply(theme: theme)
+        context.coordinator.keybarAccessory?.apply(
+            theme: theme, interfaceStyle: AppStores.shared.appearance.appearanceMode.interfaceStyle)
         // Re-apply the font live when the user changes face/size in the settings
         // picker. Compare against the last SETTINGS-applied values (not the pinch
         // baseSize) so an in-progress pinch isn't clobbered on every SwiftUI pass;

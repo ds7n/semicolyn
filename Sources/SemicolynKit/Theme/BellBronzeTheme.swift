@@ -53,5 +53,31 @@ extension Theme {
 
     // Neon Midnight is the default (first); Bell-bronze retained as a switchable
     // alternate (candidate Pro cosmetic).
-    public static let all: [Theme] = catalog.map(\.theme)
+    public static let all: [Theme] = catalog.map(\.dark)
+}
+
+// Light variant (light-theme-variants spec): anchored to the light app icon's bg and
+// text, every ANSI color darkened to >= 4.5:1 on the light terminal bg (red darker than
+// green for red/green color blindness). Values from the approved light palette mockup.
+private let bellBronzeLightANSI = ANSIPalette([
+    ThemeColor("#1F2530"), ThemeColor("#982020"), ThemeColor("#40766D"), ThemeColor("#8A5B2D"),
+    ThemeColor("#375E9D"), ThemeColor("#734B9B"), ThemeColor("#33656E"), ThemeColor("#5A5D64"),
+    ThemeColor("#848588"), ThemeColor("#B51717"), ThemeColor("#387A6E"), ThemeColor("#9A640C"),
+    ThemeColor("#356DCA"), ThemeColor("#8D55BF"), ThemeColor("#2E7987"), ThemeColor("#6E7075"),
+])
+
+extension Theme {
+    public static let bellBronzeLight = Theme.fromANSI(
+        ansi: bellBronzeLightANSI,
+        roles: ANSIRoleMap(accentPrimary: .yellow, success: .green,
+                           degraded: .brightYellow, broken: .red, warning: .brightYellow),
+        highlight: ThemeColor("#CBB49B"),
+        surface: .init(bg: ThemeColor("#F6EFE4"), panel: ThemeColor("#F0E5D3"),
+                       panelHigh: ThemeColor("#FDFBF8"), line: ThemeColor("#E5D2B2")),
+        text: .init(primary: ThemeColor("#1F2530"), secondary: ThemeColor("#646466"),
+                    muted: ThemeColor("#646466"), inverse: ThemeColor("#FAF6F0")),
+        terminal: .init(bg: ThemeColor("#FAF6F0"), fg: ThemeColor("#373C45"),
+                        cursor: ThemeColor("#8A5B2D"), cursorText: ThemeColor("#FAF6F0"),
+                        selection: ThemeColor("#8A5B2D").alpha(0.30))
+    )
 }

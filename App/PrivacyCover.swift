@@ -44,10 +44,14 @@ final class PrivacyCover {
               let scene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene }).first else { return }
         let stores = AppStores.shared
+        let mode = stores.appearance.appearanceMode
+        let variant = resolveVariant(mode: mode,
+                                     systemIsDark: scene.traitCollection.userInterfaceStyle == .dark)
         let theme = displayedDescriptor(selectedID: stores.appearance.selectedThemeID,
-                                        previewID: nil, isPro: stores.pro.isPro).theme
+                                        previewID: nil, isPro: stores.pro.isPro).theme(for: variant)
         let cover = UIWindow(windowScene: scene)
         cover.windowLevel = Self.windowLevel
+        cover.overrideUserInterfaceStyle = mode.interfaceStyle
         cover.rootViewController = UIHostingController(
             rootView: PrivacyCoverView(content: privacyCoverContent(sessions.last), theme: theme))
         // Shown without becoming key, so the terminal keeps first responder and the

@@ -9,6 +9,7 @@ import SemicolynKit
 /// result into the environment. A missing key falls back to the free default.
 @MainActor final class ThemeSettingsStore: ObservableObject {
     private static let defaultsKey = "semicolyn.appearance.themeID"
+    private static let modeKey = "semicolyn.appearance.mode"
 
     /// Persisted id deliberately un-validated; `resolveDescriptor` is the single guard (unknown/Pro-lapsed id resolves to default at render time).
     @Published var selectedThemeID: ThemeID {
@@ -20,17 +21,26 @@ import SemicolynKit
     /// reverts to `selectedThemeID`. See `displayedDescriptor`.
     @Published var previewThemeID: ThemeID?
 
+    /// System (follow the phone), Light or Dark. A missing or unknown stored value
+    /// reads as the default (System).
+    @Published var appearanceMode: AppearanceMode {
+        didSet { UserDefaults.standard.set(appearanceMode.rawValue, forKey: Self.modeKey) }
+    }
+
     init() {
         if let raw = UserDefaults.standard.string(forKey: Self.defaultsKey) {
             self.selectedThemeID = ThemeID(raw)
         } else {
             self.selectedThemeID = Theme.defaultDescriptor.id
         }
+        self.appearanceMode = UserDefaults.standard.string(forKey: Self.modeKey)
+            .flatMap(AppearanceMode.init(rawValue:)) ?? .defaultMode
     }
 
-    /// Restores the free default (Neon Midnight). Intentional forward seam for a future Settings "Reset" affordance (mirrors `KeybarSettingsStore.resetKeepingLibrary`).
+    /// Restores the free default (Neon Midnight) and System appearance. Intentional forward seam for a future Settings "Reset" affordance (mirrors `KeybarSettingsStore.resetKeepingLibrary`).
     func resetToDefault() {
         selectedThemeID = Theme.defaultDescriptor.id
+        appearanceMode = .defaultMode
     }
 
     private func persist() {
