@@ -88,14 +88,14 @@ public struct GestureEngine: Sendable {
             lastReason = "tap:held"
         }
         switch state {
-        case let .pressed(start, startTime, _, eligible, _, _)
+        case let .pressed(start, startTime, _, eligible, _, ctx)
             where eligible && time - startTime >= GestureThresholds.longPressDuration:
             // The menu opens while the finger is still down: a held finger drags nothing
             // here (moves are ignored), so waiting for release would only add delay.
             state = .longPressed(at: start)
             lastReason = "longPress"
             resetTapSequence()
-            out.append(.holdMenu(start))
+            out.append(.holdMenu(GestureGeometry.cell(at: start, in: ctx), at: start))
         case let .flinging(velocity, startTime, _, emitted, at, ctx):
             let momentum = ScrollMomentum(velocity: velocity)
             let t = time - startTime
