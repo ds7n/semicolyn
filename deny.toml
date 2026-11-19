@@ -22,6 +22,18 @@ allow = [
 ]
 confidence-threshold = 0.9
 
+# Check only the platforms we build: the iOS app slices (scripts/build-xcframework.sh)
+# and Linux, where CI runs the tests. Crates a dependency pulls in only for other
+# platforms (e.g. russh-util's wasm-only chrono) are never compiled, so they are not
+# checked.
+[graph]
+targets = [
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
+    "x86_64-apple-ios",
+    "x86_64-unknown-linux-gnu",
+]
+
 # Fail if the GPL-incompatible `ring` backend is pulled in alongside aws-lc-rs.
 [bans]
 deny = [{ name = "ring" }]
