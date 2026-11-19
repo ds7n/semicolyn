@@ -112,6 +112,41 @@ final class PaneTerminalView: TerminalView {
         selectNone()
     }
 
+    // MARK: Backspace with an empty input record
+    //
+    // SwiftTerm 1.20's `hasText` is true only while its record of keyboard-typed text
+    // (cleared on Return) is non-empty, and iOS then skips Backspace. Text the remote puts
+    // on the line (a Tab-accepted Claude Code suggestion, shell history, a paste) never
+    // enters that record, so Backspace after it did nothing. SwiftTerm's `deleteBackward`
+    // already sends DEL when the record is empty, so report text always, as SwiftTerm did
+    // before 1.20. `hasText` is `public`, not `open`, in 1.20 (open from 1.99), so the
+    // override is added through the Objective-C runtime, on this subclass only.
+
+    /// True once the override is installed (evaluated once, on first use).
+    private nonisolated static let hasTextOverrideInstalled: Bool = {
+        let sel = #selector(getter: UIKeyInput.hasText)
+        guard let inherited = class_getInstanceMethod(TerminalView.self, sel) else { return false }
+        let alwaysTrue: @convention(block) (AnyObject) -> Bool = { _ in true }
+        return class_addMethod(PaneTerminalView.self, sel, imp_implementationWithBlock(alwaysTrue),
+                               method_getTypeEncoding(inherited))
+    }()
+    private static var loggedHasTextOverride = false
+
+    override func becomeFirstResponder() -> Bool {
+        let installed = Self.hasTextOverrideInstalled   // before the keyboard first asks
+        if !Self.loggedHasTextOverride {
+            Self.loggedHasTextOverride = true
+            DebugLog.shared.log(.input, "key:hasTextOverride installed=\(installed)")
+        }
+        return super.becomeFirstResponder()
+    }
+
+    // Diagnostic: an iOS Backspace reaching the view (the sent DEL is logged in `send`).
+    override func deleteBackward() {
+        DebugLog.shared.log(.input, "key:deleteBackward called")
+        super.deleteBackward()
+    }
+
     // Single gesture engine (spec 2026-10-04): every touch goes through OUR
     // `TerminalTouchRecognizer` (plus the stock pinch). Every other tap, long-press and pan
     // recognizer, SwiftTerm's own (including the selection / mouse pans it re-creates each
