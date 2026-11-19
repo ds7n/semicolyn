@@ -6,7 +6,7 @@ import SemicolynKit
 
 /// Performs `GestureIntent`s (spec 2026-10-04) with the app's existing pieces: plain-tmux
 /// actions, SwiftTerm selection + scrollback, mouse / arrow / wheel byte encoders, the
-/// Copy/Paste/Zoom Pane edit menu and the selection magnifier. Holds the current selection, because
+/// Select/Copy/Paste/Zoom Pane edit menu and the selection magnifier. Holds the current selection, because
 /// SwiftTerm's selection service is internal (unreadable from the App).
 @MainActor
 final class GestureIntentExecutor: NSObject {
@@ -28,6 +28,9 @@ final class GestureIntentExecutor: NSObject {
     private lazy var loupe: SelectionLoupeView? = SelectionLoupeView()
     /// Inclusive selection, absolute rows; nil when none.
     private(set) var selection: GestureSelection?
+    /// The long-pressed cell the open menu's Select acts on, and where that menu opened.
+    private var menuSelectCell: GestureCell?
+    private var menuPoint: GesturePoint?
     /// Set when a new drag starts scrolling; the drag's first scroll emit logs its route
     /// (and the alt-scroll decision when it sends bytes), then clears it.
     var logNextScrollRoute = true
@@ -60,10 +63,7 @@ final class GestureIntentExecutor: NSObject {
         case let .tap(cell):
             tap(cell, in: view)
         case let .selectWord(cell, p):
-            let term = view.getTerminal()
-            let viewportRow = cell.row - term.getTopVisibleRow()
-            let (start, end) = subWordBounds(col: cell.col, viewportRow: viewportRow, in: view)
-            apply(start: GestureCell(col: start, row: cell.row), end: GestureCell(col: end, row: cell.row), in: view)
+            selectWord(at: cell, in: view)
             presentMenu(at: p, in: view)
         case let .selectLine(row, p):
             let cols = max(view.getTerminal().cols, 1)
@@ -74,11 +74,11 @@ final class GestureIntentExecutor: NSObject {
             selection = nil
         case let .showMenu(p):
             presentMenu(at: p, in: view)
-        case let .holdMenu(p):
+        case let .holdMenu(cell, p):
             // System haptic (honors Settings > Sounds & Haptics > System Haptics), as a
             // Messages bubble or Home Screen icon does when its menu opens under the finger.
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            presentMenu(at: p, in: view)
+            presentMenu(at: p, in: view, selectCell: cell)
         case let .setSelection(start, end, p):
             apply(start: start, end: end, in: view)
             loupe?.show(around: contentPoint(p, in: view), in: view)
@@ -181,6 +181,13 @@ final class GestureIntentExecutor: NSObject {
         selection = GestureSelection(start: start, end: end)
     }
 
+    /// Selects the sub-word under `cell` (absolute row), as a double-tap does.
+    private func selectWord(at cell: GestureCell, in view: TerminalView) {
+        let viewportRow = cell.row - view.getTerminal().getTopVisibleRow()
+        let (start, end) = subWordBounds(col: cell.col, viewportRow: viewportRow, in: view)
+        apply(start: GestureCell(col: start, row: cell.row), end: GestureCell(col: end, row: cell.row), in: view)
+    }
+
     /// Sub-word bounds on a VIEWPORT row (getCharData adds yDisp itself).
     private func subWordBounds(col: Int, viewportRow: Int, in view: TerminalView) -> (Int, Int) {
         let term = view.getTerminal()
@@ -204,7 +211,11 @@ final class GestureIntentExecutor: NSObject {
         CGPoint(x: CGFloat(p.x) + view.contentOffset.x, y: CGFloat(p.y) + view.contentOffset.y)
     }
 
-    private func presentMenu(at p: GesturePoint, in view: TerminalView) {
+    /// `selectCell`: the long-pressed cell, offered as the menu's Select (nil for menus that
+    /// already follow a selection).
+    private func presentMenu(at p: GesturePoint, in view: TerminalView, selectCell: GestureCell? = nil) {
+        menuSelectCell = selectCell
+        menuPoint = p
         let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: contentPoint(p, in: view))
         editMenu?.presentEditMenu(with: config)
     }
@@ -220,6 +231,13 @@ extension GestureIntentExecutor: @preconcurrency UIEditMenuInteractionDelegate {
         var items: [UIMenuElement] = []
         if view.hasActiveSelection {
             items.append(UIAction(title: "Copy") { [weak view] _ in view?.copy(nil) })
+        } else if let cell = menuSelectCell, let point = menuPoint {
+            // iOS text views offer Select on a long press; it then reopens with Copy.
+            items.append(UIAction(title: "Select") { [weak self] _ in
+                guard let self, let view = self.terminal else { return }
+                self.selectWord(at: cell, in: view)
+                self.presentMenu(at: point, in: view)
+            })
         }
         if UIPasteboard.general.hasStrings {
             items.append(UIAction(title: "Paste") { [weak self] _ in
