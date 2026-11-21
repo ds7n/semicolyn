@@ -65,20 +65,18 @@ struct TerminalScreen: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> RawTerminalContainer {
-        let terminal = PaneTerminalView(frame: .zero)
+        // Options are fixed at creation in SwiftTerm 2 (the kitty image cache cap lives there).
+        let terminal = PaneTerminalView(frame: .zero, font: nil, options: paneTerminalOptions())
         // Raw single-terminal path: `RawTerminalContainer` owns the child's frame height
         // (window-space `rawTerminalChildHeight`, PR #122), so the child must NOT self-inset.
         terminal.terminalDelegate = context.coordinator
-        // Security audit L5: cap the kitty image cache (SwiftTerm reads this on each insert).
-        terminal.applyKittyCacheLimit(SemicolynKit.kittyImageCacheLimitBytes)
         // Event-driven InteractionMode: recompute on every alt-screen / mouse-mode
         // transition, then refresh the dot immediately.
         terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] event, modes in
             coordinator?.modeTracker.recompute(modes: modes)
             // Connecting overlay: tmux turning mouse reporting on is the "attached" signal
             // (the VM uses it while the overlay is up, and to stop the Mosh direct launch's
-            // marker scan). Delivered on the main thread
-            // from a nonisolated SwiftTerm hook; hop onto the main actor for the VM.
+            // marker scan). PaneTerminalView delivers this on the main thread.
             if case .mouseChanged = event {
                 let on = modes.mouseReporting
                 let vm = coordinator?.vm
@@ -587,7 +585,8 @@ struct TerminalScreen: UIViewRepresentable {
                 if let notice = osc52Notice(action) { vm?.showNotice(notice) }
             }
         }
-        func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        func requestOpenLink(source: TerminalView, request: TerminalLinkRequest) {
+            let link = request.link
             guard let kind = classifyURL(link), let url = URL(string: link) else { return }
             switch kind {
             case .http, .https:

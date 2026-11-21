@@ -5,73 +5,89 @@ import SwiftTerm
 import SemicolynKit
 
 /// The ONLY place the App reads emulator state from SwiftTerm. Everything else asks
-/// these members, so a SwiftTerm API change (1.x `getTerminal()` versus 2.x copied
-/// snapshots) is contained to this file.
+/// these members, so a SwiftTerm API change is contained to this file. SwiftTerm 2 has
+/// no live `Terminal` on the view: every read here is a copied snapshot.
 ///
 /// Row coordinates: `cursorCell.row` is relative to the live screen (the cursor lives
 /// there); `viewportCellTexts` rows and `topVisibleRow` are relative to the viewport,
 /// which differs from the live screen only while scrolled back.
+///
+/// Never call these from inside a SwiftTerm terminal callback (`bufferActivated`,
+/// `mouseModeChanged`): the snapshots take the terminal lock that callback holds.
 @MainActor
 extension TerminalView {
     /// The grid size in cells.
     var gridSize: (cols: Int, rows: Int) {
-        let t = getTerminal()
-        return (t.cols, t.rows)
+        let d = terminalDimensions
+        return (d.cols, d.rows)
     }
 
     /// The cursor cell, relative to the live screen.
     var cursorCell: (col: Int, row: Int) {
-        let pos = getTerminal().getCursorLocation()   // (x, y) column/row
-        return (pos.x, pos.y)
+        let pos = terminalStateSnapshot().cursor
+        return (pos.col, pos.row)
     }
 
     /// The scrollback row at the top of the viewport (`yDisp`).
-    var topVisibleRow: Int { getTerminal().getTopVisibleRow() }
+    var topVisibleRow: Int { terminalStateSnapshot().viewportRow }
 
-    /// The emulator's input modes, read now.
-    var inputModes: TerminalInputModes { getTerminal().inputModes }
-
-    /// Every viewport row as one String per column (an unwritten cell is ""), top first.
-    func viewportCellTexts() -> [[String]] {
-        let rows = gridSize.rows
-        return (0..<max(rows, 0)).compactMap { viewportCellTexts(row: $0) }
+    /// The emulator's input modes, read now. All off when no terminal is attached.
+    var inputModes: TerminalInputModes {
+        guard let s = terminalInputStateSnapshot() else { return .unavailable }
+        return TerminalInputModes(isAlternateBuffer: s.isAlternateBuffer,
+                                  applicationCursor: s.applicationCursor,
+                                  mouseReporting: s.mouseMode != .off)
     }
 
-    /// One viewport row as one String per column (an unwritten cell is ""), or nil when
-    /// `row` is outside the viewport.
-    func viewportCellTexts(row: Int) -> [String]? {
-        let t = getTerminal()
-        guard row >= 0, row < t.rows else { return nil }
-        // getCharData(col:row:) is viewport-relative (it adds yDisp itself).
-        return (0..<t.cols).map { col in
-            t.getCharData(col: col, row: row).map { String($0.getCharacter()) } ?? ""
+    /// Every viewport row as one String per column (an unwritten or wide-continuation
+    /// cell is "" or NUL), top first. One copy of the viewport.
+    func viewportCellTexts() -> [[String]] {
+        let cols = gridSize.cols
+        // `.viewport`, never `.rows(...)`: `.rows` takes absolute rows, which drift from
+        // viewport rows once scrollback is trimmed.
+        guard let snap = terminalContentSnapshot(region: .viewport) else { return [] }
+        return snap.rows.map { row in
+            let texts = row.cells.map(\.text)
+            return texts.count >= cols ? texts : texts + Array(repeating: "", count: cols - texts.count)
         }
     }
 
-    /// Resize the scrollback. `changeScrollback`, not `options.scrollback =`: the buffer
-    /// already exists, and only this resizes it.
-    func setScrollback(_ lines: Int) {
-        getTerminal().changeScrollback(lines)
+    /// One viewport row as one String per column, or nil when `row` is outside the
+    /// viewport. Copies the whole viewport; batch with `viewportCellTexts()` instead
+    /// when reading many rows.
+    func viewportCellTexts(row: Int) -> [String]? {
+        let rows = viewportCellTexts()
+        guard row >= 0, row < rows.count else { return nil }
+        return rows[row]
     }
 
-    /// Cap the kitty image cache (security audit L5).
-    func applyKittyCacheLimit(_ bytes: Int) {
-        getTerminal().options.kittyImageCacheLimitBytes = bytes
+    /// Resize the scrollback (only this resizes an existing buffer).
+    func setScrollback(_ lines: Int) {
+        changeScrollback(lines)
     }
 
     /// The scroll-state fragment of the `geo:*` diagnostic lines.
     var geometryDebugFields: String {
-        let t = getTerminal(), b = t.buffer
-        return "topRow\(t.getTopVisibleRow()) yDisp\(b.yDisp) scroll\(b.scrollTop)..\(b.scrollBottom)"
+        "topRow\(topVisibleRow) yDisp\(topVisibleRow)"
     }
 }
 
 extension Terminal {
     /// The input modes, for SwiftTerm's own callbacks (`bufferActivated`,
-    /// `mouseModeChanged`), which hand over the `Terminal` itself.
+    /// `mouseModeChanged`), which hand over the `Terminal` itself with its lock held.
     var inputModes: TerminalInputModes {
         TerminalInputModes(isAlternateBuffer: isCurrentBufferAlternate,
                            applicationCursor: applicationCursor,
                            mouseReporting: mouseMode != .off)
     }
+}
+
+/// Terminal options for a new view. The kitty image cache cap (security audit L5) is
+/// set here because SwiftTerm 2 fixes it at creation; it now counts per screen, so each
+/// screen gets half of the old combined budget.
+func paneTerminalOptions() -> TerminalOptions {
+    var options = TerminalOptions.default
+    options.kittyGraphics.storageLimitBytesPerScreen =
+        UInt32(clamping: SemicolynKit.kittyImageCacheLimitBytes / 2)
+    return options
 }

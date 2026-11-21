@@ -18,8 +18,8 @@ import SemicolynKit
 enum ModeRelevantEvent { case bufferChanged, mouseChanged }
 
 final class PaneTerminalView: TerminalView {
-    /// Set by the mount right after construction. Called on every alt-screen or
-    /// mouse-mode transition with this view's emulator terminal.
+    /// Set by the mount right after construction. Called on the main thread after every
+    /// alt-screen or mouse-mode transition, with the modes captured at the transition.
     var onModeRelevantChange: ((ModeRelevantEvent, TerminalInputModes) -> Void)?
 
     /// Full geometry on EVERY layout for the single terminal view (`TerminalScreen`). A tmux
@@ -68,13 +68,22 @@ final class PaneTerminalView: TerminalView {
             + "contentSize=\(Int(contentSize.height)) frameH=\(Int(frame.height)) grCount=\(grs.count) [\(roster)]")
     }
 
-    override func bufferActivated(source: Terminal) {
+    // SwiftTerm 2 calls these `nonisolated`, possibly off the main thread, with the
+    // terminal lock held: read the modes from `source` here (snapshot APIs would
+    // deadlock), then deliver on the main thread.
+    nonisolated override func bufferActivated(source: Terminal) {
         super.bufferActivated(source: source)
-        onModeRelevantChange?(.bufferChanged, source.inputModes)
+        deliverModeChange(.bufferChanged, source.inputModes)
     }
-    override func mouseModeChanged(source: Terminal) {
+    nonisolated override func mouseModeChanged(source: Terminal) {
         super.mouseModeChanged(source: source)
-        onModeRelevantChange?(.mouseChanged, source.inputModes)
+        deliverModeChange(.mouseChanged, source.inputModes)
+    }
+
+    private nonisolated func deliverModeChange(_ event: ModeRelevantEvent, _ modes: TerminalInputModes) {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.onModeRelevantChange?(event, modes) }
+        }
     }
 
     // MARK: Native text-interaction suppression
