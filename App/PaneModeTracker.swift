@@ -1,6 +1,5 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
-import SwiftTerm
 import SemicolynKit
 
 /// Holds the terminal's tracked `InteractionMode`, recomputed from terminal state on
@@ -28,9 +27,8 @@ final class PaneModeTracker {
 
     /// Recompute the `InteractionMode` from the live emulator state. Idempotent; only
     /// fires `onChange` on a real mode change.
-    func recompute(terminal: Terminal) {
-        let next = resolveMode(isAltScreen: terminal.isCurrentBufferAlternate,
-                               mouseReporting: terminal.mouseMode != .off)
+    func recompute(modes: TerminalInputModes) {
+        let next = modes.interactionMode
         guard !primed || mode != next else { return }
         primed = true
         mode = next

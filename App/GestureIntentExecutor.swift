@@ -60,13 +60,12 @@ final class GestureIntentExecutor: NSObject {
         case let .tap(cell):
             tap(cell, in: view)
         case let .selectWord(cell, p):
-            let term = view.getTerminal()
-            let viewportRow = cell.row - term.getTopVisibleRow()
+            let viewportRow = cell.row - view.topVisibleRow
             let (start, end) = subWordBounds(col: cell.col, viewportRow: viewportRow, in: view)
             apply(start: GestureCell(col: start, row: cell.row), end: GestureCell(col: end, row: cell.row), in: view)
             presentMenu(at: p, in: view)
         case let .selectLine(row, p):
-            let cols = max(view.getTerminal().cols, 1)
+            let cols = max(view.gridSize.cols, 1)
             apply(start: GestureCell(col: 0, row: row), end: GestureCell(col: cols - 1, row: row), in: view)
             presentMenu(at: p, in: view)
         case .clearSelection:
@@ -120,11 +119,12 @@ final class GestureIntentExecutor: NSObject {
     /// N). Raw app with the mouse on: SGR click. Coordinates are clamped to the CURRENT grid
     /// (the engine clamped against the touch-down snapshot, which output may have moved since).
     private func tap(_ cell: GestureCell, in view: TerminalView) {
-        let term = view.getTerminal()
-        let col = min(max(0, cell.col), max(term.cols - 1, 0))
-        let viewportRow = min(max(0, cell.row - term.getTopVisibleRow()), max(term.rows - 1, 0))
+        let grid = view.gridSize
+        let mouseOn = view.inputModes.mouseReporting
+        let col = min(max(0, cell.col), max(grid.cols - 1, 0))
+        let viewportRow = min(max(0, cell.row - view.topVisibleRow), max(grid.rows - 1, 0))
         if let tmux = onScreenTmux() {
-            tmux.onTapPane(col: col + 1, row: viewportRow + 1, mouseModeOn: term.mouseMode != .off)
+            tmux.onTapPane(col: col + 1, row: viewportRow + 1, mouseModeOn: mouseOn)
             return
         }
         if hooks.mode() == .localScroll {
@@ -132,7 +132,7 @@ final class GestureIntentExecutor: NSObject {
             DebugLog.shared.log(.gesture, "gesture:tap route=placeCursor live=\(live) col=\(col) row=\(viewportRow)"
                 + (live ? "" : " -> skip reason=scrolledBack"))
             if live { hooks.placeCursor(col, viewportRow) }
-        } else if term.mouseMode != .off {
+        } else if mouseOn {
             hooks.sendBytes(sgrMouseClick(col: col + 1, row: viewportRow + 1))
         }
     }
@@ -153,20 +153,21 @@ final class GestureIntentExecutor: NSObject {
             if lines > 0 { view.scrollUp(lines: lines) } else { view.scrollDown(lines: -lines) }
             return
         }
-        let term = view.getTerminal()
-        let col = min(max(1, cell.col + 1), max(term.cols, 1))
-        let row = min(max(1, cell.row - term.getTopVisibleRow() + 1), max(term.rows, 1))
+        let grid = view.gridSize
+        let appCursor = view.inputModes.applicationCursor
+        let col = min(max(1, cell.col + 1), max(grid.cols, 1))
+        let row = min(max(1, cell.row - view.topVisibleRow + 1), max(grid.rows, 1))
         let decision = hooks.altScrollDecision()
         if logNextScrollRoute {
             logNextScrollRoute = false
-            DebugLog.shared.log(.gesture, "gesture:scroll route=bytes imode=\(hooks.mode()) appCursor=\(term.applicationCursor) \(decision.logLine)")
+            DebugLog.shared.log(.gesture, "gesture:scroll route=bytes imode=\(hooks.mode()) appCursor=\(appCursor) \(decision.logLine)")
         }
         let keys = decision.keys
         for run in arrowEvents(cols: 0, rows: -lines) {   // finger down -> up runs (older)
             let bytes: [UInt8]
             switch keys {
             case .wheel:  bytes = encodeWheelRun(run, col: col, row: row)
-            case .arrows: bytes = encodeArrowRun(run, applicationCursorKeys: term.applicationCursor)
+            case .arrows: bytes = encodeArrowRun(run, applicationCursorKeys: appCursor)
             }
             if !bytes.isEmpty { hooks.sendBytes(bytes) }
         }
@@ -181,16 +182,13 @@ final class GestureIntentExecutor: NSObject {
         selection = GestureSelection(start: start, end: end)
     }
 
-    /// Sub-word bounds on a VIEWPORT row (getCharData adds yDisp itself).
+    /// Sub-word bounds on a VIEWPORT row.
     private func subWordBounds(col: Int, viewportRow: Int, in view: TerminalView) -> (Int, Int) {
-        let term = view.getTerminal()
-        let cols = max(term.cols, 1)
+        let cols = max(view.gridSize.cols, 1)
+        let cells = view.viewportCellTexts(row: viewportRow) ?? []
         func classOf(_ c: Int) -> CharClass {
-            guard c >= 0, c < cols, let cd = term.getCharData(col: c, row: viewportRow) else { return .space }
-            let ch = cd.getCharacter()
-            if ch == " " || ch == "\t" || ch == "\0" { return .space }
-            if SemicolynKit.selectionPunctuation.contains(ch) { return .punct }
-            return .word
+            guard c >= 0, c < cols, c < cells.count else { return .space }
+            return selectionCharClass(ofCellText: cells[c])
         }
         let r = SemicolynKit.subWordBounds(cols: cols, col: col, classOf: classOf)
         return (r.start, r.end)

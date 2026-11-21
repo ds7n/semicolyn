@@ -9,8 +9,8 @@ import SemicolynKit
 /// `TerminalDelegate`, NOT to the app's `TerminalViewDelegate`. `TerminalView`
 /// declares them `open` for exactly this: subclass and override. We `super`-call
 /// first (preserve SwiftTerm's own scroller / mouse-pan-gesture side effects), then
-/// hand the live `Terminal` to `onModeRelevantChange`, which each mount wires to its
-/// `PaneModeTracker.recompute(terminal:)`.
+/// hand the terminal's input modes to `onModeRelevantChange`, which each mount wires to
+/// its `PaneModeTracker.recompute(modes:)`.
 
 /// Which mode-relevant SwiftTerm event fired: `bufferActivated` (a real alternate-screen
 /// `?1049` transition) or `mouseModeChanged` (the mount also uses this one as tmux's
@@ -20,7 +20,7 @@ enum ModeRelevantEvent { case bufferChanged, mouseChanged }
 final class PaneTerminalView: TerminalView {
     /// Set by the mount right after construction. Called on every alt-screen or
     /// mouse-mode transition with this view's emulator terminal.
-    var onModeRelevantChange: ((ModeRelevantEvent, Terminal) -> Void)?
+    var onModeRelevantChange: ((ModeRelevantEvent, TerminalInputModes) -> Void)?
 
     /// Full geometry on EVERY layout for the single terminal view (`TerminalScreen`). A tmux
     /// window switch doesn't change SwiftTerm's grid, so `sizeChanged` never fires for it;
@@ -31,13 +31,13 @@ final class PaneTerminalView: TerminalView {
         guard DebugLog.shared.isEnabled(.geometry) else { return }
         let f = frame, co = contentOffset, cs = contentSize
         let ci = contentInset, ai = adjustedContentInset
-        let t = getTerminal(), b = t.buffer
+        let grid = gridSize
         let sv = superview
         DebugLog.shared.log(.geometry,
             "geo:pane frame=\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width))x\(Int(f.height)) "
             + "vbounds=\(Int(bounds.width))x\(Int(bounds.height)) super=\(sv.map { String(describing: type(of: $0)) } ?? "nil")"
             + "(\(sv.map { "\(Int($0.bounds.width))x\(Int($0.bounds.height))" } ?? "-")) "
-            + "grid=\(t.cols)x\(t.rows) topRow\(t.getTopVisibleRow()) yDisp\(b.yDisp) scroll\(b.scrollTop)..\(b.scrollBottom) "
+            + "grid=\(grid.cols)x\(grid.rows) \(geometryDebugFields) "
             + "contentSize=\(Int(cs.width))x\(Int(cs.height)) offset=\(Int(co.x)),\(Int(co.y)) "
             + "inset=(t\(Int(ci.top)),b\(Int(ci.bottom))) adjInset=(t\(Int(ai.top)),b\(Int(ai.bottom))) "
             + "fr=\(isFirstResponder) clip=\(clipsToBounds) "
@@ -70,11 +70,11 @@ final class PaneTerminalView: TerminalView {
 
     override func bufferActivated(source: Terminal) {
         super.bufferActivated(source: source)
-        onModeRelevantChange?(.bufferChanged, source)
+        onModeRelevantChange?(.bufferChanged, source.inputModes)
     }
     override func mouseModeChanged(source: Terminal) {
         super.mouseModeChanged(source: source)
-        onModeRelevantChange?(.mouseChanged, source)
+        onModeRelevantChange?(.mouseChanged, source.inputModes)
     }
 
     // MARK: Native text-interaction suppression

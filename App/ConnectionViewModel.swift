@@ -514,7 +514,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// shell. Read per keystroke (the router calls this for every key). False before
     /// the terminal mounts.
     private func activePaneApplicationCursor() -> Bool {
-        mountedTerminalView?.getTerminal().applicationCursor ?? false
+        mountedTerminalView?.inputModes.applicationCursor ?? false
     }
 
     /// The `TerminalView` the user is currently typing into (L1 echo oracle, the
@@ -2300,7 +2300,7 @@ final class ConnectionViewModel: ObservableObject, PredictorPurgeable {
     /// Resolve the pause for this session (tmux title, or the terminal's own alternate
     /// screen without tmux) and send it to the predictor when it changed.
     private func updateLearningPause() {
-        let alternate = mountedTerminalView?.getTerminal().isCurrentBufferAlternate ?? false
+        let alternate = mountedTerminalView?.inputModes.isAlternateBuffer ?? false
         let pause = resolvedLearningPause(tmuxAttached: plainTmux != nil,
                                           titlePause: titleLearningPause,
                                           alternateScreen: alternate)

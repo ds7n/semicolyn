@@ -70,17 +70,17 @@ struct TerminalScreen: UIViewRepresentable {
         // (window-space `rawTerminalChildHeight`, PR #122), so the child must NOT self-inset.
         terminal.terminalDelegate = context.coordinator
         // Security audit L5: cap the kitty image cache (SwiftTerm reads this on each insert).
-        terminal.getTerminal().options.kittyImageCacheLimitBytes = SemicolynKit.kittyImageCacheLimitBytes
+        terminal.applyKittyCacheLimit(SemicolynKit.kittyImageCacheLimitBytes)
         // Event-driven InteractionMode: recompute on every alt-screen / mouse-mode
         // transition, then refresh the dot immediately.
-        terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] event, term in
-            coordinator?.modeTracker.recompute(terminal: term)
+        terminal.onModeRelevantChange = { [weak coordinator = context.coordinator] event, modes in
+            coordinator?.modeTracker.recompute(modes: modes)
             // Connecting overlay: tmux turning mouse reporting on is the "attached" signal
             // (the VM uses it while the overlay is up, and to stop the Mosh direct launch's
             // marker scan). Delivered on the main thread
             // from a nonisolated SwiftTerm hook; hop onto the main actor for the VM.
             if case .mouseChanged = event {
-                let on = term.mouseMode != .off
+                let on = modes.mouseReporting
                 let vm = coordinator?.vm
                 MainActor.assumeIsolated {
                     vm?.noteTerminalMouseMode(on: on)
@@ -89,7 +89,7 @@ struct TerminalScreen: UIViewRepresentable {
         }
         // Prime once at mount so a terminal that starts on the alt-screen (reattach
         // into a running vim/Claude) is correct from frame one.
-        context.coordinator.modeTracker.recompute(terminal: terminal.getTerminal())
+        context.coordinator.modeTracker.recompute(modes: terminal.inputModes)
         // Our keybar IS the terminal's input accessory view now (a real UIInputView
         // audio-feedback context, so `playInputClick()` fires). This replaces both
         // SwiftTerm's built-in bar and the old `.safeAreaInset` keybar mount.
@@ -100,7 +100,7 @@ struct TerminalScreen: UIViewRepresentable {
         terminal.font = TerminalFontProvider.shared.font(for: s.fontFace, size: CGFloat(s.fontSize))
         // `changeScrollback`, not `options.scrollback =`: the buffer already exists, and
         // only this resizes it. Clamped (`effectiveScrollback`) so it can't overflow.
-        terminal.getTerminal().changeScrollback(s.effectiveScrollback)
+        terminal.setScrollback(s.effectiveScrollback)
         // Apply the theme's terminal palette (bg/fg/cursor/selection + 16 ANSI).
         applyPalette(theme.terminalPalette(), to: terminal)
         applyCursor(to: terminal, style: s.cursorStyle, blink: s.cursorBlink)
@@ -187,7 +187,7 @@ struct TerminalScreen: UIViewRepresentable {
             var filtered = bytes
             kittyFilter.filter(&filtered)
             terminal?.feed(byteArray: filtered[...])
-            let alternate = terminal?.getTerminal().isCurrentBufferAlternate ?? false
+            let alternate = terminal?.inputModes.isAlternateBuffer ?? false
             guard alternate != lastAlternate else { return }
             lastAlternate = alternate
             let vm = coordinator?.vm
@@ -250,7 +250,7 @@ struct TerminalScreen: UIViewRepresentable {
             coord.lastAppliedCursorBlink = settings.cursorBlink
         }
         if settings.effectiveScrollback != coord.lastAppliedScrollback {
-            terminal.getTerminal().changeScrollback(settings.effectiveScrollback)
+            terminal.setScrollback(settings.effectiveScrollback)
             coord.lastAppliedScrollback = settings.effectiveScrollback
         }
     }
@@ -443,10 +443,9 @@ struct TerminalScreen: UIViewRepresentable {
         /// Place the terminal cursor at (toCol,toRow) by emitting arrow keys from the
         /// current cursor cell (single-tap cursor placement, reuses the pure encoders).
         func placeCursor(toCol: Int, toRow: Int, in view: TerminalView) {
-            let term = view.getTerminal()
-            let cur = term.getCursorLocation()   // .x = col, .y = row (see SwiftTermEchoOracle)
-            let appCursor = term.applicationCursor
-            let runs = cursorTapArrows(fromCol: cur.x, fromRow: cur.y, toCol: toCol, toRow: toRow)
+            let cur = view.cursorCell
+            let appCursor = view.inputModes.applicationCursor
+            let runs = cursorTapArrows(fromCol: cur.col, fromRow: cur.row, toCol: toCol, toRow: toRow)
             for run in runs {
                 let bytes = encodeArrowRun(run, applicationCursorKeys: appCursor)  // Kit encoder
                 if !bytes.isEmpty { onSend(bytes) }
@@ -468,8 +467,8 @@ struct TerminalScreen: UIViewRepresentable {
         /// Snapshot everything the gesture engine needs at touch-down.
         @MainActor
         func gestureContext(for terminal: TerminalView, selection: GestureSelection?) -> GestureContext {
-            let term = terminal.getTerminal()
-            let cols = max(term.cols, 1), rows = max(term.rows, 1)
+            let grid = terminal.gridSize
+            let cols = max(grid.cols, 1), rows = max(grid.rows, 1)
             // True cell height: caretFrame is exactly one cell tall; bounds/rows overestimates.
             // NOT its width: SwiftTerm widens the caret to cellW * columnWidth on a wide (CJK)
             // cursor cell. Cell width = SwiftTerm's own computeFontDimensions width: the "W"
@@ -487,11 +486,11 @@ struct TerminalScreen: UIViewRepresentable {
             return GestureContext(
                 screen: GestureScreen(plainTmuxAttached: vm?.plainTmux != nil, mode: mode),
                 mode: mode == .localScroll ? .local : .app,
-                appMouseOn: term.mouseMode != .off,
+                appMouseOn: terminal.inputModes.mouseReporting,
                 multiWindow: vm?.isMultiWindowTmux ?? false,
                 selection: terminal.hasActiveSelection ? selection : nil,
                 cellWidth: Double(cellW), cellHeight: Double(cellH),
-                cols: cols, rows: rows, topRow: term.getTopVisibleRow(),
+                cols: cols, rows: rows, topRow: terminal.topVisibleRow,
                 contentOffsetY: Double(terminal.contentOffset.y),
                 viewWidth: Double(terminal.bounds.width), scrollGain: gain)
         }
@@ -518,12 +517,11 @@ struct TerminalScreen: UIViewRepresentable {
                 if DebugLog.shared.isEnabled(.geometry) {
                     let f = source.frame, co = source.contentOffset, cs = source.contentSize
                     let ci = source.contentInset, ai = source.adjustedContentInset
-                    let t = source.getTerminal(), b = t.buffer
                     DebugLog.shared.log(.geometry,
                         "geo:raw frame=\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width))x\(Int(f.height)) "
                         + "vbounds=\(Int(source.bounds.width))x\(Int(source.bounds.height)) si=(t\(Int(si.top)),b\(Int(si.bottom))) "
-                        + "kbH=\(String(format: "%.1f", kbH)) grid=\(newCols)x\(newRows) rows\(t.rows) "
-                        + "topRow\(t.getTopVisibleRow()) yDisp\(b.yDisp) scroll\(b.scrollTop)..\(b.scrollBottom) "
+                        + "kbH=\(String(format: "%.1f", kbH)) grid=\(newCols)x\(newRows) rows\(source.gridSize.rows) "
+                        + "\(source.geometryDebugFields) "
                         + "contentSize=\(Int(cs.width))x\(Int(cs.height)) offset=\(Int(co.x)),\(Int(co.y)) "
                         + "inset=(t\(Int(ci.top)),b\(Int(ci.bottom))) adjInset=(t\(Int(ai.top)),b\(Int(ai.bottom))) "
                         + "fr=\(source.isFirstResponder) clip=\(source.clipsToBounds) "
