@@ -30,3 +30,17 @@ path = "crates/semicolyn-ssh-core/tests/fixtures/**"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 True Positive LLC"
 SPDX-License-Identifier = "GPL-3.0-only"
+
+# Vendored SwiftTerm (Vendor/SwiftTerm/SEMICOLYN.md): upstream MIT, copyright lines from
+# its LICENSE. SEMICOLYN.md carries its own header.
+[[annotations]]
+path = "Vendor/SwiftTerm/**"
+precedence = "closest"
+SPDX-FileCopyrightText = [
+    "2019-2026 Miguel de Icaza",
+    "2017-2019 The xterm.js authors",
+    "2014-2016 SourceLair Private Company",
+    "2012-2013 Christopher Jeffrey",
+    "2016 Ryan L McIntyre",
+]
+SPDX-License-Identifier = "MIT"

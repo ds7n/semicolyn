@@ -15,7 +15,16 @@ struct SwiftTermBuildInfoPlugin: BuildToolPlugin {
             "SWIFTTERM_BUILD_DIRTY"
         ]
         let processEnvironment = ProcessInfo.processInfo.environment
-        let fallbackEnvironment = fallbackVariableNames.reduce(into: [String: String]()) { result, name in
+        // semicolyn vendored copy: there is no SwiftTerm .git here, so git would describe
+        // the HOST repository (its branch would leak into the XTVERSION reply). Pin the
+        // identity; the process environment can still override it.
+        let vendoredDefaults = [
+            "SWIFTTERM_BUILD_BRANCH": "semicolyn",
+            "SWIFTTERM_BUILD_TAG": "1.99.3",
+            "SWIFTTERM_BUILD_COMMIT": "v1.99.3",
+            "SWIFTTERM_BUILD_DIRTY": "false"
+        ]
+        let fallbackEnvironment = fallbackVariableNames.reduce(into: vendoredDefaults) { result, name in
             if let value = processEnvironment[name] {
                 result[name] = value
             }
