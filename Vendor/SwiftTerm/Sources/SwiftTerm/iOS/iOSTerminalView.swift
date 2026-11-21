@@ -384,8 +384,17 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // UITextInput support starts
     public lazy var tokenizer: UITextInputTokenizer = UITextInputStringTokenizer (textInput: self) // TerminalInputTokenizer()
     
+    // semicolyn: held-Backspace repeat. The soft keyboard repeats Backspace only while the
+    // document has text before the caret, and this document only holds locally typed text,
+    // so after remote-inserted text (shell Tab completion) a held Backspace stopped after
+    // one delete. The document now always starts with this placeholder, which edits never
+    // remove: a Backspace at the placeholder sends DEL and leaves the document unchanged,
+    // so the key keeps repeating. Same approach as xterm.dart's `deleteDetection`.
+    static let deleteRepeatPlaceholder = "  "
+    static let deleteRepeatPlaceholderUTF16Count = 2
+
     // We use this as temporary storage for UITextInput, which we send to the terminal on demand
-    var textInputStorage: String = ""
+    var textInputStorage: String = TerminalView.deleteRepeatPlaceholder
     var pendingAutoPeriodDeleteWasSpace: Bool = false
     private var koreanResyllabificationTransaction = HangulInput.ResyllabificationTransaction()
 
@@ -401,7 +410,21 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public weak var inputDelegate: UITextInputDelegate?
 
     // This tracks the selection in the textInputStorage, it is not the same as our global selection, it is temporary
-    var _selectedTextRange: TextRange = TextRange(from: TextPosition(offset: 0), to: TextPosition(offset: 0))
+    var _selectedTextRange: TextRange = TextRange(
+        from: TextPosition(offset: TerminalView.deleteRepeatPlaceholderUTF16Count),
+        to: TextPosition(offset: TerminalView.deleteRepeatPlaceholderUTF16Count))
+
+    /// semicolyn: `range` with its start moved past the delete-repeat placeholder, so no
+    /// edit can touch the placeholder.
+    func rangeOutsideDeleteRepeatPlaceholder(_ range: TextRange) -> TextRange {
+        let floor = TerminalView.deleteRepeatPlaceholderUTF16Count
+        let start = max(range.startPosition.offset, floor)
+        let end = max(range.endPosition.offset, start)
+        if start == range.startPosition.offset && end == range.endPosition.offset {
+            return range
+        }
+        return TextRange(from: TextPosition(offset: start), to: TextPosition(offset: end))
+    }
 
     var _markedTextStyle: [NSAttributedString.Key: Any]?
 
@@ -2494,7 +2517,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         beginTextInputEdit()
 
-        let rangeToReplace = _markedTextRange ?? _selectedTextRange
+        let rangeToReplace = rangeOutsideDeleteRepeatPlaceholder(_markedTextRange ?? _selectedTextRange)
         var textToInsert = text
         if let normalized = normalizedAutoPeriodInsertionText(text, rangeToReplace: rangeToReplace, hadPendingAutoPeriodDelete: hadPendingAutoPeriodDelete) {
             textToInsert = normalized
@@ -2997,7 +3020,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         case .prefixReinserted:
             return .prefixReinserted
         case let .replacement(edit):
-            guard edit.charactersToDelete <= textInputStorage.count else {
+            guard edit.charactersToDelete <= textInputStorage.count - TerminalView.deleteRepeatPlaceholder.count else {
                 return .none
             }
             if edit.charactersToDelete > 0 {
@@ -3090,13 +3113,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         // after backward deletion, marked range is always cleared, and length of selected range is always zero
         let rangeToDelete = _markedTextRange ?? _selectedTextRange
-        var rangeStartPosition = rangeToDelete.startPosition
+        // semicolyn: only the part after the placeholder is ever removed from the document.
+        let removableRange = rangeOutsideDeleteRepeatPlaceholder(rangeToDelete)
+        var rangeStartPosition = removableRange.startPosition
         var rangeStartIndex = rangeStartPosition.offset
         if rangeToDelete.isEmpty {
             resetKoreanResyllabificationTransaction()
             // If there is no selected text, delete the character before the cursor
 
-            if rangeStartIndex == 0 {
+            // semicolyn: at (or before) the end of the placeholder there is no typed text
+            // left; send the backspace and keep the document, so the keyboard keeps
+            // repeating the key.
+            if rangeToDelete.startPosition.offset <= TerminalView.deleteRepeatPlaceholderUTF16Count {
                 // This is the case when the user hits backspace, but there is no text in the
                 // text input buffer.  This happens for example when text has been pasted.
                 // In that scenario, we should just send the backspace character to the terminal
@@ -3128,14 +3156,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             beginTextInputEdit()
             // Send as many backspaces that are in the range to delete. When on auto-repeat, after a some time
             // pressing the backspace, it will delete chunks of text at a time.
-            let oldText = textInputStorage[rangeToDelete.fullRange(in: textInputStorage)]
-            trackKoreanResyllabificationDeletion(oldText, range: rangeToDelete)
+            // semicolyn: only the typed part after the placeholder is deleted (and sent).
+            let oldText = textInputStorage[removableRange.fullRange(in: textInputStorage)]
+            trackKoreanResyllabificationDeletion(oldText, range: removableRange)
             let backspaces = oldText.count
             for _ in 0..<backspaces {
                 self.sendBackspaceKey()
             }
 
-            textInputStorage.removeSubrange(rangeToDelete.fullRange(in: textInputStorage))
+            textInputStorage.removeSubrange(removableRange.fullRange(in: textInputStorage))
         }
         
         _markedTextRange = nil

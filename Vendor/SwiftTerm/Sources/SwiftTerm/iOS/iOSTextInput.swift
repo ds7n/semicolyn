@@ -144,7 +144,9 @@ extension TerminalView: UITextInput {
     }
     
     public func replace(_ range: UITextRange, withText text: String) {
-        guard let r = coerceTextRange(range) else { return }
+        guard let coerced = coerceTextRange(range) else { return }
+        // semicolyn: edits never touch the delete-repeat placeholder.
+        let r = rangeOutsideDeleteRepeatPlaceholder(coerced)
 
         guard _markedTextRange == nil else { return }
         resetKoreanResyllabificationTransaction()
@@ -203,10 +205,12 @@ extension TerminalView: UITextInput {
                 uitiLog("selectedTextRange -> nil (ignored) \(textInputStateDescription())")
                 return
             }
-            guard let nv = coerceTextRange(newValue) else {
+            guard let coerced = coerceTextRange(newValue) else {
                 uitiLog("selectedTextRange -> unsupported range \(type(of: newValue)) \(textInputStateDescription())")
                 return
             }
+            // semicolyn: the caret and selection stay after the delete-repeat placeholder.
+            let nv = rangeOutsideDeleteRepeatPlaceholder(coerced)
             let isSame = _selectedTextRange.startPosition.offset == nv.startPosition.offset &&
                 _selectedTextRange.endPosition.offset == nv.endPosition.offset
             if isSame {
@@ -234,7 +238,12 @@ extension TerminalView: UITextInput {
                 uitiLog("markedTextRange -> nil")
                 return
             }
-            _markedTextRange = coerceTextRange(newValue)
+            if let coerced = coerceTextRange(newValue) {
+                // semicolyn: marked text stays after the delete-repeat placeholder.
+                _markedTextRange = rangeOutsideDeleteRepeatPlaceholder(coerced)
+            } else {
+                _markedTextRange = nil
+            }
             uitiLog("markedTextRange -> \(String(describing: _markedTextRange))")
         }
     }
@@ -252,7 +261,7 @@ extension TerminalView: UITextInput {
         uitiLog("setMarkedText(\(markedText?.debugDescription ?? "nil"), selectedRange:\(selectedRange)) \(textInputStateDescription())")
         resetKoreanResyllabificationTransaction()
 
-        let rangeToReplace = _markedTextRange ?? _selectedTextRange
+        let rangeToReplace = rangeOutsideDeleteRepeatPlaceholder(_markedTextRange ?? _selectedTextRange)
         let rangeStartPosition = rangeToReplace.startPosition
 
         beginTextInputEdit()
@@ -288,8 +297,10 @@ extension TerminalView: UITextInput {
         beginTextInputEdit()
         pendingAutoPeriodDeleteWasSpace = false
         resetKoreanResyllabificationTransaction()
-        textInputStorage = ""
-        _selectedTextRange = TextRange (from: TextPosition(offset: 0), to: TextPosition(offset: 0))
+        // semicolyn: reset to the delete-repeat placeholder, caret after it.
+        textInputStorage = TerminalView.deleteRepeatPlaceholder
+        let caret = TextPosition(offset: TerminalView.deleteRepeatPlaceholderUTF16Count)
+        _selectedTextRange = TextRange (from: caret, to: caret)
         _markedTextRange = nil
         endTextInputEdit()
     }
