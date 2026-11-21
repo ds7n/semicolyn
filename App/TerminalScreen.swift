@@ -441,8 +441,11 @@ struct TerminalScreen: UIViewRepresentable {
         /// Place the terminal cursor at (toCol,toRow) by emitting arrow keys from the
         /// current cursor cell (single-tap cursor placement, reuses the pure encoders).
         func placeCursor(toCol: Int, toRow: Int, in view: TerminalView) {
-            let cur = view.cursorCell
-            let appCursor = view.inputModes.applicationCursor
+            // Called from the gesture executor on the main thread; the emulator reads are
+            // @MainActor.
+            let (cur, appCursor) = MainActor.assumeIsolated {
+                (view.cursorCell, view.inputModes.applicationCursor)
+            }
             let runs = cursorTapArrows(fromCol: cur.col, fromRow: cur.row, toCol: toCol, toRow: toRow)
             for run in runs {
                 let bytes = encodeArrowRun(run, applicationCursorKeys: appCursor)  // Kit encoder

@@ -24,6 +24,9 @@ Patches are offered under the upstream MIT licence.
    two-space placeholder that edits never remove; a Backspace at the placeholder sends
    DEL and leaves the document unchanged, so the key keeps repeating. Same approach as
    xterm.dart's `deleteDetection`.
+4. `Sources/SwiftTerm/Apple/PowerlineRenderer.swift`: `thinFlamePath` wraps
+   `dropFirst()` in `Array(...)`; Xcode 26.3's type checker rejects the upstream
+   expression.
 
 ## Updating
 
