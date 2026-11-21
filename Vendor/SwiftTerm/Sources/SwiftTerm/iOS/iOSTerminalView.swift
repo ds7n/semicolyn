@@ -426,6 +426,24 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         return TextRange(from: TextPosition(offset: start), to: TextPosition(offset: end))
     }
 
+    /// semicolyn: `range` as a storage range that never starts inside the placeholder.
+    /// Offsets round to grapheme boundaries, and a combining mark typed first merges with
+    /// the last placeholder space into one grapheme, so round-trip through UTF-16 to keep
+    /// the lower bound at the placeholder's end.
+    func deleteRepeatSafeStorageRange(_ range: Range<String.Index>) -> Range<String.Index> {
+        let utf16 = textInputStorage.utf16
+        let floor = utf16.index(utf16.startIndex,
+                                offsetBy: TerminalView.deleteRepeatPlaceholderUTF16Count,
+                                limitedBy: utf16.endIndex) ?? utf16.endIndex
+        let lower = max(range.lowerBound, floor)
+        return lower..<max(range.upperBound, lower)
+    }
+
+    /// semicolyn: `fullRange(in:)` for an edit, clamped by `deleteRepeatSafeStorageRange`.
+    func deleteRepeatSafeFullRange(_ range: TextRange) -> Range<String.Index> {
+        deleteRepeatSafeStorageRange(range.fullRange(in: textInputStorage))
+    }
+
     var _markedTextStyle: [NSAttributedString.Key: Any]?
 
     // Used for the keyboard long-press gesture that works as a cursor
@@ -2493,6 +2511,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         guard text == ". " else { return nil }
         guard rangeToReplace.isEmpty else { return nil }
         guard rangeToReplace.endPosition.offset == textInputStorage.textInputUTF16Count else { return nil }
+        // semicolyn: the placeholder's trailing space is not a typed space.
+        guard textInputStorage.textInputUTF16Count > TerminalView.deleteRepeatPlaceholderUTF16Count else { return nil }
         guard textInputStorage.last == " " else { return nil }
         uitiLog("auto-period insertion range text:\(text.debugDescription) -> \" \"")
         return " "
@@ -2527,7 +2547,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
 
         let rangeStartIndex = rangeToReplace.startPosition.offset
-        textInputStorage.replaceSubrange(rangeToReplace.fullRange(in: textInputStorage), with: textToInsert)
+        textInputStorage.replaceSubrange(deleteRepeatSafeFullRange(rangeToReplace), with: textToInsert)
         _markedTextRange = nil
         let insertedOffset = textInputStorage.textInputValidUTF16Offset(
             rangeStartIndex + textToInsert.textInputUTF16Count,
@@ -3128,21 +3148,27 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 // This is the case when the user hits backspace, but there is no text in the
                 // text input buffer.  This happens for example when text has been pasted.
                 // In that scenario, we should just send the backspace character to the terminal
-                pendingAutoPeriodDeleteWasSpace = false
-                self.sendBackspaceKey()
-                uitiLog("deleteBackward() no text to delete, sending backspace")
-                return
-            }
-
-            beginTextInputEdit()
-
-            guard let deleteRange = textInputStorage.textInputCharacterRange(beforeUTF16Offset: rangeStartIndex) else {
+                // semicolyn: bracket with the edit notifications so the keyboard re-reads the
+                // (unchanged) document instead of assuming its cached copy shrank.
+                beginTextInputEdit()
                 pendingAutoPeriodDeleteWasSpace = false
                 self.sendBackspaceKey()
                 uitiLog("deleteBackward() no text to delete, sending backspace")
                 endTextInputEdit()
                 return
             }
+
+            beginTextInputEdit()
+
+            guard let graphemeRange = textInputStorage.textInputCharacterRange(beforeUTF16Offset: rangeStartIndex) else {
+                pendingAutoPeriodDeleteWasSpace = false
+                self.sendBackspaceKey()
+                uitiLog("deleteBackward() no text to delete, sending backspace")
+                endTextInputEdit()
+                return
+            }
+            // semicolyn: a grapheme reaching back into the placeholder loses only its typed part.
+            let deleteRange = deleteRepeatSafeStorageRange(graphemeRange)
             rangeStartIndex = textInputStorage.textInputUTF16Offset(of: deleteRange.lowerBound)
             let deletedChar = textInputStorage[deleteRange]
             let deletingAtEnd = rangeStartPosition.offset == textInputStorage.textInputUTF16Count
@@ -3157,14 +3183,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             // Send as many backspaces that are in the range to delete. When on auto-repeat, after a some time
             // pressing the backspace, it will delete chunks of text at a time.
             // semicolyn: only the typed part after the placeholder is deleted (and sent).
-            let oldText = textInputStorage[removableRange.fullRange(in: textInputStorage)]
+            let oldText = textInputStorage[deleteRepeatSafeFullRange(removableRange)]
             trackKoreanResyllabificationDeletion(oldText, range: removableRange)
             let backspaces = oldText.count
             for _ in 0..<backspaces {
                 self.sendBackspaceKey()
             }
 
-            textInputStorage.removeSubrange(removableRange.fullRange(in: textInputStorage))
+            textInputStorage.removeSubrange(deleteRepeatSafeFullRange(removableRange))
         }
         
         _markedTextRange = nil

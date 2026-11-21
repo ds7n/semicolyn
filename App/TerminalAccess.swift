@@ -66,9 +66,10 @@ extension TerminalView {
         changeScrollback(lines)
     }
 
-    /// The scroll-state fragment of the `geo:*` diagnostic lines.
+    /// The scroll-state fragment of the `geo:*` diagnostic lines. SwiftTerm 2 exposes no
+    /// scroll region, so only the viewport top (`yDisp`) is reported.
     var geometryDebugFields: String {
-        "topRow\(topVisibleRow) yDisp\(topVisibleRow)"
+        "topRow\(topVisibleRow)"
     }
 }
 

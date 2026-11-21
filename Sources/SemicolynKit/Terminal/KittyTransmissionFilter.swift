@@ -99,7 +99,8 @@ public struct KittyTransmissionFilter: Sendable {
     }
 }
 
-/// Memory cap for each terminal's kitty image cache (security audit L5). SwiftTerm's
-/// default is 320 MB per terminal, enough for a server to push the app toward an iOS
-/// memory kill; 64 MB still holds dozens of screen-sized images.
+/// Memory cap for each terminal's kitty image cache (security audit L5): 64 MB still holds
+/// dozens of screen-sized images without letting a server push the app toward an iOS
+/// memory kill. SwiftTerm 2 counts its limit per screen (normal and alternate), so the App
+/// gives each screen half of this.
 public let kittyImageCacheLimitBytes = 64 * 1024 * 1024

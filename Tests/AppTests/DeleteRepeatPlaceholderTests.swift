@@ -93,6 +93,20 @@ final class DeleteRepeatPlaceholderTests: XCTestCase {
     }
 
     @MainActor
+    func testCombiningMarkTypedFirstNeverEatsThePlaceholder() {
+        let t = Harness()
+        // A Thai vowel mark joins the last placeholder space into one grapheme.
+        t.view.insertText("\u{0E31}")
+        XCTAssertEqual(t.documentText.unicodeScalars.map(\.value), [0x20, 0x20, 0x0E31])
+        t.view.deleteBackward()   // removes only the mark
+        XCTAssertEqual(t.documentText.unicodeScalars.map(\.value), [0x20, 0x20])
+        XCTAssertEqual(t.caretOffset, 2)
+        t.view.deleteBackward()   // at the placeholder: DEL, document kept
+        XCTAssertEqual(t.documentText.unicodeScalars.map(\.value), [0x20, 0x20])
+        XCTAssertEqual(t.sentBytes(), Array("\u{0E31}".utf8) + [del, del])
+    }
+
+    @MainActor
     func testReplaceOverPlaceholderSendsNoDelForIt() {
         let t = Harness()
         let start = t.view.beginningOfDocument
@@ -127,8 +141,8 @@ private final class Harness {
         view.selectedTextRange = view.textRange(from: start, to: end)
     }
 
-    /// The bytes sent since the last call. SwiftTerm hands them to the delegate on a
-    /// later main-queue turn, so let the run loop deliver them first.
+    /// The bytes sent since the last call. On the main thread SwiftTerm delivers them
+    /// inline; the short run-loop spin only guards against a future async hop.
     func sentBytes() -> [UInt8] {
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         defer { sink.bytes.removeAll() }

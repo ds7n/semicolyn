@@ -156,7 +156,7 @@ extension TerminalView: UITextInput {
 
         // Send the edits to the terminal
         // Delete the old by sending as many backspaces as needed
-        let oldText = textInputStorage[r.fullRange(in: textInputStorage)]
+        let oldText = textInputStorage[deleteRepeatSafeFullRange(r)]
         if !isAutoPeriodReplacement(text) {
             pendingAutoPeriodDeleteWasSpace = false
         }
@@ -171,7 +171,7 @@ extension TerminalView: UITextInput {
         self.send (txt: replacementText)
 
         let insertionIndex = r.startPosition.offset
-        textInputStorage.replaceSubrange(r.fullRange(in: textInputStorage), with: replacementText)
+        textInputStorage.replaceSubrange(deleteRepeatSafeFullRange(r), with: replacementText)
         let replacementLength = replacementText.textInputUTF16Count
         if r.endPosition.offset <= _selectedTextRange.startPosition.offset {
             let selectionOffset = _selectedTextRange.startPosition.offset - insertionIndex
@@ -267,7 +267,7 @@ extension TerminalView: UITextInput {
         beginTextInputEdit()
 
         if let newText = markedText {
-            textInputStorage.replaceSubrange(rangeToReplace.fullRange(in: textInputStorage), with: newText)
+            textInputStorage.replaceSubrange(deleteRepeatSafeFullRange(rangeToReplace), with: newText)
             // Figure out the new selection range
             let rangeStartIndex = rangeStartPosition.offset
             let newTextLength = newText.textInputUTF16Count
@@ -283,7 +283,7 @@ extension TerminalView: UITextInput {
             _selectedTextRange = TextRange(from: TextPosition(offset: selectionStartIndex), 
                                            to: TextPosition(offset: selectionEndIndex))
         } else {
-            textInputStorage.removeSubrange(rangeToReplace.fullRange(in: textInputStorage))
+            textInputStorage.removeSubrange(deleteRepeatSafeFullRange(rangeToReplace))
             _markedTextRange = nil
             _selectedTextRange = TextRange(from: rangeStartPosition, to: rangeStartPosition)
         }
