@@ -6,6 +6,7 @@
 #else
 #import "moshiosbridge.h"
 #endif
+#include <atomic>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -46,17 +47,32 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
 // runs; this pthread cleanup handler (which pthread_exit does run) restores fd 2 and
 // closes the pipe. Without it, stderr stays on a pipe nobody reads: later output is
 // lost, and once the pipe fills every stderr write in the process blocks forever.
+//
+// fd 2 is process-global, so at most ONE session captures at a time. Without that,
+// overlapping sessions (a reconnect while the old one is still up) cross-wire it: B
+// saves A's capture pipe as "the original", A restores the real stderr and closes
+// its pipe, then B "restores" fd 2 onto A's dead pipe and stderr is lost for good.
+// A session that finds the capture taken simply runs without it (its failure text
+// stays in the device console instead of the onEnd reason).
+static std::atomic<bool> g_stderrCaptureOwned{false};
+
 struct StderrCapture {
-    int savedStderr;  // dup of the original fd 2, or -1
+    int savedStderr;  // dup of the original fd 2, or -1 (also: this session owns the capture)
     int pipeRead;     // capture pipe read end, or -1
 };
+
+// Restores fd 2 from `savedStderr`, closes it, and releases the process-wide capture.
+static void release_stderr_capture(int savedStderr) {
+    fflush(stderr);
+    dup2(savedStderr, STDERR_FILENO);
+    close(savedStderr);
+    g_stderrCaptureOwned.store(false);
+}
 
 static void restore_stderr_on_thread_exit(void *arg) {
     StderrCapture *cap = (StderrCapture *)arg;
     if (cap->savedStderr >= 0) {
-        fflush(stderr);
-        dup2(cap->savedStderr, STDERR_FILENO);
-        close(cap->savedStderr);
+        release_stderr_capture(cap->savedStderr);
         cap->savedStderr = -1;
     }
     if (cap->pipeRead >= 0) {
@@ -303,15 +319,22 @@ static void *reader_thread_main(void *ctx) {
     // the device console. Redirect fd 2 into a pipe around the mosh_main call (this
     // thread only sees the failure path; the happy path prints nothing), then use
     // the captured text as the onEnd reason so a device trace names the cause.
-    // Scoped: the original fd 2 is restored immediately after the call.
+    // Scoped: the original fd 2 is restored immediately after the call. Only one
+    // session at a time captures (see g_stderrCaptureOwned); others skip it.
     int errPipe[2] = { -1, -1 };
     int savedStderr = -1;
-    if (pipe(errPipe) == 0) {
-        // Non-blocking read end so draining a quiet/failed run never hangs.
-        fcntl(errPipe[0], F_SETFL, O_NONBLOCK);
-        savedStderr = dup(STDERR_FILENO);
-        dup2(errPipe[1], STDERR_FILENO);
-        close(errPipe[1]);
+    bool expected = false;
+    if (g_stderrCaptureOwned.compare_exchange_strong(expected, true)) {
+        if (pipe(errPipe) == 0 && (savedStderr = dup(STDERR_FILENO)) >= 0) {
+            // Non-blocking read end so draining a quiet/failed run never hangs.
+            fcntl(errPipe[0], F_SETFL, O_NONBLOCK);
+            dup2(errPipe[1], STDERR_FILENO);
+            close(errPipe[1]);
+        } else {
+            if (errPipe[0] >= 0) { close(errPipe[0]); close(errPipe[1]); }
+            errPipe[0] = errPipe[1] = -1;
+            g_stderrCaptureOwned.store(false);
+        }
     }
 
     // Snapshot the restore blob (if any) under the lock; use it outside the lock
@@ -335,9 +358,7 @@ static void *reader_thread_main(void *ctx) {
     // Restore the real stderr, then drain whatever mosh printed into a bounded buffer.
     NSString *capturedErr = nil;
     if (savedStderr >= 0) {
-        fflush(stderr);
-        dup2(savedStderr, STDERR_FILENO);
-        close(savedStderr);
+        release_stderr_capture(savedStderr);
         char buf[512];
         ssize_t n = read(errPipe[0], buf, sizeof(buf) - 1);
         if (n > 0) {
