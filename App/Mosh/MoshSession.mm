@@ -41,6 +41,30 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
     [self captureEncodedState:[NSData dataWithBytes:buf length:len]];
 }
 
+// runMoshLoop points the process's fd 2 at a capture pipe around mosh_main. On
+// SUSPEND mosh pthread_exit()s inside mosh_main, so the restore after the call never
+// runs; this pthread cleanup handler (which pthread_exit does run) restores fd 2 and
+// closes the pipe. Without it, stderr stays on a pipe nobody reads: later output is
+// lost, and once the pipe fills every stderr write in the process blocks forever.
+struct StderrCapture {
+    int savedStderr;  // dup of the original fd 2, or -1
+    int pipeRead;     // capture pipe read end, or -1
+};
+
+static void restore_stderr_on_thread_exit(void *arg) {
+    StderrCapture *cap = (StderrCapture *)arg;
+    if (cap->savedStderr >= 0) {
+        fflush(stderr);
+        dup2(cap->savedStderr, STDERR_FILENO);
+        close(cap->savedStderr);
+        cap->savedStderr = -1;
+    }
+    if (cap->pipeRead >= 0) {
+        close(cap->pipeRead);
+        cap->pipeRead = -1;
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // OWNERSHIP + CONCURRENCY MODEL (holistic  - read this before touching anything)
 //
@@ -298,9 +322,13 @@ static void *reader_thread_main(void *ctx) {
     pthread_mutex_unlock(&_lock);
     const char *stateBuf = restore.length > 0 ? (const char *)restore.bytes : "";
     size_t stateLen = restore.length;
-    int rc = mosh_main(fin, fout, &_winsize, mosh_state_capture, (__bridge void *)self,
-                       _ip.UTF8String, _port.UTF8String, _key.UTF8String, _predict.UTF8String,
-                       stateBuf, stateLen, _predict.UTF8String);
+    StderrCapture capture = { savedStderr, errPipe[0] };
+    int rc = 0;
+    pthread_cleanup_push(restore_stderr_on_thread_exit, &capture);
+    rc = mosh_main(fin, fout, &_winsize, mosh_state_capture, (__bridge void *)self,
+                   _ip.UTF8String, _port.UTF8String, _key.UTF8String, _predict.UTF8String,
+                   stateBuf, stateLen, _predict.UTF8String);
+    pthread_cleanup_pop(0);  // returned normally: restore below, after draining the pipe
 
     // Restore the real stderr, then drain whatever mosh printed into a bounded buffer.
     NSString *capturedErr = nil;
