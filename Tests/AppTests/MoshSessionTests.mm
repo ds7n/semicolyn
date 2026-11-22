@@ -4,11 +4,70 @@
 #import "MoshSession.h"
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <poll.h>
+#import <objc/runtime.h>
 
 @interface MoshSessionTests : XCTestCase
 @end
 
 @implementation MoshSessionTests
+
+// TEMPORARY DIAGNOSTIC (removed before merge): runs first (name sorts first) and
+// reports why the normal-path teardown does not complete.
+static int *diagIvar(MoshSession *s, const char *name) {
+    Ivar iv = class_getInstanceVariable([MoshSession class], name);
+    return iv ? (int *)((uint8_t *)(__bridge void *)s + ivar_getOffset(iv)) : NULL;
+}
+static NSString *diagFds(void) {
+    NSMutableString *m = [NSMutableString string];
+    for (int fd = 0; fd < 256; fd++) {
+        struct stat st;
+        if (fstat(fd, &st) != 0) continue;
+        if (!S_ISFIFO(st.st_mode)) continue;
+        int fl = fcntl(fd, F_GETFL);
+        [m appendFormat:@" %d(%s ino=%llu)", fd, (fl & O_ACCMODE) == O_WRONLY ? "w" : "r",
+                        (unsigned long long)st.st_ino];
+    }
+    return m;
+}
+- (void)testAAADiagNormalTeardown {
+    NSMutableString *log = [NSMutableString string];
+    __block BOOL gcdRan = NO;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ gcdRan = YES; });
+    [NSThread sleepForTimeInterval:0.2];
+    [log appendFormat:@"gcdBefore=%d;", gcdRan];
+    [log appendFormat:@" fdsBefore=[%@];", diagFds()];
+
+    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
+                                                cols:80 rows:24 predictMode:@"none"];
+    XCTestExpectation *ended = [self expectationWithDescription:@"onEnd"];
+    s.onEnd = ^(NSString *reason) { [ended fulfill]; };
+    __block BOOL teardownFired = NO;
+    s.onTeardownComplete = ^{ teardownFired = YES; };
+    [s start];
+    int *outP = diagIvar(s, "_outPipe");
+    int *inP = diagIvar(s, "_inPipe");
+    int out0 = outP[0];
+    [log appendFormat:@" pipes in=%d,%d out=%d,%d; fdsLive=[%@];", inP[0], inP[1], outP[0], outP[1],
+                      diagFds()];
+    unsigned char quit[2] = {0x1e, 0x2e};
+    [s writeInput:[NSData dataWithBytes:quit length:2]];
+    [self waitForExpectations:@[ ended ] timeout:2.0];
+    [NSThread sleepForTimeInterval:0.2];
+    struct pollfd pfd = { out0, POLLIN, 0 };
+    int pr = poll(&pfd, 1, 0);
+    [log appendFormat:@" afterEnd out=%d,%d poll=%d revents=0x%x; fdsAfterEnd=[%@];", outP[0], outP[1],
+                      pr, pfd.revents, diagFds()];
+    [s stop];
+    [NSThread sleepForTimeInterval:1.0];
+    __block BOOL gcdRan2 = NO;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ gcdRan2 = YES; });
+    [NSThread sleepForTimeInterval:0.2];
+    [log appendFormat:@" teardownFired=%d gcdAfter=%d; fdsAfterStop=[%@]", teardownFired, gcdRan2,
+                      diagFds()];
+    XCTFail(@"DIAG %@", log);
+}
 
 // A single written byte arrives on onOutput immediately (proves setvbuf(_IONBF):
 // no 4KB stdio batching). Asserts the EXACT byte, not merely "something arrived".
