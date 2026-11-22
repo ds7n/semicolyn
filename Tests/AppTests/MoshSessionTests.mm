@@ -4,88 +4,11 @@
 #import "MoshSession.h"
 #include <sys/stat.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
-#import <objc/runtime.h>
-#include <mach/mach.h>
-#include <sys/resource.h>
 
 @interface MoshSessionTests : XCTestCase
 @end
 
 @implementation MoshSessionTests
-
-// TEMPORARY DIAGNOSTIC (removed before merge): runs first (name sorts first) and
-// reports why the normal-path teardown does not complete.
-static int *diagIvar(MoshSession *s, const char *name) {
-    Ivar iv = class_getInstanceVariable([MoshSession class], name);
-    return iv ? (int *)((uint8_t *)(__bridge void *)s + ivar_getOffset(iv)) : NULL;
-}
-static NSString *diagFds(void) {
-    NSMutableString *m = [NSMutableString string];
-    for (int fd = 0; fd < 256; fd++) {
-        struct stat st;
-        if (fstat(fd, &st) != 0) continue;
-        if (!S_ISFIFO(st.st_mode)) continue;
-        int fl = fcntl(fd, F_GETFL);
-        [m appendFormat:@" %d(%s ino=%llu)", fd, (fl & O_ACCMODE) == O_WRONLY ? "w" : "r",
-                        (unsigned long long)st.st_ino];
-    }
-    return m;
-}
-static double diagCpuSeconds(void) {
-    struct rusage ru;
-    getrusage(RUSAGE_SELF, &ru);
-    return ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6 + ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6;
-}
-- (void)testAAADiagNormalTeardown {
-    NSMutableString *log = [NSMutableString string];
-    __block BOOL gcdRan = NO, gcdDefault = NO, gcdUI = NO;
-    double cpu0 = diagCpuSeconds();
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ gcdRan = YES; });
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{ gcdDefault = YES; });
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ gcdUI = YES; });
-    [NSThread sleepForTimeInterval:1.0];
-    mach_msg_type_number_t nthreads = 0;
-    thread_act_array_t threads = NULL;
-    if (task_threads(mach_task_self(), &threads, &nthreads) == KERN_SUCCESS) {
-        for (mach_msg_type_number_t i = 0; i < nthreads; i++) mach_port_deallocate(mach_task_self(), threads[i]);
-        vm_deallocate(mach_task_self(), (vm_address_t)threads, nthreads * sizeof(thread_act_t));
-    }
-    [log appendFormat:@"gcdBefore util=%d default=%d ui=%d cpuPerSec=%.2f threads=%u ncpu=%lu;", gcdRan,
-                      gcdDefault, gcdUI, diagCpuSeconds() - cpu0, nthreads,
-                      (unsigned long)NSProcessInfo.processInfo.activeProcessorCount];
-    [log appendFormat:@" fdsBefore=[%@];", diagFds()];
-
-    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
-                                                cols:80 rows:24 predictMode:@"none"];
-    XCTestExpectation *ended = [self expectationWithDescription:@"onEnd"];
-    s.onEnd = ^(NSString *reason) { [ended fulfill]; };
-    __block BOOL teardownFired = NO;
-    s.onTeardownComplete = ^{ teardownFired = YES; };
-    [s start];
-    int *outP = diagIvar(s, "_outPipe");
-    int *inP = diagIvar(s, "_inPipe");
-    int out0 = outP[0];
-    [log appendFormat:@" pipes in=%d,%d out=%d,%d; fdsLive=[%@];", inP[0], inP[1], outP[0], outP[1],
-                      diagFds()];
-    unsigned char quit[2] = {0x1e, 0x2e};
-    [s writeInput:[NSData dataWithBytes:quit length:2]];
-    [self waitForExpectations:@[ ended ] timeout:2.0];
-    [NSThread sleepForTimeInterval:0.2];
-    struct pollfd pfd = { out0, POLLIN, 0 };
-    int pr = poll(&pfd, 1, 0);
-    [log appendFormat:@" afterEnd out=%d,%d poll=%d revents=0x%x; fdsAfterEnd=[%@];", outP[0], outP[1],
-                      pr, pfd.revents, diagFds()];
-    [s stop];
-    [NSThread sleepForTimeInterval:1.0];
-    __block BOOL gcdRan2 = NO;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ gcdRan2 = YES; });
-    [NSThread sleepForTimeInterval:0.2];
-    [log appendFormat:@" teardownFired=%d gcdAfter=%d; fdsAfterStop=[%@]", teardownFired, gcdRan2,
-                      diagFds()];
-    XCTFail(@"DIAG %@", log);
-}
 
 // A single written byte arrives on onOutput immediately (proves setvbuf(_IONBF):
 // no 4KB stdio batching). Asserts the EXACT byte, not merely "something arrived".
