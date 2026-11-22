@@ -155,9 +155,47 @@ static NSString *stderrIdentity(void) {
                           @"fd 2 must point back at the original stderr after a suspend");
 }
 
-// Same contract on the normal path (mosh_main returns): fd 2 is restored.
+// Same contract on the normal path (mosh_main returns): fd 2 is restored. onEnd
+// fires after runMoshLoop's own restore, so it is the signal to wait on.
 - (void)testQuitRestoresProcessStderr {
     NSString *before = stderrIdentity();
+    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
+                                                cols:80 rows:24 predictMode:@"none"];
+    XCTestExpectation *ended = [self expectationWithDescription:@"onEnd"];
+    s.onEnd = ^(NSString *reason) { [ended fulfill]; };
+    [s start];
+    unsigned char quit[2] = {0x1e, 0x2e};
+    [s writeInput:[NSData dataWithBytes:quit length:2]];
+    [self waitForExpectations:@[ ended ] timeout:2.0];
+    XCTAssertEqualObjects(stderrIdentity(), before,
+                          @"fd 2 must point back at the original stderr after a normal quit");
+    [s stop];
+}
+
+// -stop after mosh_main already returned: the normal-path teardown joins both
+// threads and fires onTeardownComplete.
+- (void)testStopAfterCleanQuitTearsDown {
+    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
+                                                cols:80 rows:24 predictMode:@"none"];
+    XCTestExpectation *ended = [self expectationWithDescription:@"onEnd"];
+    XCTestExpectation *teardown = [self expectationWithDescription:@"onTeardownComplete"];
+    __block BOOL teardownFired = NO;
+    s.onEnd = ^(NSString *reason) { [ended fulfill]; };
+    s.onTeardownComplete = ^{
+        if (!teardownFired) { teardownFired = YES; [teardown fulfill]; }
+    };
+    [s start];
+    unsigned char quit[2] = {0x1e, 0x2e};
+    [s writeInput:[NSData dataWithBytes:quit length:2]];
+    [self waitForExpectations:@[ ended ] timeout:2.0];
+    [s stop];
+    [self waitForExpectations:@[ teardown ] timeout:3.0];
+    XCTAssertTrue(teardownFired, @"normal-path teardown must join both threads");
+}
+
+// -stop straight after -start (mosh_main still running): -stop's quit + EOF ends
+// mosh_main, and the normal-path teardown completes.
+- (void)testImmediateStopTearsDown {
     MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
                                                 cols:80 rows:24 predictMode:@"none"];
     XCTestExpectation *teardown = [self expectationWithDescription:@"onTeardownComplete"];
@@ -168,8 +206,7 @@ static NSString *stderrIdentity(void) {
     [s start];
     [s stop];
     [self waitForExpectations:@[ teardown ] timeout:3.0];
-    XCTAssertEqualObjects(stderrIdentity(), before,
-                          @"fd 2 must point back at the original stderr after a normal quit");
+    XCTAssertTrue(teardownFired, @"normal-path teardown must join both threads");
 }
 
 // SUSPEND-TEARDOWN CONTRACT (regression for the two Criticals). mosh's SUSPEND makes
