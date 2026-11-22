@@ -30,7 +30,9 @@ jobs:
     # Stays inert until you set the repo variable TESTFLIGHT_ENABLED=true (Settings →
     # Secrets and variables → Actions → Variables). Until then this job is skipped.
     if: vars.TESTFLIGHT_ENABLED == 'true'
-    runs-on: macos-15   # Apple Silicon + Xcode 26 (App Store now requires the iOS 26 SDK)
+    # xcode-27 (preview image, macOS 26 + Xcode 27): App Store uploads need the iOS 27 SDK
+    # from April 2027 (ITMS-90725). Switch to macos-26/macos-latest once Xcode 27 is there.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
       # Only the submodules the build compiles; a recursive checkout pulls ET's unused
@@ -167,13 +169,16 @@ jobs:
           # export-compliance validation error), so its exit code alone is not trustworthy.
           # Capture output, tee it for the log, and fail the job if the tell-tale failure
           # markers appear, otherwise a rejected build silently reports the lane green.
+          # Also require the success line. A bare "ERROR:" is not a marker: Xcode 27's
+          # altool logs a harmless "ERROR: ... ResumeFilePath" on good uploads.
           set +e
           OUT="$(xcrun altool --upload-app -f "$IPA" -t ios \
             --apiKey "$KEY_ID" --apiIssuer "$ISSUER" 2>&1)"
           RC=$?
           set -e
           printf '%s\n' "$OUT"
-          if [ "$RC" -ne 0 ] || printf '%s' "$OUT" | grep -qiE 'UPLOAD FAILED|Failed to upload|VALIDATION_ERROR|ERROR:'; then
+          if [ "$RC" -ne 0 ] || ! printf '%s' "$OUT" | grep -q 'UPLOAD SUCCEEDED' \
+            || printf '%s' "$OUT" | grep -qiE 'UPLOAD FAILED|Failed to upload|VALIDATION_ERROR'; then
             echo "::error::altool upload to TestFlight failed, see log above."
             exit 1
           fi

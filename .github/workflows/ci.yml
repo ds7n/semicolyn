@@ -130,7 +130,9 @@ jobs:
 
   # ---- Apple-gated build (the reason for macOS CI) ----
   macos:
-    runs-on: macos-15   # Apple Silicon + Xcode (macos-14 retires 2026-11-02)
+    # xcode-27 (preview image, macOS 26 + Xcode 27): App Store uploads need the iOS 27 SDK
+    # from April 2027 (ITMS-90725). Switch to macos-26/macos-latest once Xcode 27 is there.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
       # Only the submodules the build compiles; a recursive checkout pulls ET's unused
@@ -192,9 +194,15 @@ jobs:
       - name: Test MoshSession bridge plumbing (loopback fake mosh_main, M3)
         # Runs the Obj-C++ bridge tests on a booted simulator. Verifies the pipe /
         # thread / setvbuf plumbing without a network (fake_mosh_main echoes input).
+        # The first available iPhone simulator, so a runner image that ships different
+        # device models does not break the job.
         run: |
+          SIM_ID="$(xcrun simctl list -j devices available \
+            | jq -r '[.devices[] | .[] | select(.name | startswith("iPhone"))][0].udid // empty')"
+          if [ -z "$SIM_ID" ]; then echo "::error::no iPhone simulator on this image"; exit 1; fi
+          echo "Simulator: $(xcrun simctl list devices available | grep "$SIM_ID")"
           xcodebuild -project Semicolyn.xcodeproj -scheme SemicolynBridgeTests \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
             -skipPackagePluginValidation \
             -resultBundlePath BridgeTests.xcresult \
             CODE_SIGNING_ALLOWED=NO test
