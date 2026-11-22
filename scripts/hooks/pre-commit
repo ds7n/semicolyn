@@ -8,8 +8,8 @@
 # screenshots, MCP/IDE/shell-rc dotfiles). Catches them even when `.gitignore` is
 # bypassed with `git add -f`.
 #
-# Install once per clone:  git config core.hooksPath scripts/hooks
-# (or run scripts/hooks/install.sh). Bypass a false positive with `git commit --no-verify`.
+# Install once per clone: scripts/hooks/install.sh (adds a .git/hooks/pre-commit shim
+# that runs this file). Bypass a false positive with `git commit --no-verify`.
 #
 # A LOCAL, gitignored overlay at .git/hooks/pre-commit.local (if present and
 # executable) is run first, that's where per-user checks (e.g. a personal-name
@@ -20,10 +20,9 @@ red() { printf '\033[31m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$1"; }
 
 # 1) Run the optional local overlay first (per-user, gitignored). Reference it via
-#    the real .git dir, NOT `git rev-parse --git-path hooks/...`, which resolves
-#    against core.hooksPath (i.e. scripts/hooks/) once that's set, so it would never
-#    find the overlay in .git/hooks/.
-git_dir="$(git rev-parse --git-dir)"
+#    the real (common) .git dir, NOT `git rev-parse --git-path hooks/...`, which
+#    follows core.hooksPath if anyone sets it.
+git_dir="$(git rev-parse --git-common-dir)"
 local_hook="$git_dir/hooks/pre-commit.local"
 if [[ -x "$local_hook" ]]; then
     "$local_hook" || exit 1
