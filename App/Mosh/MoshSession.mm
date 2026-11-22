@@ -211,6 +211,8 @@ static void restore_stderr_on_thread_exit(void *arg) {
 // trigger dealloc, but only once BOTH threads have released and both have exited,
 // and dealloc never runs while the lock is held (the loops always drop _lock before
 // returning), so there is no dealloc-under-lock hazard.
+static void run_on_detached_thread(void (^block)(void));
+
 static void *mosh_thread_main(void *ctx) {
     MoshSession *self = (__bridge MoshSession *)ctx;
     void *r = [self runMoshLoop];
@@ -524,7 +526,10 @@ static void *reader_thread_main(void *ctx) {
     // Phases 2-4 run off the main thread: pthread_join blocks, and -stop is called
     // from the main actor. Capture only scalars/pthread_t (POD) + a retained self so
     // the object outlives the async teardown even if the app drops its ref now.
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    // They run on a dedicated detached thread, not a GCD worker: blocking joins on a
+    // global queue tie up its limited pool, and when that pool is busy or starved
+    // the teardown never got scheduled at all (seen in CI).
+    run_on_detached_thread(^{
         // Retain self across the async teardown (block captures self strongly).
         // Join the mosh thread first. Joining is valid whether it returned normally
         // OR pthread_exit'd (mosh's SUSPEND), and returns immediately for an already-
@@ -634,6 +639,27 @@ static void *reader_thread_main(void *ctx) {
         //     refcount is correct (one fewer than before  - the exact leak repaired).
         if (suspended) { CFBridgingRelease((__bridge CFTypeRef)self); }
     });
+}
+
+// Runs `block` on a new detached pthread (falls back to a GCD worker if thread
+// creation fails, so teardown still happens).
+static void *detached_block_main(void *ctx) {
+    void (^block)(void) = (__bridge_transfer void (^)(void))ctx;
+    block();
+    return NULL;
+}
+static void run_on_detached_thread(void (^block)(void)) {
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    void *ctx = (__bridge_retained void *)[block copy];
+    pthread_t thread;
+    int rc = pthread_create(&thread, &attr, detached_block_main, ctx);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
+        void (^owned)(void) = (__bridge_transfer void (^)(void))ctx;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), owned);
+    }
 }
 
 - (void)fireEnd:(NSString *)reason {

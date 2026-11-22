@@ -7,6 +7,8 @@
 #include <fcntl.h>
 #include <poll.h>
 #import <objc/runtime.h>
+#include <mach/mach.h>
+#include <sys/resource.h>
 
 @interface MoshSessionTests : XCTestCase
 @end
@@ -31,12 +33,28 @@ static NSString *diagFds(void) {
     }
     return m;
 }
+static double diagCpuSeconds(void) {
+    struct rusage ru;
+    getrusage(RUSAGE_SELF, &ru);
+    return ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6 + ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6;
+}
 - (void)testAAADiagNormalTeardown {
     NSMutableString *log = [NSMutableString string];
-    __block BOOL gcdRan = NO;
+    __block BOOL gcdRan = NO, gcdDefault = NO, gcdUI = NO;
+    double cpu0 = diagCpuSeconds();
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ gcdRan = YES; });
-    [NSThread sleepForTimeInterval:0.2];
-    [log appendFormat:@"gcdBefore=%d;", gcdRan];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{ gcdDefault = YES; });
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ gcdUI = YES; });
+    [NSThread sleepForTimeInterval:1.0];
+    mach_msg_type_number_t nthreads = 0;
+    thread_act_array_t threads = NULL;
+    if (task_threads(mach_task_self(), &threads, &nthreads) == KERN_SUCCESS) {
+        for (mach_msg_type_number_t i = 0; i < nthreads; i++) mach_port_deallocate(mach_task_self(), threads[i]);
+        vm_deallocate(mach_task_self(), (vm_address_t)threads, nthreads * sizeof(thread_act_t));
+    }
+    [log appendFormat:@"gcdBefore util=%d default=%d ui=%d cpuPerSec=%.2f threads=%u ncpu=%lu;", gcdRan,
+                      gcdDefault, gcdUI, diagCpuSeconds() - cpu0, nthreads,
+                      (unsigned long)NSProcessInfo.processInfo.activeProcessorCount];
     [log appendFormat:@" fdsBefore=[%@];", diagFds()];
 
     MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
