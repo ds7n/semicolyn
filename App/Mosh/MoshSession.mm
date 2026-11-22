@@ -41,6 +41,30 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
     [self captureEncodedState:[NSData dataWithBytes:buf length:len]];
 }
 
+// runMoshLoop points the process's fd 2 at a capture pipe around mosh_main. On
+// SUSPEND mosh pthread_exit()s inside mosh_main, so the restore after the call never
+// runs; this pthread cleanup handler (which pthread_exit does run) restores fd 2 and
+// closes the pipe. Without it, stderr stays on a pipe nobody reads: later output is
+// lost, and once the pipe fills every stderr write in the process blocks forever.
+struct StderrCapture {
+    int savedStderr;  // dup of the original fd 2, or -1
+    int pipeRead;     // capture pipe read end, or -1
+};
+
+static void restore_stderr_on_thread_exit(void *arg) {
+    StderrCapture *cap = (StderrCapture *)arg;
+    if (cap->savedStderr >= 0) {
+        fflush(stderr);
+        dup2(cap->savedStderr, STDERR_FILENO);
+        close(cap->savedStderr);
+        cap->savedStderr = -1;
+    }
+    if (cap->pipeRead >= 0) {
+        close(cap->pipeRead);
+        cap->pipeRead = -1;
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // OWNERSHIP + CONCURRENCY MODEL (holistic  - read this before touching anything)
 //
@@ -187,6 +211,8 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
 // trigger dealloc, but only once BOTH threads have released and both have exited,
 // and dealloc never runs while the lock is held (the loops always drop _lock before
 // returning), so there is no dealloc-under-lock hazard.
+static void run_on_detached_thread(void (^block)(void));
+
 static void *mosh_thread_main(void *ctx) {
     MoshSession *self = (__bridge MoshSession *)ctx;
     void *r = [self runMoshLoop];
@@ -298,9 +324,13 @@ static void *reader_thread_main(void *ctx) {
     pthread_mutex_unlock(&_lock);
     const char *stateBuf = restore.length > 0 ? (const char *)restore.bytes : "";
     size_t stateLen = restore.length;
-    int rc = mosh_main(fin, fout, &_winsize, mosh_state_capture, (__bridge void *)self,
-                       _ip.UTF8String, _port.UTF8String, _key.UTF8String, _predict.UTF8String,
-                       stateBuf, stateLen, _predict.UTF8String);
+    StderrCapture capture = { savedStderr, errPipe[0] };
+    int rc = 0;
+    pthread_cleanup_push(restore_stderr_on_thread_exit, &capture);
+    rc = mosh_main(fin, fout, &_winsize, mosh_state_capture, (__bridge void *)self,
+                   _ip.UTF8String, _port.UTF8String, _key.UTF8String, _predict.UTF8String,
+                   stateBuf, stateLen, _predict.UTF8String);
+    pthread_cleanup_pop(0);  // returned normally: restore below, after draining the pipe
 
     // Restore the real stderr, then drain whatever mosh printed into a bounded buffer.
     NSString *capturedErr = nil;
@@ -496,7 +526,10 @@ static void *reader_thread_main(void *ctx) {
     // Phases 2-4 run off the main thread: pthread_join blocks, and -stop is called
     // from the main actor. Capture only scalars/pthread_t (POD) + a retained self so
     // the object outlives the async teardown even if the app drops its ref now.
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    // They run on a dedicated detached thread, not a GCD worker: blocking joins on a
+    // global queue tie up its limited pool, and when that pool is busy or starved
+    // the teardown never got scheduled at all (seen in CI).
+    run_on_detached_thread(^{
         // Retain self across the async teardown (block captures self strongly).
         // Join the mosh thread first. Joining is valid whether it returned normally
         // OR pthread_exit'd (mosh's SUSPEND), and returns immediately for an already-
@@ -606,6 +639,27 @@ static void *reader_thread_main(void *ctx) {
         //     refcount is correct (one fewer than before  - the exact leak repaired).
         if (suspended) { CFBridgingRelease((__bridge CFTypeRef)self); }
     });
+}
+
+// Runs `block` on a new detached pthread (falls back to a GCD worker if thread
+// creation fails, so teardown still happens).
+static void *detached_block_main(void *ctx) {
+    void (^block)(void) = (__bridge_transfer void (^)(void))ctx;
+    block();
+    return NULL;
+}
+static void run_on_detached_thread(void (^block)(void)) {
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    void *ctx = (__bridge_retained void *)[block copy];
+    pthread_t thread;
+    int rc = pthread_create(&thread, &attr, detached_block_main, ctx);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
+        void (^owned)(void) = (__bridge_transfer void (^)(void))ctx;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), owned);
+    }
 }
 
 - (void)fireEnd:(NSString *)reason {
