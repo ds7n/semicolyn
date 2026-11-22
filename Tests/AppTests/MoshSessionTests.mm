@@ -172,6 +172,60 @@ static NSString *stderrIdentity(void) {
     [s stop];
 }
 
+// Starts a session and waits until its mosh_main is running (an echoed byte proves
+// it), so runMoshLoop has already set up its stderr capture.
+- (MoshSession *)startedSessionEchoing:(unsigned char)byte {
+    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
+                                                cols:80 rows:24 predictMode:@"none"];
+    XCTestExpectation *echoed = [self expectationWithDescription:@"echo"];
+    __block BOOL done = NO;
+    s.onOutput = ^(NSData *d) {
+        if (!done) { done = YES; [echoed fulfill]; }
+    };
+    [s start];
+    [s writeInput:[NSData dataWithBytes:&byte length:1]];
+    [self waitForExpectations:@[ echoed ] timeout:2.0];
+    return s;
+}
+
+// Quits a running session via the quit sequence and waits for onEnd (fired after
+// runMoshLoop's own stderr restore).
+- (void)quitAndWait:(MoshSession *)s {
+    XCTestExpectation *ended = [self expectationWithDescription:@"onEnd"];
+    s.onEnd = ^(NSString *reason) { [ended fulfill]; };
+    unsigned char quit[2] = {0x1e, 0x2e};
+    [s writeInput:[NSData dataWithBytes:quit length:2]];
+    [self waitForExpectations:@[ ended ] timeout:2.0];
+}
+
+// fd 2 is process-global. Two overlapping sessions (a reconnect while the old one
+// is still up) must not cross-wire it: if B saved A's capture pipe as "the original"
+// and A ends first, B's restore would leave stderr on A's dead pipe.
+- (void)testOverlappingSessionsRestoreProcessStderr {
+    NSString *before = stderrIdentity();
+    MoshSession *a = [self startedSessionEchoing:'a'];
+    MoshSession *b = [self startedSessionEchoing:'b'];
+    [self quitAndWait:a];
+    [self quitAndWait:b];
+    XCTAssertEqualObjects(stderrIdentity(), before,
+                          @"fd 2 must be the original stderr after overlapping sessions end");
+    [a stop];
+    [b stop];
+}
+
+// Reverse end order (B first, then A) leaves fd 2 on the original too.
+- (void)testOverlappingSessionsEndingInReverseRestoreProcessStderr {
+    NSString *before = stderrIdentity();
+    MoshSession *a = [self startedSessionEchoing:'a'];
+    MoshSession *b = [self startedSessionEchoing:'b'];
+    [self quitAndWait:b];
+    [self quitAndWait:a];
+    XCTAssertEqualObjects(stderrIdentity(), before,
+                          @"fd 2 must be the original stderr after overlapping sessions end");
+    [a stop];
+    [b stop];
+}
+
 // -stop after mosh_main already returned: the normal-path teardown joins both
 // threads and fires onTeardownComplete.
 - (void)testStopAfterCleanQuitTearsDown {
