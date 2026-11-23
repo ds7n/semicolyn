@@ -1,14 +1,12 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 #import "MoshSession.h"
-#if __has_include(<Mosh/moshiosbridge.h>)
-#import <Mosh/moshiosbridge.h>
+#if __has_include(<Mosh/semicolyn_mosh_bridge.h>)
+#import <Mosh/semicolyn_mosh_bridge.h>
 #else
-#import "moshiosbridge.h"
+#import "semicolyn_mosh_bridge.h"
 #endif
-#include <atomic>
 #include <errno.h>
-#include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -40,45 +38,6 @@ static void mosh_state_capture(const void *ctx, const void *buf, size_t len) {
     if (!ctx || !buf || len == 0) return;
     MoshSession *self = (__bridge MoshSession *)ctx;
     [self captureEncodedState:[NSData dataWithBytes:buf length:len]];
-}
-
-// runMoshLoop points the process's fd 2 at a capture pipe around mosh_main. On
-// SUSPEND mosh pthread_exit()s inside mosh_main, so the restore after the call never
-// runs; this pthread cleanup handler (which pthread_exit does run) restores fd 2 and
-// closes the pipe. Without it, stderr stays on a pipe nobody reads: later output is
-// lost, and once the pipe fills every stderr write in the process blocks forever.
-//
-// fd 2 is process-global, so at most ONE session captures at a time. Without that,
-// overlapping sessions (a reconnect while the old one is still up) cross-wire it: B
-// saves A's capture pipe as "the original", A restores the real stderr and closes
-// its pipe, then B "restores" fd 2 onto A's dead pipe and stderr is lost for good.
-// A session that finds the capture taken simply runs without it (its failure text
-// stays in the device console instead of the onEnd reason).
-static std::atomic<bool> g_stderrCaptureOwned{false};
-
-struct StderrCapture {
-    int savedStderr;  // dup of the original fd 2, or -1 (also: this session owns the capture)
-    int pipeRead;     // capture pipe read end, or -1
-};
-
-// Restores fd 2 from `savedStderr`, closes it, and releases the process-wide capture.
-static void release_stderr_capture(int savedStderr) {
-    fflush(stderr);
-    dup2(savedStderr, STDERR_FILENO);
-    close(savedStderr);
-    g_stderrCaptureOwned.store(false);
-}
-
-static void restore_stderr_on_thread_exit(void *arg) {
-    StderrCapture *cap = (StderrCapture *)arg;
-    if (cap->savedStderr >= 0) {
-        release_stderr_capture(cap->savedStderr);
-        cap->savedStderr = -1;
-    }
-    if (cap->pipeRead >= 0) {
-        close(cap->pipeRead);
-        cap->pipeRead = -1;
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -313,29 +272,6 @@ static void *reader_thread_main(void *ctx) {
     // resize and read here by mosh's handler  - the tearing risk on two u16 fields is
     // benign (a resize is idempotent and re-sent), and passing &_winsize matches the
     // vendored contract. We take &_winsize directly as the vendored API requires.
-    // DIAGNOSTIC: capture what mosh writes to stderr during the run. The vendored
-    // bridge (moshiosbridge.cc) prints the caught Network/Crypto/std exception  -
-    // the REAL reason a session failed  - to stderr, which otherwise vanishes into
-    // the device console. Redirect fd 2 into a pipe around the mosh_main call (this
-    // thread only sees the failure path; the happy path prints nothing), then use
-    // the captured text as the onEnd reason so a device trace names the cause.
-    // Scoped: the original fd 2 is restored immediately after the call. Only one
-    // session at a time captures (see g_stderrCaptureOwned); others skip it.
-    int errPipe[2] = { -1, -1 };
-    int savedStderr = -1;
-    bool expected = false;
-    if (g_stderrCaptureOwned.compare_exchange_strong(expected, true)) {
-        if (pipe(errPipe) == 0 && (savedStderr = dup(STDERR_FILENO)) >= 0) {
-            // Non-blocking read end so draining a quiet/failed run never hangs.
-            fcntl(errPipe[0], F_SETFL, O_NONBLOCK);
-            dup2(errPipe[1], STDERR_FILENO);
-            close(errPipe[1]);
-        } else {
-            if (errPipe[0] >= 0) { close(errPipe[0]); close(errPipe[1]); }
-            errPipe[0] = errPipe[1] = -1;
-            g_stderrCaptureOwned.store(false);
-        }
-    }
 
     // Snapshot the restore blob (if any) under the lock; use it outside the lock
     // for the (blocking) mosh_main call. `restore` is held in this local for the
@@ -347,28 +283,15 @@ static void *reader_thread_main(void *ctx) {
     pthread_mutex_unlock(&_lock);
     const char *stateBuf = restore.length > 0 ? (const char *)restore.bytes : "";
     size_t stateLen = restore.length;
-    StderrCapture capture = { savedStderr, errPipe[0] };
-    int rc = 0;
-    pthread_cleanup_push(restore_stderr_on_thread_exit, &capture);
-    rc = mosh_main(fin, fout, &_winsize, mosh_state_capture, (__bridge void *)self,
-                   _ip.UTF8String, _port.UTF8String, _key.UTF8String, _predict.UTF8String,
-                   stateBuf, stateLen, _predict.UTF8String);
-    pthread_cleanup_pop(0);  // returned normally: restore below, after draining the pipe
-
-    // Restore the real stderr, then drain whatever mosh printed into a bounded buffer.
-    NSString *capturedErr = nil;
-    if (savedStderr >= 0) {
-        release_stderr_capture(savedStderr);
-        char buf[512];
-        ssize_t n = read(errPipe[0], buf, sizeof(buf) - 1);
-        if (n > 0) {
-            buf[n] = '\0';
-            // Trim trailing CR/LF so the reason is a single clean line.
-            while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) { buf[--n] = '\0'; }
-            if (n > 0) { capturedErr = [NSString stringWithUTF8String:buf]; }
-        }
-    }
-    if (errPipe[0] >= 0) { close(errPipe[0]); }
+    // On failure the bridge writes the caught Network/Crypto/std exception (the real
+    // reason a session failed) into errBuf; it becomes the onEnd reason so a device
+    // trace names the cause. The process's stderr is never touched.
+    char errBuf[512] = {0};
+    int rc = semicolyn_mosh_main(fin, fout, &_winsize, mosh_state_capture, (__bridge void *)self,
+                                 _ip.UTF8String, _port.UTF8String, _key.UTF8String,
+                                 _predict.UTF8String, stateBuf, stateLen, _predict.UTF8String,
+                                 errBuf, sizeof(errBuf));
+    NSString *capturedErr = errBuf[0] ? [NSString stringWithUTF8String:errBuf] : nil;
 
     // The mosh thread is the SOLE owner of the mosh-side fds: fclose each exactly
     // once (fclose closes the underlying _inPipe[0]/_outPipe[1] fd). -stop never

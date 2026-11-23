@@ -18,10 +18,13 @@
 #   2. autogen + configure + make the Mosh iOS controller library, pointing its
 #      pkg-config / CPPFLAGS / LDFLAGS at the per-slice dep prefix. The product
 #      is src/frontend/libmoshiosclient.a (which contains `mosh_main`).
+#   2b. Compile semicolyn's own entry point (Vendor/MoshBridge, `semicolyn_mosh_main`:
+#      upstream's mosh_main, but the error text goes to a caller buffer, not stderr)
+#      against the configured tree and merge it into the same archive.
 # Then:
 #   3. lipo the two simulator slices into one fat archive.
 #   4. xcodebuild -create-xcframework (device slice + fat sim slice).
-#   5. M1 SUCCESS GATE: nm the device slice for the `mosh_main` bridge symbol.
+#   5. M1 SUCCESS GATE: nm the device slice for the `semicolyn_mosh_main` bridge symbol.
 #
 # A maintainer bumps a dependency by editing the pinned versions below, or a
 # slice by editing the SLICES table. Each dep is built by its own function so a
@@ -56,8 +59,10 @@ HOST_DIR="$BUILD_ROOT/host"                # native protoc for the build host
 OUT="$REPO_ROOT/Mosh.xcframework"          # final artifact (repo root, like SSHCore)
 
 LIB_NAME="libmoshiosclient.a"              # Mosh iOS controller static lib
-BRIDGE_HEADER="$MOSH_SRC/src/frontend/moshiosbridge.h"
-BRIDGE_SYMBOL="mosh_main"                  # M1 gate symbol (extern "C")
+BRIDGE_DIR="$REPO_ROOT/Vendor/MoshBridge"  # semicolyn's entry point (built into the lib)
+BRIDGE_HEADER="$BRIDGE_DIR/semicolyn_mosh_bridge.h"
+BRIDGE_SOURCE="$BRIDGE_DIR/semicolyn_mosh_bridge.cc"
+BRIDGE_SYMBOL="semicolyn_mosh_main"        # M1 gate symbol (extern "C")
 
 # --------------------------------------------------------------------------- #
 # Slice table. Each entry: NAME|ARCH|SDK|HOST_TRIPLE|MIN_FLAG                  #
@@ -307,6 +312,14 @@ build_slice() {
   local produced="$build_tree/src/frontend/$LIB_NAME"
   test -f "$produced" || { echo "FATAL: $name did not produce $LIB_NAME"; exit 1; }
 
+  # 2b. semicolyn's entry point, compiled with the same flags + include roots as the
+  # frontend (AM_CPPFLAGS: -I$(top_srcdir); generated config.h and .pb.h live in the
+  # build tree; protobuf headers come from the dep prefix via CPPFLAGS).
+  local bridge_obj="$workdir/semicolyn_mosh_bridge.o"
+  # shellcheck disable=SC2086  # the flag strings are meant to word-split
+  "$CXX" $CXXFLAGS $CPPFLAGS -I"$build_tree" -I"$BRIDGE_DIR" \
+    -c "$BRIDGE_SOURCE" -o "$bridge_obj"
+
   # `libmoshiosclient.a` (frontend: moshiosbridge.o + iosclient.o + terminaloverlay.o)
   # is NOT self-contained, it references the sibling Mosh static libs (util defines
   # is_utf8_locale/set_native_locale/freeze_timestamp/LocaleVar::str, plus network/
@@ -357,6 +370,7 @@ build_slice() {
     done < <(find "$sub" -maxdepth 1 -name '*.o' -print0)
     idx=$((idx + 1))
   done
+  all_objs+=("$bridge_obj")
   test "${#all_objs[@]}" -gt 0 || { echo "FATAL: $name extracted no objects to merge"; exit 1; }
 
   # Re-archive the plain OBJECTS (not archives): no cross-archive basename dedup, so
@@ -395,6 +409,7 @@ build_slice() {
 main() {
   test -d "$MOSH_SRC" || { echo "FATAL: vendored mosh missing at $MOSH_SRC"; exit 1; }
   test -f "$BRIDGE_HEADER" || { echo "FATAL: bridge header missing at $BRIDGE_HEADER"; exit 1; }
+  test -f "$BRIDGE_SOURCE" || { echo "FATAL: bridge source missing at $BRIDGE_SOURCE"; exit 1; }
 
   # Mosh's autogen.sh runs `autoreconf -fi`; macOS runners don't ship autotools.
   # Install them (+ pkg-config for the PKG_CHECK_MODULES m4 macros). Idempotent.
