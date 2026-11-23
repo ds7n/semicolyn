@@ -27,7 +27,7 @@ public enum SecretRef: Hashable, Sendable {
 
 /// Keychain-bound secret storage. The swappable seam Phase 2b fills with iCloud
 /// Keychain + Secure Enclave; `InMemorySecretStore` backs tests.
-public protocol SecretStore {
+public protocol SecretStore: Sendable {
     /// Store `data` for `ref`, overwriting any existing secret.
     func setSecret(_ data: Data, for ref: SecretRef) throws
     /// The secret for `ref`, or `nil` if none exists.
@@ -42,17 +42,19 @@ public protocol BulkErasableSecretStore: SecretStore {
     func deleteAllSecrets(except kept: Set<SecretRef>) throws
 }
 
-/// In-memory `SecretStore` for tests and previews. Not thread-safe.
-public final class InMemorySecretStore: BulkErasableSecretStore {
+/// In-memory `SecretStore` for tests and previews. Every access holds `lock`, which is
+/// what the `@unchecked Sendable` relies on.
+public final class InMemorySecretStore: BulkErasableSecretStore, @unchecked Sendable {
+    private let lock = NSLock()
     private var store: [SecretRef: Data] = [:]
 
     public init() {}
 
-    public func setSecret(_ data: Data, for ref: SecretRef) throws { store[ref] = data }
-    public func getSecret(_ ref: SecretRef) throws -> Data? { store[ref] }
-    public func deleteSecret(_ ref: SecretRef) throws { store[ref] = nil }
+    public func setSecret(_ data: Data, for ref: SecretRef) throws { lock.withLock { store[ref] = data } }
+    public func getSecret(_ ref: SecretRef) throws -> Data? { lock.withLock { store[ref] } }
+    public func deleteSecret(_ ref: SecretRef) throws { lock.withLock { store[ref] = nil } }
     public func deleteAllSecrets(except kept: Set<SecretRef>) throws {
-        store = store.filter { kept.contains($0.key) }
+        lock.withLock { store = store.filter { kept.contains($0.key) } }
     }
 }
 

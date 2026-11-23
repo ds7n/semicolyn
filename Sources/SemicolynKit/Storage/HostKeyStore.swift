@@ -7,7 +7,7 @@ import Foundation
 /// backbone). Multiple entries per host are supported so a rotation window can
 /// hold the old and new key as both valid. Entries serialize as JSON `[HostKey]`
 /// under `SecretRef.hostKeys(hostID:)`.
-public struct HostKeyStore {
+public struct HostKeyStore: Sendable {
     private let secrets: SecretStore
 
     public init(secrets: SecretStore) {

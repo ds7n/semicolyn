@@ -23,7 +23,7 @@ public enum HostKeyDecision: Equatable, Sendable {
 /// known host is `.newKeyType` (a warning), not `.mismatch`; `.firstTrust` is only for a
 /// host with nothing stored. Mutation methods (`trust`, `replace`)
 /// are the only way to change storage; `evaluate` is always pure and non-mutating.
-public struct HostKeyTrustEvaluator {
+public struct HostKeyTrustEvaluator: Sendable {
     private let store: HostKeyStore
 
     public init(store: HostKeyStore) {

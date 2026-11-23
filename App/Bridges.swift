@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
+import os
 import SemicolynKit
 import SemicolynSSHCoreFFI
 
@@ -10,13 +11,13 @@ import SemicolynSSHCoreFFI
 final class TofuHostKeyVerifier: HostKeyVerifier {
     private let hostID: UUID
     private let trust: HostKeyTrustEvaluator
-    private let present: @MainActor (HostKeyPrompt) async -> Bool
-    private let notify: @MainActor (String) -> Void
+    private let present: @MainActor @Sendable (HostKeyPrompt) async -> Bool
+    private let notify: @MainActor @Sendable (String) -> Void
 
     /// `notify` shows a non-blocking notice (used when an accepted key couldn't be saved).
     init(hostID: UUID, trust: HostKeyTrustEvaluator,
-         present: @escaping @MainActor (HostKeyPrompt) async -> Bool,
-         notify: @escaping @MainActor (String) -> Void) {
+         present: @escaping @MainActor @Sendable (HostKeyPrompt) async -> Bool,
+         notify: @escaping @MainActor @Sendable (String) -> Void) {
         self.hostID = hostID; self.trust = trust; self.present = present; self.notify = notify
     }
 
@@ -40,12 +41,13 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
     static let storeFailureMessage =
         "Couldn't read the saved host keys for this server, so semicolyn didn't connect. Try again."
 
-    private let failureLock = NSLock()
-    private var storeFailed = false
+    /// Lock-owned so the class stays Sendable: written from the Rust callback thread,
+    /// read from the view model.
+    private let storeFailed = OSAllocatedUnfairLock(initialState: false)
 
     /// `true` once `verify` refused a connection because the stored host keys couldn't be
     /// read (security audit M2: a storage fault must not hide a mismatch).
-    var refusedForStoreFailure: Bool { failureLock.withLock { storeFailed } }
+    var refusedForStoreFailure: Bool { storeFailed.withLock { $0 } }
 
     func verify(info: HostKeyInfo) async -> Bool {
         // DebugLog is @MainActor; verify() is non-isolated async, so these hops need
@@ -58,7 +60,7 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
         } catch {
             // Fail closed: treating an unreadable store as "never seen" would show the
             // first-connect prompt for a server whose key may have changed.
-            failureLock.withLock { storeFailed = true }
+            storeFailed.withLock { $0 = true }
             await DebugLog.shared.log(.connect, "hostkey: trust.evaluate THREW (\(error)) → REJECT (fail closed)")
             return false
         }
@@ -106,7 +108,10 @@ final class TofuHostKeyVerifier: HostKeyVerifier {
 /// Receives merged stdout/stderr from the Rust PTY pump and forwards it to the
 /// UI. The Rust side invokes these callbacks off the main thread, so every
 /// hand-off hops to main before touching UIKit/SwiftTerm. Decoupled from the
-/// terminal view via closures so this stays SwiftTerm-free.
+/// terminal view via closures so this stays SwiftTerm-free. Main-actor isolated
+/// (which makes it Sendable): all state is main-only, and only the two nonisolated
+/// callbacks below are entered from the Rust thread.
+@MainActor
 final class TerminalShellOutput: ShellOutput {
     /// Render slot, set by the terminal view (main thread). Backed by a
     /// `PendingOutputBuffer` so output that arrives BEFORE the view installs its
@@ -124,13 +129,7 @@ final class TerminalShellOutput: ShellOutput {
                 // output = the blank-screen bug, device 2026-09-06).
                 let flushing = renderBuffer.pendingCount
                 renderBuffer.attachSink(onBytes)
-                // `onBytes` is set from `TerminalScreen.makeUIView` (main actor), but this
-                // class is nonisolated (Sendable, fed from the Rust thread), so the
-                // @MainActor `DebugLog.shared` needs assumeIsolated (project pattern for the
-                // @MainActor callback trap). Safe: the set only happens on main.
-                MainActor.assumeIsolated {
-                    DebugLog.shared.log(.lifecycle, "output:sink attached flushedPending=\(flushing)B")
-                }
+                DebugLog.shared.log(.lifecycle, "output:sink attached flushedPending=\(flushing)B")
             } else {
                 renderBuffer.detachSink()
                 // Reset the first-chunk diagnostic so `output:firstChunk` fires again on
@@ -138,9 +137,7 @@ final class TerminalShellOutput: ShellOutput {
                 // mount re-attaches): without this the counter, living on the VM-lifetime
                 // `output`, only ever logged once for the app's whole life.
                 diagBytesSeen = 0
-                MainActor.assumeIsolated {
-                    DebugLog.shared.log(.lifecycle, "output:sink detached")
-                }
+                DebugLog.shared.log(.lifecycle, "output:sink detached")
             }
         }
     }
@@ -162,32 +159,34 @@ final class TerminalShellOutput: ShellOutput {
     /// per reattach, not once for the VM-lifetime `output` instance.
     private var diagBytesSeen = 0
 
-    func onOutput(data: Data) {
+    // Called on the Rust thread. DispatchQueue.main (not a Task) keeps chunks FIFO, and
+    // assumeIsolated reaches the main-actor state (the @MainActor callback-trap pattern).
+    nonisolated func onOutput(data: Data) {
         let bytes = [UInt8](data)   // UniFFI maps Rust Vec<u8> → Swift Data
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            // Diagnostic: log the FIRST output chunk (does output arrive at all on a
-            // reattach?) and whether a sink is attached to receive it (delivered) or
-            // not (buffered = will replay on the next sink attach). Throttled to the
-            // first chunk only to avoid per-frame spam; device blank-screen 2026-09-06.
-            if self.diagBytesSeen == 0 {
-                // Inside DispatchQueue.main.async, so this runs on main; assumeIsolated
-                // lets the nonisolated class reach the @MainActor DebugLog (see above).
-                MainActor.assumeIsolated {
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                // Diagnostic: log the FIRST output chunk (does output arrive at all on a
+                // reattach?) and whether a sink is attached to receive it (delivered) or
+                // not (buffered = will replay on the next sink attach). Throttled to the
+                // first chunk only to avoid per-frame spam; device blank-screen 2026-09-06.
+                if self.diagBytesSeen == 0 {
                     DebugLog.shared.log(.lifecycle,
                         "output:firstChunk \(bytes.count)B sink=\(self.renderBuffer.hasSink ? "attached→deliver" : "none→buffer")")
                 }
+                self.diagBytesSeen += bytes.count
+                // Route render bytes through the buffer: delivered now if a sink is
+                // attached, held for replay if not. Harvest is a separate pass-through.
+                self.renderBuffer.append(bytes)
+                self.onHarvestBytes?(bytes)
             }
-            self.diagBytesSeen += bytes.count
-            // Route render bytes through the buffer: delivered now if a sink is
-            // attached, held for replay if not. Harvest is a separate pass-through.
-            self.renderBuffer.append(bytes)
-            self.onHarvestBytes?(bytes)
         }
     }
 
-    func onClosed(exit: ShellExit) {
-        DispatchQueue.main.async { [weak self] in self?.onExit?(exit) }
+    nonisolated func onClosed(exit: ShellExit) {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.onExit?(exit) }
+        }
     }
 }
 
@@ -201,10 +200,10 @@ final class GenerationGatedShellOutput: ShellOutput {
     private let target: TerminalShellOutput
     private let generation: UInt64
     /// Main-actor check of the captured generation against the view model's current one.
-    private let isCurrent: @MainActor (UInt64) -> Bool
+    private let isCurrent: @MainActor @Sendable (UInt64) -> Bool
 
     init(target: TerminalShellOutput, generation: UInt64,
-         isCurrent: @escaping @MainActor (UInt64) -> Bool) {
+         isCurrent: @escaping @MainActor @Sendable (UInt64) -> Bool) {
         self.target = target
         self.generation = generation
         self.isCurrent = isCurrent
@@ -223,13 +222,13 @@ final class GenerationGatedShellOutput: ShellOutput {
     func onClosed(exit: ShellExit) {
         DispatchQueue.main.async { [self] in
             let live = MainActor.assumeIsolated { isCurrent(generation) }
-            guard live else {
-                MainActor.assumeIsolated {
+            MainActor.assumeIsolated {
+                guard live else {
                     DebugLog.shared.log(.connect, "shell: on_closed from a replaced session → ignored")
+                    return
                 }
-                return
+                target.onExit?(exit)
             }
-            target.onExit?(exit)
         }
     }
 }

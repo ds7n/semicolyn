@@ -10,8 +10,9 @@ import Crypto
 #endif
 
 /// Wraps an in-memory secret store, counting writes/deletes so tests can assert
-/// the "no secret without a matching identity" invariant.
-private final class SpySecretStore: SecretStore {
+/// the "no secret without a matching identity" invariant. Unchecked: the counters are
+/// only touched from the single test thread.
+private final class SpySecretStore: SecretStore, @unchecked Sendable {
     private let inner = InMemorySecretStore()
     private(set) var setCount = 0
     private(set) var deleteCount = 0
