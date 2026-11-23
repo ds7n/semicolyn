@@ -16,15 +16,21 @@ final class HardwareKeyboardMonitor: ObservableObject {
     init() {
         isConnected = GCKeyboard.coalesced != nil
         let center = NotificationCenter.default
+        // The observer blocks are @Sendable, but `queue: .main` runs them on the main
+        // thread, so assumeIsolated reaches the main-actor state (callback-trap pattern).
         observers.append(center.addObserver(forName: .GCKeyboardDidConnect, object: nil,
                                             queue: .main) { [weak self] _ in
-            self?.isConnected = true
-            DebugLog.shared.log(.input, "input:hwKeyboard connected=true")
+            MainActor.assumeIsolated {
+                self?.isConnected = true
+                DebugLog.shared.log(.input, "input:hwKeyboard connected=true")
+            }
         })
         observers.append(center.addObserver(forName: .GCKeyboardDidDisconnect, object: nil,
                                             queue: .main) { [weak self] _ in
-            self?.isConnected = GCKeyboard.coalesced != nil
-            DebugLog.shared.log(.input, "input:hwKeyboard connected=\(self?.isConnected ?? false)")
+            MainActor.assumeIsolated {
+                self?.isConnected = GCKeyboard.coalesced != nil
+                DebugLog.shared.log(.input, "input:hwKeyboard connected=\(self?.isConnected ?? false)")
+            }
         })
     }
 
