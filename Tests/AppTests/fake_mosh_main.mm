@@ -1,26 +1,38 @@
 // SPDX-FileCopyrightText: 2026 True Positive LLC
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// A test-only override of mosh_main linked into SemicolynBridgeTests INSTEAD of
-// the real (network) implementation. It proves our plumbing: it echoes every byte
-// read from f_in back to f_out (so onOutput reflects writeInput:), and returns
-// cleanly (0) when it sees the quit sequence 0x1e 0x2e. No network, deterministic.
+// A test-only semicolyn_mosh_main linked into SemicolynBridgeTests INSTEAD of the
+// real (network) implementation. It proves our plumbing: it echoes every byte read
+// from f_in back to f_out (so onOutput reflects writeInput:), and returns cleanly (0)
+// when it sees the quit sequence 0x1e 0x2e. No network, deterministic.
+//
+// Error mode: key "FAIL" models a session whose client threw. Like the real bridge
+// it writes the reason into error_buf and returns non-zero, and it writes nothing to
+// stderr.
 #include <pthread.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/ioctl.h>
 
-extern "C" int mosh_main(FILE *f_in, FILE *f_out, struct winsize *window_size,
-                         void (*state_callback)(const void *, const void *, size_t),
-                         void *state_callback_context, const char *ip, const char *port,
-                         const char *key, const char *predict_mode,
-                         const char *encoded_state_buffer, size_t encoded_state_size,
-                         const char *predict_overwrite) {
+#include "semicolyn_mosh_bridge.h"
+
+extern "C" int semicolyn_mosh_main(FILE *f_in, FILE *f_out, struct winsize *window_size,
+                                   void (*state_callback)(const void *, const void *, size_t),
+                                   void *state_callback_context, const char *ip,
+                                   const char *port, const char *key, const char *predict_mode,
+                                   const char *encoded_state_buffer, size_t encoded_state_size,
+                                   const char *predict_overwrite, char *error_buf,
+                                   size_t error_buf_size) {
     (void)window_size;
     (void)ip;
     (void)port;
-    (void)key;
     (void)predict_mode;
     (void)predict_overwrite;
+    if (error_buf && error_buf_size > 0) error_buf[0] = '\0';
+    if (key && strcmp(key, "FAIL") == 0) {
+        snprintf(error_buf, error_buf_size, "Network exception: fake failure");
+        return 1;
+    }
     // On resume, announce the restored state so a test can observe replay.
     if (encoded_state_size > 0 && encoded_state_buffer) {
         fputc('R', f_out); fputc(':', f_out);

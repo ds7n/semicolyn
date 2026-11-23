@@ -128,52 +128,15 @@
     [s stop];
 }
 
-// The file fd 2 refers to, as (device, inode). runMoshLoop points the process's fd 2
-// at a capture pipe around mosh_main; afterwards it must refer to the original file.
+// The file fd 2 refers to, as (device, inode).
 static NSString *stderrIdentity(void) {
     struct stat st;
     if (fstat(STDERR_FILENO, &st) != 0) return @"fstat failed";
     return [NSString stringWithFormat:@"%lld:%llu", (long long)st.st_dev, (unsigned long long)st.st_ino];
 }
 
-// mosh's SUSPEND pthread_exits inside mosh_main, skipping runMoshLoop's own stderr
-// restore. Without a cleanup handler, process stderr stays on a pipe nobody reads:
-// later output vanishes, and once the pipe fills every stderr write blocks forever.
-- (void)testSuspendRestoresProcessStderr {
-    NSString *before = stderrIdentity();
-    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
-                                                cols:80 rows:24 predictMode:@"none"];
-    XCTestExpectation *teardown = [self expectationWithDescription:@"onTeardownComplete"];
-    __block BOOL teardownFired = NO;
-    s.onTeardownComplete = ^{
-        if (!teardownFired) { teardownFired = YES; [teardown fulfill]; }
-    };
-    [s start];
-    [s suspendForResume];
-    [self waitForExpectations:@[ teardown ] timeout:3.0];  // mosh thread joined by now
-    XCTAssertEqualObjects(stderrIdentity(), before,
-                          @"fd 2 must point back at the original stderr after a suspend");
-}
-
-// Same contract on the normal path (mosh_main returns): fd 2 is restored. onEnd
-// fires after runMoshLoop's own restore, so it is the signal to wait on.
-- (void)testQuitRestoresProcessStderr {
-    NSString *before = stderrIdentity();
-    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
-                                                cols:80 rows:24 predictMode:@"none"];
-    XCTestExpectation *ended = [self expectationWithDescription:@"onEnd"];
-    s.onEnd = ^(NSString *reason) { [ended fulfill]; };
-    [s start];
-    unsigned char quit[2] = {0x1e, 0x2e};
-    [s writeInput:[NSData dataWithBytes:quit length:2]];
-    [self waitForExpectations:@[ ended ] timeout:2.0];
-    XCTAssertEqualObjects(stderrIdentity(), before,
-                          @"fd 2 must point back at the original stderr after a normal quit");
-    [s stop];
-}
-
 // Starts a session and waits until its mosh_main is running (an echoed byte proves
-// it), so runMoshLoop has already set up its stderr capture.
+// it).
 - (MoshSession *)startedSessionEchoing:(unsigned char)byte {
     MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"K"
                                                 cols:80 rows:24 predictMode:@"none"];
@@ -188,8 +151,7 @@ static NSString *stderrIdentity(void) {
     return s;
 }
 
-// Quits a running session via the quit sequence and waits for onEnd (fired after
-// runMoshLoop's own stderr restore).
+// Quits a running session via the quit sequence and waits for onEnd.
 - (void)quitAndWait:(MoshSession *)s {
     XCTestExpectation *ended = [self expectationWithDescription:@"onEnd"];
     s.onEnd = ^(NSString *reason) { [ended fulfill]; };
@@ -198,32 +160,40 @@ static NSString *stderrIdentity(void) {
     [self waitForExpectations:@[ ended ] timeout:2.0];
 }
 
-// fd 2 is process-global. Two overlapping sessions (a reconnect while the old one
-// is still up) must not cross-wire it: if B saved A's capture pipe as "the original"
-// and A ends first, B's restore would leave stderr on A's dead pipe.
-- (void)testOverlappingSessionsRestoreProcessStderr {
+// fd 2 is process-global, so a session must never repoint it: not while mosh runs,
+// not after a quit, not after a suspend (which pthread_exits mid-call), and not with
+// two sessions overlapping. The error text comes back through the bridge's buffer
+// instead (testFailedSessionReportsBridgeErrorAsEndReason).
+- (void)testSessionsNeverRedirectProcessStderr {
     NSString *before = stderrIdentity();
+
     MoshSession *a = [self startedSessionEchoing:'a'];
+    XCTAssertEqualObjects(stderrIdentity(), before, @"fd 2 changed while mosh runs");
     MoshSession *b = [self startedSessionEchoing:'b'];
+    XCTAssertEqualObjects(stderrIdentity(), before, @"fd 2 changed with two sessions running");
     [self quitAndWait:a];
-    [self quitAndWait:b];
-    XCTAssertEqualObjects(stderrIdentity(), before,
-                          @"fd 2 must be the original stderr after overlapping sessions end");
+    XCTAssertEqualObjects(stderrIdentity(), before, @"fd 2 changed after a quit");
+
+    XCTestExpectation *teardown = [self expectationWithDescription:@"onTeardownComplete"];
+    b.onTeardownComplete = ^{ [teardown fulfill]; };
+    [b suspendForResume];
+    [self waitForExpectations:@[ teardown ] timeout:3.0];
+    XCTAssertEqualObjects(stderrIdentity(), before, @"fd 2 changed after a suspend");
     [a stop];
-    [b stop];
 }
 
-// Reverse end order (B first, then A) leaves fd 2 on the original too.
-- (void)testOverlappingSessionsEndingInReverseRestoreProcessStderr {
-    NSString *before = stderrIdentity();
-    MoshSession *a = [self startedSessionEchoing:'a'];
-    MoshSession *b = [self startedSessionEchoing:'b'];
-    [self quitAndWait:b];
-    [self quitAndWait:a];
-    XCTAssertEqualObjects(stderrIdentity(), before,
-                          @"fd 2 must be the original stderr after overlapping sessions end");
-    [a stop];
-    [b stop];
+// A failed session reports the bridge's exact error text as the onEnd reason (the
+// fake's FAIL key models a client that threw a Network::NetworkException).
+- (void)testFailedSessionReportsBridgeErrorAsEndReason {
+    MoshSession *s = [[MoshSession alloc] initWithIP:@"127.0.0.1" port:@"60000" key:@"FAIL"
+                                                cols:80 rows:24 predictMode:@"none"];
+    XCTestExpectation *ended = [self expectationWithDescription:@"onEnd"];
+    __block NSString *got = nil;
+    s.onEnd = ^(NSString *reason) { got = reason; [ended fulfill]; };
+    [s start];
+    [self waitForExpectations:@[ ended ] timeout:2.0];
+    XCTAssertEqualObjects(got, @"Mosh failed: Network exception: fake failure  - using SSH");
+    [s stop];
 }
 
 // -stop after mosh_main already returned: the normal-path teardown joins both

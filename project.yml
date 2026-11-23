@@ -120,12 +120,11 @@ targets:
         CLANG_CXX_LANGUAGE_STANDARD: gnu++17
 
   # macOS-CI-only unit tests for the Obj-C++ MoshSession bridge. STANDALONE, it
-  # compiles the real bridge (App/Mosh/MoshSession.mm) + a loopback fake mosh_main
-  # (Tests/AppTests/fake_mosh_main.mm) and deliberately does NOT link Mosh.xcframework
-  # or the app. The fake is therefore the ONLY `mosh_main` definition (no duplicate-
-  # symbol collision with the real network one), and the bridge only needs the
-  # `mosh_main` *declaration*, supplied by the vendored header on the search path
-  # below. (The app-links-Mosh gate is the separate "Build Semicolyn app" CI step.)
+  # compiles the real bridge (App/Mosh/MoshSession.mm) + a loopback fake
+  # semicolyn_mosh_main (Tests/AppTests/fake_mosh_main.mm) and deliberately does NOT
+  # link Mosh.xcframework or the app. The fake is therefore the ONLY definition (no
+  # duplicate-symbol collision with the real network one), and the bridge only needs
+  # the *declaration*, supplied by Vendor/MoshBridge on the search path below. (The app-links-Mosh gate is the separate "Build Semicolyn app" CI step.)
   SemicolynBridgeTests:
     type: bundle.unit-test
     platform: iOS
@@ -141,10 +140,10 @@ targets:
         SWIFT_VERSION: "5.0"
         CLANG_CXX_LANGUAGE_STANDARD: gnu++17
         CODE_SIGNING_ALLOWED: NO
-        # Mosh: resolve moshiosbridge.h without linking the framework.
+        # Mosh: resolve semicolyn_mosh_bridge.h without linking the framework.
         # ET: resolve eternaltermlib.h (the <eternaltermlib.h> angle include) the same way.
         HEADER_SEARCH_PATHS:
-          - $(SRCROOT)/extern/mosh/src/frontend
+          - $(SRCROOT)/Vendor/MoshBridge
           - $(SRCROOT)/extern/eternaltermlib/include
         # Host-less logic-test bundle: `bundle.unit-test` defaults to no TEST_HOST,
         # so we deliberately do NOT set TEST_HOST (an empty-string value can be
