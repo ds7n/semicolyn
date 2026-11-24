@@ -591,6 +591,17 @@ The rows above are kept as written (this log is locked). This entry overrides th
 | Still in force | The tmux 3.0 minimum and the `tmux -V` probe on SSH, the raw-shell fallback with its degrade reasons, and the per-host tmux opt-out. The legacy `semicolyn.tmux.attemptControlMode` key is still decoded as a fallback for the per-host "Use tmux" setting, so hosts that opted out keep tmux off. |
 | Removed with it | Keybar symbol promotions per foreground process, Fn auto-engage in `htop`/`top`/`mc`, and the per-app PgUp/PgDn alt-screen scroll branch: all were fed by control mode's per-pane process name, which plain tmux does not report. |
 
+### Scroll gesture with tmux `mouse off` (2026-11-24)
+
+| Topic | Decision |
+|---|---|
+| Problem | With tmux's default `mouse off`, tmux discards wheel bytes, so swiping at a tmux shell prompt did nothing. It only worked for users whose own config sets `mouse on`. |
+| Fix | Two more private bindings (slots 908/909): scroll-up runs `copy-mode -e` then scrolls 5 lines (tmux's own wheel step); scroll-down scrolls 5 lines only while in copy mode (and `-e` exits at the bottom). The app uses them only when tmux is on screen, the terminal is not reporting the mouse (tmux `mouse off`), and the scroll setting is wheel. |
+| Not changed | The user's `~/.tmux.conf` and tmux options, including `mouse`. tmux `mouse on` keeps wheel bytes. The arrow-key fallback setting keeps arrows. |
+| Full-screen programs | Scroll-up only enters copy mode off the alternate screen, so vim/less/htop keep the swipe (as before: nothing happens there with `mouse off`). Copy mode the user already opened always scrolls. |
+| Burst cap | At most two scroll sequences per write: tmux treats keys arriving within `assume-paste-time` (1ms) as a paste and skips their bindings from the third on (wheel events are exempt, keys are not). |
+| Cost | The typed launch line grows to 994 + session name bytes, so names up to 29 characters fit the 1024-byte MAX_CANON (was 164). |
+
 ---
 
 ## Deferred / for future conversation

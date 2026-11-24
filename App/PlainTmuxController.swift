@@ -85,6 +85,14 @@ final class PlainTmuxController {
         sendAction(action)
     }
 
+    /// Scroll-gesture step with tmux's `mouse` option off: copy-mode scroll through the
+    /// private scroll bindings (`plainTmuxScrollBytes`, at most two sequences per write).
+    /// Not logged per step; the gesture executor logs the route once per drag.
+    func onScroll(lines: Int) {
+        let bytes = plainTmuxScrollBytes(lines: lines)
+        if !bytes.isEmpty { sendInput(bytes) }
+    }
+
     /// Finger-drag / edge-swipe window switch (relative: next/previous window).
     func onSwitchWindow(delta: Int) {
         let action: TmuxAction = delta >= 0 ? .nextWindow : .previousWindow
