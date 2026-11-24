@@ -139,10 +139,12 @@ final class GestureIntentExecutor: NSObject {
 
     // MARK: scroll
 
-    /// Positive `lines` = finger moved down = older content. Routes on the mode alone: the
-    /// normal screen (`localScroll`, including plain tmux detached back to the shell) scrolls
-    /// SwiftTerm's scrollback; everything else (tmux on screen, alt-screen apps, app mouse)
-    /// sends wheel / arrow / page-key bytes.
+    /// Positive `lines` = finger moved down = older content. The normal screen
+    /// (`localScroll`, including plain tmux detached back to the shell) scrolls SwiftTerm's
+    /// scrollback. tmux on screen with its `mouse` option off (no mouse reporting) drives
+    /// tmux copy mode through the private scroll bindings (`usesTmuxScrollBinding`), since
+    /// tmux ignores wheel bytes then. Everything else (tmux mouse on, alt-screen apps, app
+    /// mouse) sends wheel / arrow bytes.
     private func scroll(_ lines: Int, at cell: GestureCell, in view: TerminalView) {
         guard lines != 0 else { return }
         if hooks.mode() == .localScroll {
@@ -153,11 +155,21 @@ final class GestureIntentExecutor: NSObject {
             if lines > 0 { view.scrollUp(lines: lines) } else { view.scrollDown(lines: -lines) }
             return
         }
+        let decision = hooks.altScrollDecision()
+        if let tmux = onScreenTmux(),
+           usesTmuxScrollBinding(tmuxOnScreen: true, mouseReporting: view.inputModes.mouseReporting,
+                                 keys: decision.keys) {
+            if logNextScrollRoute {
+                logNextScrollRoute = false
+                DebugLog.shared.log(.gesture, "gesture:scroll route=tmuxCopyMode reason=tmuxMouseOff \(decision.logLine)")
+            }
+            tmux.onScroll(lines: lines)
+            return
+        }
         let grid = view.gridSize
         let appCursor = view.inputModes.applicationCursor
         let col = min(max(1, cell.col + 1), max(grid.cols, 1))
         let row = min(max(1, cell.row - view.topVisibleRow + 1), max(grid.rows, 1))
-        let decision = hooks.altScrollDecision()
         if logNextScrollRoute {
             logNextScrollRoute = false
             DebugLog.shared.log(.gesture, "gesture:scroll route=bytes imode=\(hooks.mode()) appCursor=\(appCursor) \(decision.logLine)")

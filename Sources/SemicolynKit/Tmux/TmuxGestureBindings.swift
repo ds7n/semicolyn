@@ -10,7 +10,7 @@ import Foundation
 /// server until it exits. See spec 2026-09-25-tmux-private-gesture-bindings-design.
 public extension TmuxAction {
     /// The PREFERRED `user-keys[N]` slot and `UserN` key for this action. Contiguous
-    /// 900...907 in `allCases` order: the launch script derives each slot from the
+    /// 900...909 in `allCases` order: the launch script derives each slot from the
     /// action's position in its `for` list, which is built from `allCases`. If the user
     /// already holds this slot, the launch binds `fallbackBindingSlot` instead.
     var bindingSlot: Int {
@@ -23,11 +23,13 @@ public extension TmuxAction {
         case .nextWindow:      return 905
         case .previousWindow:  return 906
         case .cyclePane:       return 907
+        case .scrollUp:        return 908
+        case .scrollDown:      return 909
         }
     }
 
     /// The slot the launch claims when `bindingSlot` holds a user value: 100 below the
-    /// preferred slot, so contiguous 800...807 in `allCases` order. It is registered with
+    /// preferred slot, so contiguous 800...809 in `allCases` order. It is registered with
     /// the SAME `gestureSequence`, so the app sends one sequence whichever slot holds it.
     var fallbackBindingSlot: Int { bindingSlot - 100 }
 
@@ -79,8 +81,8 @@ public func containsPlainTmuxNoTmuxMarker(_ output: String, nonce: String) -> Bo
 /// The one-line command that launches plain tmux with the private gesture bindings.
 ///
 /// Wrapped in `sh -c '...'` so it behaves the same under any login shell (bash/zsh/fish),
-/// and kept on one short line (859 + name length, under the 1024-byte MAX_CANON for names
-/// up to 164 characters) because
+/// and kept on one short line (994 + name length, under the 1024-byte MAX_CANON for names
+/// up to 29 characters) because
 /// Mosh/ET type it into an interactive shell. Every tmux client spawn delays the first
 /// paint, so it starts at most FIVE: `has-session`, `new-session` (only if absent), one
 /// `show -s user-keys` that reads every slot, one call carrying all the `set`/`bind`
@@ -154,9 +156,17 @@ public func plainTmuxDirectLaunchCommand(sessionName: String, nonce: String) -> 
 /// of `plainTmuxLaunchCommand`, up to but excluding the attach), always including the
 /// session-scoped title options (`set -t "$S"`, never `-g`). Expects `S` set and
 /// tmux on `PATH`; contains no single quote.
+///
+/// Each action's `arguments` ride the `for` list as ONE shell word joined with `@`
+/// (double-quoted when it has a space or `#`), and `IFS=@` splits `$c` back into those
+/// arguments at the `bind`, so an argument may itself contain spaces (the scroll
+/// bindings' inner command string). `set -f` keeps the `?` in a format from globbing.
 private func plainTmuxBindingsScript() -> String {
     let commands = TmuxAction.allCases
-        .map { $0.command.contains(" ") ? "\"\($0.command)\"" : $0.command }
+        .map { action -> String in
+            let word = action.arguments.joined(separator: "@")
+            return word.contains(" ") || word.contains("#") ? "\"\(word)\"" : word
+        }
         .joined(separator: " ")
-    return #"tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set -- set -t "$S" set-titles on \; set -t "$S" set-titles-string "\#(tmuxTitlesFormat)" \;;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in \#(commands);do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null"#
+    return #"tmux has-session -t "=$S" 2>/dev/null||tmux new-session -d -s "$S";E=$(printf "\033");Q=$(printf "\047");N=$(printf "\nx");N=${N%x};set -- set -t "$S" set-titles on \; set -t "$S" set-titles-string "\#(tmuxTitlesFormat)" \;;IFS=@;set -f;i=0;U=$N$(tmux show -s user-keys 2>/dev/null)&&for c in \#(commands);do k=$((9900+i));for n in $((900+i)) $((800+i));do K="${N}user-keys[$n] ";v=;case "$U" in *"$K"*)v=${U#*"$K"};v=${v%%"$N"*};;esac;case "$v" in ""|"$Q$Q"|*"[$k~"|*"[$k~\"")set -- "$@" set -s "user-keys[$n]" "$E[$k~" \; bind -n "User$n" $c \;;break;;esac;done;i=$((i+1));done;[ $# -gt 0 ]&&tmux "$@" 2>/dev/null"#
 }

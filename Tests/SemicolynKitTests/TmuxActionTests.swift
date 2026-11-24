@@ -14,9 +14,25 @@ final class TmuxActionTests: XCTestCase {
         XCTAssertEqual(TmuxAction.nextWindow.command, "next-window")
         XCTAssertEqual(TmuxAction.previousWindow.command, "previous-window")
         XCTAssertEqual(TmuxAction.cyclePane.command, "select-pane -t +")
+        XCTAssertEqual(TmuxAction.scrollUp.command,
+                       ##"if -F "#{?alternate_on,#{pane_in_mode},1}" "copy-mode -e ; send -X -N 5 scroll-up""##)
+        XCTAssertEqual(TmuxAction.scrollDown.command,
+                       ##"if -F "#{pane_in_mode}" "send -X -N 5 scroll-down""##)
     }
 
-    func testEightActions() {
-        XCTAssertEqual(TmuxAction.allCases.count, 8)
+    /// The argv the launch passes to `bind`: plain commands split on spaces; the scroll
+    /// commands keep their format and inner command string as ONE argument each.
+    func testArguments() {
+        XCTAssertEqual(TmuxAction.splitHorizontal.arguments, ["split-window", "-h"])
+        XCTAssertEqual(TmuxAction.closePane.arguments, ["kill-pane"])
+        XCTAssertEqual(TmuxAction.cyclePane.arguments, ["select-pane", "-t", "+"])
+        XCTAssertEqual(TmuxAction.scrollUp.arguments,
+                       ["if", "-F", "#{?alternate_on,#{pane_in_mode},1}", "copy-mode -e ; send -X -N 5 scroll-up"])
+        XCTAssertEqual(TmuxAction.scrollDown.arguments,
+                       ["if", "-F", "#{pane_in_mode}", "send -X -N 5 scroll-down"])
+    }
+
+    func testTenActions() {
+        XCTAssertEqual(TmuxAction.allCases.count, 10)
     }
 }

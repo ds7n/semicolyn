@@ -233,9 +233,83 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         XCTAssertTrue(try sh("tmux list-keys -T root User900 2>&1").contains("split-window -h"))
     }
 
-    /// Reconnect re-runs the launch against the same server: still exactly 8 bindings,
+    // MARK: - Scroll bindings (tmux `mouse` off, the default)
+
+    /// At a shell prompt with `mouse off` (the isolated HOME has no config), scroll-up
+    /// enters copy mode and scrolls 5 lines per sequence (tmux's own wheel step); the same
+    /// number of scroll-downs returns to the bottom and leaves copy mode (`copy-mode -e`).
+    /// Nothing reaches the shell, and the user's `mouse` option is untouched.
+    func testScrollUpAtPromptScrollsHistoryAndScrollDownExits() throws {
+        try launchInner()
+        try fillHistory()
+        XCTAssertEqual(try sh("tmux show -gv mouse"), "off")
+
+        try send(.scrollUp, times: 2)
+        try waitUntil("copy mode, 10 lines up") {
+            try self.inner("#{pane_in_mode}/#{scroll_position}") == "1/10"
+        }
+        XCTAssertEqual(try inner("#{pane_mode}"), "copy-mode")
+
+        try send(.scrollDown)
+        try waitUntil("5 lines up") { try self.inner("#{scroll_position}") == "5" }
+        try send(.scrollDown)
+        try waitUntil("copy mode exited at the bottom") { try self.inner("#{pane_in_mode}") == "0" }
+        XCTAssertEqual(try sh("tmux show -gv mouse"), "off")
+        XCTAssertFalse(try sh("tmux capture-pane -p -t semicolyn").contains("[99"))
+    }
+
+    /// A full-screen program (alternate screen) keeps the swipe to itself: no copy mode,
+    /// and the sequence is consumed by the binding, not typed into the program.
+    func testScrollUpInFullScreenProgramDoesNothing() throws {
+        try launchInner()
+        try sh("tmux -L outer send-keys -t outer -l " + shellQuoted(#"printf '\033[?1049h'; cat -v"#))
+        try sh("tmux -L outer send-keys -t outer Enter")
+        try waitUntil("full-screen cat -v") {
+            try self.inner("#{alternate_on}#{pane_current_command}") == "1cat"
+        }
+        try send(.scrollUp, times: 3)
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertEqual(try inner("#{pane_in_mode}"), "0")
+        XCTAssertFalse(try sh("tmux capture-pane -p -t semicolyn").contains("[99"))
+    }
+
+    /// Scroll-down at the live bottom (not in copy mode) does nothing: no copy mode, no
+    /// bytes in the program.
+    func testScrollDownOutsideCopyModeDoesNothing() throws {
+        try launchInner()
+        try runCatInPane()
+        try send(.scrollDown, times: 3)
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertEqual(try inner("#{pane_in_mode}"), "0")
+        XCTAssertFalse(try sh("tmux capture-pane -p -t semicolyn").contains("[99"))
+    }
+
+    /// Copy mode the user entered themselves (prefix `[`) keeps scrolling from where it
+    /// is: re-running `copy-mode` on a pane already in copy mode does not reset it.
+    func testScrollUpInsideExistingCopyModeScrolls() throws {
+        try launchInner()
+        try fillHistory()
+        try sh("tmux copy-mode -t semicolyn")
+        try waitUntil("copy mode") { try self.inner("#{pane_in_mode}") == "1" }
+        try send(.scrollUp, times: 2)
+        try waitUntil("10 lines up") { try self.inner("#{scroll_position}") == "10" }
+    }
+
+    /// tmux runs at most TWO bindings from keys that arrive together: from the third key
+    /// within `assume-paste-time` (1ms) on, it treats them as a paste and skips bindings.
+    /// This is why `plainTmuxScrollBytes` caps one write at two sequences.
+    func testThirdSequenceInOneWriteIsTreatedAsPaste() throws {
+        try launchInner()
+        try fillHistory()
+        try send(.scrollUp, times: 3)
+        try waitUntil("copy mode") { try self.inner("#{pane_in_mode}") == "1" }
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(try inner("#{scroll_position}"), "10")
+    }
+
+    /// Reconnect re-runs the launch against the same server: still exactly 10 bindings,
     /// same slots, still working.
-    func testRelaunchKeepsExactlyEightBindings() throws {
+    func testRelaunchKeepsExactlyTenBindings() throws {
         try launchInner()
         try sh("tmux -L outer kill-server")   // client gone; inner server + bindings stay
         try waitUntil("inner client detached") {
@@ -243,8 +317,8 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         }
         try launchInner()
         let bound = try sh("tmux list-keys -T root").split(separator: "\n").filter { $0.contains(" User9") }
-        XCTAssertEqual(bound.count, 8)
-        XCTAssertEqual(try sh("tmux show -sv 'user-keys[907]'"), #"\033[9907~"#)
+        XCTAssertEqual(bound.count, 10)
+        XCTAssertEqual(try sh("tmux show -sv 'user-keys[909]'"), #"\033[9909~"#)
         try send(.splitHorizontal)
         try waitUntil("split after relaunch") { try self.paneCount() == 2 }
     }
@@ -432,10 +506,19 @@ final class TmuxGestureBindingsIntegrationTests: XCTestCase {
         }
     }
 
-    /// Write `action`'s exact gesture bytes to the inner client in ONE write.
-    private func send(_ action: TmuxAction) throws {
-        let hex = action.gestureSequence.map { String(format: "%02x", $0) }.joined(separator: " ")
+    /// Write `action`'s exact gesture bytes, `times` copies back to back, to the inner
+    /// client in ONE write (as the app sends a multi-line scroll run).
+    private func send(_ action: TmuxAction, times: Int = 1) throws {
+        let bytes = Array(repeating: action.gestureSequence, count: times).flatMap { $0 }
+        let hex = bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
         try sh("tmux -L outer send-keys -t outer -H " + hex)
+    }
+
+    /// Print 300 lines into the inner pane's shell so it has history to scroll.
+    private func fillHistory() throws {
+        try sh("tmux -L outer send-keys -t outer -l 'seq 1 300'")
+        try sh("tmux -L outer send-keys -t outer Enter")
+        try waitUntil("history filled") { try self.inner("#{history_size}") != "0" }
     }
 
     /// Expand a tmux format against the inner session's active pane.
