@@ -98,6 +98,21 @@ final class HostFormValidationTests: XCTestCase {
         XCTAssertFalse(canSave(issues))
     }
 
+    func testOverLongTmuxSessionNameHardBlocks() {
+        var h = Host(id: UUID(), label: "l", hostName: "h")
+        h.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: String(repeating: "a", count: 30))))
+        let issues = validateHostForm(h, others: [], defaults: Defaults(), passwordRefResolves: true)
+        XCTAssertTrue(issues.contains { $0.kind == .invalidTmuxSessionName && $0.severity == .hardBlock })
+        XCTAssertFalse(canSave(issues))
+    }
+
+    func testMaxLengthTmuxSessionNameDoesNotBlock() {
+        var h = Host(id: UUID(), label: "l", hostName: "h")
+        h.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: String(repeating: "a", count: 29))))
+        let issues = validateHostForm(h, others: [], defaults: Defaults(), passwordRefResolves: true)
+        XCTAssertFalse(issues.contains { $0.kind == .invalidTmuxSessionName })
+    }
+
     func testValidTmuxSessionNameDoesNotBlock() {
         var h = Host(id: UUID(), label: "l", hostName: "h")
         h.semicolyn = .explicit(SemicolynConfig(tmux: TmuxConfig(sessionName: "work")))

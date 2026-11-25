@@ -82,7 +82,7 @@ public func containsPlainTmuxNoTmuxMarker(_ output: String, nonce: String) -> Bo
 ///
 /// Wrapped in `sh -c '...'` so it behaves the same under any login shell (bash/zsh/fish),
 /// and kept on one short line (994 + name length, under the 1024-byte MAX_CANON for names
-/// up to 29 characters) because
+/// up to `maxTmuxSessionNameLength`, 29 characters) because
 /// Mosh/ET type it into an interactive shell. Every tmux client spawn delays the first
 /// paint, so it starts at most FIVE: `has-session`, `new-session` (only if absent), one
 /// `show -s user-keys` that reads every slot, one call carrying all the `set`/`bind`

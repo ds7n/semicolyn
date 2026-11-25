@@ -600,7 +600,7 @@ The rows above are kept as written (this log is locked). This entry overrides th
 | Not changed | The user's `~/.tmux.conf` and tmux options, including `mouse`. tmux `mouse on` keeps wheel bytes. The arrow-key fallback setting keeps arrows. |
 | Full-screen programs | Scroll-up only enters copy mode off the alternate screen, so vim/less/htop keep the swipe (as before: nothing happens there with `mouse off`). Copy mode the user already opened always scrolls. |
 | Burst cap | At most two scroll sequences per write: tmux treats keys arriving within `assume-paste-time` (1ms) as a paste and skips their bindings from the third on (wheel events are exempt, keys are not). |
-| Cost | The typed launch line grows to 994 + session name bytes, so names up to 29 characters fit the 1024-byte MAX_CANON (was 164). |
+| Cost | The typed launch line grows to 994 + session name bytes, so names up to 29 characters fit the 1024-byte MAX_CANON (was 164). `isValidTmuxSessionName` enforces it (`maxTmuxSessionNameLength`): the host editor blocks Save past 29, and a longer stored name falls back to a plain shell instead of sending a launch line the shell would cut. |
 
 ---
 
