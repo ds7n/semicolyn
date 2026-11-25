@@ -43,15 +43,17 @@ final class TmuxGestureBindingsTests: XCTestCase {
         XCTAssertEqual(plainTmuxLaunchCommand(sessionName: "a").count, 995)
     }
 
-    /// `isValidTmuxSessionName` has no length cap, so the MAX_CANON budget is the
-    /// binding limit: a 29-character name is the longest whose typed launch still fits
-    /// (1023 bytes); one more character reaches 1024.
-    func testLongestNameThatFitsMaxCanon() {
-        let longest = String(repeating: "n", count: 29)
+    /// `maxTmuxSessionNameLength` is the MAX_CANON budget: the longest valid name's typed
+    /// launch fits (1023 bytes), and one more character would reach 1024. A longer launch
+    /// script must lower the cap, which fails this test.
+    func testSessionNameCapMatchesMaxCanonBudget() {
+        let longest = String(repeating: "n", count: maxTmuxSessionNameLength)
+        XCTAssertEqual(maxTmuxSessionNameLength, 29)
         XCTAssertTrue(isValidTmuxSessionName(longest))
         XCTAssertEqual(plainTmuxLaunchCommand(sessionName: longest).utf8.count, 1023)
-        XCTAssertLessThan(plainTmuxLaunchCommand(sessionName: longest).utf8.count, 1024)
-        XCTAssertEqual(plainTmuxLaunchCommand(sessionName: longest + "n").utf8.count, 1024)
+        let overhead = plainTmuxLaunchCommand(sessionName: "a").utf8.count - 1
+        XCTAssertEqual(overhead + maxTmuxSessionNameLength + 1, 1024)
+        XCTAssertFalse(isValidTmuxSessionName(longest + "n"))
     }
 
     /// Learning pause (privacy P-M6): the launch turns on tmux titles for THIS session

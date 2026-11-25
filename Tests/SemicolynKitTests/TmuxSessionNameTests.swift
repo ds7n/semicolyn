@@ -29,6 +29,17 @@ final class TmuxSessionNameTests: XCTestCase {
         XCTAssertTrue(isValidTmuxSessionName("  work  "))
     }
 
+    // Length cap (BVA around maxTmuxSessionNameLength = 29)
+    func testAcceptsOneCharacter() { XCTAssertTrue(isValidTmuxSessionName("a")) }
+    func testAcceptsTwentyEightCharacters() { XCTAssertTrue(isValidTmuxSessionName(String(repeating: "a", count: 28))) }
+    func testAcceptsTwentyNineCharacters() { XCTAssertTrue(isValidTmuxSessionName(String(repeating: "a", count: 29))) }
+    func testRejectsThirtyCharacters() { XCTAssertFalse(isValidTmuxSessionName(String(repeating: "a", count: 30))) }
+    func testRejectsVeryLongName() { XCTAssertFalse(isValidTmuxSessionName(String(repeating: "a", count: 500))) }
+    func testCapCountsTrimmedName() {
+        // Surrounding spaces are trimmed before the cap: 29 characters padded is valid.
+        XCTAssertTrue(isValidTmuxSessionName("  " + String(repeating: "a", count: 29) + "  "))
+    }
+
     func testBuiltinDefaultIsSemicolyn() { XCTAssertEqual(builtInTmuxSessionName, "semicolyn") }
     func testBuiltinDefaultIsItselfValid() { XCTAssertTrue(isValidTmuxSessionName(builtInTmuxSessionName)) }
 }

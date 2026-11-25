@@ -638,7 +638,7 @@ extension HostEditorView {
                 .foregroundStyle(Color(theme.text.secondary))
 
             if vm.issues.contains(where: { $0.kind == .invalidTmuxSessionName }) {
-                Text("Only letters, digits, - and _ (no spaces, dots, or colons).")
+                Text("Up to \(maxTmuxSessionNameLength) letters, digits, - and _ (no spaces, dots, or colons).")
                     .font(.caption)
                     .foregroundStyle(Color(theme.state.broken))
             }
